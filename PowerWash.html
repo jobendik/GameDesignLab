@@ -63,6 +63,9 @@
         let width, height;
         let mouse = { x: 0, y: 0, down: false };
         let particles = [];
+        // Area-based scoring: each owner accumulates pixel-area of dirt they successfully eroded.
+        let p1CleanedArea = 0;
+        let p2CleanedArea = 0;
         
         // Game State
         let player = { x: 0, y: 0, angle: 0, color: '#00f3ff' };
@@ -163,7 +166,18 @@
             }
         }
 
-        function eraseDirt(x, y, radius) {
+        function eraseDirt(x, y, radius, owner) {
+            // Credit the owner only if there was dirt here (alpha > 0). Cheap single-pixel sample.
+            if (owner && x >= 0 && y >= 0 && x < width && y < height) {
+                try {
+                    const sample = ctxDirt.getImageData(x | 0, y | 0, 1, 1).data;
+                    if (sample[3] > 10) {
+                        const gain = Math.PI * radius * radius * 0.6; // 0.6 factor compensates for overlap between sprays
+                        if (owner === 'p1') p1CleanedArea += gain;
+                        else if (owner === 'p2') p2CleanedArea += gain;
+                    }
+                } catch(e) { /* ignore if canvas is tainted */ }
+            }
             ctxDirt.globalCompositeOperation = 'destination-out';
             ctxDirt.beginPath();
             ctxDirt.arc(x, y, radius, 0, Math.PI * 2);
@@ -231,8 +245,8 @@
                 ctxEntity.fill();
                 
                 // Erase Dirt
-                // We erase circle at particle position
-                eraseDirt(p.x, p.y, p.size);
+                // We erase circle at particle position and credit the owning player
+                eraseDirt(p.x, p.y, p.size, p.owner);
 
                 if (p.life <= 0) particles.splice(i, 1);
             }
@@ -251,17 +265,13 @@
             ctxEntity.arc(bot.x, bot.y, 15, 0, Math.PI*2);
             ctxEntity.fill();
 
-            // 5. Scoring (Simplified approximation based on frame spray count)
-            // Real pixel counting is expensive (getImageData), so we cheat for prototype
-            // We just increment score when spraying
-            if (mouse.down) {
-                let score = parseFloat(document.getElementById('p1-score').innerText);
-                if (score < 100) document.getElementById('p1-score').innerText = (score + 0.05).toFixed(1) + "%";
-            }
-             
-            // Bot score cheat
-            let bScore = parseFloat(document.getElementById('p2-score').innerText);
-            if (bScore < 100) document.getElementById('p2-score').innerText = (bScore + 0.03).toFixed(1) + "%";
+            // 5. Scoring (area-based approximation: only counts when spray actually overlaps dirt)
+            // We accumulate erased area per owner via spawnSpray/eraseDirt tagging, then convert to %.
+            const totalDirtArea = width * height;
+            const p1Pct = Math.min(100, (p1CleanedArea / totalDirtArea) * 100);
+            const p2Pct = Math.min(100, (p2CleanedArea / totalDirtArea) * 100);
+            document.getElementById('p1-score').innerText = p1Pct.toFixed(1) + "%";
+            document.getElementById('p2-score').innerText = p2Pct.toFixed(1) + "%";
 
             requestAnimationFrame(loop);
         }
