@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Kosmisk Slange</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0f172a; /* Slate 900 */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* Forhindrer scrolling på mobil */
+        }
+        
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .hud-text {
+            color: white;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            font-weight: bold;
+            pointer-events: none;
+        }
+
+        #start-screen, #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(5px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            pointer-events: auto;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            border: none;
+            padding: 15px 40px;
+            color: white;
+            font-size: 1.2rem;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+            transition: transform 0.1s, box-shadow 0.1s;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 20px;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Leaderboard styling */
+        #leaderboard {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 8px;
+            text-align: right;
+            pointer-events: none;
+        }
+        
+        #minimap-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 100px;
+            height: 100px;
+            background: rgba(0,0,0,0.3);
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+            overflow: hidden;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Canvas for spillet -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI Overlay -->
+    <div id="ui-layer">
+        <div style="padding: 15px;">
+            <div class="hud-text" style="font-size: 1.5rem;" id="score-display">Lengde: 10</div>
+            <div class="hud-text" style="font-size: 0.9rem; opacity: 0.7;">FPS: <span id="fps-display">60</span></div>
+        </div>
+        
+        <!-- Minimap rendres via JS -->
+        <div id="minimap-container">
+            <canvas id="minimapCanvas" width="100" height="100"></canvas>
+        </div>
+        
+        <!-- Leaderboard -->
+        <div id="leaderboard" class="hud-text text-sm">
+            <div class="text-gray-400 text-xs uppercase mb-1">Toppliste</div>
+            <div id="leaderboard-list"></div>
+        </div>
+    </div>
+
+    <!-- Start Skjerm -->
+    <div id="start-screen">
+        <h1 class="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 mb-2">NEBULA</h1>
+        <p class="text-gray-300 mb-6">Spis. Voks. Dominer.</p>
+        <input type="text" id="player-name" placeholder="Ditt kallenavn" class="bg-slate-800 text-white px-4 py-3 rounded-lg border border-slate-600 outline-none focus:border-cyan-400 mb-4 text-center w-64">
+        <button class="btn" onclick="startGame()">Start Spillet</button>
+        <p class="text-xs text-gray-500 mt-4">Tips: Hold nede (klikk) for å booste!</p>
+    </div>
+
+    <!-- Game Over Skjerm -->
+    <div id="game-over-screen" class="hidden">
+        <h2 class="text-4xl font-bold text-white mb-2">Game Over</h2>
+        <p class="text-gray-300 text-lg mb-4">Du ble spist!</p>
+        <div class="text-2xl text-cyan-400 font-bold mb-6" id="final-score">Sluttlengde: 0</div>
+        <button class="btn" onclick="resetGame()">Spill Igjen</button>
+    </div>
+
+    <script>
+        // --- Konfigurasjon ---
+        const WORLD_SIZE = 4000;
+        const VIEWPORT_SCALE = 1.0; // Zoom nivå
+        const BG_COLOR = '#0f172a';
+        const GRID_COLOR = '#1e293b';
+        
+        // --- Globale Variabler ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const minimapCanvas = document.getElementById('minimapCanvas');
+        const minimapCtx = minimapCanvas.getContext('2d');
+        
+        let width, height;
+        let animationId;
+        let lastTime = 0;
+        let gameActive = false;
+        
+        // Input state
+        let mouseX = 0;
+        let mouseY = 0;
+        let mouseDown = false;
+        
+        // Spill objekter
+        let player;
+        let foods = [];
+        let bots = [];
+        let particles = [];
+        
+        // Kamera
+        let camX = 0;
+        let camY = 0;
+
+        // Bot navn
+        const botNames = ["Kjell", "Viper", "Sulten", "Kongen", "Skygge", "Luna", "Titan", "Nova", "Frode", "Storm", "Hacker", "Drage", "Pølsa", "Mette"];
+
+        // --- Hjelpefunksjoner ---
+        function randomRange(min, max) { return Math.random() * (max - min) + min; }
+        function randomColor() { return `hsl(${Math.random() * 360}, 70%, 60%)`; }
+        function getDistance(x1, y1, x2, y2) { return Math.hypot(x2 - x1, y2 - y1); }
+
+        // --- Klasser ---
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.size = randomRange(2, 5);
+                this.life = 1.0;
+                this.decay = randomRange(0.01, 0.03);
+                this.velX = randomRange(-2, 2);
+                this.velY = randomRange(-2, 2);
+            }
+
+            update() {
+                this.x += this.velX;
+                this.y += this.velY;
+                this.life -= this.decay;
+            }
+
+            draw(ctx) {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        class Food {
+            constructor(x, y, size = 10, value = 1) {
+                this.x = x || randomRange(-WORLD_SIZE/2, WORLD_SIZE/2);
+                this.y = y || randomRange(-WORLD_SIZE/2, WORLD_SIZE/2);
+                this.size = size;
+                this.baseSize = size;
+                this.value = value;
+                this.color = randomColor();
+                this.pulse = Math.random() * Math.PI;
+            }
+
+            update() {
+                // Pulserende effekt
+                this.pulse += 0.1;
+                this.size = this.baseSize + Math.sin(this.pulse) * 2;
+            }
+
+            draw(ctx) {
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = this.color;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        class Snake {
+            constructor(name, x, y, isPlayer = false) {
+                this.name = name;
+                this.x = x;
+                this.y = y;
+                this.angle = randomRange(0, Math.PI * 2);
+                this.targetAngle = this.angle;
+                this.speed = 3;
+                this.baseSpeed = 3;
+                this.boostSpeed = 6;
+                this.turnSpeed = 0.08;
+                this.isPlayer = isPlayer;
+                this.color = isPlayer ? '#22d3ee' : randomColor(); // Cyan for spiller
+                
+                // Kroppssegmenter
+                this.segments = [];
+                this.length = 20; // Start lengde (antall segmenter)
+                this.segmentSpacing = 5;
+                this.width = 20;
+                
+                // Initialiser kropp
+                for (let i = 0; i < this.length; i++) {
+                    this.segments.push({ x: this.x - i * this.segmentSpacing, y: this.y });
+                }
+
+                // AI state
+                this.changeDirTimer = 0;
+                this.boosting = false;
+            }
+
+            update() {
+                // Styr retning
+                if (this.isPlayer) {
+                    // Spiller styrer mot musen/touch
+                    // Konverter skjermkoordinater til spillverden-vinkel
+                    // Vi må ta hensyn til kameraet som sentrerer spilleren
+                    let dx = mouseX - width / 2;
+                    let dy = mouseY - height / 2;
+                    this.targetAngle = Math.atan2(dy, dx);
+                    
+                    this.boosting = mouseDown && this.length > 25; // Kostnad for å booste
+                } else {
+                    // Bot AI
+                    this.aiLogic();
+                }
+
+                // Glatt rotasjon
+                let diff = this.targetAngle - this.angle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                this.angle += Math.sign(diff) * Math.min(Math.abs(diff), this.turnSpeed);
+
+                // Bestem hastighet
+                let currentSpeed = this.boosting ? this.boostSpeed : this.baseSpeed;
+                
+                // Kostnad for boosting (mister lengde)
+                if (this.boosting && Math.random() < 0.1) {
+                    if (this.segments.length > 10) {
+                        this.segments.pop();
+                        this.length--;
+                        // Slipp mat bak
+                        let lastSeg = this.segments[this.segments.length - 1];
+                        foods.push(new Food(lastSeg.x, lastSeg.y, 6, 0.5));
+                    } else {
+                        this.boosting = false;
+                    }
+                }
+
+                // Flytt hodet
+                this.x += Math.cos(this.angle) * currentSpeed;
+                this.y += Math.sin(this.angle) * currentSpeed;
+
+                // Grensesjekk (World bounds)
+                const limit = WORLD_SIZE/2;
+                if (this.x < -limit || this.x > limit || this.y < -limit || this.y > limit) {
+                    if(this.isPlayer) gameOver();
+                    else this.respawn(); // Bots bare respawner
+                    return;
+                }
+
+                // Oppdater segmenter (Enkel dra-logikk)
+                // Hodet er nytt, legg til foran, fjern bak
+                // For å få "slange"-bevegelsen der kroppen følger sporet, må vi lagre historikk
+                // Men for enkelhets skyld bruker vi en constraint metode her:
+                
+                // Ny posisjon for hodet legges til i historikken (men vi trenger ikke lagre alle frames)
+                // En enklere metode for Slither-look:
+                // Flytt hvert segment mot segmentet foran seg
+                
+                // Legg til nytt hode-punkt
+                this.segments.unshift({ x: this.x, y: this.y });
+                
+                // Fjern overflødige segmenter hvis vi har flere enn lengden tillater
+                // Vi må ta hensyn til spacing. Hvis vi bare legger til hvert frame blir slangen for tett.
+                // En bedre metode: Bare legg til nytt punkt hvis avstanden fra forrige lagrede punkt er stor nok.
+                // Men for glatthet i denne prototypen, la oss holde arrayet litt større og rendre med spacing.
+                
+                // Enklest: La arrayet vokse, men kutt det ned til 'this.length' * spacing faktoren
+                // La oss forenkle: Beveg alle segmenter mot det forrige.
+                
+                // Re-kalkuler posisjoner basert på hode
+                let prev = { x: this.x, y: this.y };
+                for (let i = 0; i < this.segments.length; i++) {
+                    let seg = this.segments[i];
+                    
+                    // Vektor fra seg til prev
+                    let dx = prev.x - seg.x;
+                    let dy = prev.y - seg.y;
+                    let dist = Math.hypot(dx, dy);
+                    let targetDist = this.boosting ? this.segmentSpacing * 1.5 : this.segmentSpacing;
+                    
+                    if (dist > targetDist) {
+                        let angle = Math.atan2(dy, dx);
+                        seg.x = prev.x - Math.cos(angle) * targetDist;
+                        seg.y = prev.y - Math.sin(angle) * targetDist;
+                    }
+                    prev = seg;
+                }
+                
+                // Trim array hvis det har blitt for langt pga logikken over (det vokser ikke av seg selv her, men vi må håndtere lengde endringer)
+                while(this.segments.length > this.length) {
+                    this.segments.pop();
+                }
+                while(this.segments.length < this.length) {
+                    let last = this.segments[this.segments.length-1];
+                    this.segments.push({x: last.x, y: last.y});
+                }
+            }
+
+            aiLogic() {
+                this.changeDirTimer--;
+                
+                // Søk mat
+                let nearestFood = null;
+                let minDist = 300; // Synsfelt
+
+                for(let f of foods) {
+                    let d = getDistance(this.x, this.y, f.x, f.y);
+                    if(d < minDist) {
+                        minDist = d;
+                        nearestFood = f;
+                    }
+                }
+
+                if(nearestFood) {
+                    this.targetAngle = Math.atan2(nearestFood.y - this.y, nearestFood.x - this.x);
+                    this.boosting = minDist > 100; 
+                } else if (this.changeDirTimer <= 0) {
+                    this.targetAngle = randomRange(0, Math.PI * 2);
+                    this.changeDirTimer = randomRange(50, 150);
+                    this.boosting = false;
+                }
+
+                // Unngå grenser
+                const limit = WORLD_SIZE/2 - 200;
+                if(this.x < -limit) this.targetAngle = 0;
+                if(this.x > limit) this.targetAngle = Math.PI;
+                if(this.y < -limit) this.targetAngle = Math.PI/2;
+                if(this.y > limit) this.targetAngle = -Math.PI/2;
+            }
+
+            draw(ctx) {
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                
+                // Kropp
+                ctx.lineWidth = this.width;
+                ctx.strokeStyle = this.color;
+                
+                // Tegn skygge
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = this.color;
+                
+                ctx.beginPath();
+                if(this.segments.length > 0) {
+                    ctx.moveTo(this.segments[0].x, this.segments[0].y);
+                    // Bruk quadratic curves for glattere slange
+                    for (let i = 1; i < this.segments.length - 1; i++) {
+                        let p1 = this.segments[i];
+                        let p2 = this.segments[i+1];
+                        // Midtpunkt
+                        let mx = (p1.x + p2.x) / 2;
+                        let my = (p1.y + p2.y) / 2;
+                        ctx.quadraticCurveTo(p1.x, p1.y, mx, my);
+                    }
+                }
+                ctx.stroke();
+                
+                ctx.shadowBlur = 0;
+
+                // Øyne
+                let headX = this.x;
+                let headY = this.y;
+                let eyeOffset = 8;
+                let eyeSize = 4;
+                
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(headX + Math.cos(this.angle - 0.5) * eyeOffset, headY + Math.sin(this.angle - 0.5) * eyeOffset, eyeSize, 0, Math.PI*2);
+                ctx.arc(headX + Math.cos(this.angle + 0.5) * eyeOffset, headY + Math.sin(this.angle + 0.5) * eyeOffset, eyeSize, 0, Math.PI*2);
+                ctx.fill();
+
+                // Navn
+                ctx.fillStyle = 'white';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(this.name, headX, headY - 15);
+            }
+
+            grow(amount) {
+                this.length += amount;
+                this.width = Math.min(40, 20 + this.length * 0.05);
+                
+                // Lag partikkel effekt ved spising
+                for(let i=0; i<3; i++) {
+                    particles.push(new Particle(this.x, this.y, this.color));
+                }
+            }
+
+            respawn() {
+                this.x = randomRange(-WORLD_SIZE/2, WORLD_SIZE/2);
+                this.y = randomRange(-WORLD_SIZE/2, WORLD_SIZE/2);
+                this.length = randomRange(10, 30);
+                this.segments = [];
+                for (let i = 0; i < this.length; i++) this.segments.push({ x: this.x, y: this.y });
+                this.color = randomColor();
+            }
+            
+            die() {
+                // Gjør om kroppen til mat
+                for (let i = 0; i < this.segments.length; i+=2) { // Hvert andre segment
+                    foods.push(new Food(this.segments[i].x, this.segments[i].y, 8, 2));
+                }
+                
+                if(this.isPlayer) {
+                    gameOver();
+                } else {
+                    this.respawn();
+                }
+            }
+        }
+
+        // --- Hovedspill Logikk ---
+
+        function init() {
+            resize();
+            window.addEventListener('resize', resize);
+            
+            // Input event listeners
+            window.addEventListener('mousemove', e => {
+                mouseX = e.clientX;
+                mouseY = e.clientY;
+            });
+            window.addEventListener('mousedown', () => mouseDown = true);
+            window.addEventListener('mouseup', () => mouseDown = false);
+            
+            // Touch input
+            window.addEventListener('touchstart', e => {
+                mouseDown = true;
+                mouseX = e.touches[0].clientX;
+                mouseY = e.touches[0].clientY;
+            }, {passive: false});
+            
+            window.addEventListener('touchmove', e => {
+                e.preventDefault(); // Hindre scrolling
+                mouseX = e.touches[0].clientX;
+                mouseY = e.touches[0].clientY;
+            }, {passive: false});
+            
+            window.addEventListener('touchend', () => mouseDown = false);
+
+            spawnFood(300);
+            
+            // Spawn Bots
+            for(let i=0; i<15; i++) {
+                let name = botNames[Math.floor(Math.random() * botNames.length)];
+                let bot = new Snake(name, randomRange(-WORLD_SIZE/2, WORLD_SIZE/2), randomRange(-WORLD_SIZE/2, WORLD_SIZE/2));
+                bot.length = randomRange(10, 50);
+                bots.push(bot);
+            }
+        }
+
+        function startGame() {
+            const nameInput = document.getElementById('player-name').value || "Spiller";
+            player = new Snake(nameInput, 0, 0, true);
+            
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('game-over-screen').classList.add('hidden');
+            
+            gameActive = true;
+            animate();
+        }
+
+        function resetGame() {
+            // Nullstill mat nær sentrum for en trygg start
+            foods = foods.filter(f => getDistance(f.x, f.y, 0, 0) > 500);
+            spawnFood(50); 
+            startGame();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            document.getElementById('game-over-screen').classList.remove('hidden');
+            document.getElementById('final-score').innerText = "Lengde: " + Math.floor(player.length);
+        }
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+
+        function spawnFood(count) {
+            for(let i=0; i<count; i++) {
+                foods.push(new Food());
+            }
+        }
+
+        function checkCollisions() {
+            let allSnakes = [player, ...bots];
+
+            // 1. Mat kollisjon
+            for(let s of allSnakes) {
+                // Sjekk mot mat (optimalisering: sjekk bare i nærheten)
+                // Enkel loop for demo
+                for(let i = foods.length - 1; i >= 0; i--) {
+                    let f = foods[i];
+                    if(getDistance(s.x, s.y, f.x, f.y) < s.width + f.size) {
+                        s.grow(f.value);
+                        foods.splice(i, 1);
+                        if(foods.length < 300) spawnFood(1);
+                    }
+                }
+            }
+
+            // 2. Slange mot Slange kollisjon
+            for(let s1 of allSnakes) {
+                for(let s2 of allSnakes) {
+                    if(s1 === s2) continue;
+
+                    // Sjekk om s1 sitt hode treffer s2 sin kropp
+                    let hit = false;
+                    for(let i = 0; i < s2.segments.length; i++) {
+                        let seg = s2.segments[i];
+                        if(getDistance(s1.x, s1.y, seg.x, seg.y) < s2.width/2 + 5) { // +5 buffer
+                            hit = true;
+                            break;
+                        }
+                    }
+
+                    if(hit) {
+                        s1.die();
+                        if(s1 === player) return; // Stopp hvis spiller dør
+                    }
+                }
+            }
+        }
+
+        function drawGrid(ctx) {
+            ctx.save();
+            ctx.strokeStyle = GRID_COLOR;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            // Grid størrelse
+            let gridSize = 100;
+            
+            // Beregn offset basert på kamera for "uendelig" følelse visuelt, men begrenset av World
+            let startX = Math.floor((camX - width/2) / gridSize) * gridSize;
+            let endX = startX + width + gridSize;
+            let startY = Math.floor((camY - height/2) / gridSize) * gridSize;
+            let endY = startY + height + gridSize;
+
+            for (let x = startX; x < endX; x += gridSize) {
+                ctx.moveTo(x, startY);
+                ctx.lineTo(x, endY);
+            }
+            for (let y = startY; y < endY; y += gridSize) {
+                ctx.moveTo(startX, y);
+                ctx.lineTo(endX, y);
+            }
+            ctx.stroke();
+            
+            // Tegn grenser (World Borders)
+            ctx.strokeStyle = '#ef4444'; // Rød kant
+            ctx.lineWidth = 10;
+            ctx.strokeRect(-WORLD_SIZE/2, -WORLD_SIZE/2, WORLD_SIZE, WORLD_SIZE);
+            
+            ctx.restore();
+        }
+        
+        function updateLeaderboard() {
+            let all = [player, ...bots];
+            all.sort((a, b) => b.length - a.length);
+            
+            let html = "";
+            for(let i=0; i<Math.min(5, all.length); i++) {
+                let s = all[i];
+                let colorClass = s === player ? "text-cyan-400 font-bold" : "text-white";
+                html += `<div class="${colorClass}">${i+1}. ${s.name}: ${Math.floor(s.length)}</div>`;
+            }
+            document.getElementById('leaderboard-list').innerHTML = html;
+        }
+        
+        function drawMinimap() {
+            minimapCtx.clearRect(0, 0, 100, 100);
+            
+            let scale = 100 / WORLD_SIZE;
+            let centerX = 50;
+            let centerY = 50;
+            
+            // Tegn mat (små prikker) - dropper for ytelse hvis mange, men ok her
+            /*
+            minimapCtx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            for(let f of foods) {
+                minimapCtx.fillRect(centerX + f.x * scale, centerY + f.y * scale, 1, 1);
+            }
+            */
+
+            // Tegn bots
+            minimapCtx.fillStyle = 'red';
+            for(let b of bots) {
+                minimapCtx.fillRect(centerX + b.x * scale, centerY + b.y * scale, 2, 2);
+            }
+            
+            // Tegn spiller
+            minimapCtx.fillStyle = '#22d3ee';
+            minimapCtx.beginPath();
+            minimapCtx.arc(centerX + player.x * scale, centerY + player.y * scale, 3, 0, Math.PI*2);
+            minimapCtx.fill();
+        }
+
+        function animate(time) {
+            if (!gameActive) return;
+
+            // Delta time beregning (for jevnere animasjon)
+            const dt = time - lastTime;
+            lastTime = time;
+            
+            // Oppdater UI
+            document.getElementById('score-display').innerText = `Lengde: ${Math.floor(player.length)}`;
+            // Enkel FPS teller
+            if(Math.random() < 0.05) document.getElementById('fps-display').innerText = Math.round(1000/dt) || 60;
+            
+            // Slett canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Kamera logikk: Flytt konteksten til sentrum, flytt 'verden' motsatt av spillerens posisjon
+            // Lerp (Linear Interpolation) for myk kamerafølging
+            let targetCamX = player.x;
+            let targetCamY = player.y;
+            camX += (targetCamX - camX) * 0.1;
+            camY += (targetCamY - camY) * 0.1;
+
+            ctx.save();
+            ctx.translate(width / 2, height / 2);
+            ctx.scale(VIEWPORT_SCALE, VIEWPORT_SCALE);
+            ctx.translate(-camX, -camY);
+
+            // 1. Tegn Bakgrunn / Grid
+            drawGrid(ctx);
+
+            // 2. Oppdater og tegn mat
+            foods.forEach(f => {
+                f.update();
+                f.draw(ctx);
+            });
+
+            // 3. Oppdater og tegn partikler
+            particles = particles.filter(p => p.life > 0);
+            particles.forEach(p => {
+                p.update();
+                p.draw(ctx);
+            });
+
+            // 4. Oppdater og tegn Bots
+            bots.forEach(b => {
+                b.update();
+                b.draw(ctx);
+            });
+
+            // 5. Oppdater og tegn Spiller
+            player.update();
+            player.draw(ctx);
+            
+            // Sjekk kollisjoner
+            checkCollisions();
+
+            ctx.restore();
+            
+            // UI Oppdateringer (Leaderboard og Minimap)
+            if(time % 10 === 0 || Math.random() < 0.1) {
+                updateLeaderboard();
+                drawMinimap();
+            }
+
+            animationId = requestAnimationFrame(animate);
+        }
+
+        // Start
+        init();
+
+    </script>
+</body>
+</html>

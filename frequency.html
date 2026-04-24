@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>FREQUENCY</title>
+    <style>
+        :root {
+            --bg: #101210;
+            --panel: #1a1c1a;
+            --glow: #ffb84d; /* Amber monochrome */
+            --glow-dim: #664411;
+            --off: #332200;
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--bg);
+            color: var(--glow);
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            user-select: none;
+        }
+
+        /* CRT Overlay Effect */
+        body::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 100;
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+        }
+
+        #radio-casing {
+            width: 90%;
+            max-width: 600px;
+            background: var(--panel);
+            border: 4px solid #333;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8), inset 0 0 20px rgba(0,0,0,0.8);
+            position: relative;
+        }
+
+        /* --- DISPLAY --- */
+        #display-window {
+            background: #000;
+            border: 2px solid #555;
+            border-radius: 4px;
+            padding: 20px;
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: inset 0 0 20px #000;
+        }
+
+        #freq-readout {
+            font-size: 4rem;
+            font-weight: bold;
+            text-align: center;
+            text-shadow: 0 0 10px var(--glow);
+            letter-spacing: 5px;
+        }
+
+        #signal-strength {
+            height: 4px;
+            background: var(--off);
+            margin-top: 10px;
+            position: relative;
+        }
+        
+        #signal-bar {
+            height: 100%;
+            width: 0%;
+            background: var(--glow);
+            box-shadow: 0 0 10px var(--glow);
+            transition: width 0.1s;
+        }
+
+        #oscilloscope {
+            width: 100%;
+            height: 60px;
+            margin-top: 10px;
+            opacity: 0.7;
+        }
+
+        /* --- CONTROLS --- */
+        #controls-area {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* The Dial (Slider) */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 40px;
+            width: 20px;
+            border-radius: 2px;
+            background: var(--glow);
+            cursor: pointer;
+            box-shadow: 0 0 15px var(--glow);
+            margin-top: -14px;
+        }
+        
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 12px;
+            cursor: pointer;
+            background: #333;
+            border-radius: 5px;
+            box-shadow: inset 0 0 5px #000;
+        }
+
+        /* Buttons */
+        .btn-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        button {
+            background: #222;
+            color: var(--glow);
+            border: 2px solid var(--glow-dim);
+            padding: 10px 20px;
+            font-family: inherit;
+            font-size: 1rem;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 0 5px var(--off);
+            transition: all 0.1s;
+        }
+        
+        button:hover {
+            border-color: var(--glow);
+            box-shadow: 0 0 10px var(--glow-dim);
+        }
+        
+        button:active {
+            transform: translateY(2px);
+            background: var(--glow-dim);
+            color: #000;
+        }
+
+        #broadcast-btn {
+            color: #ff3333;
+            border-color: #550000;
+        }
+        #broadcast-btn.active {
+            background: #ff3333;
+            color: black;
+            box-shadow: 0 0 20px #ff3333;
+        }
+
+        /* Status LEDs */
+        .status-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 10px;
+            font-size: 0.8rem;
+            color: var(--glow-dim);
+        }
+        
+        .led {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--off);
+            display: inline-block;
+            margin-right: 5px;
+        }
+        
+        .led.on { background: var(--glow); box-shadow: 0 0 10px var(--glow); }
+        .led.red { background: #300; }
+        .led.red.on { background: #f00; box-shadow: 0 0 10px #f00; }
+
+        #power-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000;
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+        
+        .power-symbol {
+            font-size: 5rem;
+            color: #333;
+            transition: color 0.5s;
+        }
+        #power-overlay:hover .power-symbol {
+            color: var(--glow);
+            text-shadow: 0 0 20px var(--glow);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="power-overlay">
+        <div class="power-symbol">⏻</div>
+        <p>CLICK TO POWER ON RECEIVER</p>
+    </div>
+
+    <div id="radio-casing">
+        <div class="status-row">
+            <div><span id="led-pwr" class="led"></span>PWR</div>
+            <div><span id="led-stereo" class="led"></span>LOCK</div>
+            <div><span id="led-bcast" class="led red"></span>TX</div>
+        </div>
+
+        <div id="display-window">
+            <div id="freq-readout">88.00</div>
+            <div style="font-size: 0.8rem; text-align: center; color: var(--glow-dim); margin-top: 5px;">MHz</div>
+            <canvas id="oscilloscope"></canvas>
+            <div id="signal-strength">
+                <div id="signal-bar"></div>
+            </div>
+        </div>
+
+        <div id="controls-area">
+            <!-- Coarse Tune -->
+            <input type="range" id="freq-slider" min="8800" max="16000" value="8800">
+            
+            <div class="btn-row">
+                <button id="tune-down">&lt; TUNE</button>
+                <button id="broadcast-btn">BROADCAST</button>
+                <button id="tune-up">TUNE &gt;</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    /**
+     * FREQUENCY
+     * A simulated shortwave radio experience using Web Audio API.
+     */
+
+    // --- CONFIG ---
+    // Stations are defined by their Frequency (MHz) and Type
+    const STATIONS = [
+        { freq: 92.4, type: 'NUMBERS', bandwidth: 0.3 },
+        { freq: 98.0, type: 'DRONE', bandwidth: 0.5 },
+        { freq: 104.5, type: 'TALK', bandwidth: 0.4 },
+        { freq: 108.0, type: 'MUSIC', bandwidth: 0.3 },
+        { freq: 120.2, type: 'MORSE', bandwidth: 0.2 },
+        { freq: 140.5, type: 'BEACON', bandwidth: 0.1 },
+        { freq: 155.0, type: 'WHISPER', bandwidth: 0.4 }
+    ];
+
+    // --- STATE ---
+    let isOn = false;
+    let frequency = 88.00; // stored as float
+    let isBroadcasting = false;
+    let currentSignalStrength = 0;
+
+    // --- AUDIO SYSTEM ---
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    let audioCtx;
+    let masterGain;
+    let analyser;
+    
+    // Noise Generator
+    let noiseNode;
+    let noiseGain;
+
+    // Active Station Sound Generators
+    let activeOscillators = [];
+    let stationGain;
+    
+    // Speech Synthesis
+    let synth = window.speechSynthesis;
+    let speaking = false;
+
+    // --- UI ELEMENTS ---
+    const display = document.getElementById('freq-readout');
+    const slider = document.getElementById('freq-slider');
+    const signalBar = document.getElementById('signal-bar');
+    const canvas = document.getElementById('oscilloscope');
+    const canvasCtx = canvas.getContext('2d');
+    const ledLock = document.getElementById('led-stereo');
+    const ledTx = document.getElementById('led-bcast');
+
+    // --- INITIALIZATION ---
+    document.getElementById('power-overlay').addEventListener('click', () => {
+        document.getElementById('power-overlay').style.display = 'none';
+        document.getElementById('led-pwr').classList.add('on');
+        isOn = true;
+        initAudio();
+        requestAnimationFrame(renderLoop);
+    });
+
+    function initAudio() {
+        audioCtx = new AudioContext();
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = 0.5;
+        masterGain.connect(audioCtx.destination);
+
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        masterGain.connect(analyser);
+
+        // 1. Create White Noise (Static)
+        const bufferSize = audioCtx.sampleRate * 2; // 2 sec buffer
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+
+        noiseNode = audioCtx.createBufferSource();
+        noiseNode.buffer = buffer;
+        noiseNode.loop = true;
+        
+        // Lowpass filter for "warm" radio static
+        const noiseFilter = audioCtx.createBiquadFilter();
+        noiseFilter.type = 'lowpass';
+        noiseFilter.frequency.value = 1000;
+
+        noiseGain = audioCtx.createGain();
+        noiseGain.gain.value = 0.5;
+
+        noiseNode.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(masterGain);
+        noiseNode.start();
+
+        // 2. Station Bus
+        stationGain = audioCtx.createGain();
+        stationGain.gain.value = 0; // Starts silent
+        stationGain.connect(masterGain);
+        
+        // Start procedural generators
+        setInterval(stationLogic, 100);
+    }
+
+    // --- TUNING LOGIC ---
+
+    slider.addEventListener('input', (e) => {
+        frequency = parseFloat(e.target.value) / 100;
+        updateDisplay();
+    });
+
+    document.getElementById('tune-down').addEventListener('click', () => tune(-0.1));
+    document.getElementById('tune-up').addEventListener('click', () => tune(0.1));
+    
+    // Keyboard support
+    window.addEventListener('keydown', (e) => {
+        if (e.key === "ArrowLeft") tune(-0.05);
+        if (e.key === "ArrowRight") tune(0.05);
+    });
+
+    function tune(amount) {
+        frequency += amount;
+        frequency = Math.round(frequency * 100) / 100;
+        // Clamp
+        if(frequency < 88.00) frequency = 88.00;
+        if(frequency > 160.00) frequency = 160.00;
+        
+        slider.value = frequency * 100;
+        updateDisplay();
+    }
+
+    function updateDisplay() {
+        display.innerText = frequency.toFixed(2);
+        
+        // Determine signal strength
+        let maxStrength = 0;
+        let activeStation = null;
+
+        STATIONS.forEach(station => {
+            const dist = Math.abs(frequency - station.freq);
+            if (dist < station.bandwidth) {
+                // Calculate strength (0.0 to 1.0) based on distance
+                // Normalized: 1 at center, 0 at edge
+                const s = 1 - (dist / station.bandwidth);
+                if (s > maxStrength) {
+                    maxStrength = s;
+                    activeStation = station;
+                }
+            }
+        });
+
+        currentSignalStrength = maxStrength;
+        
+        // Crossfade Physics
+        // Static volume is high when signal is low
+        const staticVol = (1 - currentSignalStrength) * 0.4;
+        const signalVol = currentSignalStrength;
+
+        if (noiseGain) noiseGain.gain.setTargetAtTime(staticVol, audioCtx.currentTime, 0.1);
+        if (stationGain) stationGain.gain.setTargetAtTime(signalVol, audioCtx.currentTime, 0.1);
+
+        // UI Updates
+        signalBar.style.width = (currentSignalStrength * 100) + '%';
+        if (currentSignalStrength > 0.8) ledLock.classList.add('on');
+        else ledLock.classList.remove('on');
+
+        // Manage Audio Content
+        handleStationAudio(activeStation, currentSignalStrength);
+    }
+
+    // --- PROCEDURAL AUDIO GENERATION ---
+
+    let currentStationType = null;
+    let stationInterval = null; // For sequences
+
+    function handleStationAudio(station, strength) {
+        if (!station || strength < 0.1) {
+            // Stop everything if weak signal
+            stopActiveSounds();
+            return;
+        }
+
+        if (currentStationType === station.type) return; // Already playing
+
+        // New Station Detected
+        stopActiveSounds();
+        currentStationType = station.type;
+
+        // Init specific generator
+        switch(station.type) {
+            case 'NUMBERS': startNumbersStation(); break;
+            case 'DRONE': startDrone(); break;
+            case 'MORSE': startMorse(); break;
+            case 'MUSIC': startMusic(); break;
+            case 'BEACON': startBeacon(); break;
+            case 'WHISPER': startTalk(); break; // Reuse talk logic
+            case 'TALK': startTalk(); break;
+        }
+    }
+
+    function stopActiveSounds() {
+        // Kill oscillators
+        activeOscillators.forEach(osc => {
+            try { osc.stop(); } catch(e){}
+            osc.disconnect();
+        });
+        activeOscillators = [];
+        
+        // Clear intervals
+        if (stationInterval) {
+            clearInterval(stationInterval);
+            stationInterval = null;
+        }
+        
+        // Stop speech
+        if (synth.speaking) synth.cancel();
+
+        currentStationType = null;
+    }
+
+    // -- Generators --
+
+    function createOsc(type, freq) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        osc.connect(gain);
+        gain.connect(stationGain);
+        osc.start();
+        activeOscillators.push(osc);
+        return { osc, gain };
+    }
+
+    function startDrone() {
+        // Deep pulsating drone
+        const o1 = createOsc('sawtooth', 55); // Low A
+        const o2 = createOsc('sine', 57);     // Slightly detuned
+        
+        // LFO for volume
+        const lfo = audioCtx.createOscillator();
+        lfo.frequency.value = 0.5;
+        const lfoGain = audioCtx.createGain();
+        lfoGain.gain.value = 0.3;
+        lfo.connect(lfoGain);
+        lfoGain.connect(o1.gain.gain);
+        lfo.start();
+        activeOscillators.push(lfo);
+    }
+
+    function startBeacon() {
+        // High pitch steady beep
+        const o = createOsc('sine', 1200);
+        
+        stationInterval = setInterval(() => {
+            o.gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            o.gain.gain.setValueAtTime(0, audioCtx.currentTime + 0.1);
+        }, 1000);
+    }
+
+    function startMorse() {
+        const o = createOsc('square', 600);
+        o.gain.gain.value = 0;
+        
+        const pattern = [1,0,1,0,1,0,0,3,0,3,0,3,0,0,1,0,1,0,1,0,0,0,0]; // SOSish
+        let idx = 0;
+        
+        stationInterval = setInterval(() => {
+            const beat = pattern[idx];
+            if (beat > 0) {
+                o.gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                o.gain.gain.setValueAtTime(0, audioCtx.currentTime + (beat * 0.05));
+            }
+            idx = (idx + 1) % pattern.length;
+        }, 150);
+    }
+
+    function startMusic() {
+        // Simple Arpeggio
+        const o = createOsc('triangle', 440);
+        o.gain.gain.value = 0;
+        
+        // A minor arpeggio
+        const notes = [220, 261.63, 329.63, 440, 329.63, 261.63]; 
+        let idx = 0;
+
+        stationInterval = setInterval(() => {
+            const freq = notes[idx];
+            o.osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            
+            // Envelope
+            o.gain.gain.cancelScheduledValues(audioCtx.currentTime);
+            o.gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            o.gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.05);
+            o.gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+            
+            idx = (idx + 1) % notes.length;
+        }, 400);
+    }
+
+    function startNumbersStation() {
+        // Robot voice reading numbers
+        const numbers = ["Nine", "Four", "Two", "Zero", "Obey", "Sleep", "Alpha"];
+        
+        function speak() {
+            if (!isOn || currentStationType !== 'NUMBERS') return;
+            const text = numbers[Math.floor(Math.random() * numbers.length)];
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.rate = 0.8;
+            utter.pitch = 0.5;
+            utter.volume = 1; // Handled by mix, but speech API is separate track usually
+            // Note: SpeechSynthesis bypasses Web Audio graph in some browsers, 
+            // so we can't fully static-filter it easily without complex routing. 
+            // We rely on the static noise overlay to simulate the effect.
+            synth.speak(utter);
+            
+            // Trigger next
+            setTimeout(speak, 2000 + Math.random() * 2000);
+        }
+        speak();
+    }
+
+    function startTalk() {
+        // Random whispered phrases
+        const phrases = [
+            "They are listening.",
+            "Look behind you.",
+            "The frequency is shifting.",
+            "I found the key.",
+            "Don't go to the tower."
+        ];
+        
+        function speak() {
+            if (!isOn || (currentStationType !== 'TALK' && currentStationType !== 'WHISPER')) return;
+            const text = phrases[Math.floor(Math.random() * phrases.length)];
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.rate = 1.2;
+            utter.pitch = 0.1; // Low pitch
+            synth.speak(utter);
+            
+            setTimeout(speak, 4000);
+        }
+        speak();
+    }
+
+    // --- VISUALIZER ---
+    const bufferLength = 256;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function renderLoop() {
+        if (!isOn) return;
+        requestAnimationFrame(renderLoop);
+
+        analyser.getByteTimeDomainData(dataArray);
+
+        canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.2)'; // Trail effect
+        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+        canvasCtx.lineWidth = 2;
+        canvasCtx.strokeStyle = '#ffb84d'; // Amber
+        canvasCtx.beginPath();
+
+        const sliceWidth = canvas.width * 1.0 / bufferLength;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+            const v = dataArray[i] / 128.0;
+            const y = v * canvas.height / 2;
+
+            if (i === 0) canvasCtx.moveTo(x, y);
+            else canvasCtx.lineTo(x, y);
+
+            x += sliceWidth;
+        }
+
+        canvasCtx.lineTo(canvas.width, canvas.height / 2);
+        canvasCtx.stroke();
+    }
+
+    // --- BROADCAST LOGIC ---
+    document.getElementById('broadcast-btn').addEventListener('click', () => {
+        isBroadcasting = !isBroadcasting;
+        const btn = document.getElementById('broadcast-btn');
+        
+        if (isBroadcasting) {
+            btn.classList.add('active');
+            btn.innerText = "ON AIR";
+            ledTx.classList.add('on');
+            // Mute receiver to avoid feedback (logic only)
+            if (noiseGain) noiseGain.gain.value = 0;
+            if (stationGain) stationGain.gain.value = 0;
+        } else {
+            btn.classList.remove('active');
+            btn.innerText = "BROADCAST";
+            ledTx.classList.remove('on');
+            updateDisplay(); // Restore volume
+        }
+    });
+
+    // Run logic once
+    stationLogic = () => updateDisplay();
+
+</script>
+</body>
+</html>

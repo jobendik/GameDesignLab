@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Last War: Ultimate</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0f172a; touch-action: none; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        /* UI Layer */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; }
+        .text-shadow { text-shadow: 2px 2px 0 #000; }
+        
+        /* Start/Game Over Screens */
+        #menu-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(4px);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            pointer-events: auto;
+            z-index: 50;
+            transition: opacity 0.3s;
+        }
+        
+        .hidden { opacity: 0; pointer-events: none; }
+        
+        /* Animations */
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        .btn-pulse { animation: pulse 2s infinite; }
+        
+        /* Floating Text Logic handled in JS, styling here */
+        .floating-text {
+            position: absolute;
+            font-weight: 900;
+            pointer-events: none;
+            animation: floatUp 1s ease-out forwards;
+            text-shadow: 1px 1px 2px black;
+        }
+        @keyframes floatUp {
+            0% { transform: translateY(0) scale(0.5); opacity: 0; }
+            20% { transform: translateY(-10px) scale(1.2); opacity: 1; }
+            100% { transform: translateY(-60px) scale(1); opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- HUD -->
+    <div id="ui-layer" class="p-4">
+        <div class="flex justify-between w-full max-w-lg mx-auto">
+            <!-- Troops Counter -->
+            <div class="bg-blue-900/80 border border-blue-500/30 rounded-xl p-3 flex flex-col items-center min-w-[90px]">
+                <span class="text-[10px] text-blue-200 uppercase tracking-widest font-bold">TROOPS</span>
+                <span id="ui-troops" class="text-3xl font-black text-white text-shadow">1</span>
+            </div>
+            
+            <!-- Score Counter -->
+            <div class="bg-yellow-900/80 border border-yellow-500/30 rounded-xl p-3 flex flex-col items-center min-w-[90px]">
+                <span class="text-[10px] text-yellow-200 uppercase tracking-widest font-bold">SCORE</span>
+                <span id="ui-score" class="text-3xl font-black text-white text-shadow">0</span>
+            </div>
+        </div>
+        
+        <!-- Feedback Container for Floating Numbers -->
+        <div id="feedback-layer" class="absolute inset-0 overflow-hidden pointer-events-none"></div>
+    </div>
+
+    <!-- Menus -->
+    <div id="menu-layer">
+        <div id="start-content" class="text-center">
+            <h1 class="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-br from-blue-400 to-indigo-600 mb-2 italic tracking-tighter" style="filter: drop-shadow(0 0 10px rgba(59,130,246,0.5));">
+                LAST WAR
+            </h1>
+            <p class="text-blue-200 text-lg mb-8 tracking-widest uppercase">Ultimate Clone</p>
+            
+            <div class="bg-slate-800/50 p-6 rounded-2xl mb-8 border border-slate-700">
+                <p class="text-gray-300 mb-2">👈 Dra for å styre 👉</p>
+                <p class="text-gray-300 mb-2">Samle <span class="text-blue-400 font-bold">BLÅ</span> porter</p>
+                <p class="text-gray-300">Unngå <span class="text-red-400 font-bold">RØDE</span> porter</p>
+            </div>
+
+            <button id="btn-start" class="btn-pulse bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-12 rounded-full text-2xl shadow-[0_0_20px_rgba(37,99,235,0.6)] border-t border-blue-400 transition-all active:scale-95">
+                START BATTLE
+            </button>
+        </div>
+
+        <div id="game-over-content" class="text-center hidden absolute">
+            <h2 class="text-5xl font-black text-red-500 mb-2 text-shadow">DEFEAT</h2>
+            <div class="text-white text-xl mb-6">Final Score: <span id="final-score" class="text-yellow-400 font-bold">0</span></div>
+            <button id="btn-restart" class="bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-10 rounded-xl text-xl shadow-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1">
+                TRY AGAIN
+            </button>
+        </div>
+    </div>
+
+<script>
+/**
+ * LAST WAR: ULTIMATE
+ * Combining efficient rendering with satisfying mechanics.
+ */
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+// Config
+const CFG = {
+    colors: {
+        bg: '#0f172a',
+        bgGrid: '#1e293b',
+        troop: '#3b82f6',
+        troopDark: '#1d4ed8',
+        enemy: '#ef4444',
+        enemyDark: '#991b1b',
+        bullet: '#fbbf24',
+        gateBlue: 'rgba(37, 99, 235, 0.25)',
+        gateRed: 'rgba(220, 38, 38, 0.25)',
+        text: '#ffffff'
+    },
+    laneWidth: 0, 
+    baseSpeed: 400,
+    fireRate: 0.1, // Seconds between shots
+    bulletSpeed: 900
+};
+
+// State
+let game = {
+    active: false,
+    score: 0,
+    troops: 1,
+    speed: CFG.baseSpeed,
+    difficulty: 1,
+    distance: 0,
+    lastTime: 0
+};
+
+// Entities
+let player = { x: 0, y: 0, width: 40, shootTimer: 0 };
+let bullets = [];
+let enemies = [];
+let gates = [];
+let particles = [];
+
+// Input
+let input = { x: 0, active: false, startX: 0, playerStartX: 0 };
+
+// DOM
+const uiTroops = document.getElementById('ui-troops');
+const uiScore = document.getElementById('ui-score');
+const feedbackLayer = document.getElementById('feedback-layer');
+const menuLayer = document.getElementById('menu-layer');
+const startContent = document.getElementById('start-content');
+const gameOverContent = document.getElementById('game-over-content');
+
+// --- Core Systems ---
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    player.y = canvas.height - 180;
+    if (!game.active) player.x = canvas.width / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function init() {
+    game.active = true;
+    game.score = 0;
+    game.troops = 1;
+    game.speed = CFG.baseSpeed;
+    game.difficulty = 1;
+    game.distance = 0;
+    game.lastTime = performance.now();
+    
+    player.x = canvas.width / 2;
+    bullets = [];
+    enemies = [];
+    gates = [];
+    particles = [];
+    
+    // Clear UI
+    feedbackLayer.innerHTML = '';
+    menuLayer.classList.add('hidden');
+    startContent.classList.add('hidden');
+    gameOverContent.classList.add('hidden');
+    updateHUD();
+    
+    spawnLoop();
+    requestAnimationFrame(loop);
+}
+
+function gameOver() {
+    game.active = false;
+    menuLayer.classList.remove('hidden');
+    gameOverContent.classList.remove('hidden');
+    document.getElementById('final-score').innerText = Math.floor(game.score);
+}
+
+// --- Input ---
+const handleStart = (x) => {
+    input.active = true;
+    input.startX = x;
+    input.playerStartX = player.x;
+};
+const handleMove = (x) => {
+    if (!input.active || !game.active) return;
+    const dx = x - input.startX;
+    player.x = input.playerStartX + dx;
+    
+    // Bounds
+    const margin = 20 + Math.min(game.troops, 100) * 0.2; // Margin grows slightly with army
+    if (player.x < margin) player.x = margin;
+    if (player.x > canvas.width - margin) player.x = canvas.width - margin;
+};
+const handleEnd = () => { input.active = false; };
+
+window.addEventListener('mousedown', e => handleStart(e.clientX));
+window.addEventListener('mousemove', e => handleMove(e.clientX));
+window.addEventListener('mouseup', handleEnd);
+window.addEventListener('touchstart', e => handleStart(e.touches[0].clientX), {passive: false});
+window.addEventListener('touchmove', e => { e.preventDefault(); handleMove(e.touches[0].clientX); }, {passive: false});
+window.addEventListener('touchend', handleEnd);
+
+// --- Game Logic ---
+
+function spawnLoop() {
+    if (!game.active) return;
+    
+    const nextSpawnTime = Math.max(0.5, 1.5 - (game.difficulty * 0.1));
+    
+    // Logic: Alternate between Combat and Gates
+    // Use game distance to create "phases"
+    const phase = Math.floor(game.distance / 1000); // New phase every 1000 pixels
+    
+    const rand = Math.random();
+    
+    if (rand < 0.35) {
+        spawnGatePair();
+    } else {
+        spawnEnemies();
+    }
+    
+    setTimeout(spawnLoop, nextSpawnTime * 1000);
+}
+
+function spawnGatePair() {
+    const y = -150;
+    const w = canvas.width / 2;
+    const h = 100;
+    
+    const ops = ['add', 'sub', 'mult', 'div'];
+    
+    // Create logical pairs (Good vs Bad, or Lesser of two evils)
+    let left = generateOp();
+    let right = generateOp();
+    
+    // Ensure at least one is usually passable early on
+    if (game.difficulty < 3 && !left.good && !right.good) {
+        left = { op: 'add', val: 5 + Math.floor(Math.random()*10), good: true };
+    }
+
+    gates.push({ x: 0, y: y, w: w, h: h, ...left, side: 'left' });
+    gates.push({ x: w, y: y, w: w, h: h, ...right, side: 'right' });
+}
+
+function generateOp() {
+    const r = Math.random();
+    if (r > 0.6) {
+        // Good
+        if (Math.random() > 0.7) return { op: 'mult', val: Math.floor(Math.random()*2)+2, good: true };
+        return { op: 'add', val: Math.floor(Math.random()*20)+5, good: true };
+    } else {
+        // Bad
+        if (Math.random() > 0.8) return { op: 'div', val: 2, good: false };
+        return { op: 'sub', val: Math.floor(Math.random()*15)+5, good: false };
+    }
+}
+
+function spawnEnemies() {
+    const count = 3 + Math.floor(Math.random() * game.difficulty * 2);
+    const hp = 5 + Math.floor(game.difficulty * 3);
+    
+    // "Horde" formation logic
+    for(let i=0; i<count; i++) {
+        enemies.push({
+            x: Math.random() * (canvas.width - 40) + 20,
+            y: -50 - (Math.random() * 200),
+            size: 20 + (Math.random() * 10),
+            hp: hp,
+            maxHp: hp
+        });
+    }
+}
+
+function update(dt) {
+    game.distance += game.speed * dt;
+    game.score += game.speed * dt * 0.01;
+    game.difficulty += dt * 0.05;
+    game.speed = CFG.baseSpeed + (game.difficulty * 20);
+
+    // --- Shooting System ---
+    player.shootTimer -= dt;
+    if (player.shootTimer <= 0) {
+        player.shootTimer = CFG.fireRate;
+        fireBullets();
+    }
+
+    // --- Physics ---
+    
+    // Bullets
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        let b = bullets[i];
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        
+        if (b.y < -50) { bullets.splice(i, 1); continue; }
+        
+        // Hit Enemy
+        let hit = false;
+        for (let j = enemies.length - 1; j >= 0; j--) {
+            let e = enemies[j];
+            // Simple box collision for performance
+            if (b.x > e.x - e.size && b.x < e.x + e.size && 
+                b.y > e.y - e.size && b.y < e.y + e.size) {
+                
+                e.hp--;
+                hit = true;
+                // Spark
+                particles.push({x: b.x, y: b.y, vx: (Math.random()-0.5)*300, vy: (Math.random()-0.5)*300, life: 0.2, color: '#fff'});
+                
+                if (e.hp <= 0) {
+                    // Enemy Die
+                    enemies.splice(j, 1);
+                    game.score += 10;
+                    spawnExplosion(e.x, e.y, CFG.colors.enemy);
+                }
+                break;
+            }
+        }
+        if (hit) bullets.splice(i, 1);
+    }
+
+    // Enemies
+    for (let i = enemies.length - 1; i >= 0; i--) {
+        let e = enemies[i];
+        e.y += (game.speed * 0.9) * dt; // Move slightly slower than world
+        
+        // Player Collision
+        // We calculate an approximate radius for the army
+        const armyRadius = 20 + Math.sqrt(game.troops) * 4;
+        
+        if (Math.hypot(player.x - e.x, player.y - e.y) < armyRadius + e.size) {
+            // Crash
+            modifyTroops(-e.hp); // Lose troops equal to remaining HP
+            spawnExplosion(e.x, e.y, CFG.colors.enemy);
+            enemies.splice(i, 1);
+        } else if (e.y > canvas.height + 50) {
+            enemies.splice(i, 1);
+        }
+    }
+
+    // Gates
+    for (let i = gates.length - 1; i >= 0; i--) {
+        let g = gates[i];
+        g.y += game.speed * dt;
+        
+        // Trigger logic
+        if (!g.triggered && 
+            player.y > g.y && player.y < g.y + g.h &&
+            player.x > g.x && player.x < g.x + g.w) {
+            
+            triggerGate(g);
+            // Disable partner gate
+            const partner = gates.find(o => Math.abs(o.y - g.y) < 10 && o !== g);
+            if (partner) partner.triggered = true;
+        }
+        
+        if (g.y > canvas.height + 100) gates.splice(i, 1);
+    }
+    
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.life -= dt;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function fireBullets() {
+    // Determine Fire Width based on troops
+    const troops = game.troops;
+    
+    // Instead of just shooting from center, we calculate "Spread Width"
+    // The army arranges itself in a circle/block.
+    // We shoot from random x-positions within that block width.
+    
+    const armyWidth = Math.min(troops * 3, 100); 
+    const projectileCount = Math.ceil(Math.min(troops, 50) / 2); // Cap bullets for performance
+    
+    for(let i=0; i<projectileCount; i++) {
+        const xOffset = (Math.random() - 0.5) * armyWidth;
+        // Angle slight outward
+        const angle = xOffset * 0.005; 
+        
+        bullets.push({
+            x: player.x + xOffset,
+            y: player.y - 20,
+            vx: Math.sin(angle) * 100,
+            vy: -CFG.bulletSpeed
+        });
+    }
+}
+
+function triggerGate(g) {
+    g.triggered = true;
+    const old = game.troops;
+    
+    if (g.op === 'add') game.troops += g.val;
+    if (g.op === 'sub') game.troops -= g.val;
+    if (g.op === 'mult') game.troops *= g.val;
+    if (g.op === 'div') game.troops = Math.floor(game.troops / g.val);
+    
+    if (game.troops < 0) game.troops = 0;
+    
+    const diff = game.troops - old;
+    showFloatingText(player.x, player.y - 50, diff > 0 ? `+${diff}` : `${diff}`, diff >= 0 ? 'text-blue-400' : 'text-red-500');
+    
+    if (diff > 0) spawnExplosion(player.x, player.y, CFG.colors.troop);
+    
+    updateHUD();
+    if (game.troops <= 0) gameOver();
+}
+
+function modifyTroops(amount) {
+    game.troops += amount;
+    if (game.troops < 0) game.troops = 0;
+    showFloatingText(player.x, player.y - 50, `${amount}`, 'text-red-500');
+    updateHUD();
+    if (game.troops <= 0) gameOver();
+}
+
+function updateHUD() {
+    uiTroops.innerText = game.troops;
+    uiScore.innerText = Math.floor(game.score);
+}
+
+// --- Visual Effects ---
+
+function spawnExplosion(x, y, color) {
+    for(let i=0; i<10; i++) {
+        particles.push({
+            x: x, y: y,
+            vx: (Math.random()-0.5)*500,
+            vy: (Math.random()-0.5)*500,
+            life: 0.5 + Math.random()*0.3,
+            color: color
+        });
+    }
+}
+
+function showFloatingText(x, y, text, colorClass) {
+    const el = document.createElement('div');
+    el.className = `floating-text ${colorClass} text-4xl`;
+    el.innerText = text;
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    feedbackLayer.appendChild(el);
+    setTimeout(() => el.remove(), 1000);
+}
+
+// --- Render ---
+
+function draw() {
+    // BG
+    ctx.fillStyle = CFG.colors.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Moving Grid Effect
+    ctx.strokeStyle = CFG.colors.bgGrid;
+    ctx.lineWidth = 2;
+    const offset = (game.distance % 100);
+    for(let i=0; i<canvas.height; i+=100) {
+        ctx.beginPath();
+        ctx.moveTo(0, i + offset);
+        ctx.lineTo(canvas.width, i + offset);
+        ctx.stroke();
+    }
+    
+    // Gates
+    gates.forEach(g => {
+        if (g.triggered) return;
+        
+        ctx.fillStyle = g.good ? CFG.colors.gateBlue : CFG.colors.gateRed;
+        ctx.fillRect(g.x, g.y, g.w, g.h);
+        
+        // Border
+        ctx.strokeStyle = g.good ? '#60a5fa' : '#f87171';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(g.x, g.y, g.w, g.h);
+        
+        // Text
+        ctx.fillStyle = '#fff';
+        ctx.font = '900 40px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        let sym = g.op === 'mult' ? 'x' : (g.op === 'div' ? '÷' : (g.op === 'add' ? '+' : '-'));
+        ctx.fillText(`${sym}${g.val}`, g.x + g.w/2, g.y + g.h/2);
+    });
+    
+    // Bullets
+    ctx.fillStyle = CFG.colors.bullet;
+    bullets.forEach(b => {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 3, 0, Math.PI*2);
+        ctx.fill();
+    });
+    
+    // Enemies
+    enemies.forEach(e => {
+        ctx.fillStyle = CFG.colors.enemy;
+        ctx.fillRect(e.x - e.size/2, e.y - e.size/2, e.size, e.size);
+        
+        // 3D Side effect
+        ctx.fillStyle = CFG.colors.enemyDark;
+        ctx.fillRect(e.x - e.size/2, e.y + e.size/2, e.size, 5);
+        
+        // HP Bar
+        const hpPct = e.hp / e.maxHp;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(e.x - e.size/2, e.y - e.size - 5, e.size, 4);
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(e.x - e.size/2, e.y - e.size - 5, e.size * hpPct, 4);
+    });
+    
+    // Player Army (The "Formation" Logic from your snippet, enhanced)
+    drawArmy();
+    
+    // Particles
+    particles.forEach(p => {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.random()*3+1, 0, Math.PI*2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+}
+
+function drawArmy() {
+    // Instead of a simple dot, we draw the swarm
+    const troopCount = Math.min(game.troops, 200); // Visual Cap
+    
+    // Determine rows/cols for visual blockiness
+    const cols = Math.ceil(Math.sqrt(troopCount * 2)); 
+    const spacing = 8;
+    
+    ctx.fillStyle = CFG.colors.troop;
+    
+    for (let i = 0; i < troopCount; i++) {
+        // Calculate grid position relative to center (player.x, player.y)
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        
+        // Center the grid
+        const xOffset = (col - (cols/2)) * spacing;
+        const yOffset = row * spacing;
+        
+        // Add a little animated sway
+        const sway = Math.sin((game.distance * 0.05) + row) * 2;
+        
+        const tx = player.x + xOffset + sway;
+        const ty = player.y + yOffset;
+        
+        ctx.beginPath();
+        ctx.arc(tx, ty, 3.5, 0, Math.PI*2);
+        ctx.fill();
+    }
+    
+    // Leader Indicator
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y - 5, 8, 0, Math.PI*2);
+    ctx.stroke();
+}
+
+function loop() {
+    const now = performance.now();
+    const dt = Math.min((now - game.lastTime) / 1000, 0.1);
+    game.lastTime = now;
+    
+    if (game.active) {
+        update(dt);
+    }
+    draw();
+    
+    // Animate background even when stopped
+    if (!game.active) {
+        game.distance += 1; 
+    }
+    
+    requestAnimationFrame(loop);
+}
+
+// Button Events
+document.getElementById('btn-start').addEventListener('click', init);
+document.getElementById('btn-restart').addEventListener('click', init);
+
+</script>
+</body>
+</html>

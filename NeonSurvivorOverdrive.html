@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Survivor: Overdrive</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            touch-action: none; /* Critical for mobile touch controls */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+    <script>
+        class GameScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameScene' });
+            }
+
+            create() {
+                this.cameras.main.setBackgroundColor('#000011');
+                this.cameras.main.setBounds(0, 0, 800, 600);
+
+                // Input setup
+                this.input.addPointer(2); // Enable multi-touch
+                this.input.setDefaultCursor('pointer');
+
+                // Generate textures
+                this.generateTextures();
+
+                // Background grid
+                this.createBackground();
+
+                // Groups
+                this.bullets = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image, maxSize: 300 });
+                this.enemies = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image, maxSize: 100 });
+                this.xpOrbs = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image, maxSize: 50 });
+                this.powerups = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image, maxSize: 10 });
+
+                // Player
+                this.player = this.physics.add.image(400, 300, 'player');
+                this.player.setDepth(10);
+                this.player.body.setCollideWorldBounds(true);
+                this.player.body.setCircle(12);
+                this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+
+                // --- FIXED PARTICLE SYNTAX (Phaser 3.60+) ---
+                this.hitParticles = this.add.particles(0, 0, 'particle', {
+                    speed: 200,
+                    lifespan: 400,
+                    quantity: 8,
+                    scale: { start: 1, end: 0 },
+                    alpha: { start: 1, end: 0 },
+                    blendMode: 'ADD',
+                    emitting: false // Important: Start stopped
+                });
+
+                this.playerTrail = this.add.particles(0, 0, 'particle', {
+                    follow: this.player,
+                    quantity: 1,
+                    frequency: 50,
+                    lifespan: 600,
+                    speed: { min: 20, max: 50 }, // Move away from player
+                    scale: { start: 0.8, end: 0 },
+                    alpha: { start: 0.6, end: 0 },
+                    tint: 0x00ffff,
+                    blendMode: 'ADD'
+                });
+                // ---------------------------------------------
+
+                // Physics colliders
+                this.physics.add.collider(this.bullets, this.enemies, this.hitEnemy, null, this);
+                this.physics.add.overlap(this.player, this.xpOrbs, this.collectXP, null, this);
+                this.physics.add.overlap(this.player, this.powerups, this.collectPowerup, null, this);
+                this.physics.add.overlap(this.enemies, this.player, this.hitPlayer, null, this);
+
+                // World bounds
+                this.physics.world.setBounds(0, 0, 800, 600);
+
+                // Touch Control State
+                this.touchState = {
+                    leftId: null, leftActive: false, leftOrigin: new Phaser.Math.Vector2(), leftCurr: new Phaser.Math.Vector2(),
+                    rightId: null, rightActive: false, rightOrigin: new Phaser.Math.Vector2(), rightCurr: new Phaser.Math.Vector2()
+                };
+                
+                // Joystick Graphics
+                this.joyGraphics = this.add.graphics().setScrollFactor(0).setDepth(2000);
+
+                // Touch Listeners
+                this.input.on('pointerdown', (p) => this.handleTouchStart(p));
+                this.input.on('pointermove', (p) => this.handleTouchMove(p));
+                this.input.on('pointerup', (p) => this.handleTouchEnd(p));
+                this.input.on('pointerout', (p) => this.handleTouchEnd(p)); // Safety
+
+                // --- INITIALIZATION ORDER FIX ---
+                // 1. Initialize safe defaults for UI to prevent undefined errors before resetGame
+                this.health = 100;
+                this.maxHealth = 100;
+                this.xp = 0;
+                this.xpToNext = 100;
+                this.score = 0;
+                this.streak = 0;
+
+                // 2. Create UI (Needs variables above)
+                this.createUI();
+
+                // 3. Create Timers (Needs to exist before resetGame accesses .delay)
+                this.enemySpawnTimer = this.time.addEvent({
+                    delay: 800,
+                    callback: this.spawnEnemy,
+                    callbackScope: this,
+                    loop: true
+                });
+
+                this.streakDecayEvent = this.time.addEvent({
+                    delay: 2000,
+                    callback: () => { this.streak = 0; },
+                    callbackScope: this,
+                    loop: true,
+                    paused: true
+                });
+
+                this.regenTimer = this.time.addEvent({
+                    delay: 1000,
+                    callback: () => {
+                        if (this.gameState === 'playing' && this.regenRate > 0) {
+                            this.health = Math.min(this.maxHealth, this.health + this.regenRate);
+                            this.updateHealthBar();
+                        }
+                    },
+                    loop: true
+                });
+
+                // 4. Now safe to call resetGame (uses UI and Timers)
+                this.resetGame();
+
+                // 5. Load persistent data
+                this.loadPersistentData();
+            }
+
+            // --- Touch Logic ---
+            handleTouchStart(p) {
+                if(this.gameState !== 'playing') return;
+
+                // Split screen logic
+                if (p.x < this.cameras.main.width / 2) {
+                    if (!this.touchState.leftActive) {
+                        this.touchState.leftId = p.id;
+                        this.touchState.leftActive = true;
+                        this.touchState.leftOrigin.set(p.x, p.y);
+                        this.touchState.leftCurr.set(p.x, p.y);
+                    }
+                } else {
+                    if (!this.touchState.rightActive) {
+                        this.touchState.rightId = p.id;
+                        this.touchState.rightActive = true;
+                        this.touchState.rightOrigin.set(p.x, p.y);
+                        this.touchState.rightCurr.set(p.x, p.y);
+                    }
+                }
+            }
+
+            handleTouchMove(p) {
+                if (this.touchState.leftActive && p.id === this.touchState.leftId) {
+                    this.touchState.leftCurr.set(p.x, p.y);
+                }
+                if (this.touchState.rightActive && p.id === this.touchState.rightId) {
+                    this.touchState.rightCurr.set(p.x, p.y);
+                }
+            }
+
+            handleTouchEnd(p) {
+                if (this.touchState.leftActive && p.id === this.touchState.leftId) {
+                    this.touchState.leftActive = false;
+                }
+                if (this.touchState.rightActive && p.id === this.touchState.rightId) {
+                    this.touchState.rightActive = false;
+                }
+            }
+
+            drawJoysticks() {
+                this.joyGraphics.clear();
+                
+                // Draw Left Joystick (Cyan)
+                if (this.touchState.leftActive) {
+                    this.joyGraphics.lineStyle(2, 0x00ffff, 0.5);
+                    this.joyGraphics.strokeCircle(this.touchState.leftOrigin.x, this.touchState.leftOrigin.y, 40);
+                    this.joyGraphics.fillStyle(0x00ffff, 0.3);
+                    this.joyGraphics.fillCircle(this.touchState.leftCurr.x, this.touchState.leftCurr.y, 15);
+                }
+
+                // Draw Right Joystick (Magenta)
+                if (this.touchState.rightActive) {
+                    this.joyGraphics.lineStyle(2, 0xff00ff, 0.5);
+                    this.joyGraphics.strokeCircle(this.touchState.rightOrigin.x, this.touchState.rightOrigin.y, 40);
+                    this.joyGraphics.fillStyle(0xff00ff, 0.3);
+                    this.joyGraphics.fillCircle(this.touchState.rightCurr.x, this.touchState.rightCurr.y, 15);
+                }
+            }
+
+            generateTextures() {
+                // Particle 1x1
+                let g = this.add.graphics();
+                g.fillStyle(0xffffff, 1);
+                g.fillRect(0, 0, 2, 2);
+                g.generateTexture('particle', 2, 2);
+                g.destroy();
+
+                // Player ship
+                g = this.add.graphics();
+                g.fillStyle(0x00ffff, 1);
+                g.fillTriangle(0, -12, 12, 12, -12, 12); // Pointing UP initially
+                g.lineStyle(2, 0x00ffff, 1);
+                g.strokeTriangle(0, -12, 12, 12, -12, 12);
+                g.generateTexture('player', 32, 32);
+                g.destroy();
+
+                // Enemy
+                g = this.add.graphics();
+                g.fillStyle(0xff00ff, 1);
+                g.fillCircle(16, 16, 10);
+                g.lineStyle(2, 0xff00ff, 1);
+                g.strokeCircle(16, 16, 10);
+                g.generateTexture('enemy', 32, 32);
+                g.destroy();
+
+                // Bullet
+                g = this.add.graphics();
+                g.fillStyle(0x00ffff, 1);
+                g.fillRect(0, 0, 4, 12); // Vertical initially
+                g.generateTexture('bullet', 4, 12);
+                g.destroy();
+
+                // XP orb
+                g = this.add.graphics();
+                g.fillStyle(0x00ff00, 1);
+                g.fillCircle(12, 12, 8);
+                g.lineStyle(2, 0x00ff00, 1);
+                g.strokeCircle(12, 12, 8);
+                g.generateTexture('xp', 24, 24);
+                g.destroy();
+
+                // Powerup base
+                g = this.add.graphics();
+                g.fillStyle(0xffffff, 1);
+                g.fillCircle(16, 16, 12);
+                g.lineStyle(3, 0xffffff, 1);
+                g.strokeCircle(16, 16, 12);
+                g.generateTexture('powerup', 32, 32);
+                g.destroy();
+            }
+
+            createBackground() {
+                let gridG = this.add.graphics();
+                gridG.lineStyle(1, 0x00ffff, 0.15);
+                // Draw a 1000x1000 grid
+                for (let i = 0; i < 20; i++) {
+                    gridG.lineBetween(i * 50, 0, i * 50, 1000);
+                    gridG.lineBetween(0, i * 50, 1000, i * 50);
+                }
+                gridG.generateTexture('grid', 1000, 1000);
+                gridG.destroy();
+
+                this.grid = this.add.tileSprite(400, 300, 800, 600, 'grid').setScrollFactor(0);
+            }
+
+            createUI() {
+                // Score
+                this.scoreText = this.add.text(20, 20, 'SCORE: 0', {
+                    font: 'bold 24px Arial',
+                    fill: '#00ffff',
+                    stroke: '#000000',
+                    strokeThickness: 4
+                }).setScrollFactor(0).setDepth(100);
+
+                // Level
+                this.levelText = this.add.text(20, 55, 'LEVEL: 1', {
+                    font: 'bold 24px Arial',
+                    fill: '#00ffff',
+                    stroke: '#000000',
+                    strokeThickness: 4
+                }).setScrollFactor(0).setDepth(100);
+
+                // Hint
+                this.add.text(20, 560, 'Left: Move | Right: Aim', {
+                    font: '14px Arial',
+                    fill: '#aaaaaa'
+                }).setScrollFactor(0).setDepth(100);
+
+                // Streak
+                this.streakText = this.add.text(780, 30, 'STREAK: 0', {
+                    font: 'bold 36px Arial',
+                    fill: '#ffff00',
+                    stroke: '#000000',
+                    strokeThickness: 5
+                }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(100);
+
+                // Health bar
+                this.healthBarBg = this.add.graphics().setScrollFactor(0).setDepth(100);
+                this.healthBarFill = this.add.graphics().setScrollFactor(0).setDepth(101);
+                this.updateHealthBar();
+
+                // XP bar
+                this.xpBarBg = this.add.graphics().setPosition(20, 100).setScrollFactor(0).setDepth(100);
+                this.xpBarFill = this.add.graphics().setPosition(20, 100).setScrollFactor(0).setDepth(101);
+                this.updateXPBar();
+            }
+
+            resetGame() {
+                this.gameState = 'playing';
+                this.score = 0;
+                this.level = 1;
+                this.xp = 0;
+                this.xpToNext = 100;
+                this.health = 100;
+                this.maxHealth = 100;
+                this.damage = 25;
+                this.fireRate = 250;
+                this.critChance = 0.2;
+                this.playerSpeed = 220;
+                this.regenRate = 0;
+                this.streak = 0;
+                this.maxStreak = 0;
+                this.totalKills = 0;
+                this.multiKillCount = 0;
+                this.lastKillTime = 0;
+                this.lastShotTime = 0;
+                this.lastComboMilestone = 0;
+                this.scoreMult = 1;
+                this.invulTime = 0;
+                this.rapidEndTime = 0;
+                this.shieldEndTime = 0;
+                this.boostEndTime = 0;
+
+                this.touchState.leftActive = false;
+                this.touchState.rightActive = false;
+
+                // Clear groups
+                this.bullets.clear(true, true);
+                this.enemies.clear(true, true);
+                this.xpOrbs.clear(true, true);
+                this.powerups.clear(true, true);
+
+                this.player.setPosition(400, 300);
+                this.player.setVelocity(0, 0);
+                this.player.setTint(0xffffff);
+
+                this.enemySpawnTimer.delay = 800;
+                this.streakDecayEvent.paused = true;
+                this.physics.world.resume();
+
+                this.updateUI();
+            }
+
+            update(time, delta) {
+                if (this.gameState !== 'playing') {
+                    this.joyGraphics.clear();
+                    return;
+                }
+
+                this.drawJoysticks();
+
+                // Background scroll
+                this.grid.tilePositionX += 1;
+                this.grid.tilePositionY += 0.5;
+
+                // --- Input Logic (Mobile + Desktop) ---
+                const isTouching = this.touchState.leftActive || this.touchState.rightActive;
+                let vx = 0;
+                let vy = 0;
+                let moved = false;
+                let aiming = false;
+                let targetAngle = 0;
+
+                // 1. Movement (Left Stick)
+                if (this.touchState.leftActive) {
+                    const dx = this.touchState.leftCurr.x - this.touchState.leftOrigin.x;
+                    const dy = this.touchState.leftCurr.y - this.touchState.leftOrigin.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist > 5) {
+                        const speedMod = Math.min(1, dist / 40);
+                        vx = (dx / dist) * this.playerSpeed * speedMod;
+                        vy = (dy / dist) * this.playerSpeed * speedMod;
+                        moved = true;
+                        if (!this.touchState.rightActive) {
+                            targetAngle = Math.atan2(dy, dx) + Math.PI/2;
+                        }
+                    }
+                } 
+                // Desktop Movement (Follow Mouse) - only if no touch input
+                else if (!isTouching) {
+                    const pointer = this.input.activePointer;
+                    const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+                    const dx = worldPoint.x - this.player.x;
+                    const dy = worldPoint.y - this.player.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist > 15) {
+                        const speedMod = Math.min(1, dist / 100); 
+                        vx = (dx / dist) * this.playerSpeed * speedMod;
+                        vy = (dy / dist) * this.playerSpeed * speedMod;
+                        moved = true;
+                        targetAngle = Math.atan2(dy, dx) + Math.PI/2;
+                    }
+                }
+
+                this.player.body.setVelocity(vx, vy);
+
+                // 2. Shooting (Right Stick or Mouse)
+                const currFireRate = this.fireRate * (time < this.rapidEndTime ? 0.6 : 1);
+                
+                if (time > this.lastShotTime + currFireRate) {
+                    if (this.touchState.rightActive) {
+                        const dx = this.touchState.rightCurr.x - this.touchState.rightOrigin.x;
+                        const dy = this.touchState.rightCurr.y - this.touchState.rightOrigin.y;
+                        if (Math.sqrt(dx*dx + dy*dy) > 10) {
+                            const angle = Math.atan2(dy, dx);
+                            this.shoot(this.player.x + Math.cos(angle)*100, this.player.y + Math.sin(angle)*100);
+                            targetAngle = angle + Math.PI/2;
+                            aiming = true;
+                        }
+                    } else if (!isTouching) {
+                        const pointer = this.input.activePointer;
+                        const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+                        // Auto fire if mouse is far enough
+                         const dx = worldPoint.x - this.player.x;
+                         const dy = worldPoint.y - this.player.y;
+                         if (Math.sqrt(dx*dx + dy*dy) > 40) {
+                            this.shoot(worldPoint.x, worldPoint.y);
+                            aiming = true;
+                         }
+                    }
+                }
+
+                // Apply rotation
+                if (moved || aiming) {
+                    this.player.setRotation(targetAngle);
+                }
+
+                // Invul flash
+                if (time < this.invulTime) {
+                    this.player.setTint(0x00ff00);
+                } else {
+                    this.player.clearTint();
+                }
+
+                // XP bar pulse
+                if (this.xp / this.xpToNext > 0.9) {
+                    this.xpBarFill.setAlpha(1 + 0.5 * Math.sin(time * 0.01));
+                }
+
+                this.updateStreakText();
+
+                // Cleanup offscreen enemies
+                this.enemies.children.entries.forEach(enemy => {
+                    if (enemy.active && (enemy.x < -50 || enemy.x > 850 || enemy.y < -50 || enemy.y > 650)) {
+                        enemy.setActive(false).setVisible(false);
+                    }
+                });
+            }
+
+            shoot(targetX, targetY) {
+                // Adjust angle because bullet texture is vertical
+                const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, targetX, targetY);
+                const vx = Math.cos(angle) * 500;
+                const vy = Math.sin(angle) * 500;
+
+                const bullet = this.bullets.get(this.player.x, this.player.y, 'bullet');
+                if (bullet) {
+                    bullet.setActive(true).setVisible(true);
+                    bullet.setRotation(angle + Math.PI/2); 
+                    bullet.body.setVelocity(vx, vy);
+                    bullet.setDepth(5);
+                    this.time.delayedCall(3000, () => {
+                        if (bullet.active) bullet.setActive(false).setVisible(false);
+                    });
+                }
+                this.lastShotTime = this.time.now;
+            }
+
+            spawnEnemy() {
+                const sides = [
+                    () => ({ x: Phaser.Math.Between(0, 800), y: -50 }),
+                    () => ({ x: 850, y: Phaser.Math.Between(0, 600) }),
+                    () => ({ x: Phaser.Math.Between(0, 800), y: 650 }),
+                    () => ({ x: -50, y: Phaser.Math.Between(0, 600) })
+                ];
+                const side = Phaser.Math.Between(0, 3);
+                const pos = sides[side]();
+                const angle = Phaser.Math.Angle.Between(pos.x, pos.y, this.player.x, this.player.y);
+
+                const enemy = this.enemies.get(pos.x, pos.y, 'enemy');
+                if (enemy) {
+                    enemy.setActive(true).setVisible(true);
+                    enemy.setRotation(angle);
+                    const speed = 120 + this.level * 15;
+                    enemy.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+                    enemy.hp = 20 + this.level * 8;
+                    enemy.maxHp = enemy.hp;
+                    enemy.setDepth(2);
+                }
+                this.enemySpawnTimer.delay = Math.max(150, 900 - this.level * 25);
+            }
+
+            hitEnemy(bullet, enemy) {
+                bullet.setActive(false).setVisible(false);
+
+                const isCrit = Math.random() < this.critChance;
+                let dmg = this.damage;
+                if (isCrit) {
+                    dmg *= 1.5 + Math.random();
+                }
+                enemy.hp -= dmg;
+
+                // Damage number
+                const color = isCrit ? 0xffff00 : 0x00ff88;
+                const fontSize = isCrit ? 28 : 22;
+                const dmgTxt = this.add.text(enemy.x, enemy.y - 10, (isCrit ? 'CRIT ' : '') + Math.round(dmg), {
+                    font: `bold ${fontSize}px Arial`,
+                    fill: '#' + color.toString(16).padStart(6, '0'),
+                    stroke: '#000000',
+                    strokeThickness: 3
+                }).setOrigin(0.5).setDepth(20);
+
+                this.tweens.add({
+                    targets: dmgTxt,
+                    y: ' -= 40',
+                    alpha: 0,
+                    scale: 1.3,
+                    duration: 600,
+                    onComplete: () => dmgTxt.destroy()
+                });
+
+                // Shake & Particles
+                const shakeDur = isCrit ? 120 : 60;
+                const shakeInt = isCrit ? 0.008 : 0.004;
+                this.cameras.main.shake(shakeDur, shakeInt);
+                
+                // --- FIXED PARTICLE TINT SYNTAX ---
+                this.hitParticles.setParticleTint(isCrit ? 0xffff00 : 0xff00ff);
+                this.hitParticles.explode(8, enemy.x, enemy.y); 
+
+                if (enemy.hp <= 0) {
+                    this.killEnemy(enemy);
+                }
+            }
+
+            killEnemy(enemy) {
+                enemy.setActive(false).setVisible(false);
+                this.totalKills++;
+                const now = this.time.now;
+
+                if (now - this.lastKillTime < 1500) {
+                    this.multiKillCount++;
+                } else {
+                    this.multiKillCount = 1;
+                }
+                this.lastKillTime = now;
+                this.announceMultiKill();
+
+                this.streak++;
+                this.maxStreak = Math.max(this.maxStreak, this.streak);
+                this.streakDecayEvent.paused = false;
+                this.streakDecayEvent.restart();
+
+                const xpGain = enemy.maxHp * 1.5 + this.level * 3;
+                const scoreGain = xpGain * (1 + this.streak * 0.15) * (1 + this.multiKillCount * 0.2) * (now < this.boostEndTime ? 2 : 1) * this.scoreMult;
+                this.xp += xpGain;
+                this.score += Math.round(scoreGain);
+
+                const orb = this.xpOrbs.get(enemy.x, enemy.y, 'xp');
+                if (orb) {
+                    orb.setActive(true).setVisible(true);
+                    const dir = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+                    orb.body.setVelocity(Math.cos(dir) * 60, Math.sin(dir) * 60);
+                    orb.xpValue = xpGain;
+                    orb.setRotation(dir);
+                    orb.setDepth(15);
+                    orb.setScale(1 + 0.3 * Math.sin(now * 0.02));
+                }
+
+                if (this.streak % 5 === 0 && this.streak > this.lastComboMilestone) {
+                    this.announceCombo();
+                }
+                this.lastComboMilestone = this.streak;
+
+                this.checkLevelUp();
+                this.checkAchievements();
+            }
+
+            announceMultiKill() {
+                if (this.multiKillCount < 2) return;
+                const names = ['', 'DOUBLE', 'TRIPLE', 'MEGA', 'ULTRA', 'MONSTER', 'GODLIKE'];
+                const name = names[Math.min(this.multiKillCount, names.length - 1)] + ' KILL!';
+                const color = this.multiKillCount >= 5 ? 0xffd700 : 0xffff00;
+                const txt = this.add.text(400, 150, name, {
+                    font: `bold ${48 + this.multiKillCount * 4}px Arial`,
+                    fill: '#' + color.toString(16),
+                    stroke: '#ff00ff',
+                    strokeThickness: 6
+                }).setOrigin(0.5).setDepth(50);
+
+                this.tweens.add({
+                    targets: txt,
+                    y: ' += 120',
+                    alpha: 0,
+                    scale: 1.4,
+                    duration: 1800,
+                    ease: 'Power2',
+                    onComplete: () => txt.destroy()
+                });
+                this.cameras.main.shake(150, 0.01);
+            }
+
+            announceCombo() {
+                const txt = this.add.text(400, 200, `COMBO x${this.streak}!`, {
+                    font: 'bold 72px Arial',
+                    fill: '#00ffff',
+                    stroke: '#ffff00',
+                    strokeThickness: 8
+                }).setOrigin(0.5).setDepth(50);
+
+                this.tweens.add({
+                    targets: txt,
+                    alpha: 0,
+                    scale: { from: 1, to: 1.8 },
+                    duration: 1200,
+                    ease: 'Bounce.easeOut',
+                    onComplete: () => txt.destroy()
+                });
+                this.cameras.main.shake(200, 0.015);
+            }
+
+            collectXP(player, orb) {
+                orb.setActive(false).setVisible(false);
+                const xpTxt = this.add.text(player.x, player.y - 25, `+${Math.round(orb.xpValue)} XP`, {
+                    font: 'bold 24px Arial',
+                    fill: '#00ff00',
+                    stroke: '#000',
+                    strokeThickness: 3
+                }).setOrigin(0.5).setDepth(20);
+                this.tweens.add({
+                    targets: xpTxt,
+                    y: ' -= 40',
+                    alpha: 0,
+                    duration: 800,
+                    onComplete: () => xpTxt.destroy()
+                });
+                
+                // --- FIXED PARTICLE TINT SYNTAX ---
+                this.hitParticles.setParticleTint(0x00ff00);
+                this.hitParticles.explode(8, player.x, player.y);
+            }
+
+            collectPowerup(player, powerup) {
+                powerup.setActive(false).setVisible(false);
+                const dur = 8000;
+                const now = this.time.now;
+                switch (powerup.type) {
+                    case 'rapid': this.rapidEndTime = now + dur; break;
+                    case 'shield': this.shieldEndTime = now + dur; break;
+                    case 'boost': this.boostEndTime = now + dur; break;
+                }
+                
+                // --- FIXED PARTICLE TINT SYNTAX ---
+                this.hitParticles.setParticleTint(powerup.type === 'rapid' ? 0x00ffff : powerup.type === 'shield' ? 0xffff00 : 0xff8800);
+                this.hitParticles.explode(12, player.x, player.y);
+            }
+
+            hitPlayer(player, enemy) {
+                if (this.time.now < this.shieldEndTime) return;
+                const dmg = 15 + this.level * 3;
+                this.health -= dmg;
+
+                const dmgTxt = this.add.text(player.x, player.y - 20, '-' + Math.round(dmg), {
+                    font: 'bold 32px Arial',
+                    fill: '#ff4444',
+                    stroke: '#000',
+                    strokeThickness: 4
+                }).setOrigin(0.5).setDepth(20);
+
+                this.tweens.add({
+                    targets: dmgTxt,
+                    y: ' -= 50',
+                    alpha: 0,
+                    scale: 1.5,
+                    duration: 700,
+                    onComplete: () => dmgTxt.destroy()
+                });
+
+                this.cameras.main.flash(250, 255, 100, 100);
+                this.cameras.main.shake(250, 0.02);
+
+                const dir = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+                enemy.body.velocity.x += Math.cos(dir) * 150;
+                enemy.body.velocity.y += Math.sin(dir) * 150;
+
+                this.streak = 0;
+                this.streakDecayEvent.paused = true;
+                this.announceComboBroken();
+
+                this.updateHealthBar();
+                if (this.health <= 0) {
+                    this.gameOver();
+                }
+            }
+
+            announceComboBroken() {
+                const txt = this.add.text(400, 250, 'COMBO BROKEN!', {
+                    font: 'bold 64px Arial',
+                    fill: '#ff4444',
+                    stroke: '#ffffff',
+                    strokeThickness: 8
+                }).setOrigin(0.5).setDepth(50);
+                this.tweens.add({
+                    targets: txt,
+                    y: ' += 100',
+                    alpha: 0,
+                    scale: 1.3,
+                    duration: 1500,
+                    ease: 'Power2',
+                    onComplete: () => txt.destroy()
+                });
+            }
+
+            checkLevelUp() {
+                if (this.xp >= this.xpToNext) {
+                    this.xp -= this.xpToNext;
+                    this.xpToNext = Math.round(this.xpToNext * 1.6);
+                    this.level++;
+                    this.health = Math.min(this.maxHealth, this.health + 25);
+                    this.updateHealthBar();
+                    this.updateXPBar();
+                    this.updateLevelText();
+
+                    this.physics.world.pause();
+                    this.gameState = 'levelUp';
+                    this.showUpgrades();
+                }
+            }
+
+            showUpgrades() {
+                this.upgradeChoices = [];
+                const upgradeTypes = [
+                    { key: 'damage', value: 0.35, name: 'Damage Boost', desc: 'Damage +35%', icon: '⚔️' },
+                    { key: 'fireRate', value: 0.28, name: 'Rapid Fire', desc: 'Fire Rate +28%', icon: '🔫' },
+                    { key: 'crit', value: 0.06, name: 'Crit Chance', desc: 'Crit +6%', icon: '⭐' },
+                    { key: 'health', value: 35, name: 'Max Health', desc: 'Max HP +35', icon: '❤️' },
+                    { key: 'speed', value: 0.25, name: 'Speed Boost', desc: 'Speed +25%', icon: '🚀' },
+                    { key: 'regen', value: 0.8, name: 'Regeneration', desc: 'Regen +0.8/s', icon: '🩹' }
+                ];
+
+                for (let i = 0; i < 3; i++) {
+                    const type = Phaser.Utils.Array.GetRandom(upgradeTypes);
+                    const rand = Math.random();
+                    let rarity = 'common';
+                    let mult = 1.2;
+                    if (rand < 0.05) { rarity = 'legendary'; mult = 2.5; } 
+                    else if (rand < 0.3) { rarity = 'epic'; mult = 1.6; }
+                    const upgrade = {
+                        ...type, rarity, mult, finalValue: type.value * mult
+                    };
+
+                    const container = this.add.container(400 + (i - 1) * 160, 300).setDepth(100);
+                    const glowColor = rarity === 'legendary' ? 0xffd700 : rarity === 'epic' ? 0xcc00ff : 0x00ff88;
+
+                    const glow = this.add.graphics();
+                    glow.fillStyle(glowColor, 0.6);
+                    glow.fillRoundedRect(-75, -55, 150, 110, 15);
+                    glow.setBlendMode('ADD');
+                    container.add(glow);
+
+                    const bg = this.add.graphics();
+                    bg.fillStyle(0x111111, 0.9);
+                    bg.fillRoundedRect(-70, -50, 140, 100, 12);
+                    bg.lineStyle(3, glowColor, 1);
+                    bg.strokeRoundedRect(-70, -50, 140, 100, 12);
+                    container.add(bg);
+
+                    const iconTxt = this.add.text(0, -32, upgrade.icon, { font: 'bold 48px Arial', fill: '#ffffff' }).setOrigin(0.5);
+                    container.add(iconTxt);
+
+                    const nameTxt = this.add.text(0, -2, `${upgrade.name} [${rarity.toUpperCase()}]`, { font: 'bold 18px Arial', fill: glowColor, stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
+                    container.add(nameTxt);
+
+                    const descTxt = this.add.text(0, 28, upgrade.desc.replace('%', Math.round(upgrade.finalValue * 100) + '%').replace('HP', Math.round(upgrade.finalValue)), { font: '16px Arial', fill: '#00ff88', align: 'center' }).setOrigin(0.5);
+                    container.add(descTxt);
+
+                    const hitArea = this.add.rectangle(0, 0, 150, 110, 0xffffff, 0).setInteractive();
+                    hitArea.once('pointerdown', () => this.chooseUpgrade(upgrade, this.upgradeChoices));
+                    container.add(hitArea);
+
+                    container.setAlpha(0);
+                    container.setScale(0.6);
+                    this.tweens.add({ targets: container, alpha: 1, scale: 1, duration: 400, ease: 'Back.easeOut' });
+                    this.upgradeChoices.push(container);
+                }
+            }
+
+            chooseUpgrade(upgrade, choices) {
+                switch (upgrade.key) {
+                    case 'damage': this.damage *= (1 + upgrade.finalValue); break;
+                    case 'fireRate': this.fireRate *= (1 - upgrade.finalValue); break;
+                    case 'crit': this.critChance += upgrade.finalValue; break;
+                    case 'health': this.maxHealth += upgrade.finalValue; this.health = this.maxHealth; break;
+                    case 'speed': this.playerSpeed *= (1 + upgrade.finalValue); break;
+                    case 'regen': this.regenRate += upgrade.finalValue; break;
+                }
+
+                const annTxt = this.add.text(400, 220, upgrade.name, {
+                    font: 'bold 52px Arial', fill: '#00ffff', stroke: '#ffffff', strokeThickness: 6
+                }).setOrigin(0.5).setDepth(101);
+                this.tweens.add({ targets: annTxt, y: ' -= 60', alpha: 0, scale: 1.6, duration: 1200, onComplete: () => annTxt.destroy() });
+                this.cameras.main.shake(300, 0.012);
+
+                choices.forEach(choice => {
+                    this.tweens.add({ targets: choice, alpha: 0, scale: 1.2, duration: 300, onComplete: () => choice.destroy() });
+                });
+                this.time.delayedCall(1500, () => {
+                    this.gameState = 'playing';
+                    this.physics.world.resume();
+                    this.touchState.leftActive = false;
+                    this.touchState.rightActive = false;
+                });
+            }
+
+            checkAchievements() {
+                const achs = [
+                    { id: 'firstBlood', check: () => this.totalKills >= 1 },
+                    { id: 'streak10', check: () => this.maxStreak >= 10 },
+                    { id: 'streak25', check: () => this.maxStreak >= 25 },
+                    { id: 'streak50', check: () => this.maxStreak >= 50 },
+                    { id: 'godlike', check: () => this.multiKillCount >= 6 }
+                ];
+                achs.forEach(ach => {
+                    if (ach.check() && !this.unlockedAchievements.includes(ach.id)) {
+                        this.unlockAchievement(ach.id);
+                    }
+                });
+            }
+
+            unlockAchievement(id) {
+                this.unlockedAchievements.push(id);
+                const names = { firstBlood: 'FIRST BLOOD!', streak10: '10 STREAK!', streak25: '25 STREAK!', streak50: '50 STREAK!', godlike: 'GODLIKE!' };
+                const txt = this.add.text(400, 100, names[id], {
+                    font: 'bold 68px Arial', fill: '#ffd700', stroke: '#ff00ff', strokeThickness: 10
+                }).setOrigin(0.5).setDepth(60);
+                this.tweens.add({ targets: txt, scale: 1.5, alpha: 0, duration: 2000, onComplete: () => txt.destroy() });
+                this.cameras.main.shake(400, 0.02);
+            }
+
+            updateHealthBar() {
+                this.healthBarBg.clear();
+                this.healthBarBg.fillStyle(0x333333, 1);
+                this.healthBarBg.fillRoundedRect(550, 20, 220, 25, 8);
+                this.healthBarFill.clear();
+                const pct = this.health / this.maxHealth;
+                this.healthBarFill.fillStyle(0xff4444, 1);
+                if (pct > 0.5) this.healthBarFill.fillStyle(0x44ff44, 1);
+                this.healthBarFill.fillRoundedRect(555, 25, 210 * pct, 15, 6);
+            }
+
+            updateXPBar() {
+                this.xpBarBg.clear();
+                this.xpBarBg.fillStyle(0x333333, 1);
+                this.xpBarBg.fillRoundedRect(0, 0, 300, 20, 8);
+                this.xpBarFill.clear();
+                const pct = this.xp / this.xpToNext;
+                this.xpBarFill.fillStyle(0x00ff88, 1);
+                this.xpBarFill.fillRoundedRect(5, 5, 290 * pct, 10, 5);
+            }
+
+            updateStreakText() {
+                this.streakText.setText(`STREAK: ${this.streak}`);
+            }
+
+            updateUI() {
+                this.scoreText.setText(`SCORE: ${this.score.toLocaleString()}`);
+                this.levelText.setText(`LEVEL: ${this.level}`);
+                this.updateXPBar();
+                this.updateHealthBar();
+            }
+
+            updateLevelText() {
+                this.levelText.setText(`LEVEL: ${this.level}`);
+            }
+
+            gameOver() {
+                this.gameState = 'gameOver';
+                this.physics.world.pause();
+                this.enemySpawnTimer.paused = true;
+                this.joyGraphics.clear();
+
+                if (this.score > this.highScore) {
+                    this.highScore = this.score;
+                    localStorage.setItem('neonSurvivor_highScore', this.highScore);
+                }
+                localStorage.setItem('neonSurvivor_achievements', JSON.stringify(this.unlockedAchievements));
+
+                const overlay = this.add.graphics();
+                overlay.fillStyle(0x000000, 0.85);
+                overlay.fillRect(0, 0, 800, 600);
+                overlay.setScrollFactor(0).setDepth(200);
+
+                const statsY = 200;
+                const stats = [
+                    `SCORE: ${this.score.toLocaleString()}`,
+                    `HIGH SCORE: ${this.highScore.toLocaleString()}`,
+                    `KILLS: ${this.totalKills}`,
+                    `MAX STREAK: ${this.maxStreak}`,
+                    `LEVEL REACHED: ${this.level}`,
+                    `ACHIEVEMENTS: ${this.unlockedAchievements.length}`
+                ];
+
+                stats.forEach((stat, i) => {
+                    this.add.text(400, statsY + i * 40, stat, {
+                        font: 'bold 28px Arial', fill: '#00ffff', stroke: '#000', strokeThickness: 4, align: 'center'
+                    }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
+                });
+
+                if (this.score > this.highScore - 1) {
+                    const newHSTxt = this.add.text(400, 150, 'NEW HIGH SCORE!', {
+                        font: 'bold 48px Arial', fill: '#ffd700', stroke: '#ff00ff', strokeThickness: 8
+                    }).setOrigin(0.5).setScrollFactor(0).setDepth(202);
+                    this.tweens.add({ targets: newHSTxt, scale: 1.4, alpha: 0.5, yoyo: true, duration: 1000, repeat: -1 });
+                }
+
+                const btnBg = this.add.graphics();
+                btnBg.fillStyle(0x00ffff, 1);
+                btnBg.fillRoundedRect(300, 450, 200, 70, 15);
+                btnBg.lineStyle(4, 0xffffff, 1);
+                btnBg.strokeRoundedRect(300, 450, 200, 70, 15);
+                btnBg.setScrollFactor(0).setDepth(205);
+
+                const btnTxt = this.add.text(400, 485, 'RETRY', { font: 'bold 36px Arial', fill: '#000000' }).setOrigin(0.5).setScrollFactor(0).setDepth(206);
+                const btnHit = this.add.rectangle(400, 485, 200, 70, 0xffffff, 0).setInteractive().setScrollFactor(0).setDepth(204);
+                btnHit.once('pointerdown', () => this.restartGame());
+                btnHit.on('pointerover', () => btnBg.setScale(1.05));
+                btnHit.on('pointerout', () => btnBg.setScale(1));
+            }
+
+            restartGame() {
+                this.children.removeAll(true, true, true, 200); // Clean up overlay
+                this.resetGame();
+                this.enemySpawnTimer.paused = false;
+            }
+
+            loadPersistentData() {
+                this.highScore = parseInt(localStorage.getItem('neonSurvivor_highScore') || '0');
+                this.unlockedAchievements = JSON.parse(localStorage.getItem('neonSurvivor_achievements') || '[]');
+            }
+        }
+
+        const config = {
+            type: Phaser.AUTO,
+            parent: 'game-container',
+            width: 800,
+            height: 600,
+            backgroundColor: '#000011',
+            scale: {
+                mode: Phaser.Scale.FIT,
+                autoCenter: Phaser.Scale.CENTER_BOTH
+            },
+            physics: {
+                default: 'arcade',
+                arcade: { gravity: { x: 0, y: 0 }, debug: false }
+            },
+            scene: GameScene
+        };
+
+        const game = new Phaser.Game(config);
+    </script>
+</body>
+</html>

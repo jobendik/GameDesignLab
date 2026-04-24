@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Power Wash Royale</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: 'Segoe UI', sans-serif; cursor: none; }
+        canvas { position: absolute; top: 0; left: 0; }
+        
+        #ui {
+            position: absolute; top: 20px; left: 20px; pointer-events: none;
+            background: rgba(0,0,0,0.7); padding: 15px; border-radius: 10px;
+            color: white; border: 1px solid #444;
+        }
+        .stat-row { margin-bottom: 5px; font-weight: bold; font-size: 18px; display: flex; align-items: center; gap: 10px; }
+        .color-box { width: 15px; height: 15px; display: inline-block; border-radius: 50%; }
+        
+        #cursor-ring {
+            position: absolute; width: 40px; height: 40px; 
+            border: 2px solid white; border-radius: 50%; 
+            pointer-events: none; transform: translate(-50%, -50%);
+            mix-blend-mode: difference;
+        }
+
+        #tutorial {
+            position: absolute; bottom: 50px; width: 100%; text-align: center;
+            color: white; font-size: 20px; text-shadow: 0 2px 5px rgba(0,0,0,0.8);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. The Clean Layer (Bottom) -->
+    <canvas id="clean-layer"></canvas>
+    <!-- 2. The Dirt Layer (Top, gets erased) -->
+    <canvas id="dirt-layer"></canvas>
+    <!-- 3. The Entity Layer (Players, particles) -->
+    <canvas id="entity-layer"></canvas>
+
+    <div id="ui">
+        <div class="stat-row">
+            <span class="color-box" style="background:#00f3ff"></span> YOU: <span id="p1-score">0%</span>
+        </div>
+        <div class="stat-row">
+            <span class="color-box" style="background:#ff0055"></span> BOT: <span id="p2-score">0%</span>
+        </div>
+    </div>
+    
+    <div id="cursor-ring"></div>
+    <div id="tutorial">HOLD LEFT CLICK TO CLEAN</div>
+
+    <script>
+        const cleanCanvas = document.getElementById('clean-layer');
+        const dirtCanvas = document.getElementById('dirt-layer');
+        const entityCanvas = document.getElementById('entity-layer');
+        
+        const ctxClean = cleanCanvas.getContext('2d');
+        const ctxDirt = dirtCanvas.getContext('2d');
+        const ctxEntity = entityCanvas.getContext('2d');
+
+        let width, height;
+        let mouse = { x: 0, y: 0, down: false };
+        let particles = [];
+        
+        // Game State
+        let player = { x: 0, y: 0, angle: 0, color: '#00f3ff' };
+        let bot = { x: 0, y: 0, angle: 0, color: '#ff0055', target: {x:0, y:0}, timer: 0 };
+        
+        let totalPixels = 0;
+        let cleanedPixels = 0; // Approximate
+
+        function init() {
+            resize();
+            window.addEventListener('resize', resize);
+            
+            // Input
+            window.addEventListener('mousemove', e => {
+                mouse.x = e.clientX;
+                mouse.y = e.clientY;
+                document.getElementById('cursor-ring').style.left = e.clientX + 'px';
+                document.getElementById('cursor-ring').style.top = e.clientY + 'px';
+            });
+            window.addEventListener('mousedown', () => mouse.down = true);
+            window.addEventListener('mouseup', () => mouse.down = false);
+            
+            // Touch
+            window.addEventListener('touchstart', (e) => {
+                mouse.down = true;
+                mouse.x = e.touches[0].clientX;
+                mouse.y = e.touches[0].clientY;
+            });
+            window.addEventListener('touchmove', (e) => {
+                mouse.x = e.touches[0].clientX;
+                mouse.y = e.touches[0].clientY;
+            });
+            window.addEventListener('touchend', () => mouse.down = false);
+
+            // Init Bot
+            bot.x = width - 100;
+            bot.y = height - 100;
+
+            generateMap();
+            loop();
+        }
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            [cleanCanvas, dirtCanvas, entityCanvas].forEach(c => {
+                c.width = width;
+                c.height = height;
+            });
+            totalPixels = width * height;
+            generateMap();
+        }
+
+        function generateMap() {
+            // 1. Draw Clean Layer (Pattern)
+            ctxClean.fillStyle = '#111';
+            ctxClean.fillRect(0,0,width,height);
+            
+            // Draw colorful tiles
+            const size = 60;
+            const colors = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4'];
+            for(let x=0; x<width; x+=size) {
+                for(let y=0; y<height; y+=size) {
+                    ctxClean.fillStyle = colors[Math.floor(Math.random()*colors.length)];
+                    ctxClean.fillRect(x,y,size-2,size-2);
+                }
+            }
+
+            // 2. Draw Dirt Layer (Solid Grey/Brown)
+            ctxDirt.globalCompositeOperation = 'source-over';
+            ctxDirt.fillStyle = '#555'; // Base dirt
+            ctxDirt.fillRect(0,0,width,height);
+            
+            // Add some grime texture
+            for(let i=0; i<500; i++) {
+                ctxDirt.fillStyle = Math.random() > 0.5 ? '#444' : '#666';
+                let s = Math.random() * 50 + 20;
+                ctxDirt.fillRect(Math.random()*width, Math.random()*height, s, s);
+            }
+        }
+
+        function spawnSpray(originX, originY, angle, color, isPlayer) {
+            // Create "Water" particles
+            const count = 5;
+            for(let i=0; i<count; i++) {
+                let spread = (Math.random() - 0.5) * 0.5;
+                let speed = Math.random() * 10 + 15;
+                particles.push({
+                    x: originX, y: originY,
+                    vx: Math.cos(angle + spread) * speed,
+                    vy: Math.sin(angle + spread) * speed,
+                    life: 1.0,
+                    size: Math.random() * 8 + 5,
+                    color: isPlayer ? '#afffff' : '#ffafaf', // Water tint
+                    type: 'water',
+                    owner: isPlayer ? 'p1' : 'p2'
+                });
+            }
+        }
+
+        function eraseDirt(x, y, radius) {
+            ctxDirt.globalCompositeOperation = 'destination-out';
+            ctxDirt.beginPath();
+            ctxDirt.arc(x, y, radius, 0, Math.PI * 2);
+            ctxDirt.fill();
+            
+            // Restore context
+            ctxDirt.globalCompositeOperation = 'source-over';
+        }
+
+        function updateBot() {
+            bot.timer--;
+            // Pick new target if close or time out
+            let dx = bot.target.x - bot.x;
+            let dy = bot.target.y - bot.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+
+            if (dist < 50 || bot.timer <= 0) {
+                bot.target.x = Math.random() * width;
+                bot.target.y = Math.random() * height;
+                bot.timer = 100 + Math.random() * 100;
+            }
+
+            // Move
+            let angle = Math.atan2(dy, dx);
+            bot.angle = angle;
+            bot.x += Math.cos(angle) * 3;
+            bot.y += Math.sin(angle) * 3;
+
+            // Shoot always
+            spawnSpray(bot.x, bot.y, bot.angle, bot.color, false);
+        }
+
+        function loop() {
+            ctxEntity.clearRect(0,0,width,height);
+
+            // 1. Player Logic
+            player.x += (mouse.x - player.x) * 0.1;
+            player.y += (mouse.y - player.y) * 0.1;
+            
+            // Angle towards mouse (if we had a separate character, now character IS mouse)
+            // Let's pretend player is slightly behind mouse
+            let px = player.x;
+            let py = player.y;
+            let angle = Math.atan2(mouse.y - py, mouse.x - px);
+
+            if (mouse.down) {
+                spawnSpray(px, py, angle, player.color, true);
+            }
+
+            // 2. Bot Logic
+            updateBot();
+
+            // 3. Particle Logic
+            for(let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.05;
+                
+                // Draw Particle on Entity Layer
+                ctxEntity.fillStyle = p.color;
+                ctxEntity.globalAlpha = p.life;
+                ctxEntity.beginPath();
+                ctxEntity.arc(p.x, p.y, p.size/2, 0, Math.PI*2);
+                ctxEntity.fill();
+                
+                // Erase Dirt
+                // We erase circle at particle position
+                eraseDirt(p.x, p.y, p.size);
+
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+            ctxEntity.globalAlpha = 1.0;
+
+            // 4. Draw Characters
+            // Player
+            ctxEntity.fillStyle = player.color;
+            ctxEntity.beginPath();
+            ctxEntity.arc(player.x, player.y, 15, 0, Math.PI*2);
+            ctxEntity.fill();
+            
+            // Bot
+            ctxEntity.fillStyle = bot.color;
+            ctxEntity.beginPath();
+            ctxEntity.arc(bot.x, bot.y, 15, 0, Math.PI*2);
+            ctxEntity.fill();
+
+            // 5. Scoring (Simplified approximation based on frame spray count)
+            // Real pixel counting is expensive (getImageData), so we cheat for prototype
+            // We just increment score when spraying
+            if (mouse.down) {
+                let score = parseFloat(document.getElementById('p1-score').innerText);
+                if (score < 100) document.getElementById('p1-score').innerText = (score + 0.05).toFixed(1) + "%";
+            }
+             
+            // Bot score cheat
+            let bScore = parseFloat(document.getElementById('p2-score').innerText);
+            if (bScore < 100) document.getElementById('p2-score').innerText = (bScore + 0.03).toFixed(1) + "%";
+
+            requestAnimationFrame(loop);
+        }
+
+        // Debounced resize
+        let resizeTimeout;
+        window.onresize = function() {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(resize, 200);
+        };
+
+        window.onload = init;
+
+    </script>
+</body>
+</html>

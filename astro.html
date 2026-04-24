@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Galaxy .io</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050510;
+            font-family: 'Courier New', Courier, monospace;
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+        }
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .hud-text {
+            color: #00ffcc;
+            text-shadow: 0 0 10px #00ffcc;
+            font-weight: bold;
+            padding: 20px;
+            pointer-events: none;
+        }
+        #start-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(5, 5, 16, 0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            z-index: 10;
+        }
+        .neon-btn {
+            background: transparent;
+            border: 2px solid #ff00ff;
+            color: #ff00ff;
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            text-transform: uppercase;
+            cursor: pointer;
+            box-shadow: 0 0 15px #ff00ff, inset 0 0 15px #ff00ff;
+            transition: all 0.2s;
+            margin-top: 20px;
+        }
+        .neon-btn:hover {
+            background: #ff00ff;
+            color: white;
+            box-shadow: 0 0 30px #ff00ff, inset 0 0 30px #ff00ff;
+        }
+        .neon-title {
+            font-size: 4rem;
+            color: white;
+            text-shadow: 
+                0 0 5px #fff,
+                0 0 10px #fff,
+                0 0 20px #00ffcc,
+                0 0 30px #00ffcc,
+                0 0 40px #00ffcc;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        #upgrade-msg {
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ffff00;
+            font-size: 2rem;
+            font-weight: bold;
+            text-shadow: 0 0 10px #ffff00;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        /* Virtual Joystick for mobile visual hint */
+        .joystick-hint {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255,255,255,0.5);
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="ui">
+    <div style="display:flex; justify-content:space-between;">
+        <div class="hud-text">
+            <div style="font-size: 1.5rem;">SCORE: <span id="score">0</span></div>
+            <div style="font-size: 1rem; color: #ff00ff; text-shadow: 0 0 10px #ff00ff;">LEVEL: <span id="level">1</span></div>
+        </div>
+        <div class="hud-text" style="text-align:right;">
+            RADAR ACTIVE<br>
+            ENEMIES: <span id="enemy-count">0</span>
+        </div>
+    </div>
+    <div id="upgrade-msg">SYSTEM UPGRADE!</div>
+    <div class="joystick-hint hidden md:block">MOUSE TO AIM • CLICK TO SHOOT</div>
+    <div class="joystick-hint block md:hidden">TOUCH & DRAG TO FLY • TAP TO SHOOT</div>
+</div>
+
+<div id="start-overlay">
+    <h1 class="neon-title">NEON<br>GALAXY</h1>
+    <p style="color:#aaa; max-width: 400px; text-align: center; margin-bottom: 20px;">
+        Ødelegg asteroider. Samle energi. Oppgrader skipet ditt.<br>
+        Bli universets hersker.
+    </p>
+    <input type="text" id="username" placeholder="PILOT NAME" style="background:transparent; border:1px solid #00ffcc; color:#00ffcc; padding:10px; text-align:center; font-family:monospace; font-size:1.2rem; outline:none; margin-bottom:10px;">
+    <button class="neon-btn" onclick="startGame()">DEPLOY SHIP</button>
+</div>
+
+<script>
+    // --- Oppsett ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Globale variabler
+    let width, height;
+    let gameRunning = false;
+    let score = 0;
+    let level = 1;
+    let lastTime = 0;
+    
+    // Kamera
+    let camX = 0, camY = 0;
+    const WORLD_SIZE = 3000;
+
+    // Input
+    const mouse = { x: 0, y: 0, down: false };
+    const keys = {};
+
+    // Spillobjekter
+    let player;
+    let bullets = [];
+    let asteroids = [];
+    let enemies = [];
+    let particles = [];
+    let xps = []; // Erfaringspoeng (orbs)
+
+    // Farger
+    const COLORS = {
+        player: '#00ffcc',
+        enemy: '#ff0055',
+        asteroid: '#aaaaaa',
+        xp: '#ffff00',
+        bullet: '#ffffff'
+    };
+
+    // --- Klasser ---
+
+    class Entity {
+        constructor(x, y, radius, color) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.color = color;
+            this.vx = 0;
+            this.vy = 0;
+            this.angle = 0;
+            this.dead = false;
+        }
+
+        update(dt) {
+            this.x += this.vx * dt;
+            this.y += this.vy * dt;
+
+            // Enkel world bounds
+            if (this.x < -WORLD_SIZE) this.x = -WORLD_SIZE;
+            if (this.x > WORLD_SIZE) this.x = WORLD_SIZE;
+            if (this.y < -WORLD_SIZE) this.y = -WORLD_SIZE;
+            if (this.y > WORLD_SIZE) this.y = WORLD_SIZE;
+        }
+
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.angle);
+            this.drawShape(ctx);
+            ctx.restore();
+        }
+        
+        drawShape(ctx) {
+            // Overskrives av subklasser
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    class Ship extends Entity {
+        constructor(x, y, isPlayer = false) {
+            super(x, y, 15, isPlayer ? COLORS.player : COLORS.enemy);
+            this.isPlayer = isPlayer;
+            this.speed = 300;
+            this.maxHealth = 100;
+            this.health = this.maxHealth;
+            this.reloadTime = 0.2;
+            this.reloadTimer = 0;
+            this.level = 1;
+            this.xp = 0;
+            this.nextLevelXp = 50;
+        }
+
+        update(dt) {
+            // Friksjon
+            this.vx *= 0.95;
+            this.vy *= 0.95;
+
+            super.update(dt);
+            
+            if (this.reloadTimer > 0) this.reloadTimer -= dt;
+
+            if (this.isPlayer) {
+                // Sikt mot musen (kompensert for kamera)
+                const screenX = this.x - camX + width/2;
+                const screenY = this.y - camY + height/2;
+                const dx = mouse.x - screenX;
+                const dy = mouse.y - screenY;
+                this.angle = Math.atan2(dy, dx);
+                
+                // Bevegelse (Touch/Mouse distance determines speed logic or just constant thrust towards mouse)
+                // Her: Enkel følg musen logikk, men med "thrust" følelse
+                const dist = Math.hypot(dx, dy);
+                if (dist > 20) {
+                    this.vx += Math.cos(this.angle) * this.speed * dt;
+                    this.vy += Math.sin(this.angle) * this.speed * dt;
+                }
+
+                // Skyting
+                if (mouse.down && this.reloadTimer <= 0) {
+                    this.shoot();
+                }
+            } else {
+                // AI Logikk
+                this.aiBehavior(dt);
+            }
+        }
+
+        aiBehavior(dt) {
+            // Enkel AI: Finn nærmeste asteroide eller spiller
+            let target = player;
+            let distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
+
+            // Hvis spilleren er langt unna, fly tilfeldig eller mot sentrum
+            if (distToPlayer > 800) {
+                this.angle += (Math.random() - 0.5) * 0.1;
+                this.vx += Math.cos(this.angle) * (this.speed * 0.5) * dt;
+                this.vy += Math.sin(this.angle) * (this.speed * 0.5) * dt;
+            } else {
+                // Jakt på spiller
+                const dx = player.x - this.x;
+                const dy = player.y - this.y;
+                let desiredAngle = Math.atan2(dy, dx);
+                
+                // Myk svinging
+                let diff = desiredAngle - this.angle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                this.angle += diff * 5 * dt;
+
+                // Bevegelse
+                if (distToPlayer > 200) {
+                    this.vx += Math.cos(this.angle) * (this.speed * 0.8) * dt;
+                    this.vy += Math.sin(this.angle) * (this.speed * 0.8) * dt;
+                }
+
+                // Skyt hvis peker mot spiller
+                if (Math.abs(diff) < 0.2 && this.reloadTimer <= 0 && distToPlayer < 600) {
+                    this.shoot();
+                }
+            }
+        }
+
+        shoot() {
+            this.reloadTimer = this.reloadTime;
+            
+            // Rekyl
+            this.vx -= Math.cos(this.angle) * 20;
+            this.vy -= Math.sin(this.angle) * 20;
+
+            // Multishot basert på level
+            const speed = 800;
+            const life = 1.5;
+
+            const createBullet = (offsetAngle) => {
+                const a = this.angle + offsetAngle;
+                // Start bullet litt foran skipet
+                const bx = this.x + Math.cos(this.angle) * 20;
+                const by = this.y + Math.sin(this.angle) * 20;
+                
+                let b = new Bullet(bx, by, this.angle, speed, this.isPlayer);
+                b.vx = Math.cos(a) * speed;
+                b.vy = Math.sin(a) * speed;
+                bullets.push(b);
+            };
+
+            createBullet(0);
+
+            if (this.level >= 3) {
+                createBullet(-0.1);
+                createBullet(0.1);
+            }
+            if (this.level >= 5) {
+                createBullet(-0.2);
+                createBullet(0.2);
+            }
+        }
+
+        gainXp(amount) {
+            this.xp += amount;
+            if (this.xp >= this.nextLevelXp) {
+                this.level++;
+                this.xp = 0;
+                this.nextLevelXp *= 1.5;
+                this.radius += 2;
+                this.health = this.maxHealth; // Heal on level up
+                
+                if (this.isPlayer) {
+                    showUpgradeMessage();
+                    document.getElementById('level').innerText = this.level;
+                }
+                
+                // Level up effekt
+                for(let i=0; i<20; i++) {
+                    particles.push(new Particle(this.x, this.y, '#ffff00', 5));
+                }
+            }
+            if(this.isPlayer) {
+                score += amount * 10;
+                document.getElementById('score').innerText = Math.floor(score);
+            }
+        }
+
+        drawShape(ctx) {
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = this.color;
+            ctx.strokeStyle = this.color;
+            ctx.lineWidth = 3;
+            
+            // Tegn skip (trekant)
+            ctx.beginPath();
+            ctx.moveTo(15, 0);
+            ctx.lineTo(-10, 10);
+            ctx.lineTo(-5, 0);
+            ctx.lineTo(-10, -10);
+            ctx.closePath();
+            ctx.stroke();
+
+            // Ekstra detaljer for level
+            if (this.level >= 3) {
+                ctx.beginPath();
+                ctx.moveTo(-5, 10);
+                ctx.lineTo(5, 10);
+                ctx.stroke();
+                ctx.moveTo(-5, -10);
+                ctx.lineTo(5, -10);
+                ctx.stroke();
+            }
+
+            // Health bar
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(-15, -25, 30, 4);
+            ctx.fillStyle = '#00ff00';
+            ctx.fillRect(-15, -25, 30 * (this.health / this.maxHealth), 4);
+        }
+    }
+
+    class Asteroid extends Entity {
+        constructor(x, y, size) {
+            super(x, y, size, COLORS.asteroid);
+            this.health = size * 2;
+            this.verts = [];
+            // Generer tilfeldig form
+            const points = 8;
+            for(let i=0; i<points; i++) {
+                const angle = (i / points) * Math.PI * 2;
+                const r = this.radius * (0.8 + Math.random() * 0.4);
+                this.verts.push({
+                    x: Math.cos(angle) * r,
+                    y: Math.sin(angle) * r
+                });
+            }
+            this.rotationSpeed = (Math.random() - 0.5) * 2;
+            this.vx = (Math.random() - 0.5) * 50;
+            this.vy = (Math.random() - 0.5) * 50;
+        }
+
+        update(dt) {
+            this.angle += this.rotationSpeed * dt;
+            super.update(dt);
+        }
+
+        drawShape(ctx) {
+            ctx.strokeStyle = this.color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(this.verts[0].x, this.verts[0].y);
+            for(let i=1; i<this.verts.length; i++) {
+                ctx.lineTo(this.verts[i].x, this.verts[i].y);
+            }
+            ctx.closePath();
+            ctx.stroke();
+        }
+
+        takeDamage(amount) {
+            this.health -= amount;
+            if (this.health <= 0) {
+                this.dead = true;
+                // Splitt opp?
+                if (this.radius > 20) {
+                    for(let i=0; i<2; i++) {
+                        let a = new Asteroid(this.x, this.y, this.radius / 1.5);
+                        a.vx = (Math.random() - 0.5) * 100;
+                        a.vy = (Math.random() - 0.5) * 100;
+                        asteroids.push(a);
+                    }
+                }
+                // Dropp XP
+                const xpAmount = Math.floor(this.radius / 5);
+                for(let i=0; i<xpAmount; i++) {
+                    xps.push(new XP(this.x, this.y, 5));
+                }
+                // Eksplosjon
+                createExplosion(this.x, this.y, 10, '#aaa');
+            }
+        }
+    }
+
+    class Bullet extends Entity {
+        constructor(x, y, angle, speed, isPlayerOwner) {
+            super(x, y, 3, COLORS.bullet);
+            this.vx = Math.cos(angle) * speed;
+            this.vy = Math.sin(angle) * speed;
+            this.life = 1.0;
+            this.isPlayerOwner = isPlayerOwner;
+        }
+
+        update(dt) {
+            super.update(dt);
+            this.life -= dt;
+            if (this.life <= 0) this.dead = true;
+        }
+
+        drawShape(ctx) {
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#fff';
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    class XP extends Entity {
+        constructor(x, y, value) {
+            super(x, y, 5, COLORS.xp);
+            this.value = value;
+            this.vx = (Math.random() - 0.5) * 50;
+            this.vy = (Math.random() - 0.5) * 50;
+        }
+        update(dt) {
+            // Magnetisk effekt mot spiller
+            const dist = Math.hypot(player.x - this.x, player.y - this.y);
+            if (dist < 200) {
+                this.vx += (player.x - this.x) * 2 * dt;
+                this.vy += (player.y - this.y) * 2 * dt;
+            }
+            // Friksjon
+            this.vx *= 0.98;
+            this.vy *= 0.98;
+            super.update(dt);
+        }
+        drawShape(ctx) {
+            ctx.shadowBlur = 5;
+            ctx.shadowColor = this.color;
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.moveTo(0, -this.radius);
+            ctx.lineTo(this.radius, 0);
+            ctx.lineTo(0, this.radius);
+            ctx.lineTo(-this.radius, 0);
+            ctx.fill();
+        }
+    }
+
+    class Particle extends Entity {
+        constructor(x, y, color, speed = 1) {
+            super(x, y, Math.random() * 3, color);
+            const a = Math.random() * Math.PI * 2;
+            const s = Math.random() * 100 * speed;
+            this.vx = Math.cos(a) * s;
+            this.vy = Math.sin(a) * s;
+            this.life = 1.0;
+            this.decay = Math.random() * 0.05 + 0.02;
+        }
+        update(dt) {
+            super.update(dt);
+            this.life -= this.decay;
+            if(this.life <= 0) this.dead = true;
+        }
+        drawShape(ctx) {
+            ctx.globalAlpha = this.life;
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(0,0,this.radius,0,Math.PI*2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    // --- System Funksjoner ---
+
+    function createExplosion(x, y, count, color) {
+        for(let i=0; i<count; i++) {
+            particles.push(new Particle(x, y, color));
+        }
+    }
+
+    function showUpgradeMessage() {
+        const msg = document.getElementById('upgrade-msg');
+        msg.style.opacity = 1;
+        setTimeout(() => msg.style.opacity = 0, 2000);
+    }
+
+    function init() {
+        resize();
+        window.addEventListener('resize', resize);
+        
+        // Mouse Listeners
+        window.addEventListener('mousemove', e => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+        });
+        window.addEventListener('mousedown', () => mouse.down = true);
+        window.addEventListener('mouseup', () => mouse.down = false);
+
+        // Touch Listeners
+        window.addEventListener('touchstart', e => {
+            e.preventDefault();
+            mouse.down = true;
+            mouse.x = e.touches[0].clientX;
+            mouse.y = e.touches[0].clientY;
+        }, {passive: false});
+        window.addEventListener('touchmove', e => {
+            e.preventDefault();
+            mouse.x = e.touches[0].clientX;
+            mouse.y = e.touches[0].clientY;
+        }, {passive: false});
+        window.addEventListener('touchend', () => mouse.down = false);
+    }
+
+    function startGame() {
+        const name = document.getElementById('username').value || "Pilot";
+        document.getElementById('start-overlay').style.display = 'none';
+        
+        player = new Ship(0, 0, true);
+        
+        // Spawn initielle asteroider
+        for(let i=0; i<50; i++) spawnAsteroid();
+        
+        // Spawn fiender
+        for(let i=0; i<5; i++) spawnEnemy();
+
+        gameRunning = true;
+        lastTime = performance.now();
+        requestAnimationFrame(loop);
+    }
+
+    function spawnAsteroid() {
+        const dist = 500 + Math.random() * 2000;
+        const angle = Math.random() * Math.PI * 2;
+        const x = Math.cos(angle) * dist;
+        const y = Math.sin(angle) * dist;
+        asteroids.push(new Asteroid(x, y, 20 + Math.random() * 30));
+    }
+
+    function spawnEnemy() {
+        const dist = 1000 + Math.random() * 1000;
+        const angle = Math.random() * Math.PI * 2;
+        const x = Math.cos(angle) * dist;
+        const y = Math.sin(angle) * dist;
+        enemies.push(new Ship(x, y, false));
+    }
+
+    function resize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+    }
+
+    function checkCollisions() {
+        // Bullet vs Asteroid
+        for (let b of bullets) {
+            if (b.dead) continue;
+            
+            // Vs Asteroids
+            for (let a of asteroids) {
+                if (a.dead) continue;
+                if (Math.hypot(b.x - a.x, b.y - a.y) < a.radius + b.radius) {
+                    b.dead = true;
+                    a.takeDamage(10);
+                    createExplosion(b.x, b.y, 3, '#fff');
+                    break; 
+                }
+            }
+
+            // Vs Enemies
+            if (b.isPlayerOwner) {
+                for (let e of enemies) {
+                    if (e.dead) continue;
+                    if (Math.hypot(b.x - e.x, b.y - e.y) < e.radius + b.radius) {
+                        b.dead = true;
+                        e.health -= 10;
+                        createExplosion(b.x, b.y, 3, '#ff0055');
+                        if (e.health <= 0) {
+                            e.dead = true;
+                            createExplosion(e.x, e.y, 20, '#ff0055');
+                            for(let i=0; i<10; i++) xps.push(new XP(e.x, e.y, 10));
+                        }
+                    }
+                }
+            }
+            
+            // Vs Player
+            if (!b.isPlayerOwner && !player.dead) {
+                if (Math.hypot(b.x - player.x, b.y - player.y) < player.radius + b.radius) {
+                    b.dead = true;
+                    player.health -= 5;
+                    createExplosion(b.x, b.y, 5, '#00ffcc');
+                    if (player.health <= 0) {
+                        // Game Over (enkelt restart her)
+                        player.x = 0; player.y = 0; player.health = 100;
+                        player.xp = 0; player.level = 1; level = 1; score = 0;
+                        document.getElementById('score').innerText = 0;
+                        document.getElementById('level').innerText = 1;
+                        alert("GAME OVER - Try again!");
+                    }
+                }
+            }
+        }
+
+        // Player vs XP
+        for (let x of xps) {
+            if (x.dead) continue;
+            if (Math.hypot(x.x - player.x, x.y - player.y) < player.radius + x.radius + 20) {
+                x.dead = true;
+                player.gainXp(x.value);
+            }
+        }
+    }
+
+    function drawGrid(ctx) {
+        ctx.strokeStyle = '#111122';
+        ctx.lineWidth = 2;
+        const gridSize = 100;
+        const startX = Math.floor((camX - width/2) / gridSize) * gridSize;
+        const endX = startX + width + gridSize;
+        const startY = Math.floor((camY - height/2) / gridSize) * gridSize;
+        const endY = startY + height + gridSize;
+
+        ctx.beginPath();
+        for (let x = startX; x < endX; x += gridSize) {
+            ctx.moveTo(x, startY);
+            ctx.lineTo(x, endY);
+        }
+        for (let y = startY; y < endY; y += gridSize) {
+            ctx.moveTo(startX, y);
+            ctx.lineTo(endX, y);
+        }
+        ctx.stroke();
+
+        // World borders
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 5;
+        ctx.strokeRect(-WORLD_SIZE, -WORLD_SIZE, WORLD_SIZE*2, WORLD_SIZE*2);
+    }
+
+    function drawBackgroundStars(ctx) {
+        // Enkel stjernehimmel som beveger seg litt saktere enn kamera (parallax)
+        const starSpeed = 0.5;
+        const offsetX = camX * starSpeed;
+        const offsetY = camY * starSpeed;
+        
+        ctx.fillStyle = '#ffffff';
+        // Pseudo-random stjerner basert på skjermkoordinater for ytelse
+        // Her: Bare tegn noen faste stjerner i forhold til grid for enkelhet i denne demoen
+        // For ekte spill bør dette pre-rendres eller loopes
+    }
+
+    function loop(time) {
+        if (!gameRunning) return;
+        const dt = (time - lastTime) / 1000;
+        lastTime = time;
+
+        // Oppdater kamera
+        camX += (player.x - camX) * 0.1;
+        camY += (player.y - camY) * 0.1;
+
+        // Oppdater Entities
+        player.update(dt);
+        bullets.forEach(b => b.update(dt));
+        asteroids.forEach(a => a.update(dt));
+        enemies.forEach(e => e.update(dt));
+        particles.forEach(p => p.update(dt));
+        xps.forEach(x => x.update(dt));
+
+        // Rydd opp
+        bullets = bullets.filter(b => !b.dead);
+        asteroids = asteroids.filter(a => !a.dead);
+        enemies = enemies.filter(e => !e.dead);
+        particles = particles.filter(p => !p.dead);
+        xps = xps.filter(x => !x.dead);
+
+        // Spawn nye
+        if (asteroids.length < 50) spawnAsteroid();
+        if (enemies.length < 5) spawnEnemy();
+        document.getElementById('enemy-count').innerText = enemies.length;
+
+        checkCollisions();
+
+        // Tegn
+        ctx.fillStyle = '#050510';
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.save();
+        ctx.translate(width/2 - camX, height/2 - camY);
+
+        drawGrid(ctx);
+        
+        xps.forEach(x => x.draw(ctx));
+        asteroids.forEach(a => a.draw(ctx));
+        enemies.forEach(e => e.draw(ctx));
+        bullets.forEach(b => b.draw(ctx));
+        player.draw(ctx);
+        particles.forEach(p => p.draw(ctx));
+
+        ctx.restore();
+
+        requestAnimationFrame(loop);
+    }
+
+    init();
+
+</script>
+</body>
+</html>

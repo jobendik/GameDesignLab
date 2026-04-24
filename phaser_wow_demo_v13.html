@@ -1,0 +1,1920 @@
+
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lysarkivet – versjon 13</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#091126;font-family:Georgia,"Times New Roman",serif}
+#game{width:100%;height:100%}
+.hud,.quest,.stats,.hint{
+  position:fixed;z-index:5;pointer-events:none;color:rgba(255,255,255,.94);
+  backdrop-filter:blur(10px);box-shadow:0 10px 40px rgba(0,0,0,.20);border:1px solid rgba(255,255,255,.09)
+}
+.hud{left:18px;top:14px;max-width:480px;border-radius:18px;padding:14px 18px;background:rgba(11,18,42,.58);line-height:1.4}
+.hud strong{display:block;font-size:30px;margin-bottom:4px}
+.quest{left:18px;top:108px;min-width:310px;border-radius:14px;padding:12px 16px;background:rgba(22,28,60,.78);color:#fff7dc;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.45}
+.quest .title{font-weight:700;letter-spacing:.3px;margin-bottom:6px;color:#fff5c4}
+.stats{left:18px;top:270px;min-width:310px;border-radius:14px;padding:12px 16px;background:rgba(15,20,44,.70);font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45}
+.stats .hearts{font-size:20px;letter-spacing:2px;color:#ffb5c0}
+.hint{right:18px;bottom:14px;max-width:500px;border-radius:14px;padding:10px 14px;background:rgba(10,14,34,.50);font-family:Arial,Helvetica,sans-serif;font-size:14px;color:rgba(255,255,255,.86)}
+.em{color:#bfeeff}
+.warn{color:#ffd7a5}
+.good{color:#d8ffb6}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div class="hud"><strong>Lysarkivet</strong>A/D eller piltaster = gå · Space/W/↑ = hopp · Shift = dash · E/Enter = snakk/aktiver · Farlige skygger og torner skader deg · Du gjenfødes ved siste lysvarde.</div>
+<div class="quest" id="questBox"></div>
+<div class="stats" id="statsBox"></div>
+<div class="hint" id="hintBox">Versjon 13: bedre pacing, smartere fiender, ekte animasjoner, pause/restart og en langt mer dramatisk boss-jakt mot porten.</div>
+
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
+<script>
+const GAME_W = 1366;
+const GAME_H = 768;
+const WORLD_W = 4320;
+const GROUND_Y = 620;
+
+const questBox = document.getElementById('questBox');
+const statsBox = document.getElementById('statsBox');
+const hintBox = document.getElementById('hintBox');
+
+new Phaser.Game({
+  type: Phaser.AUTO,
+  parent: 'game',
+  width: GAME_W,
+  height: GAME_H,
+  backgroundColor: '#091126',
+  physics: { default: 'arcade', arcade: { gravity: { y: 1800 }, debug: false } },
+  scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+  scene: { preload, create, update }
+});
+
+function preload(){}
+
+function create(){
+  const s = this;
+  s.physics.world.setBounds(0, 0, WORLD_W, GAME_H + 320);
+  s.cameras.main.setBounds(0, 0, WORLD_W, GAME_H);
+  s.cameras.main.fadeIn(1400, 0, 0, 0);
+
+  s.questCount = 0;
+  s.questTarget = 3;
+  s.beaconCount = 0;
+  s.beaconTarget = 2;
+  s.secretCount = 0;
+  s.secretTarget = 3;
+  s.questFinished = false;
+  s.finalBlessingDone = false;
+  s.endingSeen = false;
+  s.storyStarted = false;
+  s.portalOpened = false;
+  s.soundStarted = false;
+  s.stormActive = false;
+  s.stormResolved = false;
+  s.damageLocked = false;
+  s.isRespawning = false;
+  s.pausedGame = false;
+  s.currentAreaIndex = -1;
+  s.audioMood = 'calm';
+
+  s.maxHealth = 5;
+  s.health = 5;
+  s.wasOnFloor = false;
+  s.playerFacing = 1;
+  s.isDashing = false;
+  s.dashReady = true;
+  s.currentDialogLine = 0;
+  s.inDialog = false;
+  s.activeNpc = null;
+  s.nearNpc = null;
+  s.nearBeacon = null;
+
+  s.checkpoint = { x: 220, y: 460, label: 'Starten av stien' };
+
+  createTextures(s);
+  createAnimations(s);
+  createBackground(s);
+  createGroundAndPlatforms(s);
+  createStoryIntro(s);
+  createPlayer(s);
+  createCrumblePlatforms(s);
+  createEffects(s);
+  createNPCs(s);
+  createCreatures(s);
+  createQuestPages(s);
+  createBeacons(s);
+  createSecrets(s);
+  createCheckpoints(s);
+  createHazards(s);
+  createPortal(s);
+  createStormFX(s);
+  createBoss(s);
+  createDialogueUI(s);
+  createPauseMenu(s);
+  bindKeys(s);
+
+  s.cameras.main.startFollow(s.player, true, 0.05, 0.05, 0, 20);
+
+  s.resizeHandler = gs => {
+    s.cameras.main.setViewport(0, 0, gs.width, gs.height);
+    if (s.dialogue) { s.dialogue.x = gs.width / 2; s.dialogue.y = gs.height - 220; }
+    if (s.intro) { s.intro.x = gs.width / 2; s.intro.y = gs.height / 2; }
+    if (s.endingOverlay) { s.endingOverlay.x = gs.width / 2; s.endingOverlay.y = gs.height / 2; }
+    if (s.toastLayer) { s.toastLayer.x = gs.width / 2; s.toastLayer.y = 90; }
+    if (s.pauseMenu) { s.pauseMenu.x = gs.width / 2; s.pauseMenu.y = gs.height / 2; }
+  };
+  s.scale.on('resize', s.resizeHandler);
+
+  refreshUI(s);
+}
+
+function update(time, delta){
+  const s = this;
+  if (!s.player) return;
+
+  if (s.pausedGame) {
+    updateHint(s);
+    return;
+  }
+
+  updateAreaPacing(s);
+  updateAudioMood(s);
+  updatePlayerMovement(s, time);
+  updateNearbyNpc(s);
+  updateNearbyBeacon(s);
+  updateQuestCollectibles(s);
+  updateSecrets(s);
+  updateCheckpoints(s);
+  updatePortal(s, time);
+  updateWraiths(s, time, delta);
+  updateStorm(s, delta, time);
+  updateBoss(s, time, delta);
+  updateFloatingStoryElements(s, time);
+  updateNpcAnimation(s, time);
+  updateMist(s, time);
+  updateCreatures(s, time);
+  updateCrumblePlatforms(s);
+  updateHint(s);
+}
+
+function ensureAudio(s){
+  if (s.soundStarted) return;
+  s.soundStarted = true;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function mk(freq, gainValue, type){
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    filter.type = 'lowpass';
+    filter.frequency.value = 900;
+    gain.gain.value = gainValue;
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    return { osc, gain, filter };
+  }
+
+  const p1 = mk(196, 0.016, 'sine');
+  const p2 = mk(293.66, 0.010, 'triangle');
+  const p3 = mk(392, 0.006, 'sine');
+
+  s.audioCtx = ctx;
+  s.audioPads = [p1, p2, p3];
+
+  s.time.addEvent({
+    delay: 2400,
+    loop: true,
+    callback: () => {
+      const t = ctx.currentTime;
+      const target = [196, 220, 246.94, 293.66, 329.63, 392][Phaser.Math.Between(0, 5)];
+      p2.osc.frequency.cancelScheduledValues(t);
+      p2.osc.frequency.linearRampToValueAtTime(target, t + 1.4);
+    }
+  });
+
+  s.time.addEvent({
+    delay: 5200,
+    loop: true,
+    callback: () => {
+      const t = ctx.currentTime;
+      const target = [392, 440, 523.25, 349.23][Phaser.Math.Between(0, 3)];
+      p3.osc.frequency.cancelScheduledValues(t);
+      p3.osc.frequency.linearRampToValueAtTime(target, t + 1.8);
+    }
+  });
+}
+
+function playChime(s, f1, f2, gainLevel = 0.03){
+  if (!s.audioCtx) return;
+  const ctx = s.audioCtx;
+  const t = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(f1, t);
+  osc.frequency.linearRampToValueAtTime(f2, t + 0.28);
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(gainLevel, t + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(t);
+  osc.stop(t + 1.0);
+}
+
+function playStormPulse(s){
+  if (!s.audioCtx) return;
+  const ctx = s.audioCtx;
+  const t = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const filter = ctx.createBiquadFilter();
+  const gain = ctx.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(80, t);
+  osc.frequency.exponentialRampToValueAtTime(40, t + 0.3);
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(240, t);
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(0.06, t + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(t);
+  osc.stop(t + 0.55);
+}
+
+function createTextures(s){
+  let g;
+  const make = (key, fn, w, h) => {
+    if (s.textures.exists(key)) return;
+    g = s.add.graphics();
+    fn(g);
+    g.generateTexture(key, w, h);
+    g.destroy();
+  };
+
+  make('particleSoft', g => { g.fillStyle(0xffffff, 1); g.fillCircle(8, 8, 8); }, 16, 16);
+  make('spark', g => { g.fillStyle(0xffffff, 1); g.fillCircle(5, 5, 5); g.fillStyle(0xdce8ff, .8); g.fillCircle(5, 5, 3); }, 10, 10);
+  make('page', g => {
+    g.fillStyle(0xf8edc8, 1);
+    g.fillRoundedRect(4, 4, 38, 50, 8);
+    g.lineStyle(2, 0xd3bd7d, 1);
+    g.strokeRoundedRect(4, 4, 38, 50, 8);
+    g.fillStyle(0xb38cff, .9);
+    g.fillRect(12, 18, 18, 3);
+    g.fillRect(12, 26, 14, 3);
+    g.fillRect(12, 34, 20, 3);
+  }, 46, 58);
+
+  make('pageGlow', g => { g.fillStyle(0xeed9ff, .25); g.fillCircle(32, 32, 30); }, 64, 64);
+  make('portalRing', g => {
+    g.lineStyle(8, 0x92dcff, 1); g.strokeCircle(64, 64, 48);
+    g.lineStyle(2, 0xf7f1b7, .6); g.strokeCircle(64, 64, 58);
+  }, 128, 128);
+
+  make('firefly', g => {
+    g.fillStyle(0xfff7c0, 1); g.fillCircle(8, 8, 4);
+    g.fillStyle(0xffffff, .65); g.fillCircle(8, 8, 2);
+  }, 16, 16);
+
+  make('critter', g => {
+    g.fillStyle(0xd5f4ff, 1); g.fillEllipse(18, 16, 22, 14);
+    g.fillStyle(0x8ae1ff, 1); g.fillTriangle(6, 16, 1, 10, 1, 22); g.fillTriangle(30, 16, 35, 10, 35, 22);
+    g.fillStyle(0x1e3551, 1); g.fillCircle(15, 15, 1.5); g.fillCircle(21, 15, 1.5);
+  }, 36, 32);
+
+  [
+    ['portraitEira', 0x1b1630, 0xf6e8c8, 0x8b5cff, 0x3c275d],
+    ['portraitMilo', 0x132534, 0xffefcf, 0x7ecfff, 0x3f5f7b],
+    ['portraitVeyra', 0x2c1426, 0xffe8ce, 0xffb275, 0x7d445f]
+  ].forEach(([key, bg, skin, robe, hair]) => make(key, g => {
+    g.fillStyle(bg, 1); g.fillCircle(36, 36, 34);
+    g.fillStyle(skin, 1); g.fillCircle(36, 30, 16);
+    g.fillStyle(robe, 1); g.fillRoundedRect(18, 42, 36, 20, 9);
+    g.fillStyle(hair, 1); g.fillEllipse(36, 22, 34, 18);
+    g.fillStyle(0x1c132d, 1); g.fillCircle(31, 29, 2); g.fillCircle(41, 29, 2);
+  }, 72, 72));
+
+  make('hero', g => {
+    g.fillStyle(0xfff1d0, 1); g.fillCircle(32, 15, 13);
+    g.fillStyle(0x8ee6ff, 1); g.fillRoundedRect(18, 28, 28, 34, 10);
+    g.fillStyle(0x5068d8, .85); g.fillRoundedRect(12, 31, 12, 30, 8);
+    g.fillStyle(0xd6fbff, 1); g.fillRect(18, 32, 16, 5);
+  }, 64, 64);
+
+  make('shadowWisp', g => {
+    g.fillStyle(0x170f2b, 1); g.fillEllipse(30, 28, 40, 28);
+    g.fillStyle(0x51307f, .9); g.fillCircle(22, 22, 9); g.fillCircle(38, 22, 9);
+    g.fillStyle(0xaed5ff, .8); g.fillCircle(24, 24, 2.2); g.fillCircle(36, 24, 2.2);
+    g.lineStyle(3, 0x8f71d8, .45); g.strokeEllipse(30, 28, 44, 32);
+  }, 60, 56);
+
+  make('beacon', g => {
+    g.fillStyle(0x2f365f, 1); g.fillRoundedRect(20, 34, 24, 26, 8);
+    g.fillStyle(0xbdd8ff, 1); g.fillRect(29, 14, 6, 28);
+    g.fillStyle(0xffefb0, 1); g.fillCircle(32, 14, 9);
+    g.fillStyle(0xffffff, .7); g.fillCircle(32, 14, 4);
+  }, 64, 64);
+
+  make('beaconGlow', g => { g.fillStyle(0xfff2ba, .28); g.fillCircle(32, 32, 28); }, 64, 64);
+
+  make('secretSeed', g => {
+    g.fillStyle(0xb6ffda, 1); g.fillCircle(16, 16, 7);
+    g.fillStyle(0xffffff, .7); g.fillCircle(16, 16, 3);
+    g.lineStyle(2, 0x8ff5d0, .8); g.strokeCircle(16, 16, 11);
+  }, 32, 32);
+
+  make('checkpointLamp', g => {
+    g.fillStyle(0x31435d, 1); g.fillRoundedRect(25, 26, 14, 32, 6);
+    g.fillStyle(0xfff4c0, 1); g.fillCircle(32, 16, 10);
+    g.fillStyle(0xffffff, .7); g.fillCircle(32, 16, 4);
+  }, 64, 64);
+}
+
+
+function generateHeroFrames(s){
+  const drawHeroFrame = (key, pose) => {
+    if (s.textures.exists(key)) return;
+    const g = s.add.graphics();
+    const bob = pose.bob || 0;
+    const tilt = pose.tilt || 0;
+    const armSwing = pose.armSwing || 0;
+    const legA = pose.legA || 0;
+    const legB = pose.legB || 0;
+    const glowAlpha = pose.glowAlpha || .18;
+
+    g.fillStyle(0x9edfff, glowAlpha);
+    g.fillEllipse(32, 34, 28 + Math.abs(armSwing) * 6, 38);
+    g.fillStyle(0x5b70e0, 1);
+    g.fillRoundedRect(18, 24 + bob, 28, 30, 10);
+
+    g.fillStyle(0xd8fbff, 1);
+    g.fillRoundedRect(23, 27 + bob, 18, 7, 4);
+
+    g.lineStyle(5, 0xc2efff, 1);
+    g.beginPath();
+    g.moveTo(24, 33 + bob);
+    g.lineTo(14 + armSwing, 44 + bob + tilt);
+    g.moveTo(40, 33 + bob);
+    g.lineTo(50 - armSwing, 44 + bob - tilt);
+    g.strokePath();
+
+    g.lineStyle(6, 0x2747ad, 1);
+    g.beginPath();
+    g.moveTo(28, 53 + bob);
+    g.lineTo(24 + legA, 64 + bob);
+    g.moveTo(36, 53 + bob);
+    g.lineTo(40 + legB, 64 + bob);
+    g.strokePath();
+
+    g.fillStyle(0xfff1d0, 1);
+    g.fillCircle(32, 15 + bob, 13);
+    g.fillStyle(0x32465a, 1);
+    g.fillEllipse(32, 8 + bob, 24, 12);
+    g.fillStyle(0x223145, 1);
+    g.fillCircle(28, 15 + bob, 2);
+    g.fillCircle(36, 15 + bob, 2);
+
+    if (pose.scarf){
+      g.lineStyle(4, 0xf1e4a7, .9);
+      g.beginPath();
+      g.moveTo(40, 30 + bob);
+      g.lineTo(50 + pose.scarf, 24 + bob);
+      g.strokePath();
+    }
+    g.generateTexture(key, 64, 72);
+    g.destroy();
+  };
+
+  const idle = [
+    { bob: 0, armSwing: 0, legA: 0, legB: 0, scarf: 1, glowAlpha: .16 },
+    { bob: -1, armSwing: 1, legA: -1, legB: 1, scarf: 2, glowAlpha: .18 },
+    { bob: 0, armSwing: 0, legA: 0, legB: 0, scarf: 0, glowAlpha: .17 },
+    { bob: 1, armSwing: -1, legA: 1, legB: -1, scarf: -1, glowAlpha: .16 }
+  ];
+  const run = [
+    { bob: 0, armSwing: -7, legA: -8, legB: 8, scarf: 5, glowAlpha: .22 },
+    { bob: -1, armSwing: -3, legA: -2, legB: 4, scarf: 3, glowAlpha: .20 },
+    { bob: 1, armSwing: 4, legA: 6, legB: -6, scarf: -4, glowAlpha: .23 },
+    { bob: 0, armSwing: 8, legA: 9, legB: -9, scarf: -6, glowAlpha: .25 },
+    { bob: -1, armSwing: 3, legA: 2, legB: -4, scarf: -3, glowAlpha: .20 },
+    { bob: 1, armSwing: -4, legA: -6, legB: 6, scarf: 4, glowAlpha: .23 }
+  ];
+  const jump = [
+    { bob: -2, tilt: -2, armSwing: -2, legA: -4, legB: 4, scarf: 3, glowAlpha: .24 },
+    { bob: -3, tilt: 2, armSwing: 3, legA: 6, legB: -2, scarf: -1, glowAlpha: .26 }
+  ];
+  const dash = [
+    { bob: -1, tilt: 0, armSwing: 8, legA: 7, legB: -8, scarf: 7, glowAlpha: .34 },
+    { bob: 0, tilt: 1, armSwing: 10, legA: 8, legB: -10, scarf: 9, glowAlpha: .38 }
+  ];
+  const hurt = [
+    { bob: 1, tilt: 3, armSwing: -5, legA: 2, legB: 6, scarf: -5, glowAlpha: .18 },
+    { bob: 0, tilt: -3, armSwing: 5, legA: -6, legB: -2, scarf: 5, glowAlpha: .18 }
+  ];
+  idle.forEach((pose, i) => drawHeroFrame('hero_idle_' + i, pose));
+  run.forEach((pose, i) => drawHeroFrame('hero_run_' + i, pose));
+  jump.forEach((pose, i) => drawHeroFrame('hero_jump_' + i, pose));
+  dash.forEach((pose, i) => drawHeroFrame('hero_dash_' + i, pose));
+  hurt.forEach((pose, i) => drawHeroFrame('hero_hurt_' + i, pose));
+}
+
+function generateWraithFrames(s){
+  const drawWraith = (key, scale, eyeSpread, glowAlpha, jaw) => {
+    if (s.textures.exists(key)) return;
+    const g = s.add.graphics();
+    g.fillStyle(0x1a102d, 1);
+    g.fillEllipse(44, 42, 56 + scale * 6, 34 + scale * 4);
+    g.fillCircle(28, 30, 13 + scale);
+    g.fillCircle(60, 30, 13 + scale);
+    g.fillStyle(0x6d47ab, glowAlpha);
+    g.fillEllipse(44, 40, 70 + scale * 10, 44 + scale * 4);
+    g.lineStyle(4, 0xa487f7, .34);
+    g.strokeEllipse(44, 42, 68 + scale * 10, 42 + scale * 4);
+    g.fillStyle(0xc6e2ff, .88);
+    g.fillCircle(44 - eyeSpread, 34, 3.4);
+    g.fillCircle(44 + eyeSpread, 34, 3.4);
+    g.lineStyle(3, 0x9fd4ff, .38);
+    g.beginPath();
+    g.moveTo(36, 52);
+    g.lineTo(44, 52 + jaw);
+    g.lineTo(52, 52);
+    g.strokePath();
+    g.generateTexture(key, 88, 84);
+    g.destroy();
+  };
+  [[0,9,.18,2],[1,10,.21,5],[0,8,.18,1],[1,9,.22,4]].forEach((args,i)=>drawWraith('wraith_' + i, ...args));
+  [[2,12,.24,6],[3,13,.26,10],[2,11,.22,5],[3,12,.28,9]].forEach((args,i)=>drawWraith('boss_' + i, ...args));
+
+  if (!s.textures.exists('shadowBolt')) {
+    const g = s.add.graphics();
+    g.fillStyle(0x8b63d8, 1);
+    g.fillEllipse(26, 10, 38, 14);
+    g.fillStyle(0xcfe1ff, .9);
+    g.fillEllipse(32, 10, 18, 8);
+    g.generateTexture('shadowBolt', 52, 20);
+    g.destroy();
+  }
+}
+
+function generateCritterFrames(s){
+  const drawCritter = (key, bob, tail, blink) => {
+    if (s.textures.exists(key)) return;
+    const g = s.add.graphics();
+    g.fillStyle(0xd5f4ff, 1);
+    g.fillEllipse(18, 16 + bob, 22, 14);
+    g.fillStyle(0x8ae1ff, 1);
+    g.fillTriangle(6, 16 + bob, 1 + tail, 10 + bob, 1 + tail, 22 + bob);
+    g.fillTriangle(30, 16 + bob, 35 - tail, 10 + bob, 35 - tail, 22 + bob);
+    g.fillStyle(0x1e3551, 1);
+    if (!blink) {
+      g.fillCircle(15, 15 + bob, 1.5);
+      g.fillCircle(21, 15 + bob, 1.5);
+    } else {
+      g.fillRect(13.5, 15 + bob, 3, 1);
+      g.fillRect(19.5, 15 + bob, 3, 1);
+    }
+    g.generateTexture(key, 36, 32);
+    g.destroy();
+  };
+  [[0,0,false],[1,1,false],[2,2,true],[1,1,false]].forEach((args,i)=>drawCritter('critter_' + i, ...args));
+}
+
+function makeAnimFrames(prefix, count){
+  return Array.from({ length: count }, (_, i) => ({ key: prefix + i }));
+}
+
+function createAnimations(s){
+  generateHeroFrames(s);
+  generateWraithFrames(s);
+  generateCritterFrames(s);
+
+  if (!s.anims.exists('hero-idle')) s.anims.create({ key: 'hero-idle', frames: makeAnimFrames('hero_idle_', 4), frameRate: 6, repeat: -1 });
+  if (!s.anims.exists('hero-run')) s.anims.create({ key: 'hero-run', frames: makeAnimFrames('hero_run_', 6), frameRate: 12, repeat: -1 });
+  if (!s.anims.exists('hero-jump')) s.anims.create({ key: 'hero-jump', frames: makeAnimFrames('hero_jump_', 2), frameRate: 7, repeat: -1 });
+  if (!s.anims.exists('hero-dash')) s.anims.create({ key: 'hero-dash', frames: makeAnimFrames('hero_dash_', 2), frameRate: 16, repeat: -1 });
+  if (!s.anims.exists('hero-hurt')) s.anims.create({ key: 'hero-hurt', frames: makeAnimFrames('hero_hurt_', 2), frameRate: 10, repeat: -1 });
+  if (!s.anims.exists('wraith-float')) s.anims.create({ key: 'wraith-float', frames: makeAnimFrames('wraith_', 4), frameRate: 8, repeat: -1 });
+  if (!s.anims.exists('boss-float')) s.anims.create({ key: 'boss-float', frames: makeAnimFrames('boss_', 4), frameRate: 10, repeat: -1 });
+  if (!s.anims.exists('critter-hop')) s.anims.create({ key: 'critter-hop', frames: makeAnimFrames('critter_', 4), frameRate: 8, repeat: -1 });
+}
+
+
+function createBackground(s){
+  s.add.rectangle(0, 0, WORLD_W, GAME_H, 0x0b1638).setOrigin(0, 0).setScrollFactor(0);
+
+  const neb1 = s.add.ellipse(260, 110, 760, 320, 0x7893ff, .18).setScrollFactor(.02);
+  const neb2 = s.add.ellipse(1570, 150, 1040, 400, 0xffaff0, .10).setScrollFactor(.01);
+  const neb3 = s.add.ellipse(860, 60, 350, 120, 0xffffff, .08).setScrollFactor(.015);
+  const moon = s.add.circle(1080, 130, 42, 0xdbe7ff, .45).setScrollFactor(.03);
+
+  [neb1, neb2, neb3].forEach(n => n.setBlendMode(Phaser.BlendModes.SCREEN));
+  s.tweens.add({ targets: moon, alpha: { from: .35, to: .52 }, duration: 2600, yoyo: true, repeat: -1 });
+
+  for (let i = 0; i < 260; i++) {
+    const star = s.add.circle(
+      Phaser.Math.Between(0, WORLD_W),
+      Phaser.Math.Between(0, 260),
+      Phaser.Math.Between(1, 2),
+      0xffffff,
+      Phaser.Math.FloatBetween(.35, .9)
+    ).setScrollFactor(Phaser.Math.FloatBetween(.01, .05));
+
+    s.tweens.add({
+      targets: star,
+      alpha: { from: star.alpha * .35, to: star.alpha },
+      duration: Phaser.Math.Between(1200, 3800),
+      yoyo: true,
+      repeat: -1
+    });
+  }
+
+  const skyline = s.add.graphics().setScrollFactor(.18);
+  skyline.fillStyle(0x26376d, .85);
+  for (let x = 0; x < WORLD_W; x += 160) {
+    skyline.fillRect(x + Phaser.Math.Between(0, 40), Phaser.Math.Between(300, 380), Phaser.Math.Between(16, 38), Phaser.Math.Between(110, 220));
+    skyline.fillRect(x + Phaser.Math.Between(50, 100), Phaser.Math.Between(340, 430), Phaser.Math.Between(12, 30), Phaser.Math.Between(90, 170));
+  }
+
+  const mg = s.add.graphics().setScrollFactor(.45);
+  for (let i = 0; i < 36; i++) {
+    const x = i * 120 + Phaser.Math.Between(-10, 10);
+    const h = Phaser.Math.Between(110, 170);
+    mg.fillStyle(0x254f55, .9);
+    mg.fillRect(x + 24, GROUND_Y - h + 40, 12, h);
+    mg.fillStyle(0x31b39d, .78);
+    mg.fillEllipse(x, GROUND_Y - h + 86, 84, 110);
+    mg.fillEllipse(x + 20, GROUND_Y - h + 50, 76, 94);
+    mg.fillEllipse(x - 12, GROUND_Y - h + 58, 70, 86);
+  }
+
+  const fg = s.add.graphics().setScrollFactor(.88);
+  fg.fillStyle(0x183323, 1);
+  fg.fillRect(0, GROUND_Y - 12, WORLD_W, 18);
+  for (let i = 0; i < 432; i++) {
+    const x = i * 10;
+    const h = Phaser.Math.Between(12, 30);
+    fg.fillStyle(Phaser.Display.Color.GetColor(55, 110 + Phaser.Math.Between(0, 50), 70 + Phaser.Math.Between(0, 20)), .95);
+    fg.fillTriangle(x, GROUND_Y + 2, x + 4, GROUND_Y - h, x + 8, GROUND_Y + 2);
+  }
+
+  s.floatingLights = [];
+  for (let i = 0; i < 18; i++) {
+    const orb = s.add.circle(220 + i * 230, Phaser.Math.Between(140, 290), Phaser.Math.Between(8, 18), 0xc8eeff, .12)
+      .setBlendMode(Phaser.BlendModes.SCREEN).setScrollFactor(.12);
+    s.floatingLights.push(orb);
+  }
+
+  s.mistBands = [];
+  for (let i = 0; i < 7; i++) {
+    const mist = s.add.ellipse(450 + i * 620, 515 + (i % 2) * 28, 420, 90, 0xd7ecff, .06)
+      .setBlendMode(Phaser.BlendModes.SCREEN).setScrollFactor(.25 + i * .03);
+    s.mistBands.push({ sprite: mist, baseX: mist.x, baseY: mist.y, phase: i * .8 });
+  }
+}
+
+function createGroundAndPlatforms(s){
+  s.ground = s.add.rectangle(WORLD_W / 2, GROUND_Y + 92, WORLD_W + 300, 250, 0x173624, 1);
+  s.physics.add.existing(s.ground, true);
+
+  s.platforms = s.physics.add.staticGroup();
+  [
+    [560, 525, 260, 28],
+    [900, 455, 220, 26],
+    [1220, 390, 220, 26],
+    [1520, 335, 220, 26],
+    [1820, 405, 220, 26],
+    [2140, 340, 230, 26],
+    [2460, 395, 220, 26],
+    [2790, 325, 240, 26],
+    [3120, 385, 230, 26],
+    [3450, 325, 230, 26],
+    [3790, 390, 260, 26],
+    [700, 280, 130, 22],
+    [2310, 250, 130, 22],
+    [3340, 240, 130, 22],
+    [4050, 320, 120, 22]
+  ].forEach(p => addPlatform(s, ...p));
+
+}
+
+function addPlatform(s, x, y, w, h){
+  const p = s.add.rectangle(x, y, w, h, 0x4a624b, 1);
+  p.setStrokeStyle(2, 0xb7f6cc, .12);
+  s.physics.add.existing(p, true);
+  s.platforms.add(p);
+  s.add.rectangle(x, y - h / 2 + 3, w * .97, 5, 0x98f6b0, .15).setBlendMode(Phaser.BlendModes.SCREEN);
+}
+
+function createCrumblePlatforms(s){
+  s.crumblePlatforms = [];
+  [
+    { x: 1780, y: 280, w: 110, h: 18 },
+    { x: 2940, y: 265, w: 110, h: 18 }
+  ].forEach((data, index) => {
+    const rect = s.add.rectangle(data.x, data.y, data.w, data.h, 0x665d73, 1).setDepth(18);
+    rect.setStrokeStyle(2, 0xffd4c9, .18);
+    s.physics.add.existing(rect);
+    rect.body.setImmovable(true);
+    rect.body.setAllowGravity(false);
+    const item = { rect, baseX: data.x, baseY: data.y, w: data.w, h: data.h, falling: false, respawning: false, touched: false, index };
+    s.physics.add.collider(s.player, rect, () => triggerCrumble(s, item), null, s);
+    s.crumblePlatforms.push(item);
+  });
+}
+
+function triggerCrumble(s, item){
+  if (!item || item.falling || item.respawning || item.touched) return;
+  item.touched = true;
+  s.tweens.add({
+    targets: item.rect,
+    angle: { from: -2, to: 2 },
+    duration: 70,
+    yoyo: true,
+    repeat: 4,
+    onComplete: () => {
+      item.falling = true;
+      item.rect.body.setAllowGravity(true);
+      item.rect.body.setImmovable(false);
+      item.rect.body.setVelocity(0, 40);
+      s.time.delayedCall(2000, () => resetCrumblePlatform(s, item));
+    }
+  });
+}
+
+function resetCrumblePlatform(s, item){
+  item.falling = false;
+  item.respawning = true;
+  item.rect.body.setAllowGravity(false);
+  item.rect.body.stop();
+  item.rect.body.setVelocity(0, 0);
+  item.rect.body.setImmovable(true);
+  item.rect.x = item.baseX;
+  item.rect.y = item.baseY + 300;
+  item.rect.alpha = 0;
+  item.rect.angle = 0;
+  s.tweens.add({
+    targets: item.rect,
+    y: item.baseY,
+    alpha: 1,
+    duration: 700,
+    onComplete: () => {
+      item.respawning = false;
+      item.touched = false;
+    }
+  });
+}
+
+function updateCrumblePlatforms(s){
+  s.crumblePlatforms.forEach(item => {
+    if (item.falling && item.rect.y > GAME_H + 200) {
+      resetCrumblePlatform(s, item);
+    }
+  });
+}
+
+function createPlayer(s){
+  s.player = s.physics.add.sprite(200, 460, 'hero_idle_0');
+  s.player.play('hero-idle');
+  s.player.setCollideWorldBounds(true);
+  s.player.setDragX(900);
+  s.player.setMaxVelocity(760, 1400);
+  s.player.setDepth(30);
+  s.player.setScale(1);
+  s.player.body.setSize(24, 54);
+  s.player.body.setOffset(20, 14);
+  s.physics.add.collider(s.player, s.ground);
+  s.physics.add.collider(s.player, s.platforms);
+}
+
+function createEffects(s){
+  s.ambientParticles = s.add.particles(0, 0, 'particleSoft', {
+    x: { min: 0, max: WORLD_W }, y: { min: 30, max: GROUND_Y - 20 },
+    speedX: { min: -8, max: 8 }, speedY: { min: -18, max: -6 },
+    lifespan: { min: 2600, max: 6200 }, scale: { start: .24, end: .02 }, alpha: { start: .28, end: 0 },
+    quantity: 1, frequency: 70, tint: [0xc8f2ff, 0xf3dbff, 0xfff4c4], blendMode: 'SCREEN'
+  }).setDepth(4);
+
+  s.jumpParticles = s.add.particles(0, 0, 'spark', {
+    emitting: false, speedX: { min: -180, max: 180 }, speedY: { min: -140, max: -20 },
+    lifespan: { min: 300, max: 560 }, scale: { start: .6, end: .04 }, alpha: { start: .9, end: 0 },
+    blendMode: 'SCREEN', tint: [0xdff8ff, 0xf5dcff, 0xffefb0]
+  }).setDepth(35);
+
+  s.trailParticles = s.add.particles(0, 0, 'spark', {
+    emitting: false, follow: s.player, followOffset: { x: -2, y: 18 }, frequency: 34,
+    speedX: { min: -8, max: 8 }, speedY: { min: 3, max: 16 }, lifespan: { min: 260, max: 520 },
+    scale: { start: .26, end: .02 }, alpha: { start: .35, end: 0 }, tint: [0xbdeaff, 0xeed8ff], blendMode: 'SCREEN'
+  }).setDepth(35);
+  s.trailParticles.stop();
+
+  s.pageGlowParticles = s.add.particles(0, 0, 'particleSoft', {
+    emitting: false, speed: { min: 12, max: 60 }, angle: { min: 0, max: 360 }, lifespan: { min: 420, max: 900 },
+    scale: { start: .34, end: .02 }, alpha: { start: .8, end: 0 }, tint: [0xfff4bb, 0xe9d4ff, 0xcdeeff], blendMode: 'SCREEN'
+  }).setDepth(40);
+
+  s.weatherParticles = s.add.particles(0, 0, 'particleSoft', {
+    x: { min: 0, max: WORLD_W }, y: { min: -20, max: 180 }, speedX: { min: -12, max: 18 }, speedY: { min: 20, max: 55 },
+    lifespan: { min: 3800, max: 7000 }, scale: { start: .18, end: .05 }, alpha: { start: .12, end: 0 },
+    quantity: 1, frequency: 55, tint: [0xd8ecff, 0xf2dfff, 0xfff2bd], blendMode: 'SCREEN'
+  }).setDepth(3);
+
+  s.portalBurst = s.add.particles(0, 0, 'spark', {
+    emitting: false, speed: { min: 50, max: 180 }, angle: { min: 0, max: 360 }, lifespan: { min: 400, max: 1200 },
+    scale: { start: .65, end: .02 }, alpha: { start: 1, end: 0 }, tint: [0xbfeeff, 0xf9e2ff, 0xfff4b8], blendMode: 'SCREEN'
+  }).setDepth(70);
+
+  s.damageParticles = s.add.particles(0, 0, 'spark', {
+    emitting: false, speed: { min: 60, max: 200 }, angle: { min: 0, max: 360 }, lifespan: { min: 350, max: 850 },
+    scale: { start: .55, end: .02 }, alpha: { start: 1, end: 0 }, tint: [0xff8fa8, 0xffd4d4, 0x9ad8ff], blendMode: 'SCREEN'
+  }).setDepth(75);
+
+  s.checkpointParticles = s.add.particles(0, 0, 'spark', {
+    emitting: false, speed: { min: 20, max: 90 }, angle: { min: 0, max: 360 }, lifespan: { min: 600, max: 1200 },
+    scale: { start: .45, end: .05 }, alpha: { start: .8, end: 0 }, tint: [0xfff0b8, 0xbfeeff, 0xdfffd4], blendMode: 'SCREEN'
+  }).setDepth(55);
+
+  s.secretParticles = s.add.particles(0, 0, 'spark', {
+    emitting: false, speed: { min: 15, max: 75 }, angle: { min: 0, max: 360 }, lifespan: { min: 500, max: 1100 },
+    scale: { start: .4, end: .03 }, alpha: { start: .85, end: 0 }, tint: [0xbfffd9, 0xe7ffe9], blendMode: 'SCREEN'
+  }).setDepth(55);
+
+  s.toastLayer = s.add.container(s.scale.width / 2, 90).setScrollFactor(0).setDepth(240);
+}
+
+function createNPCs(s){
+  s.npcs = [];
+  const npcData = [
+    {
+      x: 860, y: 582, name: 'Eira, bibliotekaren av stjernestøv', portrait: 'portraitEira', role: 'eira',
+      robe: 0x8b5cff, hair: 0x43336a,
+      getLines: () => [
+        'Når en verden skrives med varme, husker den den som fant den på.',
+        'Denne gangen må du ikke bare finne sidene. Du må også tenne de gamle lysvardene.',
+        s.questFinished ? 'Alt er klart. Finn Veyra ved den stille porten.' : 'Sank sidene, tenn lysvardene, og lytt etter de skjulte minnene underveis.'
+      ]
+    },
+    {
+      x: 2140, y: 582, name: 'Milo, karttegneren', portrait: 'portraitMilo', role: 'milo',
+      robe: 0x6dd3ff, hair: 0x47647b,
+      getLines: () => [
+        'Noen stier er bygget for føtter. Andre er bygget for timing og mot.',
+        'Se opp for skyggevesenene. De hater lys og elsker å jage deg av rytmen.',
+        s.beaconCount >= s.beaconTarget ? 'Vardene brenner. Nå føles hele verden mer våken.' : 'Hvis en lysvarde glimter svakt, kan du stå ved den og vekke den med E.'
+      ]
+    },
+    {
+      x: 3450, y: 582, name: 'Veyra, vokter av den stille porten', portrait: 'portraitVeyra', role: 'veyra',
+      robe: 0xffb275, hair: 0x7d445f,
+      getLines: () => !s.questFinished ? [
+        'Porten reagerer bare når både minner og lys er vekket.',
+        'Tre sider. To lysvarder. Deretter svarer den.'
+      ] : !s.finalBlessingDone ? [
+        'Du har gjort verden hel nok til at den tør å åpne seg.',
+        'Når jeg vekker porten, kommer også det som lå og sov bak den.',
+        'Løp når stormen reiser seg. Ikke se deg tilbake.'
+      ] : [
+        'Lysarkivet er ikke ferdig. Det er endelig i live.',
+        s.secretCount >= s.secretTarget ? 'Du fant alle de skjulte minnene også. Verden kommer til å huske det.' : 'Det finnes fortsatt skjulte minner her, dersom du vil vende tilbake en dag.'
+      ]
+    }
+  ];
+
+  npcData.forEach((data, index) => {
+    const c = s.add.container(data.x, data.y).setDepth(25);
+    const g = s.add.graphics();
+    g.fillStyle(0xffefcf, 1); g.fillCircle(0, -38, 14);
+    g.fillStyle(data.robe, 1); g.fillRoundedRect(-15, -24, 30, 40, 10);
+    g.fillStyle(data.hair, 1); g.fillEllipse(0, -45, 30, 18);
+    g.fillStyle(0x1d1d29, 1); g.fillCircle(-5, -38, 2); g.fillCircle(5, -38, 2);
+    c.add(g);
+
+    const aura = s.add.circle(data.x, data.y - 30, 34, 0xffffff, .08).setBlendMode(Phaser.BlendModes.SCREEN).setDepth(20);
+    s.tweens.add({
+      targets: aura, alpha: { from: .05, to: .16 }, scale: { from: .9, to: 1.1 },
+      duration: 1800 + index * 400, yoyo: true, repeat: -1
+    });
+
+    s.npcs.push({ container: c, aura, data, baseY: data.y, bobPhase: index * .9 });
+  });
+}
+
+function createCreatures(s){
+  s.creatures = [];
+  [
+    { x: 720, y: GROUND_Y - 10, range: 70 },
+    { x: 1760, y: GROUND_Y - 10, range: 90 },
+    { x: 2950, y: GROUND_Y - 10, range: 80 },
+    { x: 3620, y: GROUND_Y - 10, range: 65 }
+  ].forEach((spot, i) => {
+    const sprite = s.add.sprite(spot.x, spot.y, 'critter_0').setDepth(26);
+    sprite.play('critter-hop');
+    sprite.setScale(.95 + i * .04);
+    const glow = s.add.image(spot.x, spot.y - 8, 'firefly').setScale(1.5).setAlpha(.22).setBlendMode(Phaser.BlendModes.SCREEN).setDepth(24);
+    s.creatures.push({ sprite, glow, baseX: spot.x, baseY: spot.y, range: spot.range, phase: i * 1.4 });
+  });
+}
+
+function createQuestPages(s){
+  s.pages = [];
+  [
+    { x: 1520, y: 270 },
+    { x: 2790, y: 255 },
+    { x: 3870, y: 315 }
+  ].forEach((pos, index) => {
+    const glow = s.add.image(pos.x, pos.y, 'pageGlow').setBlendMode(Phaser.BlendModes.SCREEN).setAlpha(.65).setDepth(12);
+    const sprite = s.physics.add.image(pos.x, pos.y, 'page');
+    sprite.setImmovable(true);
+    sprite.body.setAllowGravity(false);
+    sprite.setDepth(18);
+    sprite.collected = false;
+    s.tweens.add({
+      targets: [glow, sprite],
+      y: '-=12',
+      duration: 1600 + index * 300,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+    s.pages.push({ glow, sprite });
+  });
+}
+
+function createBeacons(s){
+  s.beacons = [];
+  [
+    { x: 1140, y: 330, label: 'Vestlig lysvarde' },
+    { x: 3210, y: 322, label: 'Østlig lysvarde' }
+  ].forEach((pos, index) => {
+    const glow = s.add.image(pos.x, pos.y, 'beaconGlow').setBlendMode(Phaser.BlendModes.SCREEN).setAlpha(.22).setDepth(16);
+    const sprite = s.add.image(pos.x, pos.y, 'beacon').setDepth(18).setTint(0x8890b8);
+    const pulse = s.add.circle(pos.x, pos.y - 18, 16, 0xffefb8, .12).setBlendMode(Phaser.BlendModes.SCREEN).setDepth(17);
+    s.beacons.push({ sprite, glow, pulse, active: false, label: pos.label, bobPhase: index, baseX: pos.x, baseY: pos.y });
+  });
+}
+
+function createSecrets(s){
+  s.secrets = [];
+  [
+    { x: 705, y: 220, text: 'Et skjult minne: en tegning som ventet på å bli sett.' },
+    { x: 2315, y: 190, text: 'Et skjult minne: en uferdig sti som likevel føltes riktig.' },
+    { x: 3340, y: 180, text: 'Et skjult minne: et lite lys som nekter å gi seg.' }
+  ].forEach((pos, index) => {
+    const sprite = s.add.image(pos.x, pos.y, 'secretSeed').setDepth(18).setAlpha(.88);
+    const glow = s.add.circle(pos.x, pos.y, 22, 0xbfffd9, .12).setBlendMode(Phaser.BlendModes.SCREEN).setDepth(16);
+    s.secrets.push({ sprite, glow, found: false, text: pos.text, phase: index, baseX: pos.x, baseY: pos.y });
+  });
+}
+
+function createCheckpoints(s){
+  s.checkpoints = [];
+  [
+    { x: 260, groundY: 562, label: 'Starten av stien' },
+    { x: 1970, groundY: 562, label: 'Midtre lysvarde' },
+    { x: 3340, groundY: 562, label: 'Portkammeret' }
+  ].forEach((pos, index) => {
+    const glow = s.add.circle(pos.x, pos.groundY - 20, 30, 0xfff2bc, .10).setBlendMode(Phaser.BlendModes.SCREEN).setDepth(17);
+    const lamp = s.add.image(pos.x, pos.groundY - 12, 'checkpointLamp').setDepth(20).setTint(0x9b9ba8);
+    s.checkpoints.push({
+      glow, lamp,
+      x: pos.x,
+      touchY: pos.groundY - 12,
+      respawnY: pos.groundY - 100,
+      label: pos.label,
+      active: index === 0
+    });
+  });
+  activateCheckpoint(s, s.checkpoints[0], true);
+}
+
+function createHazards(s){
+  s.hazardRects = [];
+  s.thorns = s.physics.add.staticGroup();
+  [
+    [980, GROUND_Y - 10, 110, 20],
+    [1680, GROUND_Y - 10, 120, 20],
+    [2560, GROUND_Y - 10, 120, 20],
+    [3560, GROUND_Y - 10, 120, 20],
+    [2080, 328, 80, 16],
+    [3080, 370, 90, 16]
+  ].forEach(data => {
+    const [x, y, w, h] = data;
+    const g = s.add.graphics().setDepth(19);
+    g.fillStyle(0x3d0f27, 1);
+    for (let i = -w / 2; i < w / 2; i += 14) {
+      g.fillTriangle(x + i, y + 8, x + i + 7, y - 8, x + i + 14, y + 8);
+    }
+    const rect = s.add.rectangle(x, y, w, h, 0xff0000, 0);
+    s.physics.add.existing(rect, true);
+    s.thorns.add(rect);
+    s.hazardRects.push({ gfx: g, rect, phase: x * .001 });
+  });
+
+  s.wraiths = [];
+  [
+    { x1: 1400, x2: 1680, y: 250, speed: .0016, aggroRadius: 240 },
+    { x1: 2260, x2: 2680, y: 305, speed: .0018, aggroRadius: 280 },
+    { x1: 3380, x2: 3900, y: 290, speed: .0014, aggroRadius: 320 }
+  ].forEach((data, index) => {
+    const sprite = s.physics.add.sprite(data.x1, data.y, 'wraith_0').setDepth(21);
+    sprite.play('wraith-float');
+    sprite.body.setAllowGravity(false);
+    sprite.setImmovable(true);
+    sprite.setAlpha(.94);
+    const glow = s.add.circle(data.x1, data.y, 28, 0x8f71d8, .12).setBlendMode(Phaser.BlendModes.SCREEN).setDepth(20);
+    s.wraiths.push({
+      sprite, glow, ...data, phase: index * 1.8,
+      mode: 'patrol',
+      focusX: data.x1,
+      focusY: data.y,
+      aggroUntil: 0,
+      nextLungeAt: 0,
+      lungeUntil: 0
+    });
+  });
+
+  s.physics.add.overlap(s.player, s.thorns, (_, thorn) => {
+    damagePlayer(s, 1, thorn.x, thorn.y, 'Torner river i deg.');
+  });
+
+  s.wraiths.forEach(w => {
+    s.physics.add.overlap(s.player, w.sprite, () => {
+      damagePlayer(s, 1, w.sprite.x, w.sprite.y, 'Et skyggevesen treffer deg.');
+    });
+  });
+}
+
+function createPortal(s){
+  s.portal = s.add.container(4105, 516).setDepth(22);
+  const glow = s.add.circle(0, -18, 72, 0xb7e6ff, .06).setBlendMode(Phaser.BlendModes.SCREEN);
+  const ring = s.add.image(0, -20, 'portalRing').setAlpha(.35);
+  const inner = s.add.circle(0, -20, 38, 0x8ac8ff, .16).setBlendMode(Phaser.BlendModes.SCREEN);
+  const pedestal = s.add.rectangle(0, 34, 110, 16, 0x44545b, 1);
+  const text = s.add.text(-102, -128, 'Porten sover ennå', { fontFamily: 'Georgia, serif', fontSize: '24px', color: '#fff6d8' });
+  text.setShadow(0, 0, '#9fdfff', 18, true, true);
+  s.portal.add([glow, ring, inner, pedestal, text]);
+  s.portalGlow = glow;
+  s.portalRing = ring;
+  s.portalInner = inner;
+  s.portalText = text;
+  s.portalEmitter = s.add.particles(4105, 498, 'spark', {
+    speed: { min: 10, max: 90 }, angle: { min: 0, max: 360 }, lifespan: { min: 700, max: 1500 },
+    scale: { start: .38, end: .02 }, alpha: { start: .65, end: 0 }, frequency: 100,
+    tint: [0xbfeeff, 0xf5dfff, 0xfff1ad], blendMode: 'SCREEN'
+  }).setDepth(24);
+}
+
+function createStormFX(s){
+  s.stormShade = s.add.rectangle(0, GAME_H / 2, 10, GAME_H + 200, 0x0b0716, .01).setOrigin(0, .5).setDepth(48);
+  s.stormFront = s.add.ellipse(-999, GROUND_Y - 110, 180, 520, 0x51307f, .01).setDepth(49).setBlendMode(Phaser.BlendModes.SCREEN);
+  s.stormWarning = s.add.text(0, 0, '', { fontFamily: 'Georgia, serif', fontSize: '24px', color: '#ffe7cb' }).setOrigin(.5).setDepth(250);
+  s.stormWarning.setScrollFactor(0);
+  s.stormWarning.setVisible(false);
+}
+
+
+function createBoss(s){
+  s.boss = {
+    active: false,
+    state: 'hidden',
+    nextShotAt: 0,
+    nextLungeAt: 0,
+    telegraphUntil: 0,
+    lungeUntil: 0
+  };
+  s.bossGlow = s.add.circle(-900, GROUND_Y - 110, 88, 0x8e68e8, .01).setDepth(52).setBlendMode(Phaser.BlendModes.SCREEN);
+  s.bossSprite = s.add.sprite(-900, GROUND_Y - 110, 'boss_0').setDepth(53).setAlpha(.01);
+  s.bossSprite.play('boss-float');
+  s.bossBolts = s.physics.add.group({ allowGravity: false, immovable: true });
+  s.physics.add.overlap(s.player, s.bossBolts, (_, bolt) => {
+    if (!bolt.active) return;
+    bolt.destroy();
+    damagePlayer(s, 1, s.bossSprite.x, s.bossSprite.y, 'Nattkjeften slynger skygger mot deg.');
+  });
+}
+
+function createPauseMenu(s){
+  s.pauseMenu = s.add.container(s.scale.width / 2, s.scale.height / 2).setScrollFactor(0).setDepth(300);
+  const bg = s.add.rectangle(0, 0, 760, 360, 0x061022, .86).setStrokeStyle(2, 0xffffff, .10);
+  const glow = s.add.ellipse(0, -86, 420, 120, 0xcde7ff, .08).setBlendMode(Phaser.BlendModes.SCREEN);
+  const title = s.add.text(0, -102, 'Pause', { fontFamily: 'Georgia, serif', fontSize: '54px', color: '#fff6dc' }).setOrigin(.5);
+  title.setShadow(0, 0, '#9fdfff', 18, true, true);
+  const body = s.add.text(
+    0, 10,
+    'ESC eller P = fortsett\nR = start hele reisen på nytt\nE = samhandle · Shift = dash · Space = hopp\n\nTa en pust. Se på nivået. Gå videre når du er klar.',
+    { fontFamily: 'Arial', fontSize: '27px', color: '#e8f6ff', align: 'center', lineSpacing: 10 }
+  ).setOrigin(.5);
+  const foot = s.add.text(0, 126, 'Spillet er frosset mens menyen er åpen.', { fontFamily: 'Arial', fontSize: '20px', color: '#d7e6ff' }).setOrigin(.5);
+  s.pauseMenu.add([bg, glow, title, body, foot]);
+  s.pauseMenu.setVisible(false);
+}
+
+function updateAreaPacing(s){
+  if (!s.storyStarted || s.endingSeen) return;
+  const x = s.player.x;
+  let index = 0;
+  if (x >= 3500) index = 3;
+  else if (x >= 2400) index = 2;
+  else if (x >= 1200) index = 1;
+  if (index === s.currentAreaIndex) return;
+  s.currentAreaIndex = index;
+  const areas = [
+    { name: 'Stjernestien', color: '#dff8ff', mood: 'calm' },
+    { name: 'Skyggeterrassen', color: '#ffdccc', mood: 'tense' },
+    { name: 'Minnetrappen', color: '#ffeec3', mood: 'urgent' },
+    { name: 'Portkammeret', color: '#f8d6ff', mood: 'boss' }
+  ];
+  const area = areas[index];
+  s.audioMood = area.mood;
+  showToast(s, area.name, area.color);
+  if (index > 0) {
+    s.cameras.main.shake(160, .0018 + index * .0005);
+  }
+  refreshUI(s);
+}
+
+function updateAudioMood(s){
+  if (!s.audioPads || !s.audioPads.length) return;
+  const targets = {
+    calm: [0.016, 0.010, 0.006],
+    tense: [0.018, 0.013, 0.009],
+    urgent: [0.021, 0.016, 0.011],
+    boss: [0.024, 0.019, 0.013]
+  }[s.stormActive ? 'boss' : s.audioMood] || [0.016, 0.010, 0.006];
+  s.audioPads.forEach((pad, i) => {
+    pad.gain.gain.value = Phaser.Math.Linear(pad.gain.gain.value, targets[i], 0.05);
+    pad.filter.frequency.value = Phaser.Math.Linear(pad.filter.frequency.value, s.stormActive ? 550 : 900 + i * 120, 0.05);
+  });
+}
+
+function togglePause(s){
+  if (s.endingOverlay.visible) return;
+  s.pausedGame = !s.pausedGame;
+  if (s.pausedGame) {
+    s.physics.world.pause();
+    s.anims.pauseAll();
+    s.pauseMenu.setAlpha(0);
+    s.pauseMenu.setVisible(true);
+    s.tweens.add({ targets: s.pauseMenu, alpha: 1, duration: 160 });
+  } else {
+    s.physics.world.resume();
+    s.anims.resumeAll();
+    s.pauseMenu.setVisible(false);
+  }
+  updateHint(s);
+}
+
+function restartRun(s){
+  window.location.reload();
+}
+
+function updateBoss(s, time, delta){
+  if (!s.boss || !s.boss.active || s.endingSeen) {
+    if (s.bossSprite) {
+      s.bossSprite.alpha = Phaser.Math.Linear(s.bossSprite.alpha, .01, .08);
+      s.bossGlow.alpha = Phaser.Math.Linear(s.bossGlow.alpha, .01, .08);
+    }
+    return;
+  }
+
+  const boss = s.boss;
+  const targetX = Math.max(s.stormWallX + 120, s.player.x - 260 + Math.sin(time * .004) * 30);
+  const targetY = Phaser.Math.Clamp(s.player.y - 46 + Math.sin(time * .007) * 22, 160, GROUND_Y - 40);
+  s.bossSprite.x = Phaser.Math.Linear(s.bossSprite.x, targetX, .045);
+  s.bossSprite.y = Phaser.Math.Linear(s.bossSprite.y, targetY, .06);
+  s.bossGlow.x = s.bossSprite.x - 8;
+  s.bossGlow.y = s.bossSprite.y;
+  s.bossGlow.alpha = .18 + Math.sin(time * .014) * .08;
+  s.bossSprite.alpha = .88;
+
+  if (time > boss.nextShotAt && !s.pausedGame) {
+    boss.nextShotAt = time + 1500;
+    const bolt = s.bossBolts.create(s.bossSprite.x + 42, s.bossSprite.y + Phaser.Math.Between(-16, 16), 'shadowBolt');
+    bolt.setDepth(54).setVelocity(420 + (s.stormActive ? 70 : 0), Phaser.Math.Between(-60, 60));
+    bolt.setScale(1.05);
+    bolt.body.setAllowGravity(false);
+    s.tweens.add({ targets: bolt, alpha: { from: 1, to: .35 }, duration: 220, yoyo: true, repeat: 1 });
+  }
+
+  if (time > boss.nextLungeAt && !boss.telegraphUntil && !boss.lungeUntil) {
+    boss.telegraphUntil = time + 460;
+    boss.nextLungeAt = time + 2500;
+    showToast(s, 'Nattkjeften samler seg til et sprang.', '#ffd7ef');
+  }
+
+  if (boss.telegraphUntil) {
+    s.bossGlow.scale = 1.2 + Math.sin(time * .06) * .12;
+    s.bossGlow.alpha = .30 + Math.sin(time * .03) * .09;
+    if (time >= boss.telegraphUntil) {
+      boss.telegraphUntil = 0;
+      boss.lungeUntil = time + 420;
+      boss.lungeDir = s.player.x > s.bossSprite.x ? 1 : -1;
+    }
+  } else {
+    s.bossGlow.scale = Phaser.Math.Linear(s.bossGlow.scaleX || 1, 1, .12);
+    s.bossGlow.setScale(s.bossGlow.scale || 1);
+  }
+
+  if (boss.lungeUntil) {
+    s.bossSprite.x += boss.lungeDir * 10 + (s.player.x - s.bossSprite.x) * .06;
+    s.bossSprite.y = Phaser.Math.Linear(s.bossSprite.y, s.player.y - 22, .12);
+    if (time >= boss.lungeUntil) boss.lungeUntil = 0;
+  }
+
+  s.bossSprite.setFlipX(false);
+
+  s.bossBolts.children.each(bolt => {
+    if (!bolt || !bolt.active) return;
+    if (bolt.x > WORLD_W + 120 || bolt.y < -120 || bolt.y > GAME_H + 220) bolt.destroy();
+  });
+
+  const bossDist = Phaser.Math.Distance.Between(s.player.x, s.player.y, s.bossSprite.x + 40, s.bossSprite.y + 10);
+  if (bossDist < 88 || (boss.lungeUntil && bossDist < 118)) {
+    damagePlayer(s, 1, s.bossSprite.x, s.bossSprite.y, 'Nattkjeften river nesten tak i deg.');
+  }
+}
+
+function createStoryIntro(s){
+  s.intro = s.add.container(s.scale.width / 2, s.scale.height / 2).setScrollFactor(0).setDepth(200);
+  const bg = s.add.rectangle(0, 0, 900, 380, 0x0a1431, .74).setStrokeStyle(2, 0xffffff, .08);
+  const glow = s.add.ellipse(0, -110, 560, 150, 0xcde8ff, .08).setBlendMode(Phaser.BlendModes.SCREEN);
+  const title = s.add.text(0, -120, 'Lysarkivet', { fontFamily: 'Georgia, serif', fontSize: '56px', color: '#fff6dc' }).setOrigin(.5);
+  title.setShadow(0, 0, '#9fdfff', 25, true, true);
+  const body = s.add.text(
+    0, -6,
+    'Langt bortenfor vanlige kart finnes et sted\n' +
+    'der historier legger fra seg glør mens de sover.\n\n' +
+    'Denne gangen er ikke verden bare vakker.\n' +
+    'Den er også farlig, prøvende og nesten ferdig.\n\n' +
+    'Finn de tapte sidene, tenn lysvardene,\n' +
+    'og løp dersom mørket våkner bak deg.',
+    { fontFamily: 'Georgia, serif', fontSize: '31px', color: '#f5f1ff', align: 'center', lineSpacing: 10 }
+  ).setOrigin(.5);
+  const prompt = s.add.text(0, 136, 'Trykk E eller Enter for å begynne', { fontFamily: 'Arial', fontSize: '24px', color: '#dff7ff' }).setOrigin(.5);
+  s.tweens.add({ targets: prompt, alpha: { from: .45, to: 1 }, duration: 900, yoyo: true, repeat: -1 });
+  s.intro.add([bg, glow, title, body, prompt]);
+}
+
+function createDialogueUI(s){
+  s.dialogue = s.add.container(s.scale.width / 2, s.scale.height - 220).setScrollFactor(0).setDepth(210);
+  const box = s.add.rectangle(0, 0, 800, 206, 0x0f1738, .86).setStrokeStyle(2, 0xffffff, .10);
+  const light = s.add.ellipse(-90, -62, 300, 100, 0xcde7ff, .10).setBlendMode(Phaser.BlendModes.SCREEN);
+  const portraitFrame = s.add.circle(-322, -6, 44, 0x23315a, .92).setStrokeStyle(2, 0xffffff, .12);
+  const portrait = s.add.image(-322, -6, 'portraitEira').setScale(.95);
+  const speaker = s.add.text(-252, -62, '', { fontFamily: 'Arial', fontSize: '22px', fontStyle: 'bold', color: '#ffefc5' });
+  const line = s.add.text(-252, -18, '', { fontFamily: 'Georgia, serif', fontSize: '33px', color: '#f7f3ff', wordWrap: { width: 560 } });
+  line.setShadow(0, 0, '#b5dfff', 18, true, true);
+  const continueText = s.add.text(255, 58, 'Trykk E', { fontFamily: 'Arial', fontSize: '18px', color: '#d4f6ff' });
+  s.dialogue.add([box, light, portraitFrame, portrait, speaker, line, continueText]);
+  s.dialogue.setVisible(false);
+  s.dialoguePortrait = portrait;
+  s.dialogueSpeaker = speaker;
+  s.dialogueLine = line;
+  s.dialogueContinue = continueText;
+
+  s.promptBubble = s.add.container(0, 0).setDepth(60);
+  const pb = s.add.rectangle(0, 0, 124, 38, 0x0f1738, .82).setStrokeStyle(2, 0xffffff, .08);
+  const pt = s.add.text(0, 0, 'Trykk E', { fontFamily: 'Arial', fontSize: '18px', color: '#e7fbff' }).setOrigin(.5);
+  s.promptBubble.add([pb, pt]);
+  s.promptBubble.setVisible(false);
+
+  s.endingOverlay = s.add.container(s.scale.width / 2, s.scale.height / 2).setScrollFactor(0).setDepth(260);
+  const ebg = s.add.rectangle(0, 0, 960, 420, 0x071126, .82).setStrokeStyle(2, 0xffffff, .10);
+  const eglow = s.add.ellipse(0, -95, 560, 140, 0xd3e7ff, .09).setBlendMode(Phaser.BlendModes.SCREEN);
+  const etitle = s.add.text(0, -120, 'En ny side begynner', { fontFamily: 'Georgia, serif', fontSize: '50px', color: '#fff6dc' }).setOrigin(.5);
+  etitle.setShadow(0, 0, '#9fdfff', 22, true, true);
+  const ebody = s.add.text(
+    0, 12,
+    '',
+    { fontFamily: 'Georgia, serif', fontSize: '28px', color: '#f4efff', align: 'center', lineSpacing: 10 }
+  ).setOrigin(.5);
+  const efoot = s.add.text(0, 156, 'Trykk E for å lukke · R for å starte på nytt', { fontFamily: 'Arial', fontSize: '22px', color: '#dff7ff' }).setOrigin(.5);
+  s.endingOverlay.add([ebg, eglow, etitle, ebody, efoot]);
+  s.endingOverlay.setVisible(false);
+  s.endingBody = ebody;
+}
+
+function bindKeys(s){
+  s.cursors = s.input.keyboard.createCursorKeys();
+  s.keys = s.input.keyboard.addKeys({
+    left: Phaser.Input.Keyboard.KeyCodes.A,
+    right: Phaser.Input.Keyboard.KeyCodes.D,
+    up: Phaser.Input.Keyboard.KeyCodes.W,
+    dash: Phaser.Input.Keyboard.KeyCodes.SHIFT,
+    interact: Phaser.Input.Keyboard.KeyCodes.E,
+    enter: Phaser.Input.Keyboard.KeyCodes.ENTER,
+    pause: Phaser.Input.Keyboard.KeyCodes.P,
+    restart: Phaser.Input.Keyboard.KeyCodes.R
+  });
+
+  const interactHandler = () => handleInteract(s);
+  s.input.keyboard.on('keydown-E', interactHandler);
+  s.input.keyboard.on('keydown-ENTER', interactHandler);
+  s.input.keyboard.on('keydown-SPACE', () => { if (s.inDialog) handleInteract(s); });
+  s.input.keyboard.on('keydown-ESC', () => { if (s.storyStarted) togglePause(s); });
+  s.input.keyboard.on('keydown-P', () => { if (s.storyStarted) togglePause(s); });
+  s.input.keyboard.on('keydown-R', () => restartRun(s));
+}
+
+function handleInteract(s){
+  if (s.pausedGame) return;
+  ensureAudio(s);
+
+  if (!s.storyStarted) {
+    s.storyStarted = true;
+    s.tweens.add({ targets: s.intro, alpha: 0, y: s.scale.height / 2 - 30, duration: 500, onComplete: () => s.intro.setVisible(false) });
+    refreshUI(s);
+    return;
+  }
+
+  if (s.endingOverlay.visible) {
+    s.endingOverlay.setVisible(false);
+    s.endingOverlay.setAlpha(1);
+    return;
+  }
+
+  if (s.inDialog) {
+    advanceDialogue(s);
+    return;
+  }
+
+  if (s.nearBeacon && !s.nearBeacon.active) {
+    activateBeacon(s, s.nearBeacon);
+    return;
+  }
+
+  if (s.nearNpc) {
+    openDialogue(s, s.nearNpc);
+    return;
+  }
+
+  if (s.portalOpened && Phaser.Math.Distance.Between(s.player.x, s.player.y, 4105, 500) < 130) {
+    if (s.stormActive) {
+      completeGame(s);
+    } else {
+      showPortalMoment(s);
+    }
+  }
+}
+
+function getNpcLines(s, npc){
+  if (!npc || !npc.data) return ['...'];
+  if (typeof npc.data.getLines === 'function') return npc.data.getLines();
+  return Array.isArray(npc.data.lines) ? npc.data.lines : ['...'];
+}
+
+function openDialogue(s, npc){
+  if (!npc || !npc.data) return;
+  s.activeNpc = npc;
+  s.inDialog = true;
+  s.currentDialogLine = 0;
+  const data = npc.data;
+  const lines = getNpcLines(s, npc);
+  s.dialoguePortrait.setTexture(data.portrait);
+  s.dialogueSpeaker.setText(data.name);
+  s.dialogueLine.setAlpha(1);
+  s.dialogueLine.setText(lines[0] || '');
+  s.dialogueContinue.setText(lines.length > 1 ? 'Trykk E for neste linje' : 'Trykk E for å lukke');
+  s.dialogue.setAlpha(0);
+  s.dialogue.y = s.scale.height - 220;
+  s.dialogue.setVisible(true);
+  s.tweens.add({ targets: s.dialogue, alpha: 1, duration: 220 });
+}
+
+function advanceDialogue(s){
+  if (!s.activeNpc || !s.activeNpc.data) {
+    closeDialogue(s);
+    return;
+  }
+
+  const lines = getNpcLines(s, s.activeNpc);
+  s.currentDialogLine += 1;
+
+  if (s.currentDialogLine >= lines.length) {
+    const role = s.activeNpc.data.role;
+    closeDialogue(s);
+    if (role === 'veyra' && s.questFinished && !s.finalBlessingDone) unlockPortal(s);
+    return;
+  }
+
+  s.dialogueLine.setAlpha(0);
+  s.dialogueLine.setText(lines[s.currentDialogLine] || '');
+  s.dialogueContinue.setText(s.currentDialogLine < lines.length - 1 ? 'Trykk E for neste linje' : 'Trykk E for å lukke');
+  s.tweens.add({ targets: s.dialogueLine, alpha: 1, duration: 140 });
+}
+
+function closeDialogue(s){
+  s.inDialog = false;
+  s.activeNpc = null;
+  s.currentDialogLine = 0;
+  s.tweens.add({ targets: s.dialogue, alpha: 0, duration: 180, onComplete: () => s.dialogue.setVisible(false) });
+}
+
+function activateBeacon(s, beacon){
+  if (!beacon || beacon.active) return;
+  beacon.active = true;
+  s.beaconCount += 1;
+  beacon.sprite.clearTint();
+  beacon.glow.setAlpha(.6);
+  beacon.pulse.setFillStyle(0xfff1ad, .32);
+  s.tweens.add({ targets: [beacon.glow, beacon.pulse], scale: { from: .9, to: 1.15 }, alpha: { from: .35, to: .7 }, yoyo: true, repeat: -1, duration: 1100 });
+  s.pageGlowParticles.emitParticleAt(beacon.sprite.x, beacon.sprite.y - 16, 30);
+  playChime(s, 392, 659.25, 0.04);
+  checkQuestCompletion(s);
+  showToast(s, beacon.label + ' er tent.', '#fff0bf');
+}
+
+function activateCheckpoint(s, checkpoint, silent = false){
+  if (!checkpoint) return;
+  s.checkpoint = { x: checkpoint.x, y: checkpoint.respawnY, label: checkpoint.label };
+  s.checkpoints.forEach(cp => {
+    cp.active = false;
+    cp.glow.setFillStyle(0xfff2bc, .10);
+    cp.lamp.setTint(0x9b9ba8);
+  });
+  checkpoint.active = true;
+  checkpoint.glow.setFillStyle(0xfff2bc, .26);
+  checkpoint.lamp.clearTint();
+  s.checkpointParticles.emitParticleAt(checkpoint.x, checkpoint.touchY - 20, 20);
+  if (!silent) {
+    playChime(s, 330, 523.25, 0.025);
+    showToast(s, 'Checkpoint: ' + checkpoint.label, '#dfffd1');
+  }
+  refreshUI(s);
+}
+
+function unlockPortal(s){
+  s.finalBlessingDone = true;
+  s.portalOpened = true;
+  refreshUI(s);
+
+  s.portalBurst.emitParticleAt(4105, 500, 90);
+  s.cameras.main.flash(400, 210, 235, 255);
+  s.cameras.main.shake(160, .003);
+  playChime(s, 523.25, 783.99, 0.05);
+
+  const txt = s.add.text(4105, 420, 'Porten våkner – men mørket våkner også', {
+    fontFamily: 'Georgia, serif', fontSize: '28px', color: '#fff6dc'
+  }).setOrigin(.5).setDepth(100);
+  txt.setShadow(0, 0, '#c0e7ff', 18, true, true);
+  s.tweens.add({ targets: txt, y: txt.y - 38, alpha: 0, duration: 1800, onComplete: () => txt.destroy() });
+
+  s.time.delayedCall(700, () => startFinalRun(s));
+}
+
+function startFinalRun(s){
+  if (s.stormActive || s.stormResolved) return;
+  s.stormActive = true;
+  s.stormWallX = Math.max(0, s.player.x - 240);
+  s.stormSpeed = 92;
+  s.weatherParticles.setFrequency(28);
+  s.stormWarning.setText('Stormen reiser seg – løp til porten!');
+  s.stormWarning.setPosition(s.scale.width / 2, 90);
+  s.stormWarning.setVisible(true);
+  s.stormWarning.setAlpha(0);
+  s.tweens.add({ targets: s.stormWarning, alpha: 1, duration: 220, yoyo: true, hold: 1100, onComplete: () => s.stormWarning.setVisible(false) });
+  showToast(s, 'Løp mot porten før mørket tar deg.', '#ffd7c0');
+  s.audioMood = 'boss';
+  s.boss.active = true;
+  s.boss.state = 'stalk';
+  s.boss.nextShotAt = s.time.now + 1100;
+  s.boss.nextLungeAt = s.time.now + 1900;
+  s.bossSprite.setPosition(s.player.x - 420, s.player.y - 40);
+  s.bossGlow.setPosition(s.player.x - 430, s.player.y - 40);
+  s.bossSprite.setAlpha(.75);
+  s.bossGlow.setAlpha(.14);
+
+  if (!s.stormPulseEvent) {
+    s.stormPulseEvent = s.time.addEvent({ delay: 900, loop: true, callback: () => playStormPulse(s) });
+  }
+}
+
+function completeGame(s){
+  if (s.endingSeen) return;
+  s.endingSeen = true;
+  s.stormActive = false;
+  s.stormResolved = true;
+  s.audioMood = 'boss';
+  s.boss.active = false;
+  s.bossBolts.clear(true, true);
+  if (s.stormPulseEvent) s.stormPulseEvent.remove(false);
+  s.weatherParticles.setFrequency(55);
+  s.portalBurst.emitParticleAt(4105, 500, 55);
+  playChime(s, 659.25, 987.77, 0.06);
+  s.cameras.main.flash(500, 220, 245, 255);
+
+  const bonusLine = s.secretCount >= s.secretTarget
+    ? 'Du fant også alle de skjulte minnene.\nVerden kjennes nå mer virkelig, mer bebodd, mer din.'
+    : 'Det finnes fortsatt skjulte minner her,\nom du vil la verden leve videre senere.';
+
+  s.endingBody.setText(
+    'Du nådde porten mens stormen presset bak deg.\n\n' +
+    'Nå føles dette ikke lenger som en prototype,\nmen som begynnelsen på et ordentlig eventyr.\n\n' +
+    bonusLine + '\n\n' +
+    'Resultat: ' + s.questCount + '/' + s.questTarget + ' sider · ' +
+    s.beaconCount + '/' + s.beaconTarget + ' lysvarder · ' +
+    s.secretCount + '/' + s.secretTarget + ' skjulte minner'
+  );
+
+  s.pauseMenu.setVisible(false);
+  s.pausedGame = false;
+  s.time.delayedCall(450, () => {
+    s.endingOverlay.setAlpha(0);
+    s.endingOverlay.setVisible(true);
+    s.tweens.add({ targets: s.endingOverlay, alpha: 1, duration: 500 });
+  });
+
+  refreshUI(s);
+}
+
+function showPortalMoment(s){
+  s.portalBurst.emitParticleAt(4105, 500, 45);
+  playChime(s, 659.25, 987.77, 0.04);
+  const txt = s.add.text(s.player.x, s.player.y - 90, 'Porten summer. Alt er klart.', {
+    fontFamily: 'Georgia, serif', fontSize: '24px', color: '#fff8dc'
+  }).setOrigin(.5).setDepth(100);
+  txt.setShadow(0, 0, '#bfeeff', 20, true, true);
+  s.tweens.add({ targets: txt, y: txt.y - 30, alpha: 0, duration: 1500, onComplete: () => txt.destroy() });
+}
+
+function refreshUI(s){
+  checkQuestCompletion(s);
+
+  let objectiveHTML = '<div class="title">Mål</div>';
+  if (!s.storyStarted) {
+    objectiveHTML += '<div>Begynn historien.</div>';
+  } else if (s.endingSeen) {
+    objectiveHTML += '<div class="good">Du kom deg gjennom stormen og inn i porten.</div>';
+  } else if (s.portalOpened && s.stormActive) {
+    objectiveHTML += '<div class="warn">Stormløp: nå porten før mørket tar deg.</div>';
+  } else if (s.questFinished && !s.portalOpened) {
+    objectiveHTML += '<div>Snakk med <span class="em">Veyra</span> ved den stille porten.</div>';
+  } else if (s.portalOpened) {
+    objectiveHTML += '<div>Porten er åpen. Gå bort til den.</div>';
+  } else {
+    objectiveHTML += '<div>Finn sidene og tenn lysvardene.</div>';
+    objectiveHTML += '<div>Sider: <span class="em">' + s.questCount + '/' + s.questTarget + '</span></div>';
+    objectiveHTML += '<div>Lysvarder: <span class="em">' + s.beaconCount + '/' + s.beaconTarget + '</span></div>';
+  }
+  objectiveHTML += '<div style="margin-top:8px;color:#d7ffe7">Valgfritt: finn skjulte minner (' + s.secretCount + '/' + s.secretTarget + ')</div>';
+  questBox.innerHTML = objectiveHTML;
+
+  const hearts = '♥'.repeat(Math.max(0, s.health)) + '<span style="opacity:.28">' + '♥'.repeat(Math.max(0, s.maxHealth - s.health)) + '</span>';
+  const areaName = ['Stjernestien', 'Skyggeterrassen', 'Minnetrappen', 'Portkammeret'][Math.max(0, s.currentAreaIndex)] || 'Stjernestien';
+  statsBox.innerHTML =
+    '<div class="hearts">' + hearts + '</div>' +
+    '<div>Checkpoint: <span class="good">' + s.checkpoint.label + '</span></div>' +
+    '<div>Område: <span class="em">' + areaName + '</span></div>' +
+    '<div>Dash: <span class="' + (s.dashReady ? 'good' : 'warn') + '">' + (s.dashReady ? 'klar' : 'lader') + '</span></div>' +
+    '<div>Skyggefare: <span class="warn">' + (s.stormActive ? 'ekstrem' : s.currentAreaIndex >= 2 ? 'høy' : s.currentAreaIndex >= 1 ? 'økende' : 'lav') + '</span></div>' +
+    '<div>Verdensstatus: <span class="em">' +
+      (s.pausedGame ? 'pauset' : s.endingSeen ? 'fullført' : s.portalOpened ? 'porten våken' : s.questFinished ? 'klar for Veyra' : 'under utforskning') +
+    '</span></div>';
+}
+
+function updateHint(s){
+  if (!s.storyStarted) {
+    hintBox.textContent = 'Versjon 13: polert spillflyt med smartere fiender, ekte animasjoner, pausemeny og en brutal boss-jakt.';
+    return;
+  }
+  if (s.pausedGame) {
+    hintBox.textContent = 'Pause: ESC/P fortsetter, R starter alt på nytt.';
+    return;
+  }
+  if (s.inDialog) {
+    hintBox.textContent = 'Dialog: trykk E for neste linje.';
+    return;
+  }
+  if (s.nearBeacon && !s.nearBeacon.active) {
+    hintBox.textContent = 'Stå ved lysvarden og trykk E for å tenne den.';
+    return;
+  }
+  if (s.nearNpc) {
+    hintBox.textContent = 'Du er nær en figur. Trykk E for å snakke.';
+    return;
+  }
+  if (s.stormActive) {
+    hintBox.textContent = 'Boss-jakt: dash mellom sprangene og hold deg foran både stormen og Nattkjeften.';
+    return;
+  }
+  hintBox.textContent = 'ESC/P pauser. R starter reisen på nytt. Wraithene blir aggressive når du driver inn i territoriet deres.';
+}
+
+function updatePlayerMovement(s, time){
+  const p = s.player;
+  if (!s.storyStarted || s.inDialog || s.endingOverlay.visible || s.isRespawning) {
+    p.setVelocityX(Phaser.Math.Linear(p.body.velocity.x, 0, .22));
+    s.trailParticles.stop();
+    if (!s.isRespawning && p.anims.currentAnim?.key !== 'hero-idle') p.play('hero-idle', true);
+    return;
+  }
+
+  const left = s.cursors.left.isDown || s.keys.left.isDown;
+  const right = s.cursors.right.isDown || s.keys.right.isDown;
+  const jumpPressed = Phaser.Input.Keyboard.JustDown(s.cursors.up) || Phaser.Input.Keyboard.JustDown(s.cursors.space) || Phaser.Input.Keyboard.JustDown(s.keys.up);
+  const dashPressed = Phaser.Input.Keyboard.JustDown(s.keys.dash) || Phaser.Input.Keyboard.JustDown(s.cursors.shift);
+  const onFloor = p.body.blocked.down || p.body.touching.down;
+  const dir = (right ? 1 : 0) - (left ? 1 : 0);
+
+  if (!s.isDashing) p.setVelocityX(Phaser.Math.Linear(p.body.velocity.x, dir * 340, onFloor ? .18 : .10));
+  if (dir !== 0) s.playerFacing = dir;
+  p.setFlipX(s.playerFacing < 0);
+
+  if (jumpPressed && onFloor) {
+    p.setVelocityY(-730);
+    s.jumpParticles.explode(14, p.x, p.y + 28);
+    playChime(s, 330, 440, 0.02);
+    s.tweens.add({ targets: p, scaleX: 1.16, scaleY: .82, duration: 90, yoyo: true });
+  }
+
+  if (dashPressed && s.dashReady) {
+    s.dashReady = false;
+    s.isDashing = true;
+    p.setVelocityX(s.playerFacing * 760);
+    p.setVelocityY(Math.min(p.body.velocity.y, -40));
+    s.jumpParticles.explode(18, p.x, p.y + 18);
+    playChime(s, 392, 523.25, 0.025);
+    p.play('hero-dash', true);
+    s.tweens.add({ targets: p, alpha: .68, duration: 60, yoyo: true, repeat: 3 });
+    s.time.delayedCall(160, () => s.isDashing = false);
+    s.time.delayedCall(650, () => { s.dashReady = true; refreshUI(s); });
+    refreshUI(s);
+  }
+
+  if (!s.wasOnFloor && onFloor && p.body.velocity.y >= 0) {
+    s.jumpParticles.explode(12, p.x, p.y + 30);
+    s.tweens.add({ targets: p, scaleX: 1.18, scaleY: .84, duration: 80, yoyo: true });
+  }
+  s.wasOnFloor = onFloor;
+
+  if (Math.abs(p.body.velocity.x) > 60 && onFloor) s.trailParticles.start();
+  else s.trailParticles.stop();
+
+  let targetAnim = 'hero-idle';
+  if (s.damageLocked && !s.isRespawning) targetAnim = 'hero-hurt';
+  else if (s.isDashing) targetAnim = 'hero-dash';
+  else if (!onFloor) targetAnim = 'hero-jump';
+  else if (Math.abs(p.body.velocity.x) > 45) targetAnim = 'hero-run';
+  if (p.anims.currentAnim?.key !== targetAnim) p.play(targetAnim, true);
+
+  if (!onFloor) {
+    p.scaleX = Phaser.Math.Linear(p.scaleX, .92, .10);
+    p.scaleY = Phaser.Math.Linear(p.scaleY, 1.10, .10);
+  } else if (Math.abs(p.body.velocity.x) > 10) {
+    const bob = Math.sin(time * .02) * .03;
+    p.scaleX = Phaser.Math.Linear(p.scaleX, 1.02 + bob, .16);
+    p.scaleY = Phaser.Math.Linear(p.scaleY, .98 - bob, .16);
+  } else {
+    p.scaleX = Phaser.Math.Linear(p.scaleX, 1, .12);
+    p.scaleY = Phaser.Math.Linear(p.scaleY, 1, .12);
+  }
+
+  if (p.y > GAME_H + 240) {
+    playerDie(s, 'Du falt ut av verden.');
+  }
+}
+
+function updateNearbyNpc(s){
+  if (!s.storyStarted || s.inDialog || s.endingOverlay.visible) {
+    if (!s.nearBeacon) s.promptBubble.setVisible(false);
+    s.nearNpc = null;
+    return;
+  }
+  let nearest = null;
+  let bestDist = Infinity;
+  s.npcs.forEach(npc => {
+    const d = Phaser.Math.Distance.Between(s.player.x, s.player.y, npc.container.x, npc.container.y);
+    if (d < 120 && d < bestDist) {
+      bestDist = d;
+      nearest = npc;
+    }
+  });
+  s.nearNpc = nearest;
+  if (nearest) {
+    s.promptBubble.setVisible(true);
+    s.promptBubble.x = nearest.container.x;
+    s.promptBubble.y = nearest.container.y - 94;
+  } else if (!s.nearBeacon) {
+    s.promptBubble.setVisible(false);
+  }
+}
+
+function updateNearbyBeacon(s){
+  if (!s.storyStarted || s.inDialog || s.endingOverlay.visible) {
+    s.nearBeacon = null;
+    if (!s.nearNpc) s.promptBubble.setVisible(false);
+    return;
+  }
+
+  let nearest = null;
+  let bestDist = Infinity;
+  s.beacons.forEach(beacon => {
+    if (beacon.active) return;
+    const d = Phaser.Math.Distance.Between(s.player.x, s.player.y, beacon.sprite.x, beacon.sprite.y);
+    if (d < 90 && d < bestDist) {
+      bestDist = d;
+      nearest = beacon;
+    }
+  });
+
+  s.nearBeacon = nearest;
+  if (nearest && !s.nearNpc) {
+    s.promptBubble.setVisible(true);
+    s.promptBubble.x = nearest.sprite.x;
+    s.promptBubble.y = nearest.sprite.y - 74;
+  } else if (!s.nearNpc) {
+    s.promptBubble.setVisible(false);
+  }
+}
+
+function updateQuestCollectibles(s){
+  s.pages.forEach(page => {
+    if (page.sprite.collected) return;
+    const d = Phaser.Math.Distance.Between(s.player.x, s.player.y, page.sprite.x, page.sprite.y);
+    if (d < 46) {
+      page.sprite.collected = true;
+      s.questCount += 1;
+      refreshUI(s);
+      s.pageGlowParticles.emitParticleAt(page.sprite.x, page.sprite.y, 26);
+      page.sprite.disableBody(true, true);
+      page.glow.setVisible(false);
+      playChime(s, 440, 659.25, 0.038);
+      showToast(s, 'En stjerneside fant veien hjem.', '#fff1ca');
+      if (s.questCount >= s.questTarget) showToast(s, 'Alle sidene er funnet. Tenn de siste lysvardene.', '#d8efff');
+      checkQuestCompletion(s);
+    }
+  });
+}
+
+function updateSecrets(s){
+  s.secrets.forEach(secret => {
+    if (secret.found) return;
+    secret.sprite.y = secret.baseY + Math.sin(s.time.now * .004 + secret.phase) * 4;
+    secret.glow.y = secret.baseY + Math.sin(s.time.now * .004 + secret.phase) * 4;
+    const d = Phaser.Math.Distance.Between(s.player.x, s.player.y, secret.sprite.x, secret.sprite.y);
+    secret.glow.alpha = .10 + Math.sin(s.time.now * .006 + secret.phase) * .03;
+    if (d < 40) {
+      secret.found = true;
+      s.secretCount += 1;
+      secret.sprite.setVisible(false);
+      secret.glow.setVisible(false);
+      s.secretParticles.emitParticleAt(secret.sprite.x, secret.sprite.y, 24);
+      playChime(s, 523.25, 783.99, 0.028);
+      showToast(s, secret.text, '#d8ffe7');
+      refreshUI(s);
+    }
+  });
+}
+
+function updateCheckpoints(s){
+  s.checkpoints.forEach(checkpoint => {
+    checkpoint.glow.alpha = checkpoint.active ? .24 + Math.sin(s.time.now * .004) * .05 : .08 + Math.sin(s.time.now * .004) * .02;
+    const d = Phaser.Math.Distance.Between(s.player.x, s.player.y, checkpoint.x, checkpoint.touchY);
+    if (d < 72 && s.checkpoint.label !== checkpoint.label) activateCheckpoint(s, checkpoint);
+  });
+}
+
+function updatePortal(s, time){
+  s.portalRing.rotation += s.portalOpened ? .018 : (s.questFinished ? .01 : .002);
+  s.portalGlow.alpha = s.portalOpened ? .28 + Math.sin(time * .006) * .09 : (s.questFinished ? .20 + Math.sin(time * .005) * .05 : .07 + Math.sin(time * .004) * .02);
+  s.portalInner.alpha = s.portalOpened ? .48 + Math.sin(time * .007) * .12 : (s.questFinished ? .34 + Math.sin(time * .006) * .08 : .14 + Math.sin(time * .004) * .03);
+
+  if (s.portalOpened) {
+    s.portalText.setText(s.stormActive ? 'Løp inn i porten' : 'Porten er åpen');
+    s.portalEmitter.setFrequency(18);
+  } else if (s.questFinished) {
+    s.portalText.setText('Snakk med Veyra');
+    s.portalEmitter.setFrequency(28);
+  } else {
+    s.portalText.setText('Porten sover ennå');
+    s.portalEmitter.setFrequency(100);
+  }
+
+  if (s.portalOpened && s.stormActive && Phaser.Math.Distance.Between(s.player.x, s.player.y, 4105, 500) < 95) {
+    completeGame(s);
+  }
+}
+
+function updateWraiths(s, time, delta){
+  s.wraiths.forEach((w, i) => {
+    const playerDist = Phaser.Math.Distance.Between(s.player.x, s.player.y, w.sprite.x, w.sprite.y);
+    const sameBand = Math.abs(s.player.y - w.sprite.y) < 120;
+    const shouldAggro = s.storyStarted && !s.inDialog && !s.stormActive && sameBand && playerDist < (w.aggroRadius || 240);
+
+    if (shouldAggro) w.aggroUntil = time + 1400;
+
+    if (time < w.aggroUntil) {
+      w.mode = 'chase';
+      const homeBoundMin = w.x1 - 60;
+      const homeBoundMax = w.x2 + 60;
+      w.focusX = Phaser.Math.Clamp(s.player.x + (s.playerFacing > 0 ? 24 : -24), homeBoundMin, homeBoundMax);
+      w.focusY = Phaser.Math.Clamp(s.player.y - 18, w.y - 70, w.y + 70);
+
+      if (time > w.nextLungeAt && playerDist < 120) {
+        w.nextLungeAt = time + 1500;
+        w.lungeUntil = time + 320;
+      }
+    } else {
+      w.mode = 'patrol';
+      const t = (Math.sin(time * w.speed + w.phase) + 1) * 0.5;
+      w.focusX = Phaser.Math.Linear(w.x1, w.x2, t);
+      w.focusY = w.y + Math.sin(time * .005 + w.phase) * 8;
+    }
+
+    if (w.lungeUntil && time < w.lungeUntil) {
+      w.sprite.x += (s.player.x - w.sprite.x) * .15;
+      w.sprite.y += (s.player.y - 10 - w.sprite.y) * .13;
+      w.glow.alpha = .22;
+    } else {
+      w.lungeUntil = 0;
+      w.sprite.x = Phaser.Math.Linear(w.sprite.x, w.focusX, w.mode === 'chase' ? .08 : .05);
+      w.sprite.y = Phaser.Math.Linear(w.sprite.y, w.focusY, w.mode === 'chase' ? .08 : .05);
+      w.glow.alpha = (w.mode === 'chase' ? .18 : .10) + Math.sin(time * .007 + w.phase) * .03;
+    }
+
+    w.glow.x = w.sprite.x;
+    w.glow.y = w.sprite.y;
+    w.sprite.setFlipX(s.player.x < w.sprite.x);
+    w.sprite.setScale(w.mode === 'chase' ? 1.08 : 1);
+
+    if (w.mode === 'chase' && playerDist < 140 && time % 600 < 20 && i === 0) {
+      // subtle extra tension via camera jitter
+      s.cameras.main.shake(40, .0008);
+    }
+  });
+
+  s.hazardRects.forEach(h => {
+    h.gfx.alpha = .88 + Math.sin(time * .006 + h.phase) * .12;
+  });
+}
+
+function updateStorm(s, delta, time){
+  if (!s.stormActive) {
+    s.stormShade.alpha = Phaser.Math.Linear(s.stormShade.alpha, .01, .05);
+    s.stormFront.alpha = Phaser.Math.Linear(s.stormFront.alpha, .01, .05);
+    return;
+  }
+
+  s.stormSpeed = Phaser.Math.Linear(s.stormSpeed, 150, .006);
+  s.stormWallX += s.stormSpeed * (delta / 1000);
+  s.stormShade.x = 0;
+  s.stormShade.displayWidth = Math.max(10, s.stormWallX);
+  s.stormShade.alpha = .24 + Math.sin(time * .01) * .04;
+  s.stormFront.x = s.stormWallX;
+  s.stormFront.alpha = .26 + Math.sin(time * .015) * .06;
+  s.stormFront.scaleX = 1 + Math.sin(time * .008) * .08;
+
+  if (s.player.x < s.stormWallX + 18) {
+    damagePlayer(s, 1, s.player.x - 20, s.player.y, 'Mørket tar deg igjen.');
+  }
+
+  if (s.stormWallX > WORLD_W + 200 && !s.endingSeen) {
+    playerDie(s, 'Stormen slukte hele stien.');
+  }
+}
+
+function updateFloatingStoryElements(s, time){
+  s.floatingLights.forEach((orb, i) => {
+    orb.y += Math.sin(time * .0011 + i) * .07;
+    orb.x += Math.sin(time * .0008 + i * 2) * .05;
+    orb.alpha = .10 + Math.sin(time * .002 + i) * .04;
+  });
+}
+
+function updateNpcAnimation(s, time){
+  s.npcs.forEach((npc, i) => {
+    const bob = Math.sin(time * .0022 + npc.bobPhase) * 3.5;
+    npc.container.y = npc.baseY + bob;
+    npc.aura.y = npc.baseY - 30 + bob;
+    npc.aura.alpha = .09 + Math.sin(time * .003 + i) * .035;
+  });
+
+  s.beacons.forEach((beacon, i) => {
+    const bob = Math.sin(time * .002 + i) * 3;
+    beacon.sprite.y = beacon.baseY + bob;
+    beacon.pulse.y = beacon.baseY - 18 + bob;
+    beacon.glow.y = beacon.baseY + bob;
+    beacon.glow.alpha = beacon.active ? .4 + Math.sin(time * .004 + i) * .08 : .16 + Math.sin(time * .004 + i) * .03;
+  });
+}
+
+function updateCreatures(s, time){
+  s.creatures.forEach((c, i) => {
+    const offset = Math.sin(time * .0015 + c.phase) * c.range;
+    c.sprite.x = c.baseX + offset;
+    c.glow.x = c.sprite.x;
+    c.sprite.y = c.baseY + Math.sin(time * .005 + i) * 2;
+    c.glow.y = c.sprite.y - 8 + Math.sin(time * .003 + i) * 3;
+    c.sprite.scaleX = offset >= 0 ? 1 : -1;
+    c.glow.alpha = .14 + Math.sin(time * .006 + i) * .07;
+  });
+}
+
+function updateMist(s, time){
+  s.mistBands.forEach(band => {
+    band.sprite.x = band.baseX + Math.sin(time * .00022 + band.phase) * 85;
+    band.sprite.y = band.baseY + Math.cos(time * .00037 + band.phase) * 8;
+    band.sprite.alpha = .04 + Math.sin(time * .0008 + band.phase) * .02;
+  });
+}
+
+function damagePlayer(s, amount, sourceX, sourceY, reason){
+  if (s.damageLocked || s.isRespawning || s.endingSeen || !s.storyStarted) return;
+
+  s.damageLocked = true;
+  s.health = Math.max(0, s.health - amount);
+  s.damageParticles.emitParticleAt(s.player.x, s.player.y, 24);
+  s.cameras.main.shake(120, .004);
+  s.cameras.main.flash(120, 255, 90, 120);
+  playChime(s, 240, 170, 0.02);
+  showToast(s, reason, '#ffd6d6');
+
+  const dirX = s.player.x >= sourceX ? 1 : -1;
+  s.player.play('hero-hurt', true);
+  s.player.setVelocity(dirX * 320, -260);
+  s.player.alpha = .55;
+  s.time.delayedCall(120, () => s.player.alpha = 1);
+  s.time.delayedCall(250, () => s.player.alpha = .55);
+  s.time.delayedCall(370, () => s.player.alpha = 1);
+
+  refreshUI(s);
+
+  if (s.health <= 0) {
+    s.time.delayedCall(220, () => playerDie(s, reason));
+  } else {
+    s.time.delayedCall(1000, () => { s.damageLocked = false; });
+  }
+}
+
+function playerDie(s, reason){
+  if (s.isRespawning) return;
+  s.isRespawning = true;
+  s.damageLocked = true;
+  s.health = 0;
+  refreshUI(s);
+
+  const msg = s.add.text(s.player.x, s.player.y - 90, 'Du svinner hen – men siste lysvarde trekker deg tilbake.', {
+    fontFamily: 'Georgia, serif', fontSize: '24px', color: '#ffe0d0'
+  }).setOrigin(.5).setDepth(110);
+  msg.setShadow(0, 0, '#ff9ab0', 18, true, true);
+  s.tweens.add({ targets: msg, alpha: 0, y: msg.y - 24, duration: 1100, onComplete: () => msg.destroy() });
+
+  s.cameras.main.fade(350, 10, 10, 20);
+
+  s.pauseMenu.setVisible(false);
+  s.pausedGame = false;
+  s.time.delayedCall(450, () => {
+    s.player.setPosition(s.checkpoint.x, s.checkpoint.y);
+    s.player.setVelocity(0, 0);
+    s.player.alpha = 1;
+    s.health = s.maxHealth;
+    s.damageLocked = false;
+    s.isRespawning = false;
+    if (s.stormActive) {
+      s.stormWallX = Math.max(0, s.checkpoint.x - 260);
+      s.bossSprite.setPosition(s.checkpoint.x - 390, s.checkpoint.y - 50);
+      s.bossGlow.setPosition(s.checkpoint.x - 400, s.checkpoint.y - 50);
+      s.boss.nextLungeAt = s.time.now + 1800;
+      s.boss.nextShotAt = s.time.now + 900;
+    }
+    s.cameras.main.fadeIn(350, 0, 0, 0);
+    s.checkpointParticles.emitParticleAt(s.checkpoint.x, s.checkpoint.y + 40, 28);
+    showToast(s, 'Du vender tilbake ved ' + s.checkpoint.label + '.', '#d7efff');
+    refreshUI(s);
+  });
+}
+
+function showToast(s, text, color = '#ffffff'){
+  const box = s.add.rectangle(0, 0, Math.min(840, 140 + text.length * 5), 46, 0x081127, .78).setStrokeStyle(2, 0xffffff, .06);
+  const label = s.add.text(0, 0, text, { fontFamily: 'Arial', fontSize: '20px', color }).setOrigin(.5);
+  const group = s.add.container(0, 0, [box, label]);
+  s.toastLayer.add(group);
+  group.y = 0;
+  group.alpha = 0;
+  s.tweens.add({
+    targets: group,
+    alpha: 1,
+    y: -18,
+    duration: 180,
+    yoyo: true,
+    hold: 1200,
+    onComplete: () => group.destroy()
+  });
+}
+
+function checkQuestCompletion(s){
+  s.questFinished = s.questCount >= s.questTarget && s.beaconCount >= s.beaconTarget;
+}
+
+</script>
+</body>
+</html>

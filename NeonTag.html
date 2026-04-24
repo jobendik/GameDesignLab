@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Aura Rooms: Social Arcade</title>
+  <meta name="description" content="A zero-friction social space with tag, collectibles, and vibes.">
+  <style>
+    :root {
+      --bg0: #050508;
+      --bg1: #0b0b12;
+      --card: rgba(255,255,255,0.06);
+      --stroke: rgba(255,255,255,0.14);
+      --txt: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.62);
+      --accent: #FFD700;
+      --tag-it: #ff4466;
+      --tag-safe: #44ff88;
+      --shadow: 0 16px 60px rgba(0,0,0,0.55);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
+      color: var(--txt);
+      /* Dynamic background set in JS */
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none; /* Prevent scroll on mobile */
+    }
+
+    /* HUD */
+    .hud {
+      position: absolute;
+      top: 14px; left: 14px; right: 14px;
+      display: flex; align-items: flex-start; justify-content: space-between;
+      pointer-events: none; z-index: 10;
+    }
+    
+    .hud-left, .hud-right { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+    .hud-right { align-items: flex-end; }
+
+    .pill {
+      pointer-events: auto;
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 14px;
+      border-radius: 99px;
+      background: rgba(20, 20, 25, 0.65);
+      border: 1px solid var(--stroke);
+      backdrop-filter: blur(12px);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      transition: transform 0.1s;
+    }
+    .pill:active { transform: scale(0.96); }
+
+    .btn {
+      pointer-events: auto;
+      background: var(--txt);
+      color: #000;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 99px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(255,255,255,0.2);
+      transition: all 0.2s ease;
+    }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(255,255,255,0.3); }
+    .btn-secondary { background: rgba(255,255,255,0.1); color: var(--txt); border: 1px solid var(--stroke); }
+    .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+
+    /* Game HUD specific */
+    .score-board {
+      display: none; /* Hidden by default */
+      flex-direction: column;
+      align-items: center;
+      background: rgba(0,0,0,0.6);
+      padding: 10px 20px;
+      border-radius: 16px;
+      border: 1px solid var(--tag-it);
+    }
+    .score-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--tag-it); font-weight: 800; }
+    .score-val { font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
+
+    /* Composer (Bottom) */
+    .composer-wrap {
+      position: absolute; bottom: 20px; left: 0; right: 0;
+      display: flex; justify-content: center;
+      pointer-events: none; z-index: 10;
+      padding: 0 14px;
+    }
+    .composer {
+      pointer-events: auto;
+      width: min(600px, 100%);
+      background: rgba(15, 15, 20, 0.85);
+      border: 1px solid var(--stroke);
+      border-radius: 24px;
+      backdrop-filter: blur(16px);
+      padding: 8px;
+      display: flex; gap: 8px;
+      box-shadow: var(--shadow);
+      transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    .composer:focus-within { transform: translateY(-5px) scale(1.02); border-color: rgba(255,255,255,0.3); }
+
+    input {
+      flex: 1; background: transparent; border: none; outline: none;
+      color: white; padding: 0 12px; font-size: 15px;
+    }
+    .reaction-bar {
+      display: flex; gap: 4px;
+    }
+    .r-btn {
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      cursor: pointer; display: grid; place-items: center;
+      font-size: 18px; transition: transform 0.1s;
+    }
+    .r-btn:hover { background: rgba(255,255,255,0.15); transform: scale(1.1); }
+    .r-btn:active { transform: scale(0.9); }
+
+    /* Room Selector Overlay */
+    .overlay {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px);
+      z-index: 20;
+      display: grid; place-items: center;
+      padding: 20px;
+    }
+    .panel {
+      background: #111; border: 1px solid var(--stroke);
+      border-radius: 24px; width: min(900px, 100%);
+      max-height: 90vh; overflow-y: auto;
+      box-shadow: 0 20px 80px rgba(0,0,0,0.8);
+      animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes popIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+    .panel-header {
+      padding: 24px; border-bottom: 1px solid var(--stroke);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .panel-header h1 { margin: 0; font-size: 24px; background: linear-gradient(to right, #fff, #888); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    
+    .grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; padding: 24px;
+    }
+    
+    .card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--stroke); border-radius: 16px;
+      padding: 20px; cursor: pointer; position: relative; overflow: hidden;
+      transition: all 0.2s;
+    }
+    .card:hover { transform: translateY(-4px); background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.3); }
+    .card h3 { margin: 0 0 8px 0; display: flex; justify-content: space-between; }
+    .card p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.4; }
+    
+    .tag-badge { 
+      font-size: 10px; font-weight: 800; text-transform: uppercase; 
+      padding: 4px 8px; border-radius: 4px; background: var(--tag-it); color: #000;
+    }
+
+    /* Hints */
+    .hint-toast {
+      position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.8); border: 1px solid var(--tag-safe);
+      color: var(--tag-safe); padding: 8px 16px; border-radius: 99px;
+      font-size: 13px; font-weight: 600; pointer-events: none;
+      opacity: 0; transition: opacity 0.3s;
+    }
+
+    /* Snapshot Modal */
+    .snap-modal {
+      display: none; position: fixed; inset: 0; z-index: 50;
+      background: rgba(0,0,0,0.9); flex-direction: column; align-items: center; justify-content: center;
+    }
+    .snap-img { border: 4px solid #fff; border-radius: 12px; max-width: 80%; max-height: 70%; box-shadow: 0 0 50px rgba(255,255,255,0.2); }
+    .snap-actions { margin-top: 20px; display: flex; gap: 10px; }
+
+  </style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<!-- HUD -->
+<div class="hud">
+  <div class="hud-left">
+    <div class="pill" id="roomPill">
+      <span style="font-size:18px" id="roomIcon">✨</span>
+      <div style="display:flex; flex-direction:column; line-height:1.1">
+        <strong id="roomTitle">Lobby</strong>
+        <span style="font-size:10px; color:var(--muted)" id="roomSub">Tap to change</span>
+      </div>
+    </div>
+    <div class="pill" style="cursor:help" title="Click yourself to change color">
+      <div id="statusDot" style="width:8px; height:8px; background:#4f8; border-radius:50%; box-shadow:0 0 8px #4f8;"></div>
+      <span style="font-size:12px; font-weight:600" id="onlineCount">12 Online</span>
+    </div>
+  </div>
+
+  <div class="hud-right">
+    <button class="btn btn-secondary" id="btnSnap" title="Take a vibe snapshot">📷 Snap</button>
+    <div class="score-board" id="scoreBoard">
+      <div class="score-title">Survival Time</div>
+      <div class="score-val" id="scoreVal">0s</div>
+    </div>
+  </div>
+</div>
+
+<div class="hint-toast" id="toast">Speed Boost Active! ⚡</div>
+
+<!-- Composer -->
+<div class="composer-wrap">
+  <div class="composer">
+    <input type="text" id="msgInput" placeholder="Type to chat..." autocomplete="off">
+    <div class="reaction-bar">
+      <button class="r-btn" onclick="react('❤️')">❤️</button>
+      <button class="r-btn" onclick="react('🔥')">🔥</button>
+      <button class="r-btn" onclick="react('✨')">✨</button>
+      <button class="r-btn" onclick="react('👋')">👋</button>
+    </div>
+  </div>
+</div>
+
+<!-- Room Menu -->
+<div class="overlay" id="roomMenu">
+  <div class="panel">
+    <div class="panel-header">
+      <h1>Select a Vibe</h1>
+      <button class="btn" id="closeMenu">Close</button>
+    </div>
+    <div class="grid" id="roomGrid">
+      <!-- Generated via JS -->
+    </div>
+  </div>
+</div>
+
+<!-- Snapshot UI -->
+<div class="snap-modal" id="snapModal">
+  <img class="snap-img" id="finalSnap">
+  <div class="snap-actions">
+    <button class="btn" onclick="downloadSnap()">Download</button>
+    <button class="btn btn-secondary" onclick="document.getElementById('snapModal').style.display='none'">Close</button>
+  </div>
+</div>
+
+<script>
+/**
+ * AURA ROOMS: SOCIAL ARCADE
+ * Core logic: 
+ * 1. Single Canvas rendering loop.
+ * 2. Particle system for "juice".
+ * 3. Tag Game logic state machine.
+ * 4. Fake WebSocket simulation (bots).
+ */
+
+(function() {
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W = window.innerWidth, H = window.innerHeight;
+
+// --- STATE & CONFIG ---
+
+const ROOMS = [
+  { id: 'chill', icon: '🌙', title: 'Chill Lounge', desc: 'Relaxing drifts. Soft trails. Low gravity vibes.', palette: ['#8CBEFF', '#FF96DC', '#78FFBE'] },
+  { id: 'tag', icon: '⚡', title: 'Neon Tag', desc: 'RUN! Avoid the red player. High speed, high stakes.', palette: ['#FF4466', '#FFD700', '#FFFFFF'], special: 'tag' },
+  { id: 'party', icon: '🎉', title: 'Confetti Chaos', desc: 'Every message explodes. Maximum visual noise.', palette: ['#FF5555', '#55FF55', '#5555FF', '#FFFF55'] },
+  { id: 'nature', icon: '🍃', title: 'Zen Garden', desc: 'Leaves falling. Wind physics. Peaceful.', palette: ['#AACC00', '#00AA55', '#DDFFDD'] }
+];
+
+const CFG = {
+  tagSpeed: 380,
+  walkSpeed: 220,
+  boostSpeed: 550,
+  friction: 0.88,
+  camEase: 0.1
+};
+
+const WORLD = {
+  w: 2500, h: 2500,
+  room: ROOMS[0],
+  cam: { x:0, y:0, zoom: 1 },
+  shake: 0
+};
+
+// Entities
+let me = { 
+  x: WORLD.w/2, y: WORLD.h/2, vx:0, vy:0, 
+  r: 20, color: '#4f8', name: 'You', 
+  isIt: false, score: 0, boost: 0 
+};
+
+let avatars = []; // Bots
+let particles = [];
+let items = []; // Collectibles
+let messages = []; // Chat bubbles
+
+// Inputs
+const keys = {};
+const mouse = { x:0, y:0, down:false };
+
+// --- INIT ---
+
+function init() {
+  resize();
+  window.addEventListener('resize', resize);
+  spawnBots(15);
+  // Auto-start loop
+  requestAnimationFrame(loop);
+  
+  // UI Bindings
+  document.getElementById('roomPill').onclick = () => document.getElementById('roomMenu').style.display = 'grid';
+  document.getElementById('closeMenu').onclick = () => document.getElementById('roomMenu').style.display = 'none';
+  document.getElementById('btnSnap').onclick = takeSnapshot;
+  
+  renderRoomGrid();
+  
+  // Input Listeners
+  window.addEventListener('keydown', e => {
+    if(e.target.tagName === 'INPUT') {
+      if(e.key === 'Enter') sendChat();
+      return;
+    }
+    keys[e.key.toLowerCase()] = true;
+    if(e.key === ' ') me.boost = me.boost > 0 ? me.boost : 0; // jump trigger logic if needed
+  });
+  window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+  
+  canvas.addEventListener('pointerdown', e => {
+    mouse.down = true; mouse.x = e.clientX; mouse.y = e.clientY;
+    
+    // Self-tap to change color (Identity Customization)
+    const screenX = me.x - WORLD.cam.x;
+    const screenY = me.y - WORLD.cam.y;
+    const dist = Math.hypot(e.clientX - screenX, e.clientY - screenY);
+    if(dist < me.r * 1.5) {
+      randomizeIdentity();
+      spawnExplosion(me.x, me.y, me.color, 12);
+    }
+  });
+  canvas.addEventListener('pointermove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+  canvas.addEventListener('pointerup', () => mouse.down = false);
+  
+  // Item Spawner
+  setInterval(() => {
+    if(items.length < 5 && Math.random() > 0.3) spawnItem();
+  }, 2000);
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  ctx.scale(dpr, dpr);
+  W = window.innerWidth; H = window.innerHeight;
+}
+
+function renderRoomGrid() {
+  const grid = document.getElementById('roomGrid');
+  grid.innerHTML = '';
+  ROOMS.forEach(r => {
+    const d = document.createElement('div');
+    d.className = 'card';
+    d.innerHTML = `
+      <h3><span>${r.icon} ${r.title}</span> ${r.special ? '<span class="tag-badge">GAME</span>' : ''}</h3>
+      <p>${r.desc}</p>
+    `;
+    d.onclick = () => switchRoom(r);
+    grid.appendChild(d);
+  });
+}
+
+function switchRoom(room) {
+  WORLD.room = room;
+  document.getElementById('roomTitle').innerText = room.title;
+  document.getElementById('roomIcon').innerText = room.icon;
+  document.getElementById('roomMenu').style.display = 'none';
+  document.getElementById('scoreBoard').style.display = room.id === 'tag' ? 'flex' : 'none';
+  
+  // Reset Game State
+  me.isIt = false;
+  me.score = 0;
+  avatars.forEach(a => a.isIt = false);
+  
+  if (room.id === 'tag') {
+    // Pick a random "It" player
+    const target = Math.random() > 0.2 ? avatars[Math.floor(Math.random()*avatars.length)] : me;
+    target.isIt = true;
+    showToast('Game Started! Don\'t get tagged!');
+  }
+  
+  spawnExplosion(me.x, me.y, '#fff', 50);
+}
+
+function randomizeIdentity() {
+  const hues = [0, 60, 120, 180, 240, 300];
+  const h = hues[Math.floor(Math.random()*hues.length)];
+  me.color = `hsl(${h}, 100%, 60%)`;
+  me.r = 18 + Math.random() * 8;
+}
+
+// --- GAME LOOP ---
+
+let lastTime = 0;
+function loop(time) {
+  const dt = Math.min((time - lastTime) / 1000, 0.1);
+  lastTime = time;
+
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function update(dt) {
+  // Input Movement
+  let dx = 0, dy = 0;
+  if (keys['w'] || keys['arrowup']) dy = -1;
+  if (keys['s'] || keys['arrowdown']) dy = 1;
+  if (keys['a'] || keys['arrowleft']) dx = -1;
+  if (keys['d'] || keys['arrowright']) dx = 1;
+  
+  // Mouse/Touch Drag
+  if (mouse.down) {
+    const center = { x: W/2, y: H/2 };
+    dx = (mouse.x - center.x) / 100;
+    dy = (mouse.y - center.y) / 100;
+  }
+
+  // Normalize and apply speed
+  const len = Math.hypot(dx, dy);
+  if (len > 0.1) {
+    const speed = me.boost > 0 ? CFG.boostSpeed : (WORLD.room.id === 'tag' ? CFG.tagSpeed : CFG.walkSpeed);
+    me.vx += (dx / len) * speed * dt * 8; // acceleration
+    me.vy += (dy / len) * speed * dt * 8;
+  }
+  
+  // Friction & Boost decay
+  me.vx *= CFG.friction;
+  me.vy *= CFG.friction;
+  me.boost = Math.max(0, me.boost - dt);
+  
+  // Position Update & Bounds
+  me.x += me.vx * dt;
+  me.y += me.vy * dt;
+  me.x = Math.max(50, Math.min(WORLD.w-50, me.x));
+  me.y = Math.max(50, Math.min(WORLD.h-50, me.y));
+
+  // Particles Trail
+  if (Math.hypot(me.vx, me.vy) > 100 || me.boost > 0) {
+    if(Math.random() > 0.5) spawnTrail(me);
+  }
+
+  // Camera Follow
+  let targetZoom = me.boost > 0 ? 0.8 : 1.0;
+  WORLD.cam.x += (me.x - W/2/WORLD.cam.zoom - WORLD.cam.x) * CFG.camEase;
+  WORLD.cam.y += (me.y - H/2/WORLD.cam.zoom - WORLD.cam.y) * CFG.camEase;
+  WORLD.cam.zoom += (targetZoom - WORLD.cam.zoom) * 0.05;
+  
+  // Shake decay
+  WORLD.shake *= 0.9;
+
+  // --- ENTITY UPDATES ---
+
+  // Items
+  items.forEach((item, i) => {
+    item.t += dt;
+    const dist = Math.hypot(me.x - item.x, me.y - item.y);
+    if (dist < me.r + item.r) {
+      // Collect!
+      items.splice(i, 1);
+      me.boost = 3.0; // 3 seconds speed
+      spawnExplosion(me.x, me.y, '#ffd700', 20);
+      showToast('⚡ SPEED BOOST! ⚡');
+      WORLD.shake = 10;
+    }
+  });
+
+  // Bots AI
+  avatars.forEach(bot => {
+    updateBot(bot, dt);
+    
+    // Tag Collision Logic
+    if (WORLD.room.id === 'tag') {
+      const d = Math.hypot(me.x - bot.x, me.y - bot.y);
+      if (d < me.r + bot.r) {
+        if (me.isIt && !bot.isIt) {
+          // Tag them
+          me.isIt = false; bot.isIt = true;
+          handleTag(bot);
+        } else if (!me.isIt && bot.isIt) {
+          // Get tagged
+          me.isIt = true; bot.isIt = false;
+          handleTag(me);
+        }
+      }
+    }
+  });
+
+  // Particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    let p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Score Logic (Tag)
+  if (WORLD.room.id === 'tag') {
+    if (!me.isIt) me.score += dt;
+    document.getElementById('scoreVal').innerText = me.score.toFixed(1) + 's';
+  }
+}
+
+function handleTag(victim) {
+  spawnExplosion(victim.x, victim.y, '#ff0044', 40);
+  WORLD.shake = 20;
+  showToast(victim === me ? 'YOU ARE IT!' : 'TAGGED!');
+}
+
+function updateBot(bot, dt) {
+  // Simple wander
+  bot.x += bot.vx * dt;
+  bot.y += bot.vy * dt;
+  
+  // Bounds
+  if (bot.x < 0 || bot.x > WORLD.w) bot.vx *= -1;
+  if (bot.y < 0 || bot.y > WORLD.h) bot.vy *= -1;
+  
+  // Tag AI
+  if (WORLD.room.id === 'tag') {
+    let target = me; // Simplified: bots care about player
+    let d = Math.hypot(target.x - bot.x, target.y - bot.y);
+    
+    if (bot.isIt) {
+      // Chase player
+      let speed = CFG.tagSpeed * 0.95; // slightly slower than player max
+      bot.vx += ((target.x - bot.x)/d) * speed * dt * 2;
+      bot.vy += ((target.y - bot.y)/d) * speed * dt * 2;
+    } else if (target.isIt) {
+      // Flee player
+      if (d < 300) {
+        bot.vx -= ((target.x - bot.x)/d) * 400 * dt;
+        bot.vy -= ((target.y - bot.y)/d) * 400 * dt;
+      }
+    }
+    
+    // Friction
+    bot.vx *= 0.92;
+    bot.vy *= 0.92;
+  } else {
+    // Normal Wander
+    if (Math.random() < 0.02) {
+      bot.vx = (Math.random() - 0.5) * 200;
+      bot.vy = (Math.random() - 0.5) * 200;
+    }
+  }
+}
+
+// --- DRAWING ---
+
+function draw() {
+  // Background
+  const gradient = ctx.createLinearGradient(0, 0, 0, H);
+  gradient.addColorStop(0, WORLD.room.palette[0] || '#111');
+  gradient.addColorStop(1, '#000');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Dynamic Grid
+  ctx.save();
+  // Camera Transform
+  let shakeX = (Math.random() - 0.5) * WORLD.shake;
+  let shakeY = (Math.random() - 0.5) * WORLD.shake;
+  
+  ctx.scale(WORLD.cam.zoom, WORLD.cam.zoom);
+  ctx.translate(-WORLD.cam.x + shakeX, -WORLD.cam.y + shakeY);
+
+  // Draw Grid Lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 2;
+  const gridSize = 100;
+  // Optimized grid render (only visible)
+  const startX = Math.floor(WORLD.cam.x / gridSize) * gridSize;
+  const startY = Math.floor(WORLD.cam.y / gridSize) * gridSize;
+  const endX = startX + W / WORLD.cam.zoom + gridSize;
+  const endY = startY + H / WORLD.cam.zoom + gridSize;
+
+  ctx.beginPath();
+  for (let x = startX; x < endX; x += gridSize) { ctx.moveTo(x, startY); ctx.lineTo(x, endY); }
+  for (let y = startY; y < endY; y += gridSize) { ctx.moveTo(startX, y); ctx.lineTo(endX, y); }
+  ctx.stroke();
+
+  // Draw Items
+  items.forEach(item => {
+    const pulse = 1 + Math.sin(item.t * 5) * 0.2;
+    ctx.fillStyle = '#FFD700';
+    ctx.shadowBlur = 20; ctx.shadowColor = '#FFD700';
+    ctx.beginPath();
+    ctx.arc(item.x, item.y, item.r * pulse, 0, Math.PI*2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+
+  // Draw Particles
+  particles.forEach(p => {
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = p.life;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  });
+
+  // Draw Avatars (Bots)
+  avatars.forEach(a => drawAvatar(a));
+  
+  // Draw Me
+  drawAvatar(me);
+
+  // Draw Chat Bubbles
+  drawChat();
+
+  ctx.restore();
+}
+
+function drawAvatar(a) {
+  // Glow logic
+  let color = a.isIt ? '#ff0044' : a.color;
+  let glow = a.isIt ? 30 : (me.boost > 0 && a === me ? 20 : 0);
+  
+  ctx.save();
+  ctx.translate(a.x, a.y);
+  
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath(); ctx.ellipse(0, a.r+5, a.r, a.r*0.4, 0, 0, Math.PI*2); ctx.fill();
+
+  // Body
+  ctx.shadowBlur = glow; ctx.shadowColor = color;
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(0, 0, a.r, 0, Math.PI*2); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Name
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(a.name, 0, -a.r - 8);
+  
+  if (a.isIt) {
+    ctx.font = '20px serif';
+    ctx.fillText('👑', 0, -a.r - 25);
+  }
+
+  ctx.restore();
+}
+
+function drawChat() {
+  const now = Date.now();
+  messages = messages.filter(m => now - m.time < 5000); // Cull old
+  
+  messages.forEach(m => {
+    ctx.font = '14px sans-serif';
+    const w = ctx.measureText(m.text).width + 20;
+    
+    ctx.save();
+    ctx.translate(m.x, m.y - 40 - (now - m.time)/50); // Float up
+    
+    // Bubble
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    ctx.roundRect(-w/2, -15, w, 30, 15);
+    ctx.fill();
+    
+    // Text
+    ctx.fillStyle = '#000';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(m.text, 0, 0);
+    
+    ctx.restore();
+  });
+}
+
+// --- UTILS & SYSTEMS ---
+
+function spawnBots(count) {
+  const names = ['Kai', 'Luna', 'Nova', 'Zane', 'Milo', 'Finn', 'Ivy', 'Leo', 'Sky', 'Jinx'];
+  for(let i=0; i<count; i++) {
+    avatars.push({
+      x: Math.random()*WORLD.w, y: Math.random()*WORLD.h,
+      vx: (Math.random()-0.5)*100, vy: (Math.random()-0.5)*100,
+      r: 16 + Math.random()*6,
+      color: `hsl(${Math.random()*360}, 70%, 60%)`,
+      name: names[i % names.length] + ((Math.random()*99)|0),
+      isIt: false
+    });
+  }
+}
+
+function spawnExplosion(x, y, color, count) {
+  for(let i=0; i<count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 200 + 50;
+    particles.push({
+      x: x, y: y,
+      vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+      life: 1.0 + Math.random(),
+      color: color,
+      size: Math.random() * 4 + 2
+    });
+  }
+}
+
+function spawnTrail(entity) {
+  particles.push({
+    x: entity.x + (Math.random()-0.5)*10, y: entity.y + (Math.random()-0.5)*10,
+    vx: 0, vy: 0,
+    life: 0.5,
+    color: entity.color,
+    size: entity.r * 0.6
+  });
+}
+
+function spawnItem() {
+  items.push({
+    x: Math.random() * (WORLD.w - 200) + 100,
+    y: Math.random() * (WORLD.h - 200) + 100,
+    r: 12,
+    t: 0
+  });
+}
+
+function react(emoji) {
+  // Visuals
+  spawnExplosion(me.x, me.y, '#fff', 15);
+  // Logic
+  messages.push({ x: me.x, y: me.y, text: emoji, time: Date.now() });
+  
+  if (WORLD.room.id === 'party') {
+    WORLD.shake = 5;
+    spawnExplosion(me.x, me.y, `hsl(${Math.random()*360},100%,50%)`, 40);
+  }
+}
+
+function sendChat() {
+  const el = document.getElementById('msgInput');
+  const txt = el.value.trim();
+  if(!txt) return;
+  messages.push({ x: me.x, y: me.y, text: txt, time: Date.now() });
+  el.value = '';
+  
+  // Fake Bot Reply
+  if(Math.random() > 0.6) {
+    setTimeout(() => {
+      const b = avatars.sort((a,b) => Math.hypot(me.x-a.x, me.y-a.y) - Math.hypot(me.x-b.x, me.y-b.y))[0];
+      if (Math.hypot(me.x-b.x, me.y-b.y) < 400) {
+         const replies = ['Nice!', 'lol', 'Wait up', 'Run!', '👀', 'Cool vibe'];
+         messages.push({ x: b.x, y: b.y, text: replies[Math.floor(Math.random()*replies.length)], time: Date.now() });
+      }
+    }, 1500);
+  }
+}
+
+function showToast(txt) {
+  const t = document.getElementById('toast');
+  t.innerText = txt;
+  t.style.opacity = 1;
+  t.style.top = '90px';
+  setTimeout(() => { t.style.opacity = 0; t.style.top = '80px'; }, 2000);
+}
+
+function takeSnapshot() {
+  // Render high quality static frame
+  draw(); 
+  const data = canvas.toDataURL('image/png');
+  document.getElementById('finalSnap').src = data;
+  document.getElementById('snapModal').style.display = 'flex';
+}
+
+function downloadSnap() {
+  const a = document.createElement('a');
+  a.href = document.getElementById('finalSnap').src;
+  a.download = 'aura-vibe-snap.png';
+  a.click();
+}
+
+// Start
+init();
+
+// Expose functions needed by HTML attributes
+window.react = react;
+window.downloadSnap = downloadSnap;
+
+})();
+
+</script>
+</body>
+</html>

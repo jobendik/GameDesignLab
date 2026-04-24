@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>THE ELEVATOR</title>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-metal: #2a2a2e;
+            --bg-dark: #111;
+            --accent: #ff9d00;
+            --screen-bg: #0f380f;
+            --screen-text: #9bbc0f;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'VT323', monospace;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* --- LAYOUT --- */
+        #game-container {
+            width: 100%;
+            max-width: 500px;
+            height: 100%;
+            max-height: 800px;
+            background: var(--bg-metal);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+            border: 4px solid #444;
+        }
+
+        /* --- TOP PANEL (Floor Indicator) --- */
+        #top-panel {
+            background: #000;
+            padding: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 4px solid #444;
+            height: 60px;
+        }
+
+        .digital-display {
+            background: #220000;
+            color: red;
+            font-size: 2rem;
+            padding: 5px 15px;
+            border-radius: 4px;
+            min-width: 80px;
+            text-align: right;
+            border: 2px solid #550000;
+            text-shadow: 0 0 5px red;
+        }
+
+        #status-light {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #333;
+            border: 2px solid #555;
+        }
+        #status-light.moving { background: #ffcc00; box-shadow: 0 0 10px #ffcc00; animation: blink 1s infinite; }
+        #status-light.open { background: #00ff00; box-shadow: 0 0 10px #00ff00; }
+        #status-light.stop { background: #ff0000; }
+
+        @keyframes blink { 50% { opacity: 0.5; } }
+
+        /* --- MAIN VIEW (The Doors & Passengers) --- */
+        #main-view {
+            flex-grow: 1;
+            position: relative;
+            background: #1a1a1a;
+            overflow: hidden;
+            perspective: 800px;
+        }
+
+        /* The "Outside" World */
+        #floor-bg {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000;
+            transition: background 0.5s;
+            z-index: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #floor-content {
+            font-size: 5rem;
+            opacity: 0.2;
+        }
+
+        /* Elevator Doors */
+        .door {
+            position: absolute;
+            top: 0;
+            width: 50%;
+            height: 100%;
+            background: repeating-linear-gradient(90deg, #444 0px, #333 10px, #444 20px);
+            z-index: 10;
+            transition: transform 1.5s ease-in-out;
+            border-right: 2px solid #111;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+        }
+        #door-left { left: 0; transform-origin: left; }
+        #door-right { right: 0; transform-origin: right; border-left: 2px solid #111; border-right: none; }
+
+        .doors-open #door-left { transform: translateX(-90%); }
+        .doors-open #door-right { transform: translateX(90%); }
+
+        /* Passengers */
+        #passenger-area {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            height: 150px;
+            z-index: 20;
+            display: flex;
+            justify-content: space-around;
+            align-items: flex-end;
+            pointer-events: none;
+        }
+
+        .avatar {
+            width: 60px;
+            height: 90px;
+            background: #555;
+            position: relative;
+            transition: transform 0.5s, opacity 0.5s;
+            box-shadow: 0 10px 10px rgba(0,0,0,0.5);
+        }
+        
+        .avatar::before { /* Eyes */
+            content: ''; position: absolute; top: 20px; left: 15px; width: 8px; height: 8px; background: white;
+            box-shadow: 22px 0 0 white;
+        }
+        .avatar::after { /* Mouth */
+            content: ''; position: absolute; top: 40px; left: 20px; width: 20px; height: 4px; background: rgba(0,0,0,0.5);
+        }
+
+        .avatar.you { background: #00ff88; border: 2px solid #fff; z-index: 30; }
+        .avatar.bot-1 { background: #ff0055; }
+        .avatar.bot-2 { background: #00ccff; }
+        .avatar.bot-3 { background: #ffcc00; }
+        .avatar.bot-4 { background: #aa00ff; }
+        
+        .avatar.leaving { transform: translateY(-20px) scale(0.8); opacity: 0; }
+        .avatar.entering { animation: enterAnim 0.5s forwards; }
+
+        @keyframes enterAnim { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        /* --- UI PANEL --- */
+        #ui-panel {
+            background: #222;
+            padding: 10px;
+            height: 250px;
+            display: flex;
+            flex-direction: column;
+            border-top: 4px solid #444;
+        }
+
+        #chat-screen {
+            flex-grow: 1;
+            background: var(--screen-bg);
+            color: var(--screen-text);
+            padding: 10px;
+            overflow-y: auto;
+            font-size: 1.1rem;
+            border: 2px solid #000;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+        }
+        
+        .chat-line { margin-bottom: 4px; }
+        .chat-name { font-weight: bold; }
+        .sys-msg { color: #557722; font-style: italic; }
+
+        #controls {
+            display: flex;
+            gap: 10px;
+            height: 60px;
+        }
+
+        button {
+            flex: 1;
+            font-family: 'VT323', monospace;
+            font-size: 1.5rem;
+            border: none;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.1s;
+            border-bottom: 4px solid rgba(0,0,0,0.3);
+        }
+        
+        button:active { transform: translateY(2px); border-bottom: 0; }
+
+        #btn-stay { background: #444; color: #888; }
+        #btn-leave { background: #ff3333; color: white; opacity: 0.5; pointer-events: none; }
+        
+        .doors-open #btn-leave { opacity: 1; pointer-events: all; animation: pulse 1s infinite; }
+        
+        @keyframes pulse { 0% { box-shadow: 0 0 0 red; } 50% { box-shadow: 0 0 20px red; } }
+
+        /* --- OVERLAYS --- */
+        .overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        
+        .hidden { display: none !important; }
+        
+        h1 { font-size: 4rem; color: var(--accent); margin: 0; text-shadow: 4px 4px 0 #000; }
+        h2 { font-size: 2rem; color: #fff; margin-bottom: 10px; }
+        .sub { color: #888; margin-bottom: 30px; font-size: 1.2rem; }
+        
+        .big-btn {
+            background: var(--accent);
+            color: #000;
+            font-size: 2rem;
+            padding: 15px 40px;
+            border: 4px solid #fff;
+        }
+
+        #fate-text { font-size: 1.5rem; color: #aaa; margin-bottom: 20px; line-height: 1.5; max-width: 80%; }
+        #fate-icon { font-size: 4rem; margin-bottom: 20px; }
+
+    </style>
+</head>
+<body>
+
+    <!-- START SCREEN -->
+    <div id="start-screen" class="overlay">
+        <h1>THE ELEVATOR</h1>
+        <p class="sub">Going Up?</p>
+        <button class="big-btn" onclick="startGame()">ENTER</button>
+    </div>
+
+    <!-- GAME OVER SCREEN -->
+    <div id="end-screen" class="overlay hidden">
+        <div id="fate-icon">💀</div>
+        <h2 id="fate-title">YOU LEFT AT FLOOR 99</h2>
+        <p id="fate-text">You walked into the void and were never seen again.</p>
+        <button class="big-btn" onclick="location.reload()">RIDE AGAIN</button>
+    </div>
+
+    <!-- MAIN GAME -->
+    <div id="game-container">
+        
+        <div id="top-panel">
+            <div id="status-light" class="stop"></div>
+            <div style="color: #666; font-size: 1.2rem;">FLOOR</div>
+            <div class="digital-display" id="floor-display">00</div>
+        </div>
+
+        <div id="main-view">
+            <div id="floor-bg">
+                <div id="floor-content">?</div>
+            </div>
+            
+            <div class="door" id="door-left"></div>
+            <div class="door" id="door-right"></div>
+            
+            <div id="passenger-area">
+                <div class="avatar bot-1" id="bot1"></div>
+                <div class="avatar bot-2" id="bot2"></div>
+                <div class="avatar you"></div> <!-- Player -->
+                <div class="avatar bot-3" id="bot3"></div>
+                <div class="avatar bot-4" id="bot4"></div>
+            </div>
+        </div>
+
+        <div id="ui-panel">
+            <div id="chat-screen">
+                <div class="chat-line sys-msg">> Connected to ElevatorNet...</div>
+            </div>
+            
+            <div style="text-align: center; color: #555; margin-bottom: 5px;" id="timer-display">DOORS CLOSED</div>
+
+            <div id="controls">
+                <button id="btn-stay" disabled>STAY</button>
+                <button id="btn-leave" onclick="leaveElevator()">LEAVE</button>
+            </div>
+        </div>
+
+    </div>
+
+<script>
+    // --- DATA ---
+    const FLOORS = [
+        { name: "THE VOID", color: "#000", icon: "⚫", fate: "You stare into the abyss. It stares back. You are lost forever." },
+        { name: "CAT CAFE", color: "#ffccdd", icon: "🐱", fate: "You are swarmed by 500 kittens. You die of cuteness." },
+        { name: "LAVA LOUNGE", color: "#550000", icon: "🔥", fate: "The floor is literally lava. Why did you get off?" },
+        { name: "NEON SLUMS", color: "#220033", icon: "🌆", fate: "You join a cyberpunk gang and eventually run the city." },
+        { name: "MATH CLASS", color: "#eeeeee", icon: "📐", fate: "You are forced to solve calculus problems for eternity." },
+        { name: "THE CLOUD", color: "#88ccff", icon: "☁️", fate: "You fall through the clouds. It's a long way down." },
+        { name: "GOLD VAULT", color: "#ffd700", icon: "💰", fate: "You are rich! But the door closes behind you. You are trapped." },
+        { name: "JUNGLE", color: "#005500", icon: "🌿", fate: "You become one with nature. No Wi-Fi here." },
+        { name: "ERROR 404", color: "#0000ff", icon: "🟦", fate: "Simulation crashed. You have been deleted." },
+        { name: "QUIET ROOM", color: "#ffffff", icon: "🤫", fate: "Finally, some peace and quiet." }
+    ];
+
+    const BOT_NAMES = ["Guest_92", "Pixel_Junkie", "Neo", "Elevator_Fan", "Glitch", "Lost_Soul", "Tourist"];
+    const CHAT_PHRASES = [
+        "What floor are we going to?",
+        "I hope it's not the lava floor again.",
+        "Does this elevator ever stop?",
+        "I'm getting off at the next one.",
+        "Anyone else hear that noise?",
+        "I've been here for days.",
+        "Nice shoes.",
+        "Going up?",
+        "I missed my floor...",
+        "Is this real?"
+    ];
+
+    // --- STATE ---
+    let currentFloor = 0;
+    let state = "STOPPED"; // MOVING, OPENING, OPEN, CLOSING
+    let timer = 0;
+    let nextFloorData = null;
+    let chatInterval = null;
+
+    // --- ELEMENTS ---
+    const mainView = document.getElementById('main-view');
+    const floorDisplay = document.getElementById('floor-display');
+    const statusLight = document.getElementById('status-light');
+    const timerDisplay = document.getElementById('timer-display');
+    const chatScreen = document.getElementById('chat-screen');
+    const bg = document.getElementById('floor-bg');
+    const bgContent = document.getElementById('floor-content');
+
+    // --- AUDIO CONTEXT ---
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioContext();
+
+    function playTone(freq, type, dur) {
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+    }
+
+    // --- GAME LOOP ---
+
+    function startGame() {
+        document.getElementById('start-screen').classList.add('hidden');
+        addChat("System", "Elevator Initialized.");
+        startMoving();
+        
+        // Random Bot Chat
+        chatInterval = setInterval(() => {
+            if(Math.random() > 0.7) {
+                const name = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
+                const msg = CHAT_PHRASES[Math.floor(Math.random() * CHAT_PHRASES.length)];
+                addChat(name, msg);
+            }
+        }, 2000);
+    }
+
+    function startMoving() {
+        state = "MOVING";
+        statusLight.className = "moving";
+        timerDisplay.innerText = "MOVING...";
+        timerDisplay.style.color = "#888";
+        
+        // Visual effect for moving
+        bg.style.background = "#111";
+        bgContent.innerText = "|||";
+        
+        // Random duration
+        const duration = 3000 + Math.random() * 2000;
+        
+        // Fast floor numbers
+        const numInterval = setInterval(() => {
+            floorDisplay.innerText = Math.floor(Math.random() * 99);
+        }, 100);
+
+        setTimeout(() => {
+            clearInterval(numInterval);
+            arriveAtFloor();
+        }, duration);
+    }
+
+    function arriveAtFloor() {
+        state = "OPENING";
+        
+        // Pick Floor
+        nextFloorData = FLOORS[Math.floor(Math.random() * FLOORS.length)];
+        currentFloor = Math.floor(Math.random() * 900) + 1;
+        
+        floorDisplay.innerText = currentFloor;
+        statusLight.className = "stop";
+        playTone(600, 'sine', 0.5); // Ding!
+
+        addChat("System", `Arrived at Floor ${currentFloor}: ${nextFloorData.name}`);
+        
+        // Setup BG
+        bg.style.background = nextFloorData.color;
+        bgContent.innerText = nextFloorData.icon;
+        
+        // Open Doors
+        setTimeout(() => {
+            mainView.classList.add('doors-open');
+            playTone(100, 'square', 1.0); // Door sound
+            state = "OPEN";
+            statusLight.className = "open";
+            startCountdown(10);
+            
+            // Bot Logic: Maybe someone leaves?
+            handleBotLogic();
+            
+        }, 1000);
+    }
+
+    function startCountdown(seconds) {
+        let count = seconds;
+        
+        const countInterval = setInterval(() => {
+            if(state !== "OPEN") {
+                clearInterval(countInterval);
+                return;
+            }
+            
+            timerDisplay.innerText = `DOORS CLOSING IN ${count}s`;
+            timerDisplay.style.color = count <= 3 ? "red" : "#fff";
+            
+            if (count <= 0) {
+                clearInterval(countInterval);
+                closeDoors();
+            }
+            count--;
+        }, 1000);
+    }
+
+    function closeDoors() {
+        state = "CLOSING";
+        mainView.classList.remove('doors-open');
+        playTone(100, 'square', 1.0);
+        timerDisplay.innerText = "DOORS CLOSED";
+        
+        setTimeout(() => {
+            startMoving();
+        }, 2000);
+    }
+
+    function leaveElevator() {
+        if(state !== "OPEN") return;
+        
+        // End Game
+        state = "GAME_OVER";
+        clearInterval(chatInterval);
+        
+        document.getElementById('end-screen').classList.remove('hidden');
+        document.getElementById('fate-title').innerText = `FLOOR ${currentFloor}: ${nextFloorData.name}`;
+        document.getElementById('fate-text').innerText = nextFloorData.fate;
+        document.getElementById('fate-icon').innerText = nextFloorData.icon;
+        
+        // Set BG of end screen to match
+        document.getElementById('end-screen').style.background = `rgba(0,0,0,0.95) linear-gradient(to bottom, transparent, ${nextFloorData.color})`;
+    }
+
+    function handleBotLogic() {
+        // 30% chance a bot leaves
+        if (Math.random() > 0.7) {
+            const botId = Math.floor(Math.random() * 4) + 1;
+            const botEl = document.getElementById(`bot${botId}`);
+            
+            if (botEl && !botEl.classList.contains('leaving')) {
+                // Bot leaves
+                setTimeout(() => {
+                    botEl.classList.add('leaving');
+                    addChat("System", `Guest_${Math.floor(Math.random()*100)} got off.`);
+                    
+                    // Bot returns later
+                    setTimeout(() => {
+                        botEl.className = `avatar bot-${botId} entering`;
+                    }, 5000 + Math.random() * 5000); // Re-appears next floor maybe
+                }, 1000 + Math.random() * 2000);
+            }
+        }
+    }
+
+    // --- UI UTILS ---
+
+    function addChat(name, msg) {
+        const div = document.createElement('div');
+        div.className = "chat-line";
+        if (name === "System") div.classList.add('sys-msg');
+        
+        const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        div.innerHTML = `<span style="opacity:0.5">[${time}]</span> <span class="chat-name">${name}:</span> ${msg}`;
+        chatScreen.appendChild(div);
+        chatScreen.scrollTop = chatScreen.scrollHeight;
+    }
+
+</script>
+</body>
+</html>

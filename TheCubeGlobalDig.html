@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>THE GLOBAL DIG</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; outline: none; }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        /* Header */
+        #header {
+            text-align: center;
+            color: white;
+            text-shadow: 0 0 10px rgba(255,255,255,0.5);
+            margin-top: 20px;
+        }
+        h1 { margin: 0; font-weight: 900; letter-spacing: 5px; font-size: 2.5rem; text-transform: uppercase; }
+        #subtitle { color: #aaa; font-size: 0.9rem; letter-spacing: 2px; margin-top: 5px; }
+
+        /* Counters */
+        #stats {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            text-align: right;
+            color: #00ff88;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        .stat-row { font-size: 1.2rem; font-weight: bold; text-shadow: 0 0 5px #00ff88; margin-bottom: 5px; }
+        .stat-label { font-size: 0.8rem; color: #888; text-transform: uppercase; }
+
+        /* Material Indicator */
+        #material-found {
+            position: absolute;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.3s;
+            text-shadow: 0 0 10px currentColor;
+        }
+
+        /* Crosshair */
+        #crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 20px; height: 20px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        #crosshair::before, #crosshair::after {
+            content: ''; position: absolute; background: rgba(255,255,255,0.3);
+        }
+        #crosshair::before { top: 9px; left: 0; width: 20px; height: 2px; }
+        #crosshair::after { top: 0; left: 9px; width: 2px; height: 20px; }
+
+        /* Loading */
+        #loader {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 100;
+            display: flex; align-items: center; justify-content: center;
+            color: white; font-size: 1.5rem; letter-spacing: 3px;
+            transition: opacity 1s;
+        }
+    </style>
+    <!-- Using a slightly newer, stable version of Three.js that supports InstancedMesh well -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="loader">INITIALIZING MONOLITH...</div>
+
+    <div id="ui-layer">
+        <div id="header">
+            <h1>THE CUBE</h1>
+            <div id="subtitle">WHAT LIES AT THE CENTER?</div>
+        </div>
+        <div id="stats">
+            <div class="stat-row" id="global-counter">8,402,192</div>
+            <div class="stat-label">Global Voxels Destroyed</div>
+            <div style="margin-top: 10px;"></div>
+            <div class="stat-row" style="color: #ff0055;" id="live-users">1,204</div>
+            <div class="stat-label">Live Miners</div>
+        </div>
+        <div id="material-found">CRUST</div>
+    </div>
+    
+    <div id="crosshair"></div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const GRID_SIZE = 20; // 20x20x20 cube = 8000 voxels
+        const VOXEL_SIZE = 1;
+        const GAP = 0.05;
+        
+        // Colors & Layers (Radius based)
+        const LAYERS = [
+            { r: 9, color: 0x444444, name: "BASALT CRUST", roughness: 0.9 },
+            { r: 7, color: 0x5d4037, name: "CLAY LAYER", roughness: 0.8 },
+            { r: 5, color: 0xC0C0C0, name: "SILVER VEIN", roughness: 0.4, metalness: 0.8 },
+            { r: 3, color: 0xFFD700, name: "GOLD CORE", roughness: 0.2, metalness: 1.0 },
+            { r: 0, color: 0xff0055, name: "THE ANOMALY", roughness: 0.0, emissive: 0xff0055 }
+        ];
+
+        // --- SETUP ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050505, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 40;
+        camera.position.y = 10;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(20, 30, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0x00f0ff, 0.8, 50);
+        pointLight.position.set(-20, 10, 10);
+        scene.add(pointLight);
+
+        // --- THE CUBE (InstancedMesh) ---
+        // Using InstancedMesh for performance with thousands of blocks
+        const totalVoxels = Math.pow(GRID_SIZE, 3);
+        const geometry = new THREE.BoxGeometry(VOXEL_SIZE - GAP, VOXEL_SIZE - GAP, VOXEL_SIZE - GAP);
+        const material = new THREE.MeshStandardMaterial({ color: 0xffffff });
+        const mesh = new THREE.InstancedMesh(geometry, material, totalVoxels);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        
+        const dummy = new THREE.Object3D();
+        const color = new THREE.Color();
+        const voxelData = []; // Store metadata for each instance
+
+        let index = 0;
+        const offset = (GRID_SIZE * VOXEL_SIZE) / 2 - (VOXEL_SIZE / 2);
+
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let z = 0; z < GRID_SIZE; z++) {
+                    // Position
+                    dummy.position.set(
+                        x * VOXEL_SIZE - offset,
+                        y * VOXEL_SIZE - offset,
+                        z * VOXEL_SIZE - offset
+                    );
+                    dummy.updateMatrix();
+                    mesh.setMatrixAt(index, dummy.matrix);
+
+                    // Determine Layer based on distance from center
+                    const dist = Math.sqrt(
+                        Math.pow(x - GRID_SIZE/2, 2) + 
+                        Math.pow(y - GRID_SIZE/2, 2) + 
+                        Math.pow(z - GRID_SIZE/2, 2)
+                    );
+                    
+                    let layerData = LAYERS[LAYERS.length - 1]; // Default to core
+                    for(let l of LAYERS) {
+                        if (dist >= l.r) {
+                            layerData = l;
+                            break;
+                        }
+                    }
+
+                    // Apply Color
+                    color.setHex(layerData.color);
+                    // Slight variation
+                    const variation = (Math.random() - 0.5) * 0.1;
+                    color.r += variation; color.g += variation; color.b += variation;
+                    
+                    mesh.setColorAt(index, color);
+
+                    // Store data for gameplay
+                    voxelData[index] = {
+                        alive: true,
+                        layer: layerData,
+                        id: index
+                    };
+
+                    index++;
+                }
+            }
+        }
+        
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        scene.add(mesh);
+
+        // --- INTERACTION ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let targetRotation = { x: 0, y: 0 };
+        const rotationGroup = new THREE.Group();
+        rotationGroup.add(mesh);
+        scene.add(rotationGroup);
+
+        // Input Listeners
+        window.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            // Rotation Logic
+            if (isDragging) {
+                const deltaMove = {
+                    x: e.clientX - previousMousePosition.x,
+                    y: e.clientY - previousMousePosition.y
+                };
+
+                targetRotation.y += deltaMove.x * 0.005;
+                targetRotation.x += deltaMove.y * 0.005;
+
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            }
+            
+            // Mouse tracking for raycasting
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+        
+        // Handle Clicks separately from drag
+        window.addEventListener('click', (e) => {
+            if(!isDragging) dig(e); // Only dig if not dragging
+        });
+
+        function dig(e) {
+            // Update raycaster
+            raycaster.setFromCamera(mouse, camera);
+            const intersections = raycaster.intersectObject(mesh);
+
+            if (intersections.length > 0) {
+                const instanceId = intersections[0].instanceId;
+                
+                if (voxelData[instanceId] && voxelData[instanceId].alive) {
+                    destroyVoxel(instanceId, intersections[0].point);
+                }
+            }
+        }
+
+        function destroyVoxel(id, point) {
+            // 1. Mark as dead
+            voxelData[id].alive = false;
+
+            // 2. Hide voxel by scaling matrix to 0
+            // We need to get the current matrix, zero scale it, and set it back
+            mesh.getMatrixAt(id, dummy.matrix);
+            dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
+            dummy.scale.set(0, 0, 0);
+            dummy.updateMatrix();
+            mesh.setMatrixAt(id, dummy.matrix);
+            mesh.instanceMatrix.needsUpdate = true;
+
+            // 3. Effects
+            spawnParticles(point, voxelData[id].layer.color);
+            playSound(voxelData[id].layer.name);
+            uiFeedback(voxelData[id].layer);
+            
+            // 4. Update Counters
+            incrementGlobalCounter();
+        }
+
+        // --- PARTICLE SYSTEM ---
+        const particleCount = 500;
+        const particleGeo = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        const particleVelocities = [];
+        const particleLife = new Float32Array(particleCount);
+        
+        // Init offscreen
+        for(let i=0; i<particleCount*3; i++) particlePositions[i] = 9999;
+        
+        particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        const particleMat = new THREE.PointsMaterial({ 
+            color: 0xffffff, 
+            size: 0.2,
+            transparent: true,
+            opacity: 0.8
+        });
+        const particles = new THREE.Points(particleGeo, particleMat);
+        scene.add(particles);
+
+        let pIndex = 0;
+
+        function spawnParticles(pos, colorHex) {
+            const col = new THREE.Color(colorHex);
+            particleMat.color = col; // Simple single color for burst
+
+            for (let i = 0; i < 15; i++) {
+                const idx = pIndex * 3;
+                particlePositions[idx] = pos.x;
+                particlePositions[idx+1] = pos.y;
+                particlePositions[idx+2] = pos.z;
+                
+                particleVelocities[pIndex] = {
+                    x: (Math.random() - 0.5) * 1.5,
+                    y: (Math.random() - 0.5) * 1.5,
+                    z: (Math.random() - 0.5) * 1.5
+                };
+                
+                particleLife[pIndex] = 1.0;
+                
+                pIndex = (pIndex + 1) % particleCount;
+            }
+            particleGeo.attributes.position.needsUpdate = true;
+        }
+
+        function updateParticles() {
+            for(let i=0; i<particleCount; i++) {
+                if(particleLife[i] > 0) {
+                    const idx = i*3;
+                    particlePositions[idx] += particleVelocities[i].x;
+                    particlePositions[idx+1] += particleVelocities[i].y;
+                    particlePositions[idx+2] += particleVelocities[i].z;
+                    
+                    // Gravity
+                    particleVelocities[i].y -= 0.05;
+
+                    particleLife[i] -= 0.03;
+                    if(particleLife[i] <= 0) {
+                        particlePositions[idx] = 9999; // hide
+                    }
+                }
+            }
+            particleGeo.attributes.position.needsUpdate = true;
+        }
+
+        // --- SIMULATED MULTIPLAYER (Fake Bots) ---
+        // This simulates other players picking away at the cube
+        setInterval(() => {
+            if(Math.random() > 0.3) {
+                // Pick a random voxel
+                const randId = Math.floor(Math.random() * totalVoxels);
+                if (voxelData[randId] && voxelData[randId].alive) {
+                      // Check if it's "exposed" (simple approximation: high index or random)
+                      // In real app, we'd check neighbors. Here we just cheat for visual effect.
+                      if (Math.random() > 0.5) {
+                          destroyVoxel(randId, new THREE.Vector3(0,0,0)); // Pos doesn't matter for bot
+                      }
+                }
+            }
+        }, 100); // Fast ticks
+
+        function incrementGlobalCounter() {
+            const el = document.getElementById('global-counter');
+            let val = parseInt(el.innerText.replace(/,/g, ''));
+            val++;
+            el.innerText = val.toLocaleString();
+            
+            // Juice the text
+            el.style.transform = "scale(1.2)";
+            el.style.color = "#fff";
+            setTimeout(() => {
+                el.style.transform = "scale(1)";
+                el.style.color = "#00ff88";
+            }, 100);
+        }
+
+        // --- AUDIO SYSTEM (Procedural) ---
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+        
+        function initAudio() {
+            if (!audioCtx) audioCtx = new AudioContext();
+        }
+
+        function playSound(materialType) {
+            if (!audioCtx) initAudio();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            // Different sounds for different layers
+            if (materialType.includes("GOLD") || materialType.includes("SILVER")) {
+                // High ping
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800 + Math.random()*200, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            } else if (materialType.includes("ANOMALY")) {
+                // Sci-fi weirdness
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(100, audioCtx.currentTime);
+                osc.frequency.linearRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+            } else {
+                // Stone thud
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(100 + Math.random()*50, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            }
+
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.3);
+        }
+
+        // --- UI FEEDBACK ---
+        function uiFeedback(layer) {
+            const el = document.getElementById('material-found');
+            el.innerText = "MINED: " + layer.name;
+            el.style.color = '#' + layer.color.toString(16).padStart(6, '0');
+            el.style.opacity = 1;
+            
+            // Reset opacity after delay
+            clearTimeout(el.timeout);
+            el.timeout = setTimeout(() => {
+                el.style.opacity = 0;
+            }, 1000);
+        }
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Smooth rotation damping
+            rotationGroup.rotation.x += (targetRotation.x - rotationGroup.rotation.x) * 0.1;
+            rotationGroup.rotation.y += (targetRotation.y - rotationGroup.rotation.y) * 0.1;
+            
+            // Idle auto-rotation
+            if (!isDragging) {
+                targetRotation.y += 0.002;
+            }
+
+            updateParticles();
+            renderer.render(scene, camera);
+        }
+
+        // --- INIT ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Remove loader
+        window.onload = () => {
+            setTimeout(() => {
+                document.getElementById('loader').style.opacity = 0;
+                setTimeout(() => document.getElementById('loader').remove(), 1000);
+                animate();
+            }, 1000);
+        };
+
+    </script>
+</body>
+</html>

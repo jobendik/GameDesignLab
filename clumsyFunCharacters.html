@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>PHYSICS CHARADES</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        :root {
+            --bg: #222;
+            --panel: #333;
+            --text: #eee;
+            --accent: #ffcc00;
+            --highlight: #00ddff;
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* --- LAYOUT --- */
+        #game-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* --- SIDEBAR (CHAT) --- */
+        #sidebar {
+            width: 300px;
+            background: #1a1a1a;
+            display: flex;
+            flex-direction: column;
+            border-right: 2px solid #444;
+        }
+
+        #prompt-area {
+            background: var(--accent);
+            color: #000;
+            padding: 20px;
+            text-align: center;
+        }
+        #prompt-label { font-size: 0.8rem; text-transform: uppercase; font-weight: bold; opacity: 0.7; }
+        #secret-word { font-size: 2rem; font-weight: 900; margin-top: 5px; }
+
+        #timer {
+            background: #000;
+            color: #fff;
+            padding: 5px;
+            text-align: center;
+            font-family: monospace;
+            font-size: 1.2rem;
+        }
+
+        #chat-log {
+            flex-grow: 1;
+            padding: 15px;
+            overflow-y: auto;
+            font-size: 0.9rem;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .chat-msg { opacity: 0.8; }
+        .chat-name { font-weight: bold; color: #aaa; }
+        .chat-guess { color: #fff; }
+        .chat-correct { color: var(--accent); font-weight: bold; font-size: 1.1rem; text-shadow: 0 0 5px var(--accent); }
+
+        /* --- MAIN AREA --- */
+        #stage {
+            flex-grow: 1;
+            position: relative;
+            cursor: default;
+        }
+
+        #toolbar {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 50px;
+            padding: 10px 20px;
+            display: flex;
+            gap: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+        }
+
+        .tool-btn {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: 2px solid #555;
+            background: #333;
+            color: #fff;
+            font-size: 1.5rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.2s;
+            position: relative;
+        }
+        
+        .tool-btn:hover { background: #444; transform: scale(1.1); }
+        .tool-btn.active { border-color: var(--highlight); background: #444; box-shadow: 0 0 15px var(--highlight); }
+        
+        .tool-label {
+            position: absolute;
+            bottom: -25px;
+            font-size: 0.7rem;
+            background: #000;
+            padding: 2px 5px;
+            border-radius: 4px;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        .tool-btn:hover .tool-label { opacity: 1; }
+
+        /* --- OVERLAY --- */
+        #win-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            display: none;
+        }
+        
+        #win-msg { font-size: 4rem; color: var(--accent); text-shadow: 0 0 20px var(--accent); font-weight: 900; }
+        #next-round-btn {
+            margin-top: 30px;
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            background: var(--highlight);
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- SIDEBAR -->
+        <div id="sidebar">
+            <div id="prompt-area">
+                <div id="prompt-label">ACT OUT:</div>
+                <div id="secret-word">SPIDER</div>
+            </div>
+            <div id="timer">01:59</div>
+            <div id="chat-log">
+                <div class="chat-msg"><span class="chat-name">System:</span> Game started! Build your puppet!</div>
+            </div>
+        </div>
+
+        <!-- STAGE -->
+        <div id="stage">
+            <div id="toolbar">
+                <div class="tool-btn active" id="tool-hand" onclick="setTool('hand')">✋<div class="tool-label">Drag/Act</div></div>
+                <div class="tool-btn" id="tool-box" onclick="setTool('box')">⬜<div class="tool-label">Box</div></div>
+                <div class="tool-btn" id="tool-circle" onclick="setTool('circle')">⚪<div class="tool-label">Circle</div></div>
+                <div class="tool-btn" id="tool-link" onclick="setTool('link')">🔗<div class="tool-label">Link Joints</div></div>
+                <div class="tool-btn" style="border-color: #ff4444;" onclick="clearStage()">🗑️<div class="tool-label">Clear All</div></div>
+            </div>
+            <canvas id="world"></canvas>
+            
+            <div id="win-overlay">
+                <div id="win-msg">CORRECT!</div>
+                <div style="color: white; font-size: 1.2rem; margin-top: 10px;">User_88 guessed the word!</div>
+                <button id="next-round-btn" onclick="nextRound()">Next Word</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    /**
+     * PHYSICS CHARADES
+     * Powered by Matter.js
+     */
+
+    // --- SETUP MATTER.JS ---
+    const Engine = Matter.Engine,
+          Render = Matter.Render,
+          Runner = Matter.Runner,
+          Bodies = Matter.Bodies,
+          Composite = Matter.Composite,
+          Constraint = Matter.Constraint,
+          Mouse = Matter.Mouse,
+          MouseConstraint = Matter.MouseConstraint,
+          Events = Matter.Events,
+          Vector = Matter.Vector;
+
+    const engine = Engine.create();
+    const world = engine.world;
+    engine.gravity.y = 1; // Normal gravity
+
+    const stage = document.getElementById('stage');
+    const canvas = document.getElementById('world');
+    
+    // Resize handling
+    let width = stage.clientWidth;
+    let height = stage.clientHeight;
+    
+    const render = Render.create({
+        canvas: canvas,
+        engine: engine,
+        options: {
+            width: width,
+            height: height,
+            wireframes: false,
+            background: 'transparent'
+        }
+    });
+
+    // --- GAME STATE ---
+    let currentTool = 'hand';
+    let selectedBody = null; // For linking
+    let currentWord = "SPIDER";
+    let gameActive = true;
+    let movementScore = 0; // Tracks how much user is "acting"
+
+    const WORDS = ["SPIDER", "BOXER", "CRAB", "ROBOT", "BALLERINA", "HORSE", "SNAKE", "TEAPOT"];
+    const WRONG_GUESSES = ["Is it a rock?", "A sandwich?", "Um...", "Move more!", "A car?", "Falling apart?", "A glitch?", "Tetris?"];
+
+    // --- BOUNDARIES ---
+    const ground = Bodies.rectangle(width/2, height, width, 60, { 
+        isStatic: true, 
+        render: { fillStyle: '#444' } 
+    });
+    const wallL = Bodies.rectangle(0, height/2, 60, height, { isStatic: true, render: { visible: false } });
+    const wallR = Bodies.rectangle(width, height/2, 60, height, { isStatic: true, render: { visible: false } });
+    
+    Composite.add(world, [ground, wallL, wallR]);
+
+    // --- INTERACTION ---
+    const mouse = Mouse.create(render.canvas);
+    const mouseConstraint = MouseConstraint.create(engine, {
+        mouse: mouse,
+        constraint: {
+            stiffness: 0.2,
+            render: { visible: false }
+        }
+    });
+    
+    // Disable default mouse constraint initially (we toggle it)
+    Composite.add(world, mouseConstraint);
+
+    // --- TOOL LOGIC ---
+    
+    function setTool(tool) {
+        currentTool = tool;
+        selectedBody = null; // Reset linking
+        
+        // Update UI
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(`tool-${tool}`).classList.add('active');
+
+        // Logic
+        if (tool === 'hand') {
+            mouseConstraint.constraint.stiffness = 0.2; // Enable dragging
+        } else {
+            mouseConstraint.constraint.stiffness = 0; // Disable dragging while building
+        }
+    }
+
+    // Handle Clicks on Canvas
+    Events.on(mouseConstraint, 'mousedown', function(event) {
+        if (!gameActive) return;
+
+        const mPos = event.mouse.position;
+        
+        // BUILD MODE
+        if (currentTool === 'box') {
+            const size = 50 + Math.random() * 30;
+            const box = Bodies.rectangle(mPos.x, mPos.y, size, size, {
+                render: { fillStyle: getRandomColor() }
+            });
+            Composite.add(world, box);
+        }
+        else if (currentTool === 'circle') {
+            const size = 25 + Math.random() * 15;
+            const circle = Bodies.circle(mPos.x, mPos.y, size, {
+                render: { fillStyle: getRandomColor() }
+            });
+            Composite.add(world, circle);
+        }
+        else if (currentTool === 'link') {
+            // Find body under mouse
+            const bodies = Composite.allBodies(world);
+            const body = Matter.Query.point(bodies, mPos)[0];
+            
+            if (body && !body.isStatic) {
+                if (!selectedBody) {
+                    // First selection
+                    selectedBody = body;
+                    body.render.lineWidth = 5;
+                    body.render.strokeStyle = '#fff';
+                } else {
+                    // Second selection -> LINK
+                    if (body !== selectedBody) {
+                        const constraint = Constraint.create({
+                            bodyA: selectedBody,
+                            bodyB: body,
+                            length: Vector.magnitude(Vector.sub(selectedBody.position, body.position)),
+                            stiffness: 0.1, // Floppy joints are funnier
+                            render: { strokeStyle: '#fff', lineWidth: 3 }
+                        });
+                        Composite.add(world, constraint);
+                    }
+                    // Reset
+                    selectedBody.render.lineWidth = 0;
+                    selectedBody = null;
+                }
+            } else {
+                // Clicked empty space -> Cancel selection
+                if(selectedBody) selectedBody.render.lineWidth = 0;
+                selectedBody = null;
+            }
+        }
+    });
+
+    // Tracking Movement for "Acting"
+    Events.on(mouseConstraint, 'mousemove', function(event) {
+        if (currentTool === 'hand' && mouseConstraint.body) {
+            movementScore += 1;
+        }
+    });
+
+    function clearStage() {
+        Composite.clear(world, false, true); // Keep static
+        Composite.add(world, [ground, wallL, wallR, mouseConstraint]);
+    }
+
+    function getRandomColor() {
+        const hue = Math.floor(Math.random() * 360);
+        return `hsl(${hue}, 70%, 60%)`;
+    }
+
+    // --- SIMULATED MULTIPLAYER (BOTS) ---
+    const chatLog = document.getElementById('chat-log');
+    let lastGuessTime = 0;
+
+    function addChat(name, text, isCorrect = false) {
+        const div = document.createElement('div');
+        div.className = 'chat-msg';
+        if (isCorrect) div.className += ' chat-correct';
+        
+        div.innerHTML = `<span class="chat-name">${name}:</span> <span class="chat-guess">${text}</span>`;
+        chatLog.appendChild(div);
+        chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function botLoop() {
+        if (!gameActive) return;
+
+        const now = Date.now();
+        
+        // Bots guess more often if you move more
+        if (movementScore > 20 && now - lastGuessTime > 2000) {
+            
+            movementScore -= 20; // Consume "movement points"
+            lastGuessTime = now;
+
+            // Chance to guess correctly increases over time or activity
+            // For prototype, random small chance per tick
+            if (Math.random() > 0.85) {
+                winGame();
+            } else {
+                const name = "User_" + Math.floor(Math.random() * 999);
+                const guess = WRONG_GUESSES[Math.floor(Math.random() * WRONG_GUESSES.length)];
+                addChat(name, guess);
+            }
+        }
+    }
+    
+    // --- GAME FLOW ---
+    
+    function nextRound() {
+        gameActive = true;
+        document.getElementById('win-overlay').style.display = 'none';
+        clearStage();
+        currentWord = WORDS[Math.floor(Math.random() * WORDS.length)];
+        document.getElementById('secret-word').innerText = currentWord;
+        addChat("System", "Next round! Go!");
+        movementScore = 0;
+    }
+
+    function winGame() {
+        gameActive = false;
+        addChat("User_88", currentWord, true);
+        addChat("System", "Round Over!");
+        
+        document.getElementById('win-msg').innerText = "CORRECT!";
+        document.getElementById('win-overlay').style.display = 'flex';
+        
+        // Confetti effect (Simulated with simple particles)
+        spawnConfetti();
+    }
+
+    function spawnConfetti() {
+        for(let i=0; i<50; i++) {
+            const c = Bodies.circle(width/2, height/2, 5, {
+                render: { fillStyle: getRandomColor() },
+                restitution: 0.5
+            });
+            Body.setVelocity(c, { x: (Math.random()-0.5)*20, y: (Math.random()-0.5)*20 });
+            Composite.add(world, c);
+        }
+    }
+
+    // --- RUN ---
+    Render.run(render);
+    Runner.run(Runner.create(), engine);
+
+    // Bot Logic Loop
+    setInterval(botLoop, 500);
+
+    // Initial setup
+    window.addEventListener('resize', () => {
+        width = stage.clientWidth;
+        height = stage.clientHeight;
+        render.canvas.width = width;
+        render.canvas.height = height;
+        Body.setPosition(ground, { x: width/2, y: height });
+        Body.setPosition(wallR, { x: width, y: height/2 });
+    });
+
+</script>
+</body>
+</html>

@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Phage - Zero Friction Flow</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: white;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        #score-board {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 8px;
+            border-left: 4px solid #00ffff;
+            backdrop-filter: blur(4px);
+        }
+
+        .lb-entry {
+            display: flex;
+            justify-content: space-between;
+            width: 180px;
+            margin-bottom: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            text-shadow: 0 0 4px rgba(0,0,0,0.8);
+        }
+
+        .lb-name { opacity: 0.9; }
+        .lb-score { opacity: 1; color: #fff; }
+        .lb-me { color: #00ffff; }
+
+        #overlay-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            display: none;
+            pointer-events: none;
+        }
+
+        h1 {
+            font-size: 4rem;
+            margin: 0;
+            color: #fff;
+            text-shadow: 0 0 20px #00ffff, 0 0 40px #00ffff;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        p {
+            font-size: 1.5rem;
+            color: #ddd;
+            margin-top: 10px;
+            text-shadow: 0 0 5px black;
+        }
+
+        #kill-feed {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .kill-msg {
+            font-size: 16px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 0 4px #000;
+            animation: fadeOut 3s forwards;
+            background: linear-gradient(90deg, rgba(255,0,0,0.4) 0%, rgba(0,0,0,0) 100%);
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
+        @keyframes fadeOut {
+            0% { opacity: 1; transform: translateX(0); }
+            80% { opacity: 1; transform: translateX(0); }
+            100% { opacity: 0; transform: translateX(-20px); }
+        }
+
+        #stats-bar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.6);
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            color: #aaa;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        #stats-bar span {
+            color: white;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-layer">
+        <div id="kill-feed"></div>
+        <div id="score-board">
+            <div style="margin-bottom:8px; border-bottom:1px solid #444; padding-bottom:4px; color:#aaa; font-size:12px;">LEADERBOARD</div>
+            <div id="lb-content"></div>
+        </div>
+        <div id="overlay-message">
+            <h1 id="title-text">NEON PHAGE</h1>
+            <p id="sub-text">MOVE MOUSE TO CONSUME</p>
+        </div>
+        <div id="stats-bar">MASS: <span id="mass-display">10</span></div>
+    </div>
+
+<script>
+/**
+ * AUDIO ENGINE
+ * Procedural audio to generate satisfying sounds without external assets.
+ */
+const AudioEngine = (() => {
+    let ctx = null;
+    let enabled = false;
+
+    function init() {
+        if (!ctx) {
+            ctx = new (window.AudioContext || window.webkitAudioContext)();
+            enabled = true;
+        }
+        if (ctx.state === 'suspended') {
+            ctx.resume();
+        }
+    }
+
+    function playTone(freq, type, duration, vol = 0.1) {
+        if (!enabled) return;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        
+        gain.gain.setValueAtTime(vol, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.start();
+        osc.stop(ctx.currentTime + duration);
+    }
+
+    function playPop() {
+        // Satisfying high pitched pentatonic pop
+        const pentatonic = [523.25, 587.33, 659.25, 783.99, 880.00]; // C5, D5, E5, G5, A5
+        const freq = pentatonic[Math.floor(Math.random() * pentatonic.length)];
+        playTone(freq, 'sine', 0.1, 0.05);
+    }
+
+    function playKill() {
+        // Low bass thud for kills
+        playTone(150, 'triangle', 0.4, 0.2);
+        playTone(100, 'sawtooth', 0.2, 0.2);
+    }
+
+    function playBoost() {
+        // Airy noise for boosting
+        playTone(200, 'square', 0.1, 0.02);
+    }
+
+    return { init, playPop, playKill, playBoost };
+})();
+
+/**
+ * GAME ENGINE
+ */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d', { alpha: false }); // Optimize for no transparency on canvas bg
+const ui = {
+    lb: document.getElementById('lb-content'),
+    mass: document.getElementById('mass-display'),
+    overlay: document.getElementById('overlay-message'),
+    title: document.getElementById('title-text'),
+    sub: document.getElementById('sub-text'),
+    killFeed: document.getElementById('kill-feed')
+};
+
+// Game State
+let gameState = 'playing'; // playing, dead
+let width, height;
+let camera = { x: 0, y: 0, zoom: 1 };
+const WORLD_SIZE = 4000;
+const INITIAL_MASS = 20;
+const GRID_SIZE = 50;
+
+// Inputs
+const mouse = { x: 0, y: 0, wx: 0, wy: 0 }; // wx/wy are world coordinates
+let isBoosting = false;
+
+// Entities
+let player;
+let foods = [];
+let bots = [];
+let particles = [];
+let ejects = []; // Ejected mass
+
+// Configuration
+const BOT_COUNT = 40;
+const FOOD_COUNT = 800;
+const COLORS = [
+    '#FF0055', '#00FF99', '#00CCFF', '#FF9900', '#CC00FF', '#FFFF00'
+];
+const BOT_NAMES = [
+    "VoidWalker", "NeonGod", "Glitch", "Echo", "Flux", "Zero", 
+    "Nexus", "Cipher", "Apex", "Zenith", "Vortex", "Quantum",
+    "Spectre", "Phantom", "Solaris", "Luna", "Nova", "Cosmos",
+    "Orion", "Drift", "Shadow", "Ghost", "Spirit", "Soul",
+    "Hunter", "Predator", "Reaper", "Slayer", "Titan", "Behemoth",
+    "Leviathan", "Kraken", "Hydra", "Drake", "Wyrm", "Basilisk",
+    "Griffin", "Phoenix", "Valkyrie", "Odin"
+];
+
+// Helper Math
+const dist = (x1, y1, x2, y2) => Math.sqrt((x2-x1)**2 + (y2-y1)**2);
+const randomPos = () => Math.random() * WORLD_SIZE - WORLD_SIZE/2;
+
+class Entity {
+    constructor(x, y, mass, color) {
+        this.x = x;
+        this.y = y;
+        this.mass = mass;
+        this.targetMass = mass;
+        this.color = color;
+        this.radius = Math.sqrt(this.mass * 10 / Math.PI); // Radius derived from mass
+        this.velX = 0;
+        this.velY = 0;
+        this.name = "";
+    }
+
+    updateRadius() {
+        // Smooth growth
+        if (this.mass !== this.targetMass) {
+            this.mass += (this.targetMass - this.mass) * 0.1;
+            this.radius = Math.sqrt(this.mass * 10 / Math.PI);
+        }
+    }
+
+    draw(ctx) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        
+        // Glow effect (Expensive, so we limit it or use simple shadows)
+        ctx.shadowBlur = this.radius * 0.5;
+        ctx.shadowColor = this.color;
+        
+        ctx.fill();
+        ctx.shadowBlur = 0; // Reset
+    }
+}
+
+class Player extends Entity {
+    constructor() {
+        super(0, 0, INITIAL_MASS, '#00FFFF');
+        this.name = "You";
+        this.speedBase = 6;
+    }
+
+    move() {
+        // Mouse vector relative to screen center
+        const screenCX = width / 2;
+        const screenCY = height / 2;
+        
+        let dx = mouse.x - screenCX;
+        let dy = mouse.y - screenCY;
+        
+        const d = Math.sqrt(dx*dx + dy*dy);
+        
+        // Normalize and apply speed
+        if (d > 1) {
+            dx /= d;
+            dy /= d;
+        }
+
+        // Speed decreases as you get bigger
+        let speed = this.speedBase * Math.pow(this.mass, -0.1); 
+        if (isBoosting && this.mass > 20) {
+            speed *= 2;
+            this.targetMass -= this.mass * 0.005; // Lose mass while boosting
+            
+            // Eject particles for effect
+            if (Math.random() < 0.3) {
+                createParticles(this.x - dx * this.radius, this.y - dy * this.radius, this.color, 1);
+                AudioEngine.playBoost();
+            }
+        }
+
+        this.x += dx * speed;
+        this.y += dy * speed;
+
+        // Boundary
+        this.x = Math.max(-WORLD_SIZE/2, Math.min(WORLD_SIZE/2, this.x));
+        this.y = Math.max(-WORLD_SIZE/2, Math.min(WORLD_SIZE/2, this.y));
+    }
+}
+
+class Bot extends Entity {
+    constructor() {
+        let m = INITIAL_MASS + Math.random() * 50;
+        // Occasional giant bot
+        if (Math.random() < 0.05) m += 500;
+        
+        super(randomPos(), randomPos(), m, COLORS[Math.floor(Math.random() * COLORS.length)]);
+        this.name = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
+        this.tx = randomPos(); // Target X
+        this.ty = randomPos(); // Target Y
+        this.state = 'wander'; // wander, chase, flee
+        this.stateTimer = 0;
+    }
+
+    ai() {
+        // Simple State Machine
+        this.stateTimer++;
+
+        // Find nearest threat or food
+        // Optimization: Don't check every frame, just move towards current target
+        
+        // Simple Wandering Logic
+        let dx = this.tx - this.x;
+        let dy = this.ty - this.y;
+        let d = Math.sqrt(dx*dx + dy*dy);
+
+        // Change target if reached or random interval
+        if (d < 50 || this.stateTimer > 100 + Math.random() * 100) {
+            this.tx = randomPos();
+            this.ty = randomPos();
+            this.stateTimer = 0;
+            
+            // Bias towards player occasionally to make it feel alive
+            if (Math.random() < 0.3) {
+                this.tx = player.x + (Math.random() - 0.5) * 500;
+                this.ty = player.y + (Math.random() - 0.5) * 500;
+            }
+        }
+
+        // Normalize
+        if (d > 0) {
+            dx /= d;
+            dy /= d;
+        }
+
+        // Speed
+        const speed = 5 * Math.pow(this.mass, -0.1);
+        this.x += dx * speed;
+        this.y += dy * speed;
+
+        // Boundaries
+        this.x = Math.max(-WORLD_SIZE/2, Math.min(WORLD_SIZE/2, this.x));
+        this.y = Math.max(-WORLD_SIZE/2, Math.min(WORLD_SIZE/2, this.y));
+    }
+}
+
+class Particle {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 5 + 2;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.life = 1.0;
+        this.decay = Math.random() * 0.05 + 0.02;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= this.decay;
+    }
+    draw(ctx) {
+        ctx.globalAlpha = this.life;
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 3, 0, Math.PI*2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+}
+
+function createParticles(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+        particles.push(new Particle(x, y, color));
+    }
+}
+
+function addKillFeed(killer, victim) {
+    const div = document.createElement('div');
+    div.className = 'kill-msg';
+    div.innerHTML = `<span style="color:#00ffff">${killer}</span> ATE <span style="color:#ff0055">${victim}</span>`;
+    ui.killFeed.prepend(div);
+    if (ui.killFeed.children.length > 5) {
+        ui.killFeed.lastChild.remove();
+    }
+}
+
+function initGame() {
+    resize();
+    player = new Player();
+    bots = [];
+    foods = [];
+    particles = [];
+    
+    // Spawn Bots
+    for(let i=0; i<BOT_COUNT; i++) bots.push(new Bot());
+
+    // Spawn Food
+    for(let i=0; i<FOOD_COUNT; i++) {
+        foods.push({
+            x: randomPos(),
+            y: randomPos(),
+            color: COLORS[Math.floor(Math.random() * COLORS.length)],
+            radius: Math.random() * 3 + 2
+        });
+    }
+
+    gameState = 'playing';
+    ui.overlay.style.display = 'none';
+    AudioEngine.init();
+}
+
+function respawnBot(index) {
+    // Respawn a bot after it dies to keep the world populated
+    bots[index] = new Bot();
+}
+
+function checkCollisions() {
+    // 1. Player vs Food
+    for (let i = foods.length - 1; i >= 0; i--) {
+        const f = foods[i];
+        if (dist(player.x, player.y, f.x, f.y) < player.radius + f.radius) {
+            player.targetMass += 0.5;
+            foods.splice(i, 1);
+            // Respawn food immediately elsewhere
+            foods.push({
+                x: randomPos(),
+                y: randomPos(),
+                color: COLORS[Math.floor(Math.random() * COLORS.length)],
+                radius: Math.random() * 3 + 2
+            });
+            AudioEngine.playPop();
+        }
+    }
+
+    // 2. Player vs Bots
+    for (let i = 0; i < bots.length; i++) {
+        const b = bots[i];
+        const d = dist(player.x, player.y, b.x, b.y);
+
+        // Interaction
+        if (d < player.radius + b.radius) {
+            // Player eats Bot
+            if (player.mass > b.mass * 1.1) {
+                player.targetMass += b.mass;
+                createParticles(b.x, b.y, b.color, 10);
+                AudioEngine.playKill();
+                addKillFeed(player.name, b.name);
+                respawnBot(i);
+                
+                // Camera shake effect? (Simulated by offsetting camera briefly)
+                camera.x += (Math.random()-0.5)*20;
+                camera.y += (Math.random()-0.5)*20;
+
+            } 
+            // Bot eats Player
+            else if (b.mass > player.mass * 1.1) {
+                createParticles(player.x, player.y, player.color, 20);
+                gameState = 'dead';
+                ui.title.innerText = "CONSUMED";
+                ui.sub.innerText = `Killed by ${b.name}. Click to Reincarnate.`;
+                ui.overlay.style.display = 'block';
+                AudioEngine.playKill();
+                return;
+            }
+        }
+
+        // Bot vs Food (Simple logic)
+        // Skip for performance, assume bots grow naturally over time (cheating for simulation)
+        if (Math.random() < 0.05) b.targetMass += 0.5;
+    }
+}
+
+function drawGrid() {
+    ctx.strokeStyle = '#1a1a1a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    
+    // Draw grid based on world coordinates
+    const startX = Math.floor((camera.x - width/2/camera.zoom) / GRID_SIZE) * GRID_SIZE;
+    const endX = Math.floor((camera.x + width/2/camera.zoom) / GRID_SIZE) * GRID_SIZE + GRID_SIZE;
+    const startY = Math.floor((camera.y - height/2/camera.zoom) / GRID_SIZE) * GRID_SIZE;
+    const endY = Math.floor((camera.y + height/2/camera.zoom) / GRID_SIZE) * GRID_SIZE + GRID_SIZE;
+
+    for (let x = startX; x <= endX; x += GRID_SIZE) {
+        ctx.moveTo(x, startY);
+        ctx.lineTo(x, endY);
+    }
+    for (let y = startY; y <= endY; y += GRID_SIZE) {
+        ctx.moveTo(startX, y);
+        ctx.lineTo(endX, y);
+    }
+    ctx.stroke();
+
+    // World Border
+    ctx.strokeStyle = '#ff0055';
+    ctx.lineWidth = 10;
+    ctx.strokeRect(-WORLD_SIZE/2, -WORLD_SIZE/2, WORLD_SIZE, WORLD_SIZE);
+}
+
+function updateLeaderboard() {
+    // Combine bots and player
+    let allEntities = [...bots];
+    if (gameState === 'playing') allEntities.push(player);
+
+    // Sort by mass
+    allEntities.sort((a, b) => b.mass - a.mass);
+
+    // Render top 10
+    let html = '';
+    for (let i = 0; i < Math.min(10, allEntities.length); i++) {
+        const e = allEntities[i];
+        const isMe = e === player;
+        html += `
+            <div class="lb-entry ${isMe ? 'lb-me' : ''}">
+                <span class="lb-name">${i+1}. ${e.name}</span>
+                <span class="lb-score">${Math.floor(e.mass)}</span>
+            </div>
+        `;
+    }
+    ui.lb.innerHTML = html;
+}
+
+function loop() {
+    requestAnimationFrame(loop);
+
+    if (gameState === 'dead') return;
+
+    // 1. Update Logic
+    player.updateRadius();
+    player.move();
+    
+    bots.forEach(b => {
+        b.updateRadius();
+        b.ai();
+    });
+
+    particles.forEach((p, index) => {
+        p.update();
+        if (p.life <= 0) particles.splice(index, 1);
+    });
+
+    checkCollisions();
+
+    // 2. Camera Logic
+    // Smooth camera follow
+    camera.x += (player.x - camera.x) * 0.1;
+    camera.y += (player.y - camera.y) * 0.1;
+    
+    // Calculate zoom based on player size (The bigger you are, the more you see)
+    // Base zoom is 1. As radius grows from ~8 to ~200.
+    const targetZoom = 1 / (1 + player.radius * 0.01); 
+    camera.zoom += (targetZoom - camera.zoom) * 0.05;
+
+    // 3. Render
+    // Background clear
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.save();
+    // Center camera
+    ctx.translate(width/2, height/2);
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.translate(-camera.x, -camera.y);
+
+    drawGrid();
+
+    // Draw Food
+    foods.forEach(f => {
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.radius, 0, Math.PI*2);
+        ctx.fillStyle = f.color;
+        ctx.fill();
+    });
+
+    // Draw Bots & Player (Sorted by size so big things cover small things)
+    const renderList = [...bots, player];
+    renderList.sort((a, b) => a.mass - b.mass);
+    renderList.forEach(e => e.draw(ctx));
+
+    // Draw Particles
+    particles.forEach(p => p.draw(ctx));
+
+    ctx.restore();
+
+    // 4. UI Updates
+    ui.mass.innerText = Math.floor(player.mass);
+    // Throttle leaderboard updates slightly for performance if needed, but modern JS is fast enough
+    if (Math.random() < 0.1) updateLeaderboard();
+}
+
+function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+}
+
+// Events
+window.addEventListener('resize', resize);
+window.addEventListener('mousemove', e => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+});
+window.addEventListener('mousedown', () => {
+    if (gameState === 'dead') {
+        initGame();
+    } else {
+        isBoosting = true;
+    }
+});
+window.addEventListener('mouseup', () => isBoosting = false);
+window.addEventListener('keydown', e => {
+    if (e.code === 'Space') isBoosting = true;
+});
+window.addEventListener('keyup', e => {
+    if (e.code === 'Space') isBoosting = false;
+});
+
+// Start
+initGame();
+loop();
+
+</script>
+</body>
+</html>

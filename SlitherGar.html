@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SlitherGar.io</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* Prevent mobile scrolling */
+        }
+        canvas {
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        #score-board {
+            padding: 20px;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+        #leaderboard {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 10px;
+            color: white;
+            min-width: 150px;
+        }
+        #leaderboard h3 {
+            margin: 0 0 10px 0;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.3);
+            padding-bottom: 5px;
+        }
+        .lb-entry {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            z-index: 10;
+        }
+        #start-box {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+            max-width: 400px;
+            width: 90%;
+        }
+        h1 {
+            color: #444;
+            margin-top: 0;
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        p {
+            color: #666;
+            margin-bottom: 20px;
+        }
+        input {
+            padding: 15px;
+            font-size: 18px;
+            border: 2px solid #ddd;
+            border-radius: 30px;
+            width: 80%;
+            margin-bottom: 20px;
+            outline: none;
+            text-align: center;
+        }
+        input:focus {
+            border-color: #00d2ff;
+        }
+        button {
+            background: linear-gradient(to right, #00d2ff, #3a7bd5);
+            border: none;
+            color: white;
+            padding: 15px 40px;
+            font-size: 20px;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: transform 0.1s;
+            font-weight: bold;
+            box-shadow: 0 5px 15px rgba(0, 210, 255, 0.4);
+        }
+        button:hover {
+            transform: scale(1.05);
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+        #minimap {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 150px;
+            height: 150px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui-layer">
+        <div id="score-board">Mass: <span>10</span></div>
+        <div id="leaderboard">
+            <h3>Leaderboard</h3>
+            <div id="lb-list"></div>
+        </div>
+        <canvas id="minimap"></canvas>
+    </div>
+
+    <div id="start-screen">
+        <div id="start-box">
+            <h1>SlitherGar</h1>
+            <p>Use Mouse to move. Click or Space to Boost.</p>
+            <input type="text" id="nickname" placeholder="Nickname" maxlength="12">
+            <br>
+            <button id="playBtn">Play</button>
+        </div>
+    </div>
+
+<script>
+/**
+ * Vector Utility Class
+ */
+class Vector {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+    }
+    add(v) { return new Vector(this.x + v.x, this.y + v.y); }
+    sub(v) { return new Vector(this.x - v.x, this.y - v.y); }
+    mult(n) { return new Vector(this.x * n, this.y * n); }
+    mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+    normalize() {
+        const m = this.mag();
+        return m === 0 ? new Vector(0, 0) : new Vector(this.x / m, this.y / m);
+    }
+    dist(v) { return Math.sqrt(Math.pow(this.x - v.x, 2) + Math.pow(this.y - v.y, 2)); }
+    limit(max) {
+        if (this.mag() > max) {
+            return this.normalize().mult(max);
+        }
+        return this;
+    }
+}
+
+// Game Constants
+const WORLD_SIZE = 4000;
+const INITIAL_LENGTH = 10;
+const BASE_RADIUS = 10; // Base width of the snake
+const SEGMENT_DISTANCE = 5; // Distance between segments
+const FOOD_COUNT = 800;
+const BOT_COUNT = 20;
+
+// Colors
+const COLORS = [
+    '#FF5733', '#33FF57', '#3357FF', '#FF33A8', '#33FFF5', 
+    '#F5FF33', '#FF8C33', '#8C33FF', '#FF3333', '#33FF99'
+];
+
+/**
+ * Game Objects
+ */
+class Food {
+    constructor(x, y, value = 1, color = null) {
+        this.pos = new Vector(x || Math.random() * WORLD_SIZE - WORLD_SIZE/2, y || Math.random() * WORLD_SIZE - WORLD_SIZE/2);
+        this.value = value;
+        this.radius = 4 + (value * 0.5);
+        this.color = color || COLORS[Math.floor(Math.random() * COLORS.length)];
+        this.glowing = Math.random() > 0.8;
+    }
+
+    draw(ctx) {
+        ctx.beginPath();
+        ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        
+        if (this.glowing) {
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = this.color;
+        } else {
+            ctx.shadowBlur = 0;
+        }
+        
+        ctx.fill();
+        ctx.shadowBlur = 0; // Reset
+    }
+}
+
+class Snake {
+    constructor(name, x, y, isBot = false) {
+        this.name = name || "Anonymouse";
+        this.pos = new Vector(x, y);
+        this.vel = new Vector(1, 0); // Start moving right
+        this.angle = 0;
+        this.targetAngle = 0;
+        
+        // Stats
+        this.length = INITIAL_LENGTH;
+        this.widthRadius = BASE_RADIUS;
+        this.speed = 3;
+        this.baseSpeed = 3;
+        this.boostSpeed = 6;
+        this.score = 10;
+        this.dead = false;
+        
+        // Bot logic
+        this.isBot = isBot;
+        this.botTarget = null;
+        this.botTimer = 0;
+        
+        // Visuals
+        this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+        // The body is a history of positions. 
+        // We store more positions than length to allow for smoother movement logic,
+        // but we only render segments at specific intervals.
+        this.history = [];
+        for(let i=0; i<this.length * SEGMENT_DISTANCE; i++) {
+            this.history.push(new Vector(x - i, y));
+        }
+
+        this.boosting = false;
+    }
+
+    update(mousePos, foods) {
+        if (this.dead) return;
+
+        // Steering
+        if (this.isBot) {
+            this.updateBotLogic(foods);
+        } else {
+            // Player steering towards mouse (relative to center of screen usually, but here relative to world)
+            // Actually, in snake games, mouse defines the ANGLE relative to head
+            // Since we translate canvas, mousePos is in world coordinates
+            let dir = mousePos.sub(this.pos);
+            this.targetAngle = Math.atan2(dir.y, dir.x);
+        }
+
+        // Smooth turning
+        let diff = this.targetAngle - this.angle;
+        // Normalize angle difference to -PI to PI
+        while (diff <= -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        
+        // Turn speed depends on size (bigger = slower turn)
+        let turnSpeed = 0.15 * (BASE_RADIUS / this.widthRadius); 
+        this.angle += Math.max(-turnSpeed, Math.min(turnSpeed, diff));
+
+        // Boosting Logic
+        if (this.boosting && this.length > 5) {
+            this.speed = this.boostSpeed;
+            // Eject mass occasionally
+            if (Math.random() < 0.2) {
+                this.length -= 0.1;
+                this.score -= 1;
+                // Add food behind
+                let dropPos = this.history[this.history.length-1] || this.pos;
+                game.foods.push(new Food(dropPos.x + (Math.random()-0.5)*10, dropPos.y + (Math.random()-0.5)*10, 2, this.color));
+            }
+        } else {
+            this.speed = this.baseSpeed;
+        }
+
+        // Calculate velocity vector
+        this.vel = new Vector(Math.cos(this.angle), Math.sin(this.angle)).mult(this.speed);
+        this.pos = this.pos.add(this.vel);
+
+        // Update body history
+        this.history.unshift(this.pos);
+        
+        // Trim history to length
+        // We need enough history to draw 'length' segments spaced by SEGMENT_DISTANCE
+        // Plus a bit extra buffer
+        let requiredHistory = Math.ceil(this.length * SEGMENT_DISTANCE) + 10;
+        if (this.history.length > requiredHistory) {
+            this.history.splice(requiredHistory);
+        }
+
+        // Wall Collision (Soft bounce or wrap? Slither is hard wall usually, let's do hard wall death)
+        if (this.pos.x < -WORLD_SIZE/2 || this.pos.x > WORLD_SIZE/2 || 
+            this.pos.y < -WORLD_SIZE/2 || this.pos.y > WORLD_SIZE/2) {
+            this.die();
+        }
+    }
+
+    updateBotLogic(foods) {
+        this.botTimer++;
+        
+        // 1. Avoid walls
+        let buffer = 200;
+        if (this.pos.x < -WORLD_SIZE/2 + buffer) this.targetAngle = 0; // Go Right
+        else if (this.pos.x > WORLD_SIZE/2 - buffer) this.targetAngle = Math.PI; // Go Left
+        else if (this.pos.y < -WORLD_SIZE/2 + buffer) this.targetAngle = Math.PI/2; // Go Down
+        else if (this.pos.y > WORLD_SIZE/2 - buffer) this.targetAngle = -Math.PI/2; // Go Up
+        
+        // 2. Find food or wander
+        else if (this.botTimer > 20 || !this.botTarget) {
+            this.botTimer = 0;
+            // Find closest food
+            let closest = null;
+            let minDist = 300; // Detection radius
+            
+            // Simple check nearby foods
+            for (let f of foods) {
+                let d = this.pos.dist(f.pos);
+                if (d < minDist) {
+                    minDist = d;
+                    closest = f;
+                }
+            }
+
+            if (closest) {
+                this.botTarget = closest.pos;
+            } else {
+                // Random wander
+                let angleVar = (Math.random() - 0.5) * 2.0;
+                this.targetAngle += angleVar;
+                this.botTarget = new Vector(
+                    this.pos.x + Math.cos(this.targetAngle)*100, 
+                    this.pos.y + Math.sin(this.targetAngle)*100
+                );
+            }
+        }
+
+        // 3. Simple Collision Avoidance (Avoid other snakes)
+        // Check for heads of other snakes nearby
+        /* (Simplified for performance) */
+        
+        if (this.botTarget) {
+            let dir = this.botTarget.sub(this.pos);
+            this.targetAngle = Math.atan2(dir.y, dir.x);
+        }
+    }
+
+    eat(foodValue) {
+        // Growth formula: logarithmic or linear damped
+        // Increase score
+        this.score += foodValue * 5;
+        
+        // Increase Length
+        this.length += foodValue * 0.5;
+
+        // Increase Width slightly (Agar.io style mass)
+        // Cap width so they don't get too huge
+        this.widthRadius = BASE_RADIUS + Math.log10(this.score/5 + 1) * 3;
+    }
+
+    die() {
+        this.dead = true;
+        // Turn body into food
+        // We drop food along the body history
+        let step = Math.floor(this.history.length / (this.score / 2)); 
+        if(step < 1) step = 1;
+        
+        for (let i = 0; i < this.history.length; i += 2) { // Every 2nd point
+             if (Math.random() > 0.5) {
+                 game.foods.push(new Food(this.history[i].x, this.history[i].y, 2 + (this.widthRadius/10), this.color));
+             }
+        }
+    }
+
+    draw(ctx) {
+        if (this.dead) return;
+
+        // Draw segments from tail to head
+        // Spacing based on SEGMENT_DISTANCE
+        
+        // Draw Shadow first (optimization: draw line?)
+        // Let's draw circles for authentic feel
+        
+        let segmentsDrawn = 0;
+        
+        // Determine segment spacing based on speed to prevent "gaps" or "bunching" visually
+        // Actually, fixed spacing in history index is safer
+        
+        for (let i = this.history.length - 1; i >= 0; i--) {
+            // Only draw every Nth recorded position to act as a segment
+            if (i % SEGMENT_DISTANCE === 0 && segmentsDrawn < this.length) {
+                let pos = this.history[i];
+                let size = this.widthRadius;
+                
+                // Taper tail
+                /* if (segmentsDrawn > this.length - 5) {
+                    size *= 0.5; 
+                } */
+
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
+                
+                // Color logic: Head is different?
+                if (i === 0) {
+                   ctx.fillStyle = '#FFF'; // Eyes placeholder
+                } else {
+                   ctx.fillStyle = this.color;
+                }
+                
+                // Outline
+                ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.fill();
+
+                segmentsDrawn++;
+            }
+        }
+
+        // Draw Head Eyes
+        let headPos = this.pos;
+        let eyeOffset = this.widthRadius * 0.6;
+        let eyeSize = this.widthRadius * 0.35;
+        
+        ctx.save();
+        ctx.translate(headPos.x, headPos.y);
+        ctx.rotate(this.angle);
+        
+        // Whites
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.arc(eyeOffset, -eyeOffset/2, eyeSize, 0, Math.PI*2);
+        ctx.arc(eyeOffset, eyeOffset/2, eyeSize, 0, Math.PI*2);
+        ctx.fill();
+        
+        // Pupils
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+        ctx.arc(eyeOffset + 2, -eyeOffset/2, eyeSize/2, 0, Math.PI*2);
+        ctx.arc(eyeOffset + 2, eyeOffset/2, eyeSize/2, 0, Math.PI*2);
+        ctx.fill();
+        
+        ctx.restore();
+
+        // Name Tag
+        ctx.fillStyle = 'white';
+        ctx.font = `bold ${Math.max(12, this.widthRadius)}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(this.name, this.pos.x, this.pos.y - this.widthRadius - 5);
+    }
+}
+
+/**
+ * Main Game Class
+ */
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.minimapCanvas = document.getElementById('minimap');
+        this.mmCtx = this.minimapCanvas.getContext('2d');
+        
+        this.width = window.innerWidth;
+        this.height = window.innerHeight;
+        
+        this.player = null;
+        this.snakes = [];
+        this.foods = [];
+        this.camera = new Vector(0, 0);
+        this.mousePos = new Vector(0, 0); // World coordinates
+        this.screenMouse = new Vector(0, 0); // Screen coordinates
+        
+        this.running = false;
+        
+        // Input
+        this.keys = {};
+        
+        this.resize();
+        window.addEventListener('resize', () => this.resize());
+        
+        // Mouse Move
+        window.addEventListener('mousemove', (e) => {
+            this.screenMouse.x = e.clientX;
+            this.screenMouse.y = e.clientY;
+        });
+
+        // Touch Support
+        window.addEventListener('touchmove', (e) => {
+             e.preventDefault();
+             this.screenMouse.x = e.touches[0].clientX;
+             this.screenMouse.y = e.touches[0].clientY;
+        }, {passive: false});
+
+        window.addEventListener('mousedown', () => { if(this.player) this.player.boosting = true; });
+        window.addEventListener('mouseup', () => { if(this.player) this.player.boosting = false; });
+        window.addEventListener('touchstart', () => { if(this.player) this.player.boosting = true; });
+        window.addEventListener('touchend', () => { if(this.player) this.player.boosting = false; });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') if(this.player) this.player.boosting = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') if(this.player) this.player.boosting = false;
+        });
+
+        document.getElementById('playBtn').addEventListener('click', () => {
+            const name = document.getElementById('nickname').value || "Player";
+            this.start(name);
+        });
+
+        // Loop
+        this.lastTime = 0;
+        requestAnimationFrame((t) => this.loop(t));
+    }
+
+    resize() {
+        this.width = window.innerWidth;
+        this.height = window.innerHeight;
+        this.canvas.width = this.width;
+        this.canvas.height = this.height;
+        
+        // Minimap resolution
+        this.minimapCanvas.width = 150;
+        this.minimapCanvas.height = 150;
+    }
+
+    start(name) {
+        document.getElementById('start-screen').style.display = 'none';
+        
+        this.foods = [];
+        this.snakes = [];
+        
+        // Create Player
+        this.player = new Snake(name, 0, 0);
+        this.snakes.push(this.player);
+        
+        // Create Bots
+        for(let i=0; i<BOT_COUNT; i++) {
+            let x = (Math.random() - 0.5) * WORLD_SIZE;
+            let y = (Math.random() - 0.5) * WORLD_SIZE;
+            this.snakes.push(new Snake(`Bot ${i+1}`, x, y, true));
+        }
+        
+        // Create Food
+        for(let i=0; i<FOOD_COUNT; i++) {
+            this.foods.push(new Food());
+        }
+        
+        this.running = true;
+    }
+
+    loop(timestamp) {
+        requestAnimationFrame((t) => this.loop(t));
+        // const dt = (timestamp - this.lastTime) / 1000;
+        this.lastTime = timestamp;
+
+        if (!this.running) {
+            // Draw background idle animation maybe?
+            this.ctx.fillStyle = '#111';
+            this.ctx.fillRect(0,0,this.width, this.height);
+            return;
+        }
+
+        this.update();
+        this.draw();
+        this.updateUI();
+    }
+
+    update() {
+        // Refill Bots
+        if (this.snakes.length < BOT_COUNT + (this.player && !this.player.dead ? 1 : 0)) {
+            let x = (Math.random() - 0.5) * WORLD_SIZE;
+            let y = (Math.random() - 0.5) * WORLD_SIZE;
+            this.snakes.push(new Snake(`Bot ${Math.floor(Math.random()*1000)}`, x, y, true));
+        }
+
+        // Refill Food
+        while (this.foods.length < FOOD_COUNT) {
+             this.foods.push(new Food());
+        }
+
+        // Calculate Mouse in World
+        this.mousePos = new Vector(
+            this.screenMouse.x - this.width/2 + this.camera.x,
+            this.screenMouse.y - this.height/2 + this.camera.y
+        );
+
+        // Update Snakes
+        for (let s of this.snakes) {
+            s.update(this.mousePos, this.foods);
+            
+            // Food Consumption
+            // Reverse loop for removal
+            for (let i = this.foods.length - 1; i >= 0; i--) {
+                let f = this.foods[i];
+                let dist = s.pos.dist(f.pos);
+                // Magnetic grab distance
+                if (dist < s.widthRadius + f.radius + 10) {
+                    // Eat
+                    s.eat(f.value);
+                    this.foods.splice(i, 1);
+                }
+            }
+        }
+
+        // Check Snake vs Snake Collision
+        for (let i = 0; i < this.snakes.length; i++) {
+            let s1 = this.snakes[i];
+            if (s1.dead) continue;
+
+            for (let j = 0; j < this.snakes.length; j++) {
+                if (i === j) continue;
+                let s2 = this.snakes[j];
+                if (s2.dead) continue;
+
+                // Check s1 Head vs s2 Body
+                // Optimization: bounding box check first
+                if (s1.pos.dist(s2.pos) > s2.length * SEGMENT_DISTANCE * 2) continue; // rough cull
+
+                // Detailed Segment check
+                // We check if s1 head is inside any of s2's history points
+                // Optimization: Check only every 5th point
+                let hit = false;
+                for (let k = 0; k < s2.history.length; k+=3) {
+                    let segPos = s2.history[k];
+                    let dist = s1.pos.dist(segPos);
+                    if (dist < s2.widthRadius + s1.widthRadius * 0.5) { 
+                        // Collision! 
+                        // But don't collide with own head (though this is s1 vs s2)
+                        hit = true;
+                        break;
+                    }
+                }
+                
+                if (hit) {
+                    s1.die();
+                    // Award s2?
+                }
+            }
+        }
+        
+        // Remove dead snakes
+        this.snakes = this.snakes.filter(s => !s.dead);
+        
+        // Check Player Death
+        if (this.player && this.player.dead) {
+            // Respawn UI or Game Over
+            document.getElementById('start-screen').style.display = 'flex';
+            document.querySelector('#start-box h1').innerText = "Game Over";
+            document.querySelector('#start-box p').innerText = `Final Mass: ${Math.floor(this.player.score)}`;
+            this.running = false;
+            this.player = null;
+        }
+
+        // Camera Follow Player
+        if (this.player && !this.player.dead) {
+            // Lerp camera
+            this.camera.x = this.lerp(this.camera.x, this.player.pos.x, 0.1);
+            this.camera.y = this.lerp(this.camera.y, this.player.pos.y, 0.1);
+        }
+    }
+
+    draw() {
+        // Clear background
+        this.ctx.fillStyle = '#1a1a1a';
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        this.ctx.save();
+        
+        // Translate to Camera
+        this.ctx.translate(this.width/2 - this.camera.x, this.height/2 - this.camera.y);
+
+        // Draw World Boundaries
+        this.ctx.strokeStyle = '#333';
+        this.ctx.lineWidth = 5;
+        this.ctx.strokeRect(-WORLD_SIZE/2, -WORLD_SIZE/2, WORLD_SIZE, WORLD_SIZE);
+
+        // Draw Grid
+        this.drawGrid();
+
+        // Draw Food
+        // Optimization: Only draw food in view
+        let viewBuffer = 100;
+        let viewLeft = this.camera.x - this.width/2 - viewBuffer;
+        let viewRight = this.camera.x + this.width/2 + viewBuffer;
+        let viewTop = this.camera.y - this.height/2 - viewBuffer;
+        let viewBottom = this.camera.y + this.height/2 + viewBuffer;
+
+        for (let f of this.foods) {
+            if (f.pos.x > viewLeft && f.pos.x < viewRight && 
+                f.pos.y > viewTop && f.pos.y < viewBottom) {
+                f.draw(this.ctx);
+            }
+        }
+
+        // Draw Snakes
+        // Draw lower score snakes first (z-index essentially)
+        this.snakes.sort((a,b) => a.score - b.score);
+        
+        for (let s of this.snakes) {
+            // Check visibility rough bound
+            if (s.pos.x > viewLeft - 1000 && s.pos.x < viewRight + 1000 &&
+                s.pos.y > viewTop - 1000 && s.pos.y < viewBottom + 1000) {
+                s.draw(this.ctx);
+            }
+        }
+
+        this.ctx.restore();
+        
+        // Draw Minimap
+        this.drawMinimap();
+    }
+
+    drawGrid() {
+        const gridSize = 50;
+        this.ctx.beginPath();
+        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        this.ctx.lineWidth = 1;
+        
+        // Calculate grid offset to make it look infinite/fixed to world
+        let startX = Math.floor((this.camera.x - this.width/2) / gridSize) * gridSize;
+        let startY = Math.floor((this.camera.y - this.height/2) / gridSize) * gridSize;
+        
+        for (let x = startX; x < this.camera.x + this.width/2; x += gridSize) {
+            this.ctx.moveTo(x, this.camera.y - this.height/2);
+            this.ctx.lineTo(x, this.camera.y + this.height/2);
+        }
+        for (let y = startY; y < this.camera.y + this.height/2; y += gridSize) {
+            this.ctx.moveTo(this.camera.x - this.width/2, y);
+            this.ctx.lineTo(this.camera.x + this.width/2, y);
+        }
+        this.ctx.stroke();
+    }
+
+    drawMinimap() {
+        // Clear
+        this.mmCtx.clearRect(0,0, 150, 150);
+        
+        // Map world to minimap size
+        const scale = 150 / WORLD_SIZE;
+        const offset = 75; // Center is 0,0 in world, so 75,75 in minimap
+        
+        // Draw all snakes as dots
+        for(let s of this.snakes) {
+            this.mmCtx.fillStyle = s === this.player ? '#FFF' : s.color;
+            this.mmCtx.beginPath();
+            let mx = s.pos.x * scale + offset;
+            let my = s.pos.y * scale + offset;
+            this.mmCtx.arc(mx, my, s === this.player ? 3 : 2, 0, Math.PI*2);
+            this.mmCtx.fill();
+        }
+        
+        // Draw Viewport Rect
+        this.mmCtx.strokeStyle = 'rgba(255,255,255,0.5)';
+        this.mmCtx.strokeRect(
+            (this.camera.x - this.width/2) * scale + offset,
+            (this.camera.y - this.height/2) * scale + offset,
+            this.width * scale,
+            this.height * scale
+        );
+    }
+
+    updateUI() {
+        if(this.player) {
+            document.querySelector('#score-board span').innerText = Math.floor(this.player.score);
+        }
+        
+        // Update Leaderboard
+        let topSnakes = [...this.snakes].sort((a,b) => b.score - a.score).slice(0, 5);
+        let html = '';
+        topSnakes.forEach((s, i) => {
+            let isMe = s === this.player ? ' (You)' : '';
+            html += `<div class="lb-entry" style="color:${s.color}">
+                <span>#${i+1} ${s.name}${isMe}</span>
+                <span>${Math.floor(s.score)}</span>
+            </div>`;
+        });
+        document.getElementById('lb-list').innerHTML = html;
+    }
+
+    lerp(start, end, amt) {
+        return (1 - amt) * start + amt * end;
+    }
+}
+
+// Start Game
+const game = new Game();
+
+</script>
+</body>
+</html>

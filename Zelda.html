@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Zelda Lite Adventure</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* Sky Blue */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* Prevent zoom/scroll on mobile */
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .stat-box {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 20px;
+            color: white;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+        .heart { color: #ff4d4d; text-shadow: 0 0 5px red; }
+        .rupee { color: #4dff4d; text-shadow: 0 0 5px lime; }
+        
+        #controls-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            text-shadow: 1px 1px 2px black;
+            font-size: 14px;
+            text-align: center;
+            pointer-events: none;
+            background: rgba(0,0,0,0.4);
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        /* Mobile Controls */
+        #mobile-controls {
+            display: none;
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            height: 150px;
+            pointer-events: none;
+        }
+        .touch-btn {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            pointer-events: auto;
+            backdrop-filter: blur(4px);
+        }
+        #joystick-zone {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 120px;
+            height: 120px;
+            pointer-events: auto;
+        }
+        #action-btn {
+            bottom: 40px;
+            right: 30px;
+            width: 70px;
+            height: 70px;
+            background: rgba(255, 0, 0, 0.3);
+        }
+        #action-btn:active { background: rgba(255, 0, 0, 0.6); }
+
+        @media (pointer: coarse) {
+            #mobile-controls { display: block; }
+            #controls-hint { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="ui-layer">
+        <div class="stat-box">
+            <span class="heart">♥♥♥</span>
+            <span id="health-display">3</span>
+        </div>
+        <div class="stat-box">
+            <span class="rupee">♦</span>
+            <span id="score-display">0</span>
+        </div>
+    </div>
+
+    <div id="controls-hint">
+        WASD / Arrows to Move • SPACE to Attack • Collect Rupees • Defeat Enemies
+    </div>
+
+    <div id="mobile-controls">
+        <div id="joystick-zone"></div>
+        <div id="action-btn" class="touch-btn"></div>
+    </div>
+</div>
+
+<!-- Import Three.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- Simple Joystick Library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
+
+<script>
+/**
+ * Zelda Lite - 3D Adventure
+ * Built with Three.js
+ */
+
+// --- Game State & Constants ---
+const GAME_CONFIG = {
+    speed: 0.15,
+    turnSpeed: 0.08,
+    gravity: 0.02,
+    jumpForce: 0.5,
+    cameraHeight: 4,
+    cameraDistance: 8,
+    mapSize: 200,
+    enemyCount: 15,
+    rupeeCount: 30
+};
+
+let scene, camera, renderer, clock;
+let hero, sword, shield;
+let terrain;
+let mixers = []; // Animation mixers
+let enemies = [];
+let rupees = [];
+let particles = [];
+let inputs = { forward: false, backward: false, left: false, right: false, attack: false, jump: false };
+let joystickManager;
+
+let playerState = {
+    health: 3,
+    score: 0,
+    isAttacking: false,
+    velocityY: 0,
+    isGrounded: true,
+    invulnerable: false
+};
+
+// --- Initialization ---
+
+function init() {
+    // 1. Setup Scene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB);
+    scene.fog = new THREE.Fog(0x87CEEB, 20, 60); // Distance fog for atmosphere
+
+    // 2. Setup Camera
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    
+    // 3. Setup Renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.getElementById('game-container').appendChild(renderer.domElement);
+
+    // 4. Lights
+    setupLights();
+
+    // 5. Create World
+    createTerrain();
+    createEnvironment();
+
+    // 6. Create Player
+    createHero();
+
+    // 7. Create Entities
+    spawnEnemies();
+    spawnRupees();
+
+    // 8. Inputs
+    setupInputs();
+
+    // 9. Loop
+    clock = new THREE.Clock();
+    window.addEventListener('resize', onWindowResize, false);
+    animate();
+}
+
+function setupLights() {
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffee, 0.8);
+    dirLight.position.set(50, 100, 50);
+    dirLight.castShadow = true;
+    dirLight.shadow.camera.left = -50;
+    dirLight.shadow.camera.right = 50;
+    dirLight.shadow.camera.top = 50;
+    dirLight.shadow.camera.bottom = -50;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    scene.add(dirLight);
+}
+
+// --- World Generation ---
+
+function createTerrain() {
+    // Simple Green Ground
+    const geometry = new THREE.PlaneGeometry(GAME_CONFIG.mapSize, GAME_CONFIG.mapSize, 32, 32);
+    
+    // Modify vertices to make it hilly
+    const posAttribute = geometry.attributes.position;
+    for (let i = 0; i < posAttribute.count; i++) {
+        const x = posAttribute.getX(i);
+        const y = posAttribute.getY(i);
+        // Slight undulation
+        const z = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 2; 
+        posAttribute.setZ(i, z);
+    }
+    geometry.computeVertexNormals();
+
+    const material = new THREE.MeshStandardMaterial({ 
+        color: 0x57a639, // Grass Green
+        roughness: 1,
+        flatShading: true
+    });
+    
+    terrain = new THREE.Mesh(geometry, material);
+    terrain.rotation.x = -Math.PI / 2;
+    terrain.receiveShadow = true;
+    scene.add(terrain);
+}
+
+function createEnvironment() {
+    // Trees
+    const treeGeo = new THREE.ConeGeometry(1.5, 5, 6);
+    const trunkGeo = new THREE.CylinderGeometry(0.5, 0.5, 2, 6);
+    const treeMat = new THREE.MeshStandardMaterial({ color: 0x2d4c1e, flatShading: true });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3c31, flatShading: true });
+
+    for (let i = 0; i < 80; i++) {
+        const x = (Math.random() - 0.5) * GAME_CONFIG.mapSize * 0.9;
+        const z = (Math.random() - 0.5) * GAME_CONFIG.mapSize * 0.9;
+        
+        // Don't spawn too close to center (start area)
+        if (Math.abs(x) < 10 && Math.abs(z) < 10) continue;
+
+        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+        trunk.position.set(x, 1, z);
+        trunk.castShadow = true;
+        
+        const leaves = new THREE.Mesh(treeGeo, treeMat);
+        leaves.position.y = 3.5;
+        leaves.castShadow = true;
+        trunk.add(leaves);
+        
+        scene.add(trunk);
+    }
+
+    // Rocks
+    const rockGeo = new THREE.DodecahedronGeometry(1.5);
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x808080, flatShading: true });
+    
+    for(let i=0; i<30; i++) {
+        const rock = new THREE.Mesh(rockGeo, rockMat);
+        rock.position.set(
+            (Math.random() - 0.5) * GAME_CONFIG.mapSize * 0.8,
+            0.5,
+            (Math.random() - 0.5) * GAME_CONFIG.mapSize * 0.8
+        );
+        rock.scale.setScalar(Math.random() * 0.5 + 0.8);
+        rock.castShadow = true;
+        scene.add(rock);
+    }
+}
+
+// --- Character ---
+
+function createHero() {
+    hero = new THREE.Group();
+
+    // Body (Tunic)
+    const bodyGeo = new THREE.CylinderGeometry(0.3, 0.4, 1.2, 8);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0066cc }); // Blue tunic
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.6;
+    body.castShadow = true;
+    hero.add(body);
+
+    // Head
+    const headGeo = new THREE.SphereGeometry(0.35, 16, 16);
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xffdbac }); // Skin tone
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 1.3;
+    hero.add(head);
+
+    // Hair (Simple cap/hair)
+    const hairGeo = new THREE.ConeGeometry(0.36, 0.5, 16);
+    const hairMat = new THREE.MeshStandardMaterial({ color: 0xffd700 }); // Blonde
+    const hair = new THREE.Mesh(hairGeo, hairMat);
+    hair.position.y = 1.5;
+    hair.rotation.x = -0.2;
+    hero.add(hair);
+
+    // Sword Arm Pivot (for swinging)
+    const armPivot = new THREE.Group();
+    armPivot.position.set(0.4, 0.9, 0);
+    hero.add(armPivot);
+
+    // Sword
+    const hiltGeo = new THREE.BoxGeometry(0.1, 0.3, 0.1);
+    const bladeGeo = new THREE.BoxGeometry(0.05, 1.2, 0.02);
+    const silverMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.5, roughness: 0.2 });
+    const hiltMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+    
+    const hilt = new THREE.Mesh(hiltGeo, hiltMat);
+    hilt.position.y = 0.15;
+    hilt.rotation.x = Math.PI / 2;
+    
+    const blade = new THREE.Mesh(bladeGeo, silverMat);
+    blade.position.y = 0.75;
+    
+    sword = new THREE.Group();
+    sword.add(hilt);
+    sword.add(blade);
+    // Initial sword position
+    sword.rotation.x = Math.PI / 2; 
+    sword.rotation.z = -Math.PI / 4;
+    armPivot.add(sword);
+
+    hero.userData.armPivot = armPivot; // Reference for animation
+
+    // Shield
+    const shieldGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.05, 16);
+    const shieldMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+    shield = new THREE.Mesh(shieldGeo, shieldMat);
+    shield.position.set(-0.35, 0.9, 0.2);
+    shield.rotation.x = Math.PI / 2;
+    shield.rotation.z = Math.PI / 4;
+    hero.add(shield);
+
+    scene.add(hero);
+}
+
+function createEnemyBlob(x, z) {
+    const group = new THREE.Group();
+    
+    // Blob body
+    const geo = new THREE.SphereGeometry(0.6, 8, 8);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xff4444, roughness: 0.4 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 0.6;
+    mesh.castShadow = true;
+    
+    // Eyes
+    const eyeGeo = new THREE.SphereGeometry(0.1, 4, 4);
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const pupilMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+    const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+    leftEye.position.set(0.2, 0.7, 0.45);
+    const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+    rightEye.position.set(-0.2, 0.7, 0.45);
+
+    const leftPupil = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.05), pupilMat);
+    leftPupil.position.set(0.2, 0.7, 0.54);
+    const rightPupil = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.05), pupilMat);
+    rightPupil.position.set(-0.2, 0.7, 0.54);
+
+    group.add(mesh);
+    group.add(leftEye);
+    group.add(rightEye);
+    group.add(leftPupil);
+    group.add(rightPupil);
+
+    group.position.set(x, 0, z);
+    
+    // Enemy State
+    group.userData = {
+        type: 'enemy',
+        hp: 2,
+        lastAttack: 0,
+        speed: 0.03 + Math.random() * 0.02,
+        hopOffset: Math.random() * Math.PI
+    };
+
+    scene.add(group);
+    enemies.push(group);
+}
+
+function spawnEnemies() {
+    for(let i=0; i<GAME_CONFIG.enemyCount; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 10 + Math.random() * 40; // Spawn in a ring around start
+        createEnemyBlob(Math.sin(angle)*dist, Math.cos(angle)*dist);
+    }
+}
+
+function createRupee(x, z) {
+    const shape = new THREE.Shape();
+    // Hexagon shape
+    shape.moveTo(0, 0.4);
+    shape.lineTo(0.2, 0.2);
+    shape.lineTo(0.2, -0.2);
+    shape.lineTo(0, -0.4);
+    shape.lineTo(-0.2, -0.2);
+    shape.lineTo(-0.2, 0.2);
+    shape.lineTo(0, 0.4);
+
+    const extrudeSettings = { depth: 0.05, bevelEnabled: true, bevelSegments: 1, steps: 1, bevelSize: 0.05, bevelThickness: 0.05 };
+    const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    const material = new THREE.MeshStandardMaterial({ 
+        color: 0x4dff4d, 
+        emissive: 0x004400,
+        metalness: 0.8,
+        roughness: 0.2
+    });
+    
+    const rupee = new THREE.Mesh(geometry, material);
+    rupee.position.set(x, 1, z);
+    rupee.castShadow = true;
+    
+    rupee.userData = { type: 'rupee', bobOffset: Math.random() * Math.PI };
+    
+    scene.add(rupee);
+    rupees.push(rupee);
+}
+
+function spawnRupees() {
+    for(let i=0; i<GAME_CONFIG.rupeeCount; i++) {
+        const x = (Math.random() - 0.5) * GAME_CONFIG.mapSize * 0.8;
+        const z = (Math.random() - 0.5) * GAME_CONFIG.mapSize * 0.8;
+        createRupee(x, z);
+    }
+}
+
+function createParticle(pos, color) {
+    const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+    const mat = new THREE.MeshBasicMaterial({ color: color });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    
+    const vel = new THREE.Vector3(
+        (Math.random()-0.5) * 0.2,
+        Math.random() * 0.2 + 0.1,
+        (Math.random()-0.5) * 0.2
+    );
+
+    scene.add(mesh);
+    particles.push({ mesh, vel, life: 1.0 });
+}
+
+// --- Input Handling ---
+
+function setupInputs() {
+    // Keyboard
+    document.addEventListener('keydown', (e) => {
+        switch(e.code) {
+            case 'ArrowUp': case 'KeyW': inputs.forward = true; break;
+            case 'ArrowDown': case 'KeyS': inputs.backward = true; break;
+            case 'ArrowLeft': case 'KeyA': inputs.left = true; break;
+            case 'ArrowRight': case 'KeyD': inputs.right = true; break;
+            case 'Space': inputs.attack = true; break;
+        }
+    });
+    document.addEventListener('keyup', (e) => {
+        switch(e.code) {
+            case 'ArrowUp': case 'KeyW': inputs.forward = false; break;
+            case 'ArrowDown': case 'KeyS': inputs.backward = false; break;
+            case 'ArrowLeft': case 'KeyA': inputs.left = false; break;
+            case 'ArrowRight': case 'KeyD': inputs.right = false; break;
+            case 'Space': inputs.attack = false; break;
+        }
+    });
+
+    // Mobile Touch
+    joystickManager = nipplejs.create({
+        zone: document.getElementById('joystick-zone'),
+        mode: 'static',
+        position: { left: '60px', bottom: '60px' },
+        color: 'white'
+    });
+
+    joystickManager.on('move', (evt, data) => {
+        const angle = data.angle.degree;
+        const force = Math.min(data.force, 1); // 0 to 1
+        
+        // Map angle to inputs (Rough approximation for simplicity)
+        inputs.forward = (angle > 45 && angle < 135);
+        inputs.backward = (angle > 225 && angle < 315);
+        inputs.right = (angle < 45 || angle > 315);
+        inputs.left = (angle > 135 && angle < 225);
+        
+        // Refined 360 movement would require changing rotation logic, keeping it simple for now
+    });
+
+    joystickManager.on('end', () => {
+        inputs.forward = inputs.backward = inputs.left = inputs.right = false;
+    });
+
+    document.getElementById('action-btn').addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        inputs.attack = true;
+        setTimeout(() => inputs.attack = false, 200);
+    });
+}
+
+// --- Game Logic ---
+
+function updatePlayer() {
+    if (!hero) return;
+
+    // Movement
+    if (inputs.forward) {
+        hero.translateZ(GAME_CONFIG.speed);
+    }
+    if (inputs.backward) {
+        hero.translateZ(-GAME_CONFIG.speed * 0.6);
+    }
+    if (inputs.left) {
+        hero.rotation.y += GAME_CONFIG.turnSpeed;
+    }
+    if (inputs.right) {
+        hero.rotation.y -= GAME_CONFIG.turnSpeed;
+    }
+
+    // Attack Animation
+    const arm = hero.userData.armPivot;
+    if (inputs.attack && !playerState.isAttacking) {
+        playerState.isAttacking = true;
+        let frame = 0;
+        const swing = () => {
+            frame++;
+            // Simple swipe animation
+            arm.rotation.y -= 0.3;
+            arm.rotation.x -= 0.1;
+            
+            // Hit detection window
+            if (frame > 2 && frame < 8) checkHit();
+
+            if (frame < 10) {
+                requestAnimationFrame(swing);
+            } else {
+                // Reset
+                arm.rotation.set(0, 0, 0);
+                sword.rotation.set(Math.PI/2, 0, -Math.PI/4); // Reset sword specifically
+                playerState.isAttacking = false;
+            }
+        };
+        swing();
+    }
+
+    // Simple Ground Clamp (No complex physics/jumping in this lite version to keep code small)
+    // Just follow terrain height roughly
+    hero.position.y = 0; 
+    // (Optional: Raycast down to set Y to terrain height would be better, but flat plane + bumps is ok)
+}
+
+function checkHit() {
+    const swordPos = new THREE.Vector3();
+    sword.getWorldPosition(swordPos);
+
+    // Check Enemies
+    for (let i = enemies.length - 1; i >= 0; i--) {
+        const enemy = enemies[i];
+        const dist = hero.position.distanceTo(enemy.position);
+        
+        // Distance + Angle check (is enemy in front?)
+        const dirToEnemy = new THREE.Vector3().subVectors(enemy.position, hero.position).normalize();
+        const heroDir = new THREE.Vector3();
+        hero.getWorldDirection(heroDir);
+        const angle = heroDir.dot(dirToEnemy);
+
+        if (dist < 2.5 && angle > 0.5) {
+            // Hit!
+            enemy.userData.hp--;
+            // Knockback
+            const kb = dirToEnemy.multiplyScalar(1);
+            enemy.position.add(kb);
+
+            // Flash White
+            enemy.children[0].material.emissive.setHex(0xffffff);
+            setTimeout(() => {
+                if(enemy) enemy.children[0].material.emissive.setHex(0x000000);
+            }, 100);
+
+            createParticle(enemy.position, 0xff0000);
+
+            if (enemy.userData.hp <= 0) {
+                scene.remove(enemy);
+                enemies.splice(i, 1);
+                createParticle(enemy.position, 0x555555);
+            }
+            return; // Hit one enemy per frame max
+        }
+    }
+}
+
+function updateEnemies() {
+    const time = clock.getElapsedTime();
+
+    enemies.forEach(enemy => {
+        // Bobbing animation
+        enemy.children[0].position.y = 0.6 + Math.sin(time * 10 + enemy.userData.hopOffset) * 0.1;
+
+        // AI: Move to player
+        const dist = enemy.position.distanceTo(hero.position);
+        if (dist < 15 && dist > 1.2) {
+            const dir = new THREE.Vector3().subVectors(hero.position, enemy.position).normalize();
+            enemy.position.add(dir.multiplyScalar(enemy.userData.speed));
+            enemy.lookAt(hero.position);
+        }
+
+        // Attack Player
+        if (dist < 1.5 && !playerState.invulnerable) {
+            playerState.health--;
+            updateUI();
+            
+            // Knockback player
+            const dir = new THREE.Vector3().subVectors(hero.position, enemy.position).normalize();
+            hero.position.add(dir.multiplyScalar(2));
+
+            playerState.invulnerable = true;
+            hero.children[0].material.opacity = 0.5;
+            hero.children[0].material.transparent = true;
+            
+            setTimeout(() => {
+                playerState.invulnerable = false;
+                hero.children[0].material.opacity = 1;
+                hero.children[0].material.transparent = false;
+            }, 1000);
+
+            if (playerState.health <= 0) {
+                alert("Game Over! Refresh to restart.");
+                location.reload();
+            }
+        }
+    });
+}
+
+function updateRupees() {
+    const time = clock.getElapsedTime();
+    for (let i = rupees.length - 1; i >= 0; i--) {
+        const rupee = rupees[i];
+        rupee.rotation.y += 0.05;
+        rupee.position.y = 1 + Math.sin(time * 3 + rupee.userData.bobOffset) * 0.2;
+
+        if (hero.position.distanceTo(rupee.position) < 1.5) {
+            scene.remove(rupee);
+            rupees.splice(i, 1);
+            playerState.score += 1; // Green rupee = 1
+            updateUI();
+            createParticle(rupee.position, 0x4dff4d);
+        }
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life -= 0.05;
+        p.mesh.position.add(p.vel);
+        p.mesh.rotation.x += 0.1;
+        p.mesh.rotation.y += 0.1;
+        p.mesh.scale.setScalar(p.life); // Shrink
+
+        if (p.life <= 0) {
+            scene.remove(p.mesh);
+            particles.splice(i, 1);
+        }
+    }
+}
+
+function updateCamera() {
+    if (!hero) return;
+
+    // Calculate ideal camera position
+    // Start with offset relative to player
+    const relativeOffset = new THREE.Vector3(0, GAME_CONFIG.cameraHeight, -GAME_CONFIG.cameraDistance);
+    
+    // Apply player's rotation to the offset
+    const cameraOffset = relativeOffset.applyMatrix4(hero.matrixWorld);
+
+    // Smoothly interpolate camera position
+    camera.position.lerp(cameraOffset, 0.1);
+    camera.lookAt(hero.position.x, hero.position.y + 1.5, hero.position.z);
+}
+
+function updateUI() {
+    let heartStr = "";
+    for(let i=0; i<playerState.health; i++) heartStr += "♥";
+    document.querySelector(".heart").innerHTML = heartStr;
+    document.getElementById("health-display").innerText = playerState.health;
+    document.getElementById("score-display").innerText = playerState.score;
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// --- Main Loop ---
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    updatePlayer();
+    updateEnemies();
+    updateRupees();
+    updateParticles();
+    updateCamera();
+
+    renderer.render(scene, camera);
+}
+
+// Start
+init();
+
+</script>
+</body>
+</html>

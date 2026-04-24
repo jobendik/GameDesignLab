@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WORD FORTS</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #222; font-family: 'Courier New', Courier, monospace; }
+        canvas { display: block; }
+        
+        #ui-layer {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 600px;
+            display: flex;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        #word-input {
+            pointer-events: auto;
+            flex-grow: 1;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #fff;
+            color: #fff;
+            font-size: 1.5rem;
+            padding: 15px;
+            text-transform: uppercase;
+            outline: none;
+            font-family: inherit;
+            text-align: center;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        #help-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #aaa;
+            background: rgba(0,0,0,0.5);
+            padding: 15px;
+            border-radius: 8px;
+            pointer-events: none;
+        }
+        h2 { margin: 0 0 10px 0; color: #fff; font-size: 1rem; text-transform: uppercase; }
+        .cmd-group { margin-bottom: 10px; font-size: 0.8rem; }
+        .cmd-title { color: #888; font-weight: bold; margin-bottom: 2px; }
+        .cmd-list { color: #ddd; }
+
+        #status-display {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            text-align: right;
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+
+        .highlight { color: #00f0ff; }
+        .enemy-highlight { color: #ff0055; }
+
+        /* Game Over Overlay */
+        #game-over {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            z-index: 100;
+            display: none;
+        }
+        button {
+            margin-top: 20px;
+            padding: 10px 30px;
+            font-size: 1.2rem;
+            background: #fff;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="help-panel">
+        <h2>Commands</h2>
+        <div class="cmd-group">
+            <div class="cmd-title">BUILD (DEFEND)</div>
+            <div class="cmd-list">WALL, BOX, ROOF, TALL</div>
+        </div>
+        <div class="cmd-group">
+            <div class="cmd-title">ATTACK (SHOOT)</div>
+            <div class="cmd-list">ROCK, BOMB, ARROW</div>
+        </div>
+    </div>
+
+    <div id="status-display">
+        <span class="highlight">YOU</span> vs <span class="enemy-highlight">ENEMY</span>
+    </div>
+
+    <div id="game-over">
+        <h1 id="winner-text">GAME OVER</h1>
+        <button onclick="location.reload()">REMATCH</button>
+    </div>
+
+    <div id="ui-layer">
+        <input type="text" id="word-input" placeholder="Type a word..." autocomplete="off" autofocus>
+    </div>
+
+    <canvas id="world"></canvas>
+
+<script>
+    // --- MATTER.JS SETUP ---
+    const Engine = Matter.Engine,
+          Render = Matter.Render,
+          Runner = Matter.Runner,
+          Bodies = Matter.Bodies,
+          Composite = Matter.Composite,
+          Events = Matter.Events,
+          Body = Matter.Body,
+          Vector = Matter.Vector;
+
+    // Create engine
+    const engine = Engine.create();
+    const world = engine.world;
+    engine.gravity.y = 1;
+
+    // Canvas
+    const canvas = document.getElementById('world');
+    const ctx = canvas.getContext('2d');
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+
+    // Constants
+    const PLATFORM_HEIGHT = 200;
+    const GROUND_Y = height - 50;
+    const LEFT_BASE_X = width * 0.2;
+    const RIGHT_BASE_X = width * 0.8;
+    
+    // Game State
+    let playerKing, enemyKing;
+    let gameActive = true;
+
+    // --- INITIALIZATION ---
+    
+    // 1. Static Bodies (Ground & Platforms)
+    const ground = Bodies.rectangle(width/2, height + 50, width, 100, { isStatic: true });
+    
+    const leftPlat = Bodies.rectangle(LEFT_BASE_X, height - PLATFORM_HEIGHT, 300, 20, { 
+        isStatic: true, 
+        render: { fillStyle: '#444' } 
+    });
+    
+    const rightPlat = Bodies.rectangle(RIGHT_BASE_X, height - PLATFORM_HEIGHT, 300, 20, { 
+        isStatic: true, 
+        render: { fillStyle: '#444' } 
+    });
+
+    Composite.add(world, [ground, leftPlat, rightPlat]);
+
+    // 2. Kings (The targets)
+    function createKing(x, y, isPlayer) {
+        const king = Bodies.rectangle(x, y - 40, 40, 60, {
+            density: 0.005, // Slightly heavy
+            friction: 0.5,
+            render: { fillStyle: isPlayer ? '#00f0ff' : '#ff0055' },
+            label: "KING"
+        });
+        king.isPlayer = isPlayer;
+        Composite.add(world, king);
+        return king;
+    }
+
+    playerKing = createKing(LEFT_BASE_X, height - PLATFORM_HEIGHT - 10, true);
+    enemyKing = createKing(RIGHT_BASE_X, height - PLATFORM_HEIGHT - 10, false);
+
+    // --- WORD LOGIC ---
+    
+    const WORDS = {
+        // BUILD
+        'WALL': { type: 'rect', w: 120, h: 20, color: '#888' },
+        'PLANK': { type: 'rect', w: 150, h: 10, color: '#a67c52' },
+        'BOX': { type: 'rect', w: 50, h: 50, color: '#aaa' },
+        'BLOCK': { type: 'rect', w: 60, h: 60, color: '#999' },
+        'TALL': { type: 'rect', w: 20, h: 100, color: '#ddd' },
+        'ROOF': { type: 'poly', sides: 3, radius: 40, color: '#d45500' },
+        
+        // ATTACK
+        'ROCK': { type: 'circle', radius: 15, density: 0.005, color: '#555', projectile: true },
+        'BOMB': { type: 'circle', radius: 25, density: 0.01, restitution: 0.8, color: '#333', projectile: true, explosive: true },
+        'ARROW': { type: 'rect', w: 60, h: 5, density: 0.002, color: '#fff', projectile: true, speed: 25 },
+        'BULLET': { type: 'circle', radius: 5, density: 0.02, color: '#ff0', projectile: true, speed: 35 }
+    };
+
+    function processWord(text, isPlayer) {
+        const word = text.toUpperCase();
+        const def = WORDS[word];
+        const spawnX = isPlayer ? LEFT_BASE_X : RIGHT_BASE_X;
+        const spawnY = height - PLATFORM_HEIGHT - 150; // Above base
+        
+        let body;
+
+        // 1. Determine Shape
+        if (def) {
+            // Pre-defined word
+            if (def.type === 'rect') {
+                body = Bodies.rectangle(spawnX, spawnY, def.w, def.h, {
+                    render: { fillStyle: def.color },
+                    density: def.density || 0.001
+                });
+            } else if (def.type === 'circle') {
+                body = Bodies.circle(spawnX, spawnY, def.radius, {
+                    render: { fillStyle: def.color },
+                    density: def.density || 0.001,
+                    restitution: def.restitution || 0
+                });
+            } else if (def.type === 'poly') {
+                body = Bodies.polygon(spawnX, spawnY, def.sides, def.radius, {
+                    render: { fillStyle: def.color }
+                });
+            }
+        } else {
+            // Generic fallback based on length
+            const width = Math.min(200, Math.max(30, text.length * 20));
+            body = Bodies.rectangle(spawnX, spawnY, width, 30, {
+                render: { fillStyle: isPlayer ? '#88ccff' : '#ff8888' }
+            });
+        }
+
+        // 2. Projectile Logic
+        if (def && def.projectile) {
+            // Shoot towards enemy
+            const targetX = isPlayer ? RIGHT_BASE_X : LEFT_BASE_X;
+            const targetY = height - PLATFORM_HEIGHT;
+            
+            // Calculate angle
+            const angle = Math.atan2(targetY - spawnY, targetX - spawnX);
+            // Add some randomness/arc
+            const arc = -0.2; // Slight upward arc
+            
+            const force = def.speed || 18; // Base speed
+            
+            // Start slightly forward so we don't hit our own tower
+            const offset = isPlayer ? 60 : -60;
+            Body.setPosition(body, { x: spawnX + offset, y: spawnY });
+
+            Body.setVelocity(body, {
+                x: Math.cos(angle + arc) * force * (isPlayer ? 1 : -1), // Only X direction matters mostly for simple shooting logic, but let's use vectors
+                y: Math.sin(angle + arc) * force
+            });
+            
+            // For simple shooting left/right
+            if(isPlayer) Body.setVelocity(body, { x: force, y: -5 });
+            else Body.setVelocity(body, { x: -force, y: -5 });
+
+        } else {
+            // Just drop it (Building)
+            // Add slight random rotation for natural stacking
+            Body.rotate(body, (Math.random() - 0.5) * 0.2);
+            // Random x offset so they don't stack perfectly straight
+            Body.translate(body, { x: (Math.random() - 0.5) * 40, y: 0 });
+        }
+
+        // Add label for rendering text
+        body.label = word;
+        Composite.add(world, body);
+    }
+
+    // --- INPUT ---
+    const input = document.getElementById('word-input');
+    
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const text = input.value.trim();
+            if (text && gameActive) {
+                processWord(text, true); // Player Spawn
+                input.value = '';
+                
+                // Camera shake effect check?
+                if(WORDS[text.toUpperCase()]?.projectile) shakeCamera(5);
+            }
+        }
+    });
+
+    // --- BOT AI ---
+    // Simple bot that randomly builds or attacks
+    setInterval(() => {
+        if (!gameActive) return;
+        
+        const moves = ['WALL', 'BOX', 'ROCK', 'ROCK', 'ARROW', 'ROOF', 'TALL', 'BOMB'];
+        const randomMove = moves[Math.floor(Math.random() * moves.length)];
+        
+        processWord(randomMove, false); // Enemy Spawn
+        
+    }, 2000); // Action every 2 seconds
+
+    // --- RENDERING LOOP ---
+    // Custom render to draw text on bodies
+    
+    function draw() {
+        // Clear
+        ctx.fillStyle = '#222';
+        ctx.fillRect(0, 0, width, height);
+        
+        // Camera Shake
+        let shakeX = 0, shakeY = 0;
+        if(shakeTimer > 0) {
+            shakeX = (Math.random() - 0.5) * shakeMagnitude;
+            shakeY = (Math.random() - 0.5) * shakeMagnitude;
+            shakeTimer--;
+        }
+
+        ctx.save();
+        ctx.translate(shakeX, shakeY);
+
+        // Draw Ground/Platforms
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, height-50, width, 100);
+        
+        // Draw Bodies
+        const bodies = Composite.allBodies(world);
+        
+        bodies.forEach(body => {
+            if (body.render.visible === false) return;
+            
+            ctx.beginPath();
+            const vertices = body.vertices;
+            ctx.moveTo(vertices[0].x, vertices[0].y);
+            for (let j = 1; j < vertices.length; j += 1) {
+                ctx.lineTo(vertices[j].x, vertices[j].y);
+            }
+            ctx.lineTo(vertices[0].x, vertices[0].y);
+            
+            ctx.fillStyle = body.render.fillStyle || '#ccc';
+            ctx.fill();
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw Text Label
+            if (body.label && body.label !== 'Rectangle Body' && body.label !== 'Circle Body' && body.label !== 'Polygon Body') {
+                ctx.save();
+                ctx.translate(body.position.x, body.position.y);
+                ctx.rotate(body.angle);
+                ctx.fillStyle = "rgba(0,0,0,0.6)";
+                ctx.font = "bold 12px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(body.label, 0, 0);
+                ctx.restore();
+            }
+            
+            // Draw Kings Crown Icon (Simple)
+            if (body.label === 'KING') {
+                ctx.save();
+                ctx.translate(body.position.x, body.position.y);
+                ctx.rotate(body.angle);
+                ctx.fillStyle = "gold";
+                ctx.font = "24px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText("👑", 0, 0);
+                ctx.restore();
+            }
+        });
+
+        ctx.restore();
+    }
+
+    // --- GAME LOOP ---
+    let shakeTimer = 0;
+    let shakeMagnitude = 0;
+
+    function shakeCamera(amount) {
+        shakeTimer = 10;
+        shakeMagnitude = amount;
+    }
+
+    function checkWinCondition() {
+        if (!gameActive) return;
+
+        // Check if Kings have fallen significantly below platform level
+        const threshold = height - PLATFORM_HEIGHT + 100;
+        
+        if (playerKing.position.y > threshold) {
+            gameOver("ENEMY WINS");
+        } else if (enemyKing.position.y > threshold) {
+            gameOver("YOU WIN");
+        }
+    }
+
+    function gameOver(text) {
+        gameActive = false;
+        document.getElementById('game-over').style.display = 'flex';
+        document.getElementById('winner-text').innerText = text;
+        if(text === "YOU WIN") document.getElementById('winner-text').style.color = "#00f0ff";
+        else document.getElementById('winner-text').style.color = "#ff0055";
+    }
+
+    (function loop() {
+        Runner.tick(Runner.create(), engine, 1000 / 60);
+        draw();
+        checkWinCondition();
+        requestAnimationFrame(loop);
+    })();
+
+    // Resize
+    window.addEventListener('resize', () => {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+        // Re-position static ground
+        Body.setPosition(ground, { x: width/2, y: height + 50 });
+    });
+
+</script>
+</body>
+</html>
