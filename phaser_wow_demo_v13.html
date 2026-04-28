@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Lysarkivet – versjon 13</title>
+<title>Lysarkivet – Ferdig spillversjon</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#091126;font-family:Georgia,"Times New Roman",serif}
 #game{width:100%;height:100%}
@@ -22,14 +22,45 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#091126;fon
 .em{color:#bfeeff}
 .warn{color:#ffd7a5}
 .good{color:#d8ffb6}
+
+:root{
+  --glass: rgba(8,14,34,.66);
+  --line: rgba(207,239,255,.14);
+  --text: rgba(246,250,255,.94);
+  --gold:#fff1b8;
+  --cyan:#bfeeff;
+}
+body::before{
+  content:"";position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(circle at 50% 16%,rgba(165,205,255,.16),transparent 32%),
+             radial-gradient(circle at 84% 78%,rgba(255,182,118,.10),transparent 28%),
+             linear-gradient(to bottom,rgba(255,255,255,.03),rgba(0,0,0,.12));
+  mix-blend-mode:screen;
+}
+body::after{
+  content:"";position:fixed;inset:0;z-index:2;pointer-events:none;
+  background:linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px);
+  background-size:100% 4px;opacity:.24;
+}
+.hud,.quest,.stats,.hint{z-index:6;background:var(--glass)!important;border-color:var(--line)!important;box-shadow:0 16px 55px rgba(0,0,0,.30), inset 0 1px 0 rgba(255,255,255,.06)!important}
+.hud strong{color:var(--gold);text-shadow:0 0 22px rgba(191,238,255,.55)}
+.hud{font-size:14px}.quest,.stats,.hint{font-size:14px}.hint{bottom:18px}
+.good{color:#d9ffc2}.warn{color:#ffd2af}.em{color:#bdefff}
+@media (max-width: 900px){
+  .hud{left:10px;right:10px;top:8px;max-width:none;padding:10px 12px;font-size:12px}.hud strong{font-size:22px}
+  .quest{left:10px;top:84px;min-width:0;right:10px;font-size:12px;padding:9px 11px}
+  .stats{left:10px;top:auto;bottom:92px;min-width:0;right:auto;font-size:12px;padding:8px 10px}
+  .hint{left:10px;right:10px;bottom:8px;max-width:none;font-size:12px;padding:8px 10px}
+}
+
 </style>
 </head>
 <body>
 <div id="game"></div>
-<div class="hud"><strong>Lysarkivet</strong>A/D eller piltaster = gå · Space/W/↑ = hopp · Shift = dash · E/Enter = snakk/aktiver · Farlige skygger og torner skader deg · Du gjenfødes ved siste lysvarde.</div>
+<div class="hud"><strong>Lysarkivet</strong>A/D eller piltaster = gå · Space/W/↑ = hopp · Shift = dash · E/Enter = snakk/aktiver · F = fullskjerm · M = lyd av/på · Gamepad og touch støttes.</div>
 <div class="quest" id="questBox"></div>
 <div class="stats" id="statsBox"></div>
-<div class="hint" id="hintBox">Versjon 13: bedre pacing, smartere fiender, ekte animasjoner, pause/restart og en langt mer dramatisk boss-jakt mot porten.</div>
+<div class="hint" id="hintBox">Ferdig spillversjon: mer presise kontroller, ekstra samleobjekter, bedre onboarding, gamepad/touch, fullskjerm, resultatskjerm og tydeligere mål.</div>
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
 <script>
@@ -50,6 +81,7 @@ new Phaser.Game({
   backgroundColor: '#091126',
   physics: { default: 'arcade', arcade: { gravity: { y: 1800 }, debug: false } },
   scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+  input: { gamepad: true },
   scene: { preload, create, update }
 });
 
@@ -80,6 +112,26 @@ function create(){
   s.pausedGame = false;
   s.currentAreaIndex = -1;
   s.audioMood = 'calm';
+  s.elapsedMs = 0;
+  s.runStartedAt = 0;
+  s.deathCount = 0;
+  s.lightShardCount = 0;
+  s.lightShardTarget = 12;
+  s.score = 0;
+  s.bestTimeKey = 'lysarkivet_best_time_ms_v_finished';
+  s.controlScheme = 'keyboard';
+  s.muted = false;
+  s.coyoteTimeMs = 120;
+  s.jumpBufferMs = 140;
+  s.lastOnFloorAt = 0;
+  s.jumpBufferUntil = 0;
+  s.dashBufferUntil = 0;
+  s.airDashAvailable = true;
+  s.touchWasJumpDown = false;
+  s.touchWasDashDown = false;
+  s.padWasJumpDown = false;
+  s.padWasDashDown = false;
+  s.padMenuWasDown = false;
 
   s.maxHealth = 5;
   s.health = 5;
@@ -103,6 +155,7 @@ function create(){
   createPlayer(s);
   createCrumblePlatforms(s);
   createEffects(s);
+  createPolishSystems(s);
   createNPCs(s);
   createCreatures(s);
   createQuestPages(s);
@@ -126,6 +179,8 @@ function create(){
     if (s.endingOverlay) { s.endingOverlay.x = gs.width / 2; s.endingOverlay.y = gs.height / 2; }
     if (s.toastLayer) { s.toastLayer.x = gs.width / 2; s.toastLayer.y = 90; }
     if (s.pauseMenu) { s.pauseMenu.x = gs.width / 2; s.pauseMenu.y = gs.height / 2; }
+    if (s.touchControls) layoutTouchControls(s);
+    if (s.objectiveMarker) layoutObjectiveMarker(s);
   };
   s.scale.on('resize', s.resizeHandler);
 
@@ -142,8 +197,13 @@ function update(time, delta){
   }
 
   updateAreaPacing(s);
+  updateGamepadMenuInput(s);
   updateAudioMood(s);
+  updateGameClock(s, delta);
+  updateMovingPlatforms(s, time);
   updatePlayerMovement(s, time);
+  updateLightShards(s, time);
+  updateObjectiveMarker(s);
   updateNearbyNpc(s);
   updateNearbyBeacon(s);
   updateQuestCollectibles(s);
@@ -213,7 +273,7 @@ function ensureAudio(s){
 }
 
 function playChime(s, f1, f2, gainLevel = 0.03){
-  if (!s.audioCtx) return;
+  if (!s.audioCtx || s.muted) return;
   const ctx = s.audioCtx;
   const t = ctx.currentTime;
   const osc = ctx.createOscillator();
@@ -231,7 +291,7 @@ function playChime(s, f1, f2, gainLevel = 0.03){
 }
 
 function playStormPulse(s){
-  if (!s.audioCtx) return;
+  if (!s.audioCtx || s.muted) return;
   const ctx = s.audioCtx;
   const t = ctx.currentTime;
   const osc = ctx.createOscillator();
@@ -338,6 +398,19 @@ function createTextures(s){
     g.fillStyle(0xfff4c0, 1); g.fillCircle(32, 16, 10);
     g.fillStyle(0xffffff, .7); g.fillCircle(32, 16, 4);
   }, 64, 64);
+
+  make('lightShard', g => {
+    g.fillStyle(0xbff6ff, .18); g.fillCircle(24, 24, 22);
+    g.fillStyle(0xfff4bd, 1); g.fillTriangle(24, 2, 36, 24, 24, 46);
+    g.fillStyle(0xbceeff, .95); g.fillTriangle(24, 2, 12, 24, 24, 46);
+    g.lineStyle(2, 0xffffff, .75); g.strokeCircle(24, 24, 16);
+    g.fillStyle(0xffffff, .85); g.fillCircle(24, 24, 4);
+  }, 48, 48);
+
+  make('objectiveArrow', g => {
+    g.fillStyle(0xfff2b8, 1); g.fillTriangle(18, 0, 36, 32, 0, 32);
+    g.lineStyle(2, 0xffffff, .65); g.strokeTriangle(18, 0, 36, 32, 0, 32);
+  }, 36, 34);
 }
 
 
@@ -1044,6 +1117,10 @@ function updateAreaPacing(s){
 
 function updateAudioMood(s){
   if (!s.audioPads || !s.audioPads.length) return;
+  if (s.muted) {
+    s.audioPads.forEach(pad => pad.gain.gain.value = 0.0001);
+    return;
+  }
   const targets = {
     calm: [0.016, 0.010, 0.006],
     tense: [0.018, 0.013, 0.009],
@@ -1159,7 +1236,7 @@ function createStoryIntro(s){
     'og løp dersom mørket våkner bak deg.',
     { fontFamily: 'Georgia, serif', fontSize: '31px', color: '#f5f1ff', align: 'center', lineSpacing: 10 }
   ).setOrigin(.5);
-  const prompt = s.add.text(0, 136, 'Trykk E eller Enter for å begynne', { fontFamily: 'Arial', fontSize: '24px', color: '#dff7ff' }).setOrigin(.5);
+  const prompt = s.add.text(0, 136, 'Trykk E / Enter / gamepad A for å begynne', { fontFamily: 'Arial', fontSize: '24px', color: '#dff7ff' }).setOrigin(.5);
   s.tweens.add({ targets: prompt, alpha: { from: .45, to: 1 }, duration: 900, yoyo: true, repeat: -1 });
   s.intro.add([bg, glow, title, body, prompt]);
 }
@@ -1213,7 +1290,9 @@ function bindKeys(s){
     interact: Phaser.Input.Keyboard.KeyCodes.E,
     enter: Phaser.Input.Keyboard.KeyCodes.ENTER,
     pause: Phaser.Input.Keyboard.KeyCodes.P,
-    restart: Phaser.Input.Keyboard.KeyCodes.R
+    restart: Phaser.Input.Keyboard.KeyCodes.R,
+    fullscreen: Phaser.Input.Keyboard.KeyCodes.F,
+    mute: Phaser.Input.Keyboard.KeyCodes.M
   });
 
   const interactHandler = () => handleInteract(s);
@@ -1223,6 +1302,14 @@ function bindKeys(s){
   s.input.keyboard.on('keydown-ESC', () => { if (s.storyStarted) togglePause(s); });
   s.input.keyboard.on('keydown-P', () => { if (s.storyStarted) togglePause(s); });
   s.input.keyboard.on('keydown-R', () => restartRun(s));
+  s.input.keyboard.on('keydown-F', () => toggleFullscreen(s));
+  s.input.keyboard.on('keydown-M', () => toggleMute(s));
+
+  s.input.gamepad?.once('connected', pad => {
+    s.controlScheme = 'gamepad';
+    showToast(s, 'Gamepad koblet til.', '#dff7ff');
+    refreshUI(s);
+  });
 }
 
 function handleInteract(s){
@@ -1231,7 +1318,9 @@ function handleInteract(s){
 
   if (!s.storyStarted) {
     s.storyStarted = true;
+    s.runStartedAt = s.time.now;
     s.tweens.add({ targets: s.intro, alpha: 0, y: s.scale.height / 2 - 30, duration: 500, onComplete: () => s.intro.setVisible(false) });
+    showToast(s, 'Reisen begynner. Samle lysfragmenter for bonuspoeng.', '#dff7ff');
     refreshUI(s);
     return;
   }
@@ -1412,17 +1501,31 @@ function completeGame(s){
   playChime(s, 659.25, 987.77, 0.06);
   s.cameras.main.flash(500, 220, 245, 255);
 
+  const finalMs = s.elapsedMs || 0;
+  const previousBest = Number(localStorage.getItem(s.bestTimeKey) || 0);
+  const isBest = !previousBest || finalMs < previousBest;
+  if (isBest) localStorage.setItem(s.bestTimeKey, String(finalMs));
+  const completionBonus = 1000 + s.questCount * 300 + s.beaconCount * 450 + s.secretCount * 250 + s.lightShardCount * 125;
+  const survivalBonus = Math.max(0, 1000 - s.deathCount * 250);
+  const speedBonus = Math.max(0, 1800 - Math.floor(finalMs / 100));
+  s.score += completionBonus + survivalBonus + speedBonus;
+  const grade = s.deathCount === 0 && s.lightShardCount === s.lightShardTarget && finalMs < 180000 ? 'S' :
+    s.deathCount <= 1 && s.lightShardCount >= 9 ? 'A' :
+    s.deathCount <= 3 ? 'B' : 'C';
+
   const bonusLine = s.secretCount >= s.secretTarget
     ? 'Du fant også alle de skjulte minnene.\nVerden kjennes nå mer virkelig, mer bebodd, mer din.'
     : 'Det finnes fortsatt skjulte minner her,\nom du vil la verden leve videre senere.';
 
   s.endingBody.setText(
     'Du nådde porten mens stormen presset bak deg.\n\n' +
-    'Nå føles dette ikke lenger som en prototype,\nmen som begynnelsen på et ordentlig eventyr.\n\n' +
+    'Resultat: grad ' + grade + ' · ' + formatTime(finalMs) + ' · ' + s.score + ' poeng\n' +
+    (isBest ? 'Ny beste tid!' : 'Beste tid: ' + formatTime(previousBest)) + '\n\n' +
     bonusLine + '\n\n' +
-    'Resultat: ' + s.questCount + '/' + s.questTarget + ' sider · ' +
-    s.beaconCount + '/' + s.beaconTarget + ' lysvarder · ' +
-    s.secretCount + '/' + s.secretTarget + ' skjulte minner'
+    'Sider ' + s.questCount + '/' + s.questTarget + ' · ' +
+    'Lysvarder ' + s.beaconCount + '/' + s.beaconTarget + ' · ' +
+    'Minner ' + s.secretCount + '/' + s.secretTarget + ' · ' +
+    'Fragmenter ' + s.lightShardCount + '/' + s.lightShardTarget
   );
 
   s.pauseMenu.setVisible(false);
@@ -1465,33 +1568,35 @@ function refreshUI(s){
     objectiveHTML += '<div>Sider: <span class="em">' + s.questCount + '/' + s.questTarget + '</span></div>';
     objectiveHTML += '<div>Lysvarder: <span class="em">' + s.beaconCount + '/' + s.beaconTarget + '</span></div>';
   }
-  objectiveHTML += '<div style="margin-top:8px;color:#d7ffe7">Valgfritt: finn skjulte minner (' + s.secretCount + '/' + s.secretTarget + ')</div>';
+  objectiveHTML += '<div style="margin-top:8px;color:#d7ffe7">Valgfritt: skjulte minner ' + s.secretCount + '/' + s.secretTarget + '</div>';
+  objectiveHTML += '<div style="color:#fff1b8">Lysfragmenter: ' + s.lightShardCount + '/' + s.lightShardTarget + '</div>';
   questBox.innerHTML = objectiveHTML;
 
   const hearts = '♥'.repeat(Math.max(0, s.health)) + '<span style="opacity:.28">' + '♥'.repeat(Math.max(0, s.maxHealth - s.health)) + '</span>';
   const areaName = ['Stjernestien', 'Skyggeterrassen', 'Minnetrappen', 'Portkammeret'][Math.max(0, s.currentAreaIndex)] || 'Stjernestien';
+  const timeText = formatTime(s.elapsedMs || 0);
   statsBox.innerHTML =
     '<div class="hearts">' + hearts + '</div>' +
+    '<div>Tid: <span class="em">' + timeText + '</span> · Død: <span class="warn">' + s.deathCount + '</span></div>' +
+    '<div>Poeng: <span class="good">' + s.score + '</span></div>' +
     '<div>Checkpoint: <span class="good">' + s.checkpoint.label + '</span></div>' +
     '<div>Område: <span class="em">' + areaName + '</span></div>' +
     '<div>Dash: <span class="' + (s.dashReady ? 'good' : 'warn') + '">' + (s.dashReady ? 'klar' : 'lader') + '</span></div>' +
-    '<div>Skyggefare: <span class="warn">' + (s.stormActive ? 'ekstrem' : s.currentAreaIndex >= 2 ? 'høy' : s.currentAreaIndex >= 1 ? 'økende' : 'lav') + '</span></div>' +
-    '<div>Verdensstatus: <span class="em">' +
-      (s.pausedGame ? 'pauset' : s.endingSeen ? 'fullført' : s.portalOpened ? 'porten våken' : s.questFinished ? 'klar for Veyra' : 'under utforskning') +
-    '</span></div>';
+    '<div>Kontroll: <span class="em">' + (s.controlScheme || 'keyboard') + '</span></div>' +
+    '<div>Skyggefare: <span class="warn">' + (s.stormActive ? 'ekstrem' : s.currentAreaIndex >= 2 ? 'høy' : s.currentAreaIndex >= 1 ? 'økende' : 'lav') + '</span></div>';
 }
 
 function updateHint(s){
   if (!s.storyStarted) {
-    hintBox.textContent = 'Versjon 13: polert spillflyt med smartere fiender, ekte animasjoner, pausemeny og en brutal boss-jakt.';
+    hintBox.textContent = 'Ferdig spillversjon: trykk E/Enter for å starte. Kontroller er strammet inn med coyote time, jump buffer og air dash.';
     return;
   }
   if (s.pausedGame) {
-    hintBox.textContent = 'Pause: ESC/P fortsetter, R starter alt på nytt.';
+    hintBox.textContent = 'Pause: ESC/P fortsetter, R starter alt på nytt, F fullskjerm, M lyd av/på.';
     return;
   }
   if (s.inDialog) {
-    hintBox.textContent = 'Dialog: trykk E for neste linje.';
+    hintBox.textContent = 'Dialog: trykk E, Enter, Space eller gamepad A for neste linje.';
     return;
   }
   if (s.nearBeacon && !s.nearBeacon.active) {
@@ -1503,10 +1608,10 @@ function updateHint(s){
     return;
   }
   if (s.stormActive) {
-    hintBox.textContent = 'Boss-jakt: dash mellom sprangene og hold deg foran både stormen og Nattkjeften.';
+    hintBox.textContent = 'Boss-jakt: bruk dash og air dash. Hold deg foran stormveggen og gå inn i porten.';
     return;
   }
-  hintBox.textContent = 'ESC/P pauser. R starter reisen på nytt. Wraithene blir aggressive når du driver inn i territoriet deres.';
+  hintBox.textContent = 'Tips: let etter 12 lysfragmenter. Gamepad: venstre stick/D-pad, A hopp/interact, X/B dash. ESC/P pause.';
 }
 
 function updatePlayerMovement(s, time){
@@ -1515,48 +1620,98 @@ function updatePlayerMovement(s, time){
     p.setVelocityX(Phaser.Math.Linear(p.body.velocity.x, 0, .22));
     s.trailParticles.stop();
     if (!s.isRespawning && p.anims.currentAnim?.key !== 'hero-idle') p.play('hero-idle', true);
+    updateInputMemory(s, false, false, false, false);
     return;
   }
 
-  const left = s.cursors.left.isDown || s.keys.left.isDown;
-  const right = s.cursors.right.isDown || s.keys.right.isDown;
-  const jumpPressed = Phaser.Input.Keyboard.JustDown(s.cursors.up) || Phaser.Input.Keyboard.JustDown(s.cursors.space) || Phaser.Input.Keyboard.JustDown(s.keys.up);
-  const dashPressed = Phaser.Input.Keyboard.JustDown(s.keys.dash) || Phaser.Input.Keyboard.JustDown(s.cursors.shift);
+  const pad = s.input.gamepad?.getPad(0);
+  const axisX = pad ? (pad.leftStick?.x || 0) : 0;
+  const padLeft = pad ? (axisX < -0.25 || pad.left) : false;
+  const padRight = pad ? (axisX > 0.25 || pad.right) : false;
+  const padJumpDown = !!(pad && (pad.A || pad.buttons?.[0]?.pressed));
+  const padDashDown = !!(pad && (pad.B || pad.X || pad.buttons?.[1]?.pressed || pad.buttons?.[2]?.pressed));
+  const padInteractPressed = !!(pad && padJumpDown && !s.padWasJumpDown && (s.nearNpc || s.nearBeacon || s.portalOpened));
+
+  const touch = s.touch || {};
+  const touchJumpDown = !!touch.jump;
+  const touchDashDown = !!touch.dash;
+  const touchLeft = !!touch.left;
+  const touchRight = !!touch.right;
+
+  const left = s.cursors.left.isDown || s.keys.left.isDown || padLeft || touchLeft;
+  const right = s.cursors.right.isDown || s.keys.right.isDown || padRight || touchRight;
+  const keyboardJumpPressed = Phaser.Input.Keyboard.JustDown(s.cursors.up) || Phaser.Input.Keyboard.JustDown(s.cursors.space) || Phaser.Input.Keyboard.JustDown(s.keys.up);
+  const keyboardDashPressed = Phaser.Input.Keyboard.JustDown(s.keys.dash) || Phaser.Input.Keyboard.JustDown(s.cursors.shift);
+  const touchJumpPressed = touchJumpDown && !s.touchWasJumpDown;
+  const touchDashPressed = touchDashDown && !s.touchWasDashDown;
+  const padJumpPressed = padJumpDown && !s.padWasJumpDown;
+  const padDashPressed = padDashDown && !s.padWasDashDown;
+  const jumpPressed = keyboardJumpPressed || touchJumpPressed || padJumpPressed;
+  const dashPressed = keyboardDashPressed || touchDashPressed || padDashPressed;
+  const jumpHeld = s.cursors.up.isDown || s.cursors.space.isDown || s.keys.up.isDown || touchJumpDown || padJumpDown;
   const onFloor = p.body.blocked.down || p.body.touching.down;
   const dir = (right ? 1 : 0) - (left ? 1 : 0);
 
-  if (!s.isDashing) p.setVelocityX(Phaser.Math.Linear(p.body.velocity.x, dir * 340, onFloor ? .18 : .10));
+  if (left || right) s.controlScheme = touchLeft || touchRight ? 'touch' : pad ? 'gamepad' : 'keyboard';
+  if (padInteractPressed) handleInteract(s);
+
+  if (onFloor) {
+    s.lastOnFloorAt = time;
+    s.airDashAvailable = true;
+  }
+
+  if (jumpPressed) s.jumpBufferUntil = time + s.jumpBufferMs;
+  if (dashPressed) s.dashBufferUntil = time + 120;
+
+  const canUseBufferedJump = s.jumpBufferUntil > time && (onFloor || time - s.lastOnFloorAt <= s.coyoteTimeMs);
+  const targetSpeed = s.stormActive ? 430 : 385;
+  const accel = onFloor ? (dir === 0 ? .24 : .19) : (dir === 0 ? .035 : .115);
+  const desiredX = dir * targetSpeed;
+
+  if (!s.isDashing) {
+    p.setVelocityX(Phaser.Math.Linear(p.body.velocity.x, desiredX, accel));
+  }
   if (dir !== 0) s.playerFacing = dir;
   p.setFlipX(s.playerFacing < 0);
 
-  if (jumpPressed && onFloor) {
-    p.setVelocityY(-730);
-    s.jumpParticles.explode(14, p.x, p.y + 28);
-    playChime(s, 330, 440, 0.02);
-    s.tweens.add({ targets: p, scaleX: 1.16, scaleY: .82, duration: 90, yoyo: true });
+  if (canUseBufferedJump) {
+    s.jumpBufferUntil = 0;
+    s.lastOnFloorAt = -9999;
+    p.setVelocityY(-760);
+    s.jumpParticles.explode(18, p.x, p.y + 28);
+    playChime(s, 330, 466.16, 0.022);
+    s.tweens.add({ targets: p, scaleX: 1.18, scaleY: .78, duration: 86, yoyo: true, ease: 'Sine.easeOut' });
   }
 
-  if (dashPressed && s.dashReady) {
+  if (!jumpHeld && p.body.velocity.y < -250) {
+    p.setVelocityY(Phaser.Math.Linear(p.body.velocity.y, -245, .25));
+  }
+
+  const canDashNow = s.dashReady && (onFloor || s.airDashAvailable);
+  if (s.dashBufferUntil > time && canDashNow) {
+    s.dashBufferUntil = 0;
     s.dashReady = false;
     s.isDashing = true;
-    p.setVelocityX(s.playerFacing * 760);
-    p.setVelocityY(Math.min(p.body.velocity.y, -40));
-    s.jumpParticles.explode(18, p.x, p.y + 18);
-    playChime(s, 392, 523.25, 0.025);
+    if (!onFloor) s.airDashAvailable = false;
+    p.setVelocityX(s.playerFacing * (s.stormActive ? 835 : 790));
+    p.setVelocityY(Math.min(p.body.velocity.y, -70));
+    s.jumpParticles.explode(24, p.x, p.y + 18);
+    playChime(s, 392, 587.33, 0.028);
     p.play('hero-dash', true);
-    s.tweens.add({ targets: p, alpha: .68, duration: 60, yoyo: true, repeat: 3 });
-    s.time.delayedCall(160, () => s.isDashing = false);
-    s.time.delayedCall(650, () => { s.dashReady = true; refreshUI(s); });
+    s.cameras.main.shake(70, .0015);
+    s.tweens.add({ targets: p, alpha: .60, duration: 50, yoyo: true, repeat: 3 });
+    s.time.delayedCall(170, () => s.isDashing = false);
+    s.time.delayedCall(610, () => { s.dashReady = true; refreshUI(s); });
     refreshUI(s);
   }
 
   if (!s.wasOnFloor && onFloor && p.body.velocity.y >= 0) {
-    s.jumpParticles.explode(12, p.x, p.y + 30);
-    s.tweens.add({ targets: p, scaleX: 1.18, scaleY: .84, duration: 80, yoyo: true });
+    s.jumpParticles.explode(14, p.x, p.y + 30);
+    s.tweens.add({ targets: p, scaleX: 1.20, scaleY: .80, duration: 78, yoyo: true });
   }
   s.wasOnFloor = onFloor;
 
-  if (Math.abs(p.body.velocity.x) > 60 && onFloor) s.trailParticles.start();
+  if (Math.abs(p.body.velocity.x) > 70 && onFloor) s.trailParticles.start();
   else s.trailParticles.stop();
 
   let targetAnim = 'hero-idle';
@@ -1581,6 +1736,8 @@ function updatePlayerMovement(s, time){
   if (p.y > GAME_H + 240) {
     playerDie(s, 'Du falt ut av verden.');
   }
+
+  updateInputMemory(s, touchJumpDown, touchDashDown, padJumpDown, padDashDown);
 }
 
 function updateNearbyNpc(s){
@@ -1857,9 +2014,11 @@ function damagePlayer(s, amount, sourceX, sourceY, reason){
 
 function playerDie(s, reason){
   if (s.isRespawning) return;
+  s.deathCount += 1;
   s.isRespawning = true;
   s.damageLocked = true;
   s.health = 0;
+  s.score = Math.max(0, s.score - 200);
   refreshUI(s);
 
   const msg = s.add.text(s.player.x, s.player.y - 90, 'Du svinner hen – men siste lysvarde trekker deg tilbake.', {
@@ -1891,6 +2050,219 @@ function playerDie(s, reason){
     showToast(s, 'Du vender tilbake ved ' + s.checkpoint.label + '.', '#d7efff');
     refreshUI(s);
   });
+}
+
+
+function updateGamepadMenuInput(s){
+  const pad = s.input.gamepad?.getPad(0);
+  if (!pad) return;
+  const jumpDown = !!(pad.A || pad.buttons?.[0]?.pressed);
+  if (jumpDown && !s.padMenuWasDown && (!s.storyStarted || s.inDialog || s.endingOverlay.visible)) {
+    handleInteract(s);
+  }
+  s.padMenuWasDown = jumpDown;
+}
+
+function createPolishSystems(s){
+  createLightShards(s);
+  createMovingPlatforms(s);
+  createObjectiveMarker(s);
+  createTouchControls(s);
+}
+
+function createLightShards(s){
+  s.lightShards = [];
+  const shardPositions = [
+    [430, 500], [710, 235], [1040, 412], [1260, 345], [1600, 292], [1880, 360],
+    [2220, 290], [2465, 350], [2810, 276], [3160, 338], [3460, 278], [3825, 340]
+  ];
+  shardPositions.forEach((pos, index) => {
+    const sprite = s.add.image(pos[0], pos[1], 'lightShard').setDepth(19).setScale(.78).setAlpha(.94);
+    const glow = s.add.circle(pos[0], pos[1], 28, 0xfff1b8, .10).setBlendMode(Phaser.BlendModes.SCREEN).setDepth(18);
+    s.tweens.add({ targets: [sprite, glow], y: '-=8', duration: 1200 + index * 80, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    s.tweens.add({ targets: sprite, angle: 360, duration: 2600 + index * 120, repeat: -1 });
+    s.lightShards.push({ sprite, glow, collected: false, baseY: pos[1], phase: index * .7 });
+  });
+}
+
+function updateLightShards(s, time){
+  if (!s.lightShards || !s.storyStarted) return;
+  s.lightShards.forEach(shard => {
+    if (shard.collected) return;
+    shard.glow.alpha = .10 + Math.sin(time * .006 + shard.phase) * .05;
+    const d = Phaser.Math.Distance.Between(s.player.x, s.player.y, shard.sprite.x, shard.sprite.y);
+    if (d < 44) {
+      shard.collected = true;
+      shard.sprite.setVisible(false);
+      shard.glow.setVisible(false);
+      s.lightShardCount += 1;
+      s.score += 125;
+      s.secretParticles.emitParticleAt(shard.sprite.x, shard.sprite.y, 22);
+      playChime(s, 587.33, 880, 0.024);
+      if (s.lightShardCount === s.lightShardTarget) {
+        s.maxHealth = Math.min(6, s.maxHealth + 1);
+        s.health = s.maxHealth;
+        s.score += 750;
+        showToast(s, 'Alle lysfragmentene er funnet. Maks helse øker!', '#fff1b8');
+      } else if (s.lightShardCount % 4 === 0) {
+        showToast(s, 'Lysfragmenter: ' + s.lightShardCount + '/' + s.lightShardTarget, '#fff1b8');
+      }
+      refreshUI(s);
+    }
+  });
+}
+
+function createMovingPlatforms(s){
+  s.movingPlatforms = [];
+  s.movingPlatformGroup = s.physics.add.staticGroup();
+  [
+    { x: 1360, y: 510, w: 120, h: 20, axis: 'x', range: 120, speed: .0015 },
+    { x: 2670, y: 505, w: 120, h: 20, axis: 'y', range: 70, speed: .0019 },
+    { x: 3650, y: 500, w: 130, h: 20, axis: 'x', range: 135, speed: .00135 }
+  ].forEach((data, i) => {
+    const rect = s.add.rectangle(data.x, data.y, data.w, data.h, 0x5b6c80, 1).setDepth(17);
+    rect.setStrokeStyle(2, 0xbfeeff, .22);
+    s.physics.add.existing(rect, true);
+    s.movingPlatformGroup.add(rect);
+    const glow = s.add.rectangle(data.x, data.y - 8, data.w * .82, 3, 0xbfeeff, .20).setBlendMode(Phaser.BlendModes.SCREEN).setDepth(18);
+    s.movingPlatforms.push({ rect, glow, ...data, phase: i * 1.7 });
+  });
+  s.physics.add.collider(s.player, s.movingPlatformGroup);
+}
+
+function updateMovingPlatforms(s, time){
+  if (!s.movingPlatforms) return;
+  s.movingPlatforms.forEach(mp => {
+    const offset = Math.sin(time * mp.speed + mp.phase) * mp.range;
+    const oldX = mp.rect.x;
+    const oldY = mp.rect.y;
+    if (mp.axis === 'x') mp.rect.x = mp.x + offset;
+    else mp.rect.y = mp.y + offset;
+    mp.glow.x = mp.rect.x;
+    mp.glow.y = mp.rect.y - 8;
+    if (mp.rect.body) mp.rect.body.updateFromGameObject();
+    const playerOnTop = s.player.body.touching.down && Math.abs(s.player.y - (oldY - 34)) < 28 && Math.abs(s.player.x - oldX) < mp.w * .58;
+    if (playerOnTop) {
+      s.player.x += (mp.rect.x - oldX) * .95;
+      s.player.y += (mp.rect.y - oldY) * .95;
+    }
+  });
+}
+
+function createObjectiveMarker(s){
+  s.objectiveMarker = s.add.container(s.scale.width / 2, 66).setScrollFactor(0).setDepth(245);
+  const bg = s.add.rectangle(0, 0, 430, 44, 0x071126, .72).setStrokeStyle(2, 0xffffff, .08);
+  const arrow = s.add.image(-184, 0, 'objectiveArrow').setScale(.65).setAlpha(.92);
+  const text = s.add.text(-154, -12, '', { fontFamily: 'Arial', fontSize: '18px', color: '#e9fbff' });
+  const sub = s.add.text(-154, 10, '', { fontFamily: 'Arial', fontSize: '12px', color: '#fff1b8' });
+  s.objectiveMarker.add([bg, arrow, text, sub]);
+  s.objectiveMarkerArrow = arrow;
+  s.objectiveMarkerText = text;
+  s.objectiveMarkerSub = sub;
+  layoutObjectiveMarker(s);
+}
+
+function layoutObjectiveMarker(s){
+  if (!s.objectiveMarker) return;
+  s.objectiveMarker.x = s.scale.width / 2;
+  s.objectiveMarker.y = 66;
+  s.objectiveMarker.setVisible(s.scale.width > 760);
+}
+
+function getCurrentObjective(s){
+  if (!s.storyStarted) return { x: s.player.x, label: 'Start reisen', sub: 'Trykk E / Enter' };
+  if (s.portalOpened) return { x: 4105, label: s.stormActive ? 'Løp inn i porten' : 'Gå til porten', sub: 'Stormløpet er sluttmålet' };
+  if (s.questFinished) return { x: 3450, label: 'Snakk med Veyra', sub: 'Porten kan vekkes' };
+  const candidates = [];
+  s.pages?.forEach(p => { if (!p.sprite.collected) candidates.push({ x: p.sprite.x, label: 'Finn neste side', sub: s.questCount + '/' + s.questTarget + ' sider' }); });
+  s.beacons?.forEach(b => { if (!b.active) candidates.push({ x: b.sprite.x, label: 'Tenn lysvarde', sub: s.beaconCount + '/' + s.beaconTarget + ' lysvarder' }); });
+  if (!candidates.length) return { x: 3450, label: 'Gå til Veyra', sub: 'Alt er samlet' };
+  candidates.sort((a,b)=>Math.abs(a.x-s.player.x)-Math.abs(b.x-s.player.x));
+  return candidates[0];
+}
+
+function updateObjectiveMarker(s){
+  if (!s.objectiveMarker || !s.storyStarted) return;
+  const obj = getCurrentObjective(s);
+  const dx = obj.x - s.player.x;
+  const meters = Math.max(0, Math.round(Math.abs(dx) / 42));
+  s.objectiveMarkerArrow.rotation = dx >= 0 ? Math.PI / 2 : -Math.PI / 2;
+  s.objectiveMarkerText.setText(obj.label + ' · ' + meters + 'm');
+  s.objectiveMarkerSub.setText(obj.sub || '');
+  s.objectiveMarker.alpha = Phaser.Math.Linear(s.objectiveMarker.alpha, s.inDialog ? .35 : .92, .12);
+}
+
+function createTouchControls(s){
+  s.touch = { left:false, right:false, jump:false, dash:false, interact:false };
+  const showTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  s.touchControls = s.add.container(0, 0).setScrollFactor(0).setDepth(330).setVisible(showTouch);
+
+  const makeButton = (label, key, radius) => {
+    const c = s.add.container(0, 0);
+    const bg = s.add.circle(0, 0, radius, 0x071126, .54).setStrokeStyle(2, 0xbfeeff, .18);
+    const txt = s.add.text(0, 0, label, { fontFamily:'Arial', fontSize: radius > 36 ? '22px' : '18px', color:'#eafaff', fontStyle:'bold' }).setOrigin(.5);
+    c.add([bg, txt]);
+    c.setSize(radius*2, radius*2);
+    c.setInteractive(new Phaser.Geom.Circle(0,0,radius), Phaser.Geom.Circle.Contains);
+    c.on('pointerdown', () => { s.touch[key] = true; s.controlScheme = 'touch'; if (key === 'interact') handleInteract(s); });
+    c.on('pointerup', () => { s.touch[key] = false; });
+    c.on('pointerout', () => { s.touch[key] = false; });
+    c.on('pointercancel', () => { s.touch[key] = false; });
+    s.touchControls.add(c);
+    return c;
+  };
+
+  s.touchLeftButton = makeButton('‹', 'left', 38);
+  s.touchRightButton = makeButton('›', 'right', 38);
+  s.touchDashButton = makeButton('D', 'dash', 34);
+  s.touchJumpButton = makeButton('J', 'jump', 44);
+  s.touchInteractButton = makeButton('E', 'interact', 30);
+  layoutTouchControls(s);
+}
+
+function layoutTouchControls(s){
+  const h = s.scale.height;
+  const w = s.scale.width;
+  s.touchLeftButton?.setPosition(72, h - 84);
+  s.touchRightButton?.setPosition(160, h - 84);
+  s.touchDashButton?.setPosition(w - 176, h - 90);
+  s.touchJumpButton?.setPosition(w - 82, h - 96);
+  s.touchInteractButton?.setPosition(w - 82, h - 196);
+}
+
+function updateInputMemory(s, touchJumpDown, touchDashDown, padJumpDown, padDashDown){
+  s.touchWasJumpDown = !!touchJumpDown;
+  s.touchWasDashDown = !!touchDashDown;
+  s.padWasJumpDown = !!padJumpDown;
+  s.padWasDashDown = !!padDashDown;
+}
+
+function updateGameClock(s, delta){
+  if (!s.storyStarted || s.endingSeen || s.inDialog || s.pausedGame) return;
+  s.elapsedMs += delta;
+  if (Math.floor(s.elapsedMs / 500) !== Math.floor((s.elapsedMs - delta) / 500)) refreshUI(s);
+}
+
+function formatTime(ms){
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+}
+
+function toggleFullscreen(s){
+  if (s.scale.isFullscreen) s.scale.stopFullscreen();
+  else s.scale.startFullscreen();
+}
+
+function toggleMute(s){
+  s.muted = !s.muted;
+  if (s.audioCtx && s.muted) {
+    s.audioPads?.forEach(pad => pad.gain.gain.value = 0.0001);
+  }
+  if (s.sound) s.sound.mute = s.muted;
+  showToast(s, s.muted ? 'Lyd av.' : 'Lyd på.', '#dff7ff');
+  refreshUI(s);
 }
 
 function showToast(s, text, color = '#ffffff'){
