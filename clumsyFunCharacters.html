@@ -1,444 +1,1551 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>PHYSICS CHARADES</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
-    <style>
-        :root {
-            --bg: #222;
-            --panel: #333;
-            --text: #eee;
-            --accent: #ffcc00;
-            --highlight: #00ddff;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Puppet Panic — Physics Charades</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <style>
+    :root {
+      --bg0: #10111f;
+      --bg1: #181a2e;
+      --bg2: #252849;
+      --panel: rgba(17, 20, 38, 0.86);
+      --panel-strong: rgba(10, 12, 24, 0.96);
+      --line: rgba(255, 255, 255, 0.11);
+      --line-strong: rgba(255, 255, 255, 0.22);
+      --text: #f7f7ff;
+      --muted: #a8acc7;
+      --accent: #ffd44d;
+      --accent2: #4ee7ff;
+      --good: #68ff9b;
+      --bad: #ff5b7a;
+      --pink: #ff63d8;
+      --purple: #8d7cff;
+      --shadow: rgba(0, 0, 0, 0.42);
+      --sidebar: 330px;
+    }
 
-        body {
-            margin: 0;
-            background-color: var(--bg);
-            color: var(--text);
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            overflow: hidden;
-            user-select: none;
-        }
+    * { box-sizing: border-box; }
 
-        /* --- LAYOUT --- */
-        #game-container {
-            display: flex;
-            height: 100vh;
-        }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 18% 12%, rgba(78, 231, 255, 0.18), transparent 32%),
+        radial-gradient(circle at 82% 18%, rgba(255, 99, 216, 0.14), transparent 28%),
+        linear-gradient(135deg, var(--bg0), var(--bg1) 48%, var(--bg2));
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
 
-        /* --- SIDEBAR (CHAT) --- */
-        #sidebar {
-            width: 300px;
-            background: #1a1a1a;
-            display: flex;
-            flex-direction: column;
-            border-right: 2px solid #444;
-        }
+    button {
+      font: inherit;
+      color: inherit;
+      border: none;
+      cursor: pointer;
+    }
 
-        #prompt-area {
-            background: var(--accent);
-            color: #000;
-            padding: 20px;
-            text-align: center;
-        }
-        #prompt-label { font-size: 0.8rem; text-transform: uppercase; font-weight: bold; opacity: 0.7; }
-        #secret-word { font-size: 2rem; font-weight: 900; margin-top: 5px; }
+    #game {
+      display: grid;
+      grid-template-columns: var(--sidebar) minmax(0, 1fr);
+      width: 100vw;
+      height: 100vh;
+    }
 
-        #timer {
-            background: #000;
-            color: #fff;
-            padding: 5px;
-            text-align: center;
-            font-family: monospace;
-            font-size: 1.2rem;
-        }
+    #sidebar {
+      position: relative;
+      z-index: 4;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      background: linear-gradient(180deg, rgba(7, 9, 18, 0.96), rgba(15, 18, 35, 0.92));
+      border-right: 1px solid var(--line-strong);
+      box-shadow: 16px 0 42px rgba(0, 0, 0, 0.26);
+    }
 
-        #chat-log {
-            flex-grow: 1;
-            padding: 15px;
-            overflow-y: auto;
-            font-size: 0.9rem;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        
-        .chat-msg { opacity: 0.8; }
-        .chat-name { font-weight: bold; color: #aaa; }
-        .chat-guess { color: #fff; }
-        .chat-correct { color: var(--accent); font-weight: bold; font-size: 1.1rem; text-shadow: 0 0 5px var(--accent); }
+    .brand {
+      padding: 18px 18px 14px;
+      border-bottom: 1px solid var(--line);
+    }
 
-        /* --- MAIN AREA --- */
-        #stage {
-            flex-grow: 1;
-            position: relative;
-            cursor: default;
-        }
+    .brand h1 {
+      margin: 0;
+      font-size: 1.18rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      line-height: 1.05;
+    }
 
-        #toolbar {
-            position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.8);
-            border-radius: 50px;
-            padding: 10px 20px;
-            display: flex;
-            gap: 15px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.5);
-        }
+    .brand .subtitle {
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.35;
+    }
 
-        .tool-btn {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            border: 2px solid #555;
-            background: #333;
-            color: #fff;
-            font-size: 1.5rem;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: 0.2s;
-            position: relative;
-        }
-        
-        .tool-btn:hover { background: #444; transform: scale(1.1); }
-        .tool-btn.active { border-color: var(--highlight); background: #444; box-shadow: 0 0 15px var(--highlight); }
-        
-        .tool-label {
-            position: absolute;
-            bottom: -25px;
-            font-size: 0.7rem;
-            background: #000;
-            padding: 2px 5px;
-            border-radius: 4px;
-            opacity: 0;
-            transition: opacity 0.2s;
-            pointer-events: none;
-            white-space: nowrap;
-        }
-        .tool-btn:hover .tool-label { opacity: 1; }
+    #round-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 14px 14px 0;
+    }
 
-        /* --- OVERLAY --- */
-        #win-overlay {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-            display: none;
-        }
-        
-        #win-msg { font-size: 4rem; color: var(--accent); text-shadow: 0 0 20px var(--accent); font-weight: 900; }
-        #next-round-btn {
-            margin-top: 30px;
-            padding: 15px 40px;
-            font-size: 1.5rem;
-            background: var(--highlight);
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-        }
+    .stat-card {
+      padding: 10px 8px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.045);
+      text-align: center;
+    }
 
-    </style>
+    .stat-label {
+      color: var(--muted);
+      font-size: 0.65rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      margin-top: 3px;
+      font-size: 1.32rem;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    #prompt-card {
+      margin: 14px;
+      padding: 17px;
+      border-radius: 22px;
+      color: #171300;
+      background:
+        radial-gradient(circle at 85% 8%, rgba(255,255,255,0.55), transparent 26%),
+        linear-gradient(135deg, #fff08a, var(--accent));
+      box-shadow: 0 14px 34px rgba(255, 212, 77, 0.18);
+    }
+
+    #phase-label {
+      font-size: 0.73rem;
+      font-weight: 950;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      opacity: 0.66;
+    }
+
+    #secret-word {
+      margin-top: 4px;
+      font-size: 2.25rem;
+      line-height: 1;
+      font-weight: 1000;
+      letter-spacing: -0.04em;
+      text-transform: uppercase;
+    }
+
+    #word-hint {
+      margin-top: 9px;
+      min-height: 35px;
+      font-size: 0.86rem;
+      font-weight: 750;
+      line-height: 1.25;
+      color: rgba(0, 0, 0, 0.68);
+    }
+
+    #meter-card {
+      margin: 0 14px 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .meter-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 900;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .meter-track {
+      height: 12px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+    }
+
+    #recognition-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--bad), var(--accent), var(--good));
+      transition: width 0.22s ease;
+      box-shadow: 0 0 18px rgba(78, 231, 255, 0.25);
+    }
+
+    #meter-tip {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.77rem;
+      line-height: 1.3;
+    }
+
+    #chat-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px 8px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.74rem;
+      font-weight: 900;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    #chat-log {
+      flex: 1;
+      min-height: 0;
+      padding: 0 14px 15px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+
+    .chat-msg {
+      margin: 8px 0;
+      padding: 9px 10px;
+      border: 1px solid rgba(255,255,255,0.075);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.04);
+      color: #d9dcf3;
+      font-size: 0.84rem;
+      line-height: 1.28;
+      animation: popIn 0.18s ease-out both;
+    }
+
+    .chat-msg.system { border-color: rgba(78,231,255,0.22); background: rgba(78,231,255,0.07); }
+    .chat-msg.correct { border-color: rgba(104,255,155,0.38); background: rgba(104,255,155,0.1); color: var(--good); font-weight: 900; }
+    .chat-msg.warning { border-color: rgba(255,212,77,0.28); background: rgba(255,212,77,0.08); color: #ffeaa6; }
+    .chat-name { color: #fff; font-weight: 950; }
+
+    #stage {
+      position: relative;
+      min-width: 0;
+      height: 100vh;
+      overflow: hidden;
+      background:
+        linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+      background-size: 56px 56px;
+    }
+
+    #stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 48% 28%, rgba(78, 231, 255, 0.14), transparent 30%),
+        linear-gradient(180deg, rgba(255,255,255,0.03), transparent 36%, rgba(0,0,0,0.2));
+      z-index: 0;
+    }
+
+    #world {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+    }
+
+    #top-hud {
+      position: absolute;
+      z-index: 3;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    #toolbar {
+      pointer-events: auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      max-width: min(760px, calc(100vw - var(--sidebar) - 180px));
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(8, 10, 20, 0.74);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 16px 38px var(--shadow);
+    }
+
+    .tool-btn, .small-btn {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-width: 48px;
+      height: 48px;
+      padding: 0 11px;
+      border: 1px solid rgba(255,255,255,0.13);
+      border-radius: 17px;
+      background: rgba(255,255,255,0.07);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+      transition: transform 0.13s ease, background 0.13s ease, border 0.13s ease;
+    }
+
+    .tool-btn:hover, .small-btn:hover { transform: translateY(-2px); background: rgba(255,255,255,0.115); }
+    .tool-btn.active { border-color: rgba(78,231,255,0.85); background: rgba(78,231,255,0.16); box-shadow: 0 0 22px rgba(78,231,255,0.2), inset 0 1px 0 rgba(255,255,255,0.16); }
+    .tool-btn.disabled { opacity: 0.43; filter: grayscale(0.6); cursor: not-allowed; }
+
+    .tool-ico { font-size: 1.22rem; line-height: 1; }
+    .keycap {
+      position: absolute;
+      right: -5px;
+      top: -6px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 4px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 7px;
+      color: var(--bg0);
+      background: #fff;
+      font-size: 0.64rem;
+      font-weight: 1000;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.22);
+    }
+
+    .tooltip {
+      position: absolute;
+      left: 50%;
+      top: calc(100% + 10px);
+      transform: translateX(-50%) translateY(-4px);
+      min-width: max-content;
+      max-width: 210px;
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(5, 7, 14, 0.92);
+      color: var(--text);
+      font-size: 0.72rem;
+      font-weight: 800;
+      line-height: 1.2;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.12s ease, transform 0.12s ease;
+    }
+    .tool-btn:hover .tooltip, .small-btn:hover .tooltip { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    #mini-panel {
+      pointer-events: auto;
+      display: flex;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(8, 10, 20, 0.74);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 16px 38px var(--shadow);
+    }
+
+    #toast {
+      position: absolute;
+      z-index: 5;
+      left: 50%;
+      top: 88px;
+      transform: translateX(-50%) translateY(-16px);
+      max-width: min(560px, 72vw);
+      padding: 11px 16px;
+      border: 1px solid rgba(255,255,255,0.17);
+      border-radius: 999px;
+      background: rgba(6, 8, 17, 0.86);
+      color: #fff;
+      font-weight: 850;
+      font-size: 0.9rem;
+      box-shadow: 0 12px 34px rgba(0,0,0,0.3);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    #action-bar {
+      position: absolute;
+      z-index: 3;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(8, 10, 20, 0.74);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 16px 38px var(--shadow);
+    }
+
+    .action-btn {
+      min-width: 120px;
+      height: 48px;
+      padding: 0 16px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.075);
+      font-weight: 950;
+      letter-spacing: 0.01em;
+      transition: transform 0.12s ease, background 0.12s ease;
+    }
+    .action-btn:hover { transform: translateY(-2px); background: rgba(255,255,255,0.13); }
+    .action-btn.primary { color: #161100; background: linear-gradient(135deg, #fff08a, var(--accent)); }
+    .action-btn.blue { background: linear-gradient(135deg, rgba(78,231,255,0.9), rgba(141,124,255,0.9)); color: #07111d; }
+    .action-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+    #center-label {
+      position: absolute;
+      z-index: 2;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      pointer-events: none;
+    }
+
+    #center-label-inner {
+      padding: 12px 18px;
+      border: 1px solid rgba(255,255,255,0.13);
+      border-radius: 999px;
+      background: rgba(7, 9, 18, 0.5);
+      color: rgba(255,255,255,0.48);
+      font-weight: 1000;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      transition: opacity 0.2s ease;
+    }
+
+    .modal {
+      position: absolute;
+      z-index: 10;
+      inset: 0;
+      display: none;
+      place-items: center;
+      padding: 24px;
+      background: rgba(3, 5, 12, 0.72);
+      backdrop-filter: blur(12px);
+    }
+    .modal.show { display: grid; }
+
+    .modal-card {
+      width: min(760px, 94vw);
+      max-height: 92vh;
+      overflow: auto;
+      border: 1px solid rgba(255,255,255,0.17);
+      border-radius: 30px;
+      background:
+        radial-gradient(circle at 88% 8%, rgba(78,231,255,0.2), transparent 24%),
+        radial-gradient(circle at 10% 14%, rgba(255,99,216,0.13), transparent 24%),
+        linear-gradient(180deg, rgba(23, 27, 50, 0.98), rgba(9, 11, 22, 0.98));
+      box-shadow: 0 30px 90px rgba(0,0,0,0.48);
+      padding: 28px;
+    }
+
+    .modal-card h2 {
+      margin: 0;
+      font-size: clamp(2rem, 6vw, 4.6rem);
+      line-height: 0.92;
+      letter-spacing: -0.06em;
+      text-transform: uppercase;
+    }
+
+    .modal-card p {
+      color: #d4d8f5;
+      line-height: 1.45;
+      font-size: 1rem;
+    }
+
+    .rules {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin: 18px 0 22px;
+    }
+
+    .rule {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.055);
+      color: #e5e7ff;
+      font-size: 0.9rem;
+      line-height: 1.3;
+    }
+    .rule b { display: block; margin-bottom: 5px; color: #fff; }
+
+    .modal-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .big-btn {
+      min-height: 56px;
+      padding: 0 22px;
+      border-radius: 18px;
+      color: #151100;
+      background: linear-gradient(135deg, #fff08a, var(--accent));
+      font-weight: 1000;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      box-shadow: 0 18px 35px rgba(255, 212, 77, 0.2);
+    }
+    .ghost-btn {
+      min-height: 56px;
+      padding: 0 18px;
+      border: 1px solid var(--line-strong);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.07);
+      color: #fff;
+      font-weight: 950;
+    }
+
+    #round-result h2 { color: var(--accent); }
+    #result-details {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .result-stat {
+      padding: 16px;
+      border-radius: 19px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.055);
+      text-align: center;
+    }
+    .result-stat span { display:block; color: var(--muted); font-size: 0.75rem; font-weight: 900; text-transform: uppercase; letter-spacing: 0.1em; }
+    .result-stat strong { display:block; margin-top: 5px; font-size: 1.55rem; }
+
+    .particle {
+      position: absolute;
+      z-index: 9;
+      width: 9px;
+      height: 13px;
+      border-radius: 3px;
+      pointer-events: none;
+      animation: confetti 1s ease-out forwards;
+    }
+
+    @keyframes popIn {
+      from { opacity: 0; transform: translateY(4px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes confetti {
+      from { opacity: 1; transform: translate(0,0) rotate(0deg); }
+      to { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); }
+    }
+
+    @media (max-width: 900px) {
+      :root { --sidebar: 286px; }
+      #toolbar { max-width: calc(100vw - var(--sidebar) - 40px); }
+      .rules { grid-template-columns: 1fr; }
+      #action-bar { width: calc(100% - 22px); overflow-x: auto; justify-content: flex-start; }
+      .action-btn { min-width: 108px; }
+    }
+
+    @media (max-width: 720px) {
+      #game { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+      #sidebar {
+        height: 220px;
+        border-right: none;
+        border-bottom: 1px solid var(--line-strong);
+      }
+      .brand { display: none; }
+      #round-strip { padding: 8px; grid-template-columns: repeat(3, 1fr); }
+      #prompt-card { margin: 0 8px 8px; padding: 10px 12px; border-radius: 16px; }
+      #secret-word { font-size: 1.55rem; }
+      #word-hint { min-height: 0; font-size: 0.75rem; }
+      #meter-card { display: none; }
+      #chat-title { display: none; }
+      #chat-log { display: none; }
+      #stage { height: calc(100vh - 220px); }
+      #toolbar { max-width: calc(100vw - 22px); top: 8px; left: 8px; right: 8px; }
+      #top-hud { top: 8px; left: 8px; right: 8px; align-items: flex-start; }
+      #mini-panel { display: none; }
+      .tool-btn, .small-btn { min-width: 42px; height: 42px; border-radius: 14px; }
+      .tooltip { display: none; }
+      #toast { top: 62px; }
+    }
+  </style>
 </head>
 <body>
+  <div id="game">
+    <aside id="sidebar">
+      <div class="brand">
+        <h1>Puppet Panic</h1>
+        <div class="subtitle">A silly physics charades game. Build a puppet, act out the secret word, and make the audience guess before time runs out.</div>
+      </div>
 
-    <div id="game-container">
-        <!-- SIDEBAR -->
-        <div id="sidebar">
-            <div id="prompt-area">
-                <div id="prompt-label">ACT OUT:</div>
-                <div id="secret-word">SPIDER</div>
-            </div>
-            <div id="timer">01:59</div>
-            <div id="chat-log">
-                <div class="chat-msg"><span class="chat-name">System:</span> Game started! Build your puppet!</div>
-            </div>
+      <div id="round-strip">
+        <div class="stat-card"><div class="stat-label">Round</div><div class="stat-value" id="round-value">1/5</div></div>
+        <div class="stat-card"><div class="stat-label">Time</div><div class="stat-value" id="time-value">45</div></div>
+        <div class="stat-card"><div class="stat-label">Score</div><div class="stat-value" id="score-value">0</div></div>
+      </div>
+
+      <div id="prompt-card">
+        <div id="phase-label">Build phase</div>
+        <div id="secret-word">SPIDER</div>
+        <div id="word-hint">Use many loose limbs, then wiggle the puppet so the crowd can read the silhouette.</div>
+      </div>
+
+      <div id="meter-card">
+        <div class="meter-header"><span>Audience recognition</span><span id="recognition-value">0%</span></div>
+        <div class="meter-track"><div id="recognition-fill"></div></div>
+        <div id="meter-tip">Build a readable silhouette first. In Act phase, movement makes the crowd more confident.</div>
+      </div>
+
+      <div id="chat-title"><span>Live guesses</span><span id="piece-counter">0/24 parts</span></div>
+      <div id="chat-log"></div>
+    </aside>
+
+    <main id="stage">
+      <canvas id="world"></canvas>
+
+      <div id="top-hud">
+        <div id="toolbar" aria-label="Build tools">
+          <button class="tool-btn active" data-tool="hand" title="Drag puppet"><span class="tool-ico">✋</span><span class="keycap">1</span><span class="tooltip">Drag / pose</span></button>
+          <button class="tool-btn" data-tool="circle" title="Add circle"><span class="tool-ico">⚪</span><span class="keycap">2</span><span class="tooltip">Round body part</span></button>
+          <button class="tool-btn" data-tool="box" title="Add box"><span class="tool-ico">⬛</span><span class="keycap">3</span><span class="tooltip">Boxy body part</span></button>
+          <button class="tool-btn" data-tool="limb" title="Add limb"><span class="tool-ico">▭</span><span class="keycap">4</span><span class="tooltip">Long limb</span></button>
+          <button class="tool-btn" data-tool="link" title="Link two parts"><span class="tool-ico">🔗</span><span class="keycap">5</span><span class="tooltip">Click two parts to join</span></button>
+          <button class="tool-btn" data-tool="pin" title="Pin one part"><span class="tool-ico">📌</span><span class="keycap">6</span><span class="tooltip">Pin a part to air</span></button>
+          <button class="tool-btn" data-tool="erase" title="Erase part"><span class="tool-ico">🧽</span><span class="keycap">X</span><span class="tooltip">Remove a part</span></button>
         </div>
 
-        <!-- STAGE -->
-        <div id="stage">
-            <div id="toolbar">
-                <div class="tool-btn active" id="tool-hand" onclick="setTool('hand')">✋<div class="tool-label">Drag/Act</div></div>
-                <div class="tool-btn" id="tool-box" onclick="setTool('box')">⬜<div class="tool-label">Box</div></div>
-                <div class="tool-btn" id="tool-circle" onclick="setTool('circle')">⚪<div class="tool-label">Circle</div></div>
-                <div class="tool-btn" id="tool-link" onclick="setTool('link')">🔗<div class="tool-label">Link Joints</div></div>
-                <div class="tool-btn" style="border-color: #ff4444;" onclick="clearStage()">🗑️<div class="tool-label">Clear All</div></div>
-            </div>
-            <canvas id="world"></canvas>
-            
-            <div id="win-overlay">
-                <div id="win-msg">CORRECT!</div>
-                <div style="color: white; font-size: 1.2rem; margin-top: 10px;">User_88 guessed the word!</div>
-                <button id="next-round-btn" onclick="nextRound()">Next Word</button>
-            </div>
+        <div id="mini-panel">
+          <button class="small-btn" id="undo-btn"><span class="tool-ico">↶</span><span class="keycap">Z</span><span class="tooltip">Undo</span></button>
+          <button class="small-btn" id="clear-btn"><span class="tool-ico">🗑</span><span class="keycap">R</span><span class="tooltip">Clear stage</span></button>
+          <button class="small-btn" id="mute-btn"><span class="tool-ico" id="mute-icon">🔊</span><span class="tooltip">Sound on/off</span></button>
         </div>
-    </div>
+      </div>
 
-<script>
-    /**
-     * PHYSICS CHARADES
-     * Powered by Matter.js
-     */
+      <div id="center-label"><div id="center-label-inner">Press Start</div></div>
+      <div id="toast"></div>
 
-    // --- SETUP MATTER.JS ---
-    const Engine = Matter.Engine,
-          Render = Matter.Render,
-          Runner = Matter.Runner,
-          Bodies = Matter.Bodies,
-          Composite = Matter.Composite,
-          Constraint = Matter.Constraint,
-          Mouse = Matter.Mouse,
-          MouseConstraint = Matter.MouseConstraint,
-          Events = Matter.Events,
-          Vector = Matter.Vector,
-          Body = Matter.Body; // Added missing reference (used by spawnConfetti)
+      <div id="action-bar">
+        <button class="action-btn primary" id="ready-btn">Start Acting <span style="opacity:.65">Space</span></button>
+        <button class="action-btn" id="wiggle-btn">Wiggle <span style="opacity:.65">Q</span></button>
+        <button class="action-btn" id="hop-btn">Hop <span style="opacity:.65">W</span></button>
+        <button class="action-btn blue" id="flourish-btn">Flourish <span style="opacity:.65">F</span></button>
+      </div>
 
-    const engine = Engine.create();
-    const world = engine.world;
-    engine.gravity.y = 1; // Normal gravity
+      <section class="modal show" id="menu-modal" aria-modal="true">
+        <div class="modal-card">
+          <h2>Puppet Panic</h2>
+          <p>Build a floppy physics puppet from simple parts. Then perform the secret word so the simulated audience can guess it. The better your silhouette and movement, the faster they understand.</p>
+          <div class="rules">
+            <div class="rule"><b>1. Build</b>Use circles, boxes, limbs, links and pins. You have a part budget, so the shape has to be readable.</div>
+            <div class="rule"><b>2. Act</b>Drag the puppet or use Wiggle, Hop and Flourish. The audience only guesses correctly when the performance makes sense.</div>
+            <div class="rule"><b>3. Score</b>Win fast for bonus points. Five rounds make one show.</div>
+          </div>
+          <div class="modal-actions">
+            <button class="big-btn" id="start-btn">Start Show</button>
+            <button class="ghost-btn" id="practice-btn">Practice Round</button>
+          </div>
+        </div>
+      </section>
 
-    const stage = document.getElementById('stage');
-    const canvas = document.getElementById('world');
-    
-    // Resize handling
-    let width = stage.clientWidth;
-    let height = stage.clientHeight;
-    
-    const render = Render.create({
-        canvas: canvas,
-        engine: engine,
+      <section class="modal" id="result-modal" aria-modal="true">
+        <div class="modal-card" id="round-result">
+          <h2 id="result-title">Correct!</h2>
+          <p id="result-copy">The audience guessed it.</p>
+          <div id="result-details">
+            <div class="result-stat"><span>Clarity</span><strong id="result-clarity">0%</strong></div>
+            <div class="result-stat"><span>Bonus</span><strong id="result-bonus">0</strong></div>
+            <div class="result-stat"><span>Total</span><strong id="result-total">0</strong></div>
+          </div>
+          <div class="modal-actions">
+            <button class="big-btn" id="next-btn">Next Round</button>
+            <button class="ghost-btn" id="restart-btn">Restart Show</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const {
+        Engine, Render, Runner, Bodies, Body, Composite, Constraint, Mouse,
+        MouseConstraint, Events, Vector, Query
+      } = Matter;
+
+      const MAX_ROUNDS = 5;
+      const MAX_PARTS = 24;
+      const MAX_JOINTS = 34;
+      const BUILD_TIME = 45;
+      const ACT_TIME = 45;
+
+      const WORDS = [
+        {
+          word: 'SPIDER',
+          hint: 'Many thin legs, one body, wide silhouette. It should crawl or wiggle.',
+          tips: ['Add 6–8 limbs.', 'Link the legs to one central body.', 'Make it wide, not tall.'],
+          wrong: ['Crab?', 'Angry octopus?', 'A broken table?', 'Bug?', 'More legs!', 'Crawling thing?']
+        },
+        {
+          word: 'SNAKE',
+          hint: 'A long chain of round parts works best. Make it slither sideways.',
+          tips: ['Use many circles in a chain.', 'Keep it long and low.', 'Wiggle left and right.'],
+          wrong: ['Worm?', 'Rope?', 'Train?', 'Long dog?', 'Noodle?', 'Dragon?']
+        },
+        {
+          word: 'ROBOT',
+          hint: 'Boxy parts, stiff joints and jerky movement. Think mechanical dancer.',
+          tips: ['Use several boxes.', 'Use clear arms and legs.', 'Move it in sharp bursts.'],
+          wrong: ['Fridge?', 'Minecraft person?', 'Computer?', 'Toy soldier?', 'Box monster?']
+        },
+        {
+          word: 'CRAB',
+          hint: 'Wide body, side legs and sideways shuffling.',
+          tips: ['Make it very wide.', 'Add several side limbs.', 'Move sideways.'],
+          wrong: ['Spider?', 'Scorpion?', 'Table?', 'Bug?', 'Dancing chair?']
+        },
+        {
+          word: 'HORSE',
+          hint: 'Long body, four legs and a head. Hop or gallop it.',
+          tips: ['Use a body, head and four legs.', 'Make it wider than tall.', 'Use Hop to sell the gallop.'],
+          wrong: ['Dog?', 'Giraffe?', 'Cow?', 'Donkey?', 'Running sofa?']
+        },
+        {
+          word: 'TEAPOT',
+          hint: 'Round body, handle and spout. Tilt it like it is pouring.',
+          tips: ['Use a round body.', 'Add a handle and spout with limbs.', 'Tilt it dramatically.'],
+          wrong: ['Cup?', 'Lamp?', 'Kettle?', 'Elephant?', 'Weird bird?']
+        },
+        {
+          word: 'BALLERINA',
+          hint: 'Tall body, limbs and spinning. A pinned torso can help.',
+          tips: ['Make a tall humanoid shape.', 'Add arms and legs.', 'Spin or flourish.'],
+          wrong: ['Dancer?', 'Windmill?', 'Person?', 'Gymnast?', 'Flying noodle?']
+        },
+        {
+          word: 'BOXER',
+          hint: 'Humanoid body with punchy arms. Use strong forward movement.',
+          tips: ['Build a small person.', 'Give it obvious arms.', 'Use quick jabs and wiggles.'],
+          wrong: ['Fighter?', 'Robot?', 'Angry man?', 'Gorilla?', 'Punching bag?']
+        }
+      ];
+
+      const BOT_NAMES = ['PixelPete', 'MiraMouse', 'User_88', 'OrbitOtter', 'NoodleKid', 'CaptainGuess', 'TinyTroll', 'LunaLag'];
+
+      const els = {
+        stage: document.getElementById('stage'),
+        canvas: document.getElementById('world'),
+        toolbar: document.getElementById('toolbar'),
+        roundValue: document.getElementById('round-value'),
+        timeValue: document.getElementById('time-value'),
+        scoreValue: document.getElementById('score-value'),
+        phaseLabel: document.getElementById('phase-label'),
+        secretWord: document.getElementById('secret-word'),
+        wordHint: document.getElementById('word-hint'),
+        recognitionFill: document.getElementById('recognition-fill'),
+        recognitionValue: document.getElementById('recognition-value'),
+        meterTip: document.getElementById('meter-tip'),
+        pieceCounter: document.getElementById('piece-counter'),
+        chatLog: document.getElementById('chat-log'),
+        centerLabel: document.getElementById('center-label-inner'),
+        toast: document.getElementById('toast'),
+        menuModal: document.getElementById('menu-modal'),
+        resultModal: document.getElementById('result-modal'),
+        resultTitle: document.getElementById('result-title'),
+        resultCopy: document.getElementById('result-copy'),
+        resultClarity: document.getElementById('result-clarity'),
+        resultBonus: document.getElementById('result-bonus'),
+        resultTotal: document.getElementById('result-total'),
+        startBtn: document.getElementById('start-btn'),
+        practiceBtn: document.getElementById('practice-btn'),
+        nextBtn: document.getElementById('next-btn'),
+        restartBtn: document.getElementById('restart-btn'),
+        readyBtn: document.getElementById('ready-btn'),
+        wiggleBtn: document.getElementById('wiggle-btn'),
+        hopBtn: document.getElementById('hop-btn'),
+        flourishBtn: document.getElementById('flourish-btn'),
+        undoBtn: document.getElementById('undo-btn'),
+        clearBtn: document.getElementById('clear-btn'),
+        muteBtn: document.getElementById('mute-btn'),
+        muteIcon: document.getElementById('mute-icon')
+      };
+
+      const engine = Engine.create({ enableSleeping: false });
+      const world = engine.world;
+      engine.gravity.y = 1.12;
+
+      let width = Math.max(320, els.stage.clientWidth);
+      let height = Math.max(320, els.stage.clientHeight);
+
+      const render = Render.create({
+        canvas: els.canvas,
+        engine,
         options: {
-            width: width,
-            height: height,
-            wireframes: false,
-            background: 'transparent'
+          width,
+          height,
+          wireframes: false,
+          background: 'transparent',
+          pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
         }
-    });
+      });
 
-    // --- GAME STATE ---
-    let currentTool = 'hand';
-    let selectedBody = null; // For linking
-    let currentWord = "SPIDER";
-    let gameActive = true;
-    let movementScore = 0; // Tracks how much user is "acting"
+      const runner = Runner.create();
+      Render.run(render);
+      Runner.run(runner, engine);
 
-    const WORDS = ["SPIDER", "BOXER", "CRAB", "ROBOT", "BALLERINA", "HORSE", "SNAKE", "TEAPOT"];
-    const WRONG_GUESSES = ["Is it a rock?", "A sandwich?", "Um...", "Move more!", "A car?", "Falling apart?", "A glitch?", "Tetris?"];
+      const mouse = Mouse.create(render.canvas);
+      const mouseConstraint = MouseConstraint.create(engine, {
+        mouse,
+        constraint: { stiffness: 0.22, damping: 0.04, render: { visible: false } }
+      });
+      Composite.add(world, mouseConstraint);
+      render.mouse = mouse;
 
-    // --- BOUNDARIES ---
-    const ground = Bodies.rectangle(width/2, height, width, 60, { 
-        isStatic: true, 
-        render: { fillStyle: '#444' } 
-    });
-    const wallL = Bodies.rectangle(0, height/2, 60, height, { isStatic: true, render: { visible: false } });
-    const wallR = Bodies.rectangle(width, height/2, 60, height, { isStatic: true, render: { visible: false } });
-    
-    Composite.add(world, [ground, wallL, wallR]);
+      const palette = ['#4ee7ff', '#8d7cff', '#ff63d8', '#ffd44d', '#68ff9b', '#ff8f5a'];
+      const state = {
+        phase: 'menu',
+        round: 1,
+        score: 0,
+        timer: BUILD_TIME,
+        currentTool: 'hand',
+        currentWord: WORDS[0],
+        usedWords: [],
+        selectedBody: null,
+        history: [],
+        recognition: 0,
+        activity: 0,
+        lastGuessAt: 0,
+        lastTickAt: performance.now(),
+        muted: false,
+        practice: false,
+        wasCorrect: false,
+        soundReady: false,
+        audioCtx: null
+      };
 
-    // --- INTERACTION ---
-    const mouse = Mouse.create(render.canvas);
-    const mouseConstraint = MouseConstraint.create(engine, {
-        mouse: mouse,
-        constraint: {
-            stiffness: 0.2,
-            render: { visible: false }
-        }
-    });
-    
-    // Disable default mouse constraint initially (we toggle it)
-    Composite.add(world, mouseConstraint);
+      let boundaries = [];
+      let toastTimer = 0;
 
-    // --- TOOL LOGIC ---
-    
-    function setTool(tool) {
-        currentTool = tool;
-        selectedBody = null; // Reset linking
-        
-        // Update UI
-        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById(`tool-${tool}`).classList.add('active');
+      function clamp(v, min = 0, max = 1) { return Math.max(min, Math.min(max, v)); }
+      function rand(min, max) { return min + Math.random() * (max - min); }
+      function choose(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+      function nowSeconds() { return Math.floor(state.timer); }
 
-        // Logic
-        if (tool === 'hand') {
-            mouseConstraint.constraint.stiffness = 0.2; // Enable dragging
-        } else {
-            mouseConstraint.constraint.stiffness = 0; // Disable dragging while building
-        }
-    }
+      function makeBoundaryBodies() {
+        boundaries.forEach(b => Composite.remove(world, b));
+        const ground = Bodies.rectangle(width / 2, height + 28, width + 220, 64, {
+          isStatic: true,
+          label: 'boundary-ground',
+          render: { fillStyle: 'rgba(255,255,255,0.13)', strokeStyle: 'rgba(255,255,255,0.16)', lineWidth: 1 }
+        });
+        const left = Bodies.rectangle(-28, height / 2, 56, height + 260, { isStatic: true, label: 'boundary-left', render: { visible: false } });
+        const right = Bodies.rectangle(width + 28, height / 2, 56, height + 260, { isStatic: true, label: 'boundary-right', render: { visible: false } });
+        const ceiling = Bodies.rectangle(width / 2, -44, width + 220, 60, { isStatic: true, label: 'boundary-ceiling', render: { visible: false } });
+        boundaries = [ground, left, right, ceiling];
+        Composite.add(world, boundaries);
+      }
+      makeBoundaryBodies();
 
-    // Handle Clicks on Canvas
-    Events.on(mouseConstraint, 'mousedown', function(event) {
-        if (!gameActive) return;
+      function ensureSound() {
+        if (state.soundReady || state.muted) return;
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        state.audioCtx = new Ctx();
+        state.soundReady = true;
+      }
 
-        const mPos = event.mouse.position;
-        
-        // BUILD MODE
-        if (currentTool === 'box') {
-            const size = 50 + Math.random() * 30;
-            const box = Bodies.rectangle(mPos.x, mPos.y, size, size, {
-                render: { fillStyle: getRandomColor() }
-            });
-            Composite.add(world, box);
-        }
-        else if (currentTool === 'circle') {
-            const size = 25 + Math.random() * 15;
-            const circle = Bodies.circle(mPos.x, mPos.y, size, {
-                render: { fillStyle: getRandomColor() }
-            });
-            Composite.add(world, circle);
-        }
-        else if (currentTool === 'link') {
-            // Find body under mouse
-            const bodies = Composite.allBodies(world);
-            const body = Matter.Query.point(bodies, mPos)[0];
-            
-            if (body && !body.isStatic) {
-                if (!selectedBody) {
-                    // First selection
-                    selectedBody = body;
-                    body.render.lineWidth = 5;
-                    body.render.strokeStyle = '#fff';
-                } else {
-                    // Second selection -> LINK
-                    if (body !== selectedBody) {
-                        const constraint = Constraint.create({
-                            bodyA: selectedBody,
-                            bodyB: body,
-                            length: Vector.magnitude(Vector.sub(selectedBody.position, body.position)),
-                            stiffness: 0.1, // Floppy joints are funnier
-                            render: { strokeStyle: '#fff', lineWidth: 3 }
-                        });
-                        Composite.add(world, constraint);
-                    }
-                    // Reset
-                    selectedBody.render.lineWidth = 0;
-                    selectedBody = null;
-                }
-            } else {
-                // Clicked empty space -> Cancel selection
-                if(selectedBody) selectedBody.render.lineWidth = 0;
-                selectedBody = null;
-            }
-        }
-    });
+      function beep(freq = 360, duration = 0.05, type = 'sine', gain = 0.035) {
+        if (state.muted) return;
+        ensureSound();
+        const ctx = state.audioCtx;
+        if (!ctx) return;
+        const osc = ctx.createOscillator();
+        const amp = ctx.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        amp.gain.setValueAtTime(gain, ctx.currentTime);
+        amp.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+        osc.connect(amp);
+        amp.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + duration);
+      }
 
-    // Tracking Movement for "Acting"
-    Events.on(mouseConstraint, 'mousemove', function(event) {
-        if (currentTool === 'hand' && mouseConstraint.body) {
-            movementScore += 1;
-        }
-    });
+      function chord(freqs, duration = 0.12) {
+        freqs.forEach((f, i) => setTimeout(() => beep(f, duration, i % 2 ? 'triangle' : 'sine', 0.03), i * 42));
+      }
 
-    function clearStage() {
-        Composite.clear(world, false, true); // Keep static
-        Composite.add(world, [ground, wallL, wallR, mouseConstraint]);
-    }
-
-    function getRandomColor() {
-        const hue = Math.floor(Math.random() * 360);
-        return `hsl(${hue}, 70%, 60%)`;
-    }
-
-    // --- SIMULATED MULTIPLAYER (BOTS) ---
-    const chatLog = document.getElementById('chat-log');
-    let lastGuessTime = 0;
-
-    function addChat(name, text, isCorrect = false) {
+      function addChat(name, text, type = '') {
         const div = document.createElement('div');
-        div.className = 'chat-msg';
-        if (isCorrect) div.className += ' chat-correct';
-        
-        div.innerHTML = `<span class="chat-name">${name}:</span> <span class="chat-guess">${text}</span>`;
-        chatLog.appendChild(div);
-        chatLog.scrollTop = chatLog.scrollHeight;
-    }
+        div.className = `chat-msg ${type}`.trim();
+        div.innerHTML = `<span class="chat-name">${name}:</span> ${text}`;
+        els.chatLog.appendChild(div);
+        els.chatLog.scrollTop = els.chatLog.scrollHeight;
+      }
 
-    function botLoop() {
-        if (!gameActive) return;
+      function toast(text) {
+        els.toast.textContent = text;
+        els.toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => els.toast.classList.remove('show'), 1500);
+      }
 
-        const now = Date.now();
-        
-        // Bots guess more often if you move more
-        if (movementScore > 20 && now - lastGuessTime > 2000) {
-            
-            movementScore -= 20; // Consume "movement points"
-            lastGuessTime = now;
+      function dynamicBodies() {
+        return Composite.allBodies(world).filter(b => !b.isStatic && !b.isSensor && b !== mouseConstraint.body && b.label !== 'mouseConstraint');
+      }
 
-            // Chance to guess correctly increases over time or activity
-            // For prototype, random small chance per tick
-            if (Math.random() > 0.85) {
-                winGame();
-            } else {
-                const name = "User_" + Math.floor(Math.random() * 999);
-                const guess = WRONG_GUESSES[Math.floor(Math.random() * WRONG_GUESSES.length)];
-                addChat(name, guess);
+      function userConstraints() {
+        return Composite.allConstraints(world).filter(c => c !== mouseConstraint.constraint && c.label !== 'Mouse Constraint');
+      }
+
+      function countParts() { return dynamicBodies().length; }
+      function countJoints() { return userConstraints().length; }
+
+      function baseRender(fill, stroke = 'rgba(255,255,255,0.72)') {
+        return { fillStyle: fill, strokeStyle: stroke, lineWidth: 2 };
+      }
+
+      function spawnPart(kind, x, y) {
+        if (state.phase !== 'build') { toast('You can only add parts during Build phase.'); return; }
+        if (countParts() >= MAX_PARTS) { toast('Part budget reached. Use fewer, clearer pieces.'); return; }
+
+        const color = palette[(countParts() + Math.floor(Math.random() * 2)) % palette.length];
+        let body;
+
+        if (kind === 'circle') {
+          const r = rand(23, 34);
+          body = Bodies.circle(x, y, r, {
+            label: 'part-circle',
+            restitution: 0.34,
+            friction: 0.72,
+            frictionAir: 0.012,
+            density: 0.0014,
+            render: baseRender(color)
+          });
+          body.gamePart = 'circle';
+        }
+
+        if (kind === 'box') {
+          const w = rand(50, 74);
+          const h = rand(42, 66);
+          body = Bodies.rectangle(x, y, w, h, {
+            label: 'part-box',
+            chamfer: { radius: 8 },
+            restitution: 0.25,
+            friction: 0.82,
+            frictionAir: 0.012,
+            density: 0.0016,
+            render: baseRender(color)
+          });
+          body.gamePart = 'box';
+        }
+
+        if (kind === 'limb') {
+          const w = rand(72, 96);
+          const h = rand(13, 18);
+          body = Bodies.rectangle(x, y, w, h, {
+            label: 'part-limb',
+            angle: rand(-0.18, 0.18),
+            chamfer: { radius: 8 },
+            restitution: 0.28,
+            friction: 0.68,
+            frictionAir: 0.015,
+            density: 0.00105,
+            render: baseRender(color)
+          });
+          body.gamePart = 'limb';
+        }
+
+        if (!body) return;
+        Composite.add(world, body);
+        state.history.push({ bodies: [body], constraints: [] });
+        state.activity += 0.5;
+        beep(260 + countParts() * 7, 0.035, 'triangle', 0.018);
+        updateUI();
+      }
+
+      function clearSelection() {
+        if (state.selectedBody) {
+          state.selectedBody.render.lineWidth = 2;
+          state.selectedBody.render.strokeStyle = 'rgba(255,255,255,0.72)';
+        }
+        state.selectedBody = null;
+      }
+
+      function setTool(tool) {
+        state.currentTool = tool;
+        clearSelection();
+        document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => btn.classList.toggle('active', btn.dataset.tool === tool));
+        const canDrag = tool === 'hand' && (state.phase === 'build' || state.phase === 'act');
+        mouseConstraint.constraint.stiffness = canDrag ? 0.22 : 0;
+        render.canvas.style.cursor = tool === 'hand' ? 'grab' : tool === 'erase' ? 'not-allowed' : 'crosshair';
+      }
+
+      function bodyAt(pos) {
+        return Query.point(dynamicBodies(), pos)[0] || null;
+      }
+
+      function addLink(a, b) {
+        if (countJoints() >= MAX_JOINTS) { toast('Joint budget reached.'); return; }
+        const len = Vector.magnitude(Vector.sub(a.position, b.position));
+        const c = Constraint.create({
+          label: 'user-link',
+          bodyA: a,
+          bodyB: b,
+          length: Math.max(24, len * 0.92),
+          stiffness: 0.18,
+          damping: 0.08,
+          render: { strokeStyle: 'rgba(255,255,255,0.78)', lineWidth: 3 }
+        });
+        Composite.add(world, c);
+        state.history.push({ bodies: [], constraints: [c] });
+        state.activity += 1;
+        chord([390, 510], 0.05);
+        updateUI();
+      }
+
+      function addPin(body, pos) {
+        if (countJoints() >= MAX_JOINTS) { toast('Joint budget reached.'); return; }
+        const c = Constraint.create({
+          label: 'user-pin',
+          pointA: { x: pos.x, y: pos.y },
+          bodyB: body,
+          pointB: { x: 0, y: 0 },
+          length: 0,
+          stiffness: 0.34,
+          damping: 0.12,
+          render: { strokeStyle: 'rgba(255,212,77,0.86)', lineWidth: 3 }
+        });
+        Composite.add(world, c);
+        state.history.push({ bodies: [], constraints: [c] });
+        state.activity += 1;
+        chord([600, 760], 0.06);
+        updateUI();
+      }
+
+      function eraseAt(pos) {
+        const body = bodyAt(pos);
+        if (!body) return;
+        userConstraints().forEach(c => {
+          if (c.bodyA === body || c.bodyB === body) Composite.remove(world, c);
+        });
+        Composite.remove(world, body);
+        if (state.selectedBody === body) state.selectedBody = null;
+        beep(120, 0.05, 'sawtooth', 0.02);
+        updateUI();
+      }
+
+      function clearStage(silent = false) {
+        clearSelection();
+        userConstraints().forEach(c => Composite.remove(world, c));
+        dynamicBodies().forEach(b => Composite.remove(world, b));
+        state.history = [];
+        state.recognition = 0;
+        state.activity = 0;
+        if (!silent) {
+          addChat('System', 'Stage cleared.', 'warning');
+          beep(150, 0.06, 'square', 0.018);
+        }
+        updateUI();
+      }
+
+      function undo() {
+        if (state.phase !== 'build') { toast('Undo is only available while building.'); return; }
+        const item = state.history.pop();
+        if (!item) return;
+        item.constraints.forEach(c => Composite.remove(world, c));
+        item.bodies.forEach(b => {
+          userConstraints().forEach(c => { if (c.bodyA === b || c.bodyB === b) Composite.remove(world, c); });
+          Composite.remove(world, b);
+        });
+        clearSelection();
+        beep(220, 0.04, 'triangle', 0.02);
+        updateUI();
+      }
+
+      function measureBuild() {
+        const bodies = dynamicBodies();
+        const constraints = userConstraints();
+        const stats = {
+          parts: bodies.length,
+          circles: bodies.filter(b => b.gamePart === 'circle').length,
+          boxes: bodies.filter(b => b.gamePart === 'box').length,
+          limbs: bodies.filter(b => b.gamePart === 'limb').length,
+          joints: constraints.filter(c => c.label === 'user-link').length,
+          pins: constraints.filter(c => c.label === 'user-pin').length,
+          avgSpeed: 0,
+          spin: 0,
+          width: 0,
+          height: 0,
+          ratio: 1,
+          activity: clamp(state.activity / 70),
+          centerX: width / 2,
+          centerY: height / 2
+        };
+        if (!bodies.length) return stats;
+
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, speed = 0, spin = 0;
+        bodies.forEach(b => {
+          minX = Math.min(minX, b.bounds.min.x);
+          minY = Math.min(minY, b.bounds.min.y);
+          maxX = Math.max(maxX, b.bounds.max.x);
+          maxY = Math.max(maxY, b.bounds.max.y);
+          speed += Vector.magnitude(b.velocity);
+          spin += Math.abs(b.angularVelocity);
+        });
+        stats.width = Math.max(1, maxX - minX);
+        stats.height = Math.max(1, maxY - minY);
+        stats.ratio = stats.width / stats.height;
+        stats.avgSpeed = speed / bodies.length;
+        stats.spin = spin / bodies.length;
+        stats.centerX = (minX + maxX) / 2;
+        stats.centerY = (minY + maxY) / 2;
+        return stats;
+      }
+
+      function atLeast(v, target) { return clamp(v / target); }
+      function atMost(v, target) { return clamp(1 - Math.max(0, v - target) / Math.max(1, target)); }
+      function ratioAbove(r, target) { return clamp((r - 0.75) / (target - 0.75)); }
+      function ratioBelow(r, target) { return clamp((1.65 - r) / (1.65 - target)); }
+      function ratioNear(r, target, spread) { return clamp(1 - Math.abs(r - target) / spread); }
+
+      function recognitionScore(stats, word) {
+        const act = clamp((stats.avgSpeed * 0.18) + (stats.spin * 3.5) + stats.activity);
+        const humanoid = Math.min(atLeast(stats.limbs, 4), atLeast(stats.parts, 5));
+        let shape = 0;
+
+        switch (word.word) {
+          case 'SPIDER':
+            shape = 0.27 * atLeast(stats.limbs, 7) + 0.18 * atLeast(stats.circles + stats.boxes, 1) + 0.23 * atLeast(stats.joints, 6) + 0.17 * ratioAbove(stats.ratio, 1.55) + 0.15 * atLeast(stats.parts, 8);
+            break;
+          case 'SNAKE':
+            shape = 0.25 * atLeast(stats.circles + stats.limbs, 7) + 0.25 * atLeast(stats.joints, 5) + 0.25 * ratioAbove(stats.ratio, 2.15) + 0.15 * atMost(stats.boxes, 2) + 0.10 * atLeast(stats.parts, 6);
+            break;
+          case 'ROBOT':
+            shape = 0.32 * atLeast(stats.boxes, 4) + 0.18 * atLeast(stats.limbs, 2) + 0.20 * atLeast(stats.joints, 3) + 0.18 * ratioNear(stats.ratio, 0.95, 0.9) + 0.12 * atLeast(stats.parts, 5);
+            break;
+          case 'CRAB':
+            shape = 0.27 * atLeast(stats.limbs, 5) + 0.18 * atLeast(stats.circles + stats.boxes, 2) + 0.20 * atLeast(stats.joints, 4) + 0.25 * ratioAbove(stats.ratio, 1.85) + 0.10 * atLeast(stats.parts, 6);
+            break;
+          case 'HORSE':
+            shape = 0.25 * atLeast(stats.limbs, 4) + 0.23 * atLeast(stats.circles + stats.boxes, 3) + 0.20 * atLeast(stats.joints, 5) + 0.22 * ratioAbove(stats.ratio, 1.45) + 0.10 * atLeast(stats.parts, 7);
+            break;
+          case 'TEAPOT':
+            shape = 0.24 * atLeast(stats.circles + stats.boxes, 2) + 0.25 * atLeast(stats.limbs, 2) + 0.16 * atLeast(stats.joints, 2) + 0.15 * ratioNear(stats.ratio, 1.25, 1.0) + 0.20 * atLeast(stats.parts, 4);
+            break;
+          case 'BALLERINA':
+            shape = 0.23 * humanoid + 0.22 * ratioBelow(stats.ratio, 0.86) + 0.18 * atLeast(stats.joints, 4) + 0.15 * atLeast(stats.circles, 1) + 0.22 * clamp(stats.spin * 8 + act * 0.45);
+            break;
+          case 'BOXER':
+            shape = 0.22 * humanoid + 0.22 * atLeast(stats.limbs, 4) + 0.18 * atLeast(stats.circles + stats.boxes, 3) + 0.18 * atLeast(stats.joints, 3) + 0.20 * act;
+            break;
+          default:
+            shape = atLeast(stats.parts, 5) * 0.7 + act * 0.3;
+        }
+        const buildPenalty = stats.parts < 2 ? 0.28 : 1;
+        const phaseWeight = state.phase === 'act' ? 0.74 * shape + 0.26 * act : 0.95 * shape + 0.05 * act;
+        return Math.round(100 * clamp(phaseWeight * buildPenalty));
+      }
+
+      function missingTip(stats, word) {
+        if (stats.parts < 2) return 'Add a few parts first.';
+        if (word.word === 'SPIDER' && stats.limbs < 6) return 'The crowd needs more legs.';
+        if (word.word === 'SNAKE' && stats.ratio < 1.9) return 'Make the silhouette longer and lower.';
+        if (word.word === 'ROBOT' && stats.boxes < 3) return 'Make it more boxy.';
+        if (word.word === 'CRAB' && stats.ratio < 1.6) return 'Make it wider and move sideways.';
+        if (word.word === 'HORSE' && stats.limbs < 4) return 'Four clear legs will help.';
+        if (word.word === 'TEAPOT' && stats.limbs < 2) return 'Add a spout and handle.';
+        if (word.word === 'BALLERINA' && state.phase === 'act' && stats.spin < 0.03) return 'Spin or flourish more.';
+        if (state.phase === 'act' && stats.avgSpeed < 1.2) return 'Act more! Drag, wiggle, hop or flourish.';
+        if (stats.joints < 2) return 'Link parts together so it reads as one puppet.';
+        return 'Good. Now perform clearly.';
+      }
+
+      function updateUI() {
+        const stats = measureBuild();
+        state.recognition = recognitionScore(stats, state.currentWord);
+        els.roundValue.textContent = `${state.round}/${state.practice ? 1 : MAX_ROUNDS}`;
+        els.timeValue.textContent = String(Math.max(0, nowSeconds())).padStart(2, '0');
+        els.scoreValue.textContent = String(state.score);
+        els.phaseLabel.textContent = state.phase === 'build' ? 'Build phase' : state.phase === 'act' ? 'Act phase' : 'Show paused';
+        els.secretWord.textContent = state.currentWord.word;
+        els.wordHint.textContent = state.currentWord.hint;
+        els.recognitionFill.style.width = `${state.recognition}%`;
+        els.recognitionValue.textContent = `${state.recognition}%`;
+        els.pieceCounter.textContent = `${countParts()}/${MAX_PARTS} parts · ${countJoints()}/${MAX_JOINTS} joints`;
+        els.meterTip.textContent = missingTip(stats, state.currentWord);
+        els.centerLabel.style.opacity = countParts() === 0 && (state.phase === 'build' || state.phase === 'menu') ? '1' : '0';
+        els.centerLabel.textContent = state.phase === 'menu' ? 'Press Start' : 'Build your clue';
+
+        const building = state.phase === 'build';
+        document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+          const tool = btn.dataset.tool;
+          const disabled = !building && tool !== 'hand';
+          btn.classList.toggle('disabled', disabled);
+        });
+        els.readyBtn.disabled = state.phase !== 'build';
+        els.readyBtn.textContent = state.phase === 'build' ? 'Start Acting  Space' : 'Acting...';
+        els.wiggleBtn.disabled = state.phase !== 'act';
+        els.hopBtn.disabled = state.phase !== 'act';
+        els.flourishBtn.disabled = state.phase !== 'act';
+      }
+
+      function pickWord() {
+        if (state.usedWords.length >= WORDS.length) state.usedWords = [];
+        const available = WORDS.filter(w => !state.usedWords.includes(w.word));
+        const word = choose(available);
+        state.usedWords.push(word.word);
+        return word;
+      }
+
+      function startGame(practice = false) {
+        ensureSound();
+        state.practice = practice;
+        state.round = 1;
+        state.score = 0;
+        state.usedWords = [];
+        els.menuModal.classList.remove('show');
+        startRound();
+      }
+
+      function startRound() {
+        state.phase = 'build';
+        state.timer = BUILD_TIME;
+        state.currentWord = pickWord();
+        state.activity = 0;
+        state.lastGuessAt = 0;
+        state.wasCorrect = false;
+        clearStage(true);
+        setTool('hand');
+        els.chatLog.innerHTML = '';
+        addChat('System', `Round ${state.round}: build the clue, then press Space to act.`, 'system');
+        addChat('Director', choose(state.currentWord.tips), 'warning');
+        chord([330, 440, 660], 0.07);
+        updateUI();
+      }
+
+      function startActing() {
+        if (state.phase !== 'build') return;
+        if (countParts() < 2) { toast('Add at least two parts before acting.'); return; }
+        state.phase = 'act';
+        state.timer = ACT_TIME;
+        state.activity = Math.max(state.activity, 8);
+        setTool('hand');
+        addChat('System', 'Act phase! Drag the puppet or use Q/W/F.', 'system');
+        toast('Act it out! Movement matters now.');
+        chord([520, 650, 780], 0.06);
+        updateUI();
+      }
+
+      function finishRound(success) {
+        if (state.phase !== 'act' && state.phase !== 'build') return;
+        state.phase = 'roundover';
+        state.wasCorrect = success;
+        clearSelection();
+        const clarity = state.recognition;
+        const timeBonus = success ? Math.max(0, Math.ceil(state.timer * 7)) : 0;
+        const clarityBonus = success ? Math.round(clarity * 3) : Math.round(clarity);
+        const roundScore = success ? 400 + timeBonus + clarityBonus : clarityBonus;
+        if (!state.practice) state.score += roundScore;
+
+        if (success) {
+          addChat('User_88', state.currentWord.word, 'correct');
+          addChat('System', 'Correct! The crowd got it.', 'system');
+          els.resultTitle.textContent = 'Correct!';
+          els.resultCopy.textContent = `They guessed ${state.currentWord.word}. Fast, readable and silly.`;
+          spawnConfetti();
+          chord([660, 880, 990, 1320], 0.1);
+        } else {
+          addChat('System', `Time! The word was ${state.currentWord.word}.`, 'warning');
+          els.resultTitle.textContent = 'Time!';
+          els.resultCopy.textContent = `The crowd did not quite get ${state.currentWord.word}. ${choose(state.currentWord.tips)}`;
+          beep(110, 0.22, 'sawtooth', 0.025);
+        }
+
+        els.resultClarity.textContent = `${clarity}%`;
+        els.resultBonus.textContent = String(timeBonus + clarityBonus);
+        els.resultTotal.textContent = state.practice ? 'Practice' : String(state.score);
+        els.nextBtn.textContent = state.practice || state.round >= MAX_ROUNDS ? 'Final Results' : 'Next Round';
+        els.resultModal.classList.add('show');
+        updateUI();
+      }
+
+      function nextRoundOrEnd() {
+        els.resultModal.classList.remove('show');
+        if (state.phase === 'gameover') {
+          startGame(false);
+          return;
+        }
+        if (state.practice) {
+          state.practice = false;
+          els.menuModal.classList.add('show');
+          state.phase = 'menu';
+          clearStage(true);
+          updateUI();
+          return;
+        }
+        if (state.round >= MAX_ROUNDS) {
+          showGameOver();
+        } else {
+          state.round += 1;
+          startRound();
+        }
+      }
+
+      function showGameOver() {
+        state.phase = 'gameover';
+        els.resultTitle.textContent = state.score >= 3200 ? 'Legendary Show!' : state.score >= 2200 ? 'Great Show!' : 'Show Complete!';
+        els.resultCopy.textContent = `Final score: ${state.score}. Try again with cleaner silhouettes and bigger performances.`;
+        els.resultClarity.textContent = '5 rounds';
+        els.resultBonus.textContent = state.score >= 3200 ? 'S+' : state.score >= 2200 ? 'A' : state.score >= 1400 ? 'B' : 'C';
+        els.resultTotal.textContent = String(state.score);
+        els.nextBtn.textContent = 'New Show';
+        els.resultModal.classList.add('show');
+      }
+
+      function botGuessLoop(dt) {
+        if (state.phase !== 'act') return;
+        const t = performance.now();
+        const interval = clamp(2700 - state.recognition * 12, 1050, 2700);
+        if (t - state.lastGuessAt < interval) return;
+        state.lastGuessAt = t;
+
+        const stats = measureBuild();
+        const activeEnough = stats.avgSpeed > 0.85 || stats.spin > 0.025 || state.activity > 0.42;
+        const correctChance = state.recognition >= 88 ? 0.92 : state.recognition >= 78 ? 0.48 : state.recognition >= 66 ? 0.18 : 0;
+        if (activeEnough && Math.random() < correctChance) {
+          finishRound(true);
+          return;
+        }
+        const name = choose(BOT_NAMES);
+        const wrong = choose(state.currentWord.wrong);
+        addChat(name, wrong);
+        if (state.recognition < 50) addChat('Director', missingTip(stats, state.currentWord), 'warning');
+        beep(260 + Math.random() * 180, 0.025, 'triangle', 0.012);
+      }
+
+      function applyImpulse(kind) {
+        if (state.phase !== 'act') { toast('Use performance moves in Act phase.'); return; }
+        const bodies = dynamicBodies();
+        if (!bodies.length) return;
+        const center = bodies.reduce((acc, b) => ({ x: acc.x + b.position.x, y: acc.y + b.position.y }), { x: 0, y: 0 });
+        center.x /= bodies.length;
+        center.y /= bodies.length;
+
+        bodies.forEach((b, i) => {
+          let force = { x: 0, y: 0 };
+          if (kind === 'wiggle') force = { x: (i % 2 ? 0.018 : -0.018) * b.mass, y: -0.006 * b.mass };
+          if (kind === 'hop') force = { x: (Math.random() - 0.5) * 0.006 * b.mass, y: -0.038 * b.mass };
+          if (kind === 'flourish') {
+            const dx = b.position.x - center.x;
+            const dy = b.position.y - center.y;
+            force = { x: -dy * 0.00018 * b.mass, y: dx * 0.00018 * b.mass - 0.007 * b.mass };
+          }
+          Body.applyForce(b, b.position, force);
+          if (kind === 'flourish') Body.setAngularVelocity(b, b.angularVelocity + (i % 2 ? 0.08 : -0.08));
+        });
+        state.activity += kind === 'flourish' ? 8 : 5;
+        if (kind === 'hop') chord([300, 460], 0.04);
+        if (kind === 'wiggle') beep(420, 0.04, 'square', 0.016);
+        if (kind === 'flourish') chord([580, 760, 920], 0.05);
+      }
+
+      function spawnConfetti() {
+        const cx = width * 0.5;
+        const cy = height * 0.32;
+        for (let i = 0; i < 80; i++) {
+          const p = document.createElement('div');
+          p.className = 'particle';
+          p.style.left = `${cx}px`;
+          p.style.top = `${cy}px`;
+          p.style.background = palette[i % palette.length];
+          p.style.setProperty('--dx', `${rand(-420, 420)}px`);
+          p.style.setProperty('--dy', `${rand(-170, 420)}px`);
+          p.style.setProperty('--rot', `${rand(-720, 720)}deg`);
+          p.style.animationDuration = `${rand(0.8, 1.35)}s`;
+          els.stage.appendChild(p);
+          setTimeout(() => p.remove(), 1500);
+        }
+      }
+
+      Events.on(mouseConstraint, 'mousedown', (event) => {
+        ensureSound();
+        const pos = event.mouse.position;
+        if (state.phase !== 'build' && state.currentTool !== 'hand') return;
+
+        switch (state.currentTool) {
+          case 'circle': spawnPart('circle', pos.x, pos.y); break;
+          case 'box': spawnPart('box', pos.x, pos.y); break;
+          case 'limb': spawnPart('limb', pos.x, pos.y); break;
+          case 'erase': eraseAt(pos); break;
+          case 'pin': {
+            const b = bodyAt(pos);
+            if (b) addPin(b, pos);
+            break;
+          }
+          case 'link': {
+            const b = bodyAt(pos);
+            if (!b) { clearSelection(); return; }
+            if (!state.selectedBody) {
+              state.selectedBody = b;
+              b.render.strokeStyle = '#ffffff';
+              b.render.lineWidth = 5;
+              beep(500, 0.04, 'triangle', 0.018);
+            } else if (state.selectedBody !== b) {
+              addLink(state.selectedBody, b);
+              clearSelection();
             }
+            break;
+          }
+          default:
+            break;
         }
-    }
-    
-    // --- GAME FLOW ---
-    
-    function nextRound() {
-        gameActive = true;
-        document.getElementById('win-overlay').style.display = 'none';
-        clearStage();
-        currentWord = WORDS[Math.floor(Math.random() * WORDS.length)];
-        document.getElementById('secret-word').innerText = currentWord;
-        addChat("System", "Next round! Go!");
-        movementScore = 0;
-    }
+      });
 
-    function winGame() {
-        gameActive = false;
-        addChat("User_88", currentWord, true);
-        addChat("System", "Round Over!");
-        
-        document.getElementById('win-msg').innerText = "CORRECT!";
-        document.getElementById('win-overlay').style.display = 'flex';
-        
-        // Confetti effect (Simulated with simple particles)
-        spawnConfetti();
-    }
-
-    function spawnConfetti() {
-        for(let i=0; i<50; i++) {
-            const c = Bodies.circle(width/2, height/2, 5, {
-                render: { fillStyle: getRandomColor() },
-                restitution: 0.5
-            });
-            Body.setVelocity(c, { x: (Math.random()-0.5)*20, y: (Math.random()-0.5)*20 });
-            Composite.add(world, c);
+      Events.on(mouseConstraint, 'startdrag', () => {
+        if (state.phase === 'act') {
+          render.canvas.style.cursor = 'grabbing';
+          state.activity += 2;
+          beep(330, 0.035, 'triangle', 0.012);
         }
-    }
+      });
 
-    // --- RUN ---
-    Render.run(render);
-    Runner.run(Runner.create(), engine);
+      Events.on(mouseConstraint, 'mousemove', () => {
+        if (state.phase === 'act' && mouseConstraint.body) state.activity += 0.45;
+      });
 
-    // Bot Logic Loop
-    setInterval(botLoop, 500);
+      Events.on(mouseConstraint, 'enddrag', () => {
+        render.canvas.style.cursor = state.currentTool === 'hand' ? 'grab' : 'crosshair';
+      });
 
-    // Initial setup
-    window.addEventListener('resize', () => {
-        width = stage.clientWidth;
-        height = stage.clientHeight;
-        render.canvas.width = width;
-        render.canvas.height = height;
-        Body.setPosition(ground, { x: width/2, y: height });
-        Body.setPosition(wallR, { x: width, y: height/2 });
-    });
+      Events.on(render, 'afterRender', () => {
+        const ctx = render.context;
+        if (!state.selectedBody) return;
+        const b = state.selectedBody;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(b.position.x, b.position.y, 30 + Math.sin(performance.now() * 0.01) * 4, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+      });
 
-</script>
+      Events.on(engine, 'afterUpdate', () => {
+        const current = performance.now();
+        const dt = Math.min(0.05, (current - state.lastTickAt) / 1000);
+        state.lastTickAt = current;
+        if (state.phase === 'build' || state.phase === 'act') {
+          state.timer -= dt;
+          state.activity = clamp(state.activity - dt * 2.7, 0, 100);
+          if (state.timer <= 0) {
+            if (state.phase === 'build') {
+              if (countParts() < 2) finishRound(false);
+              else startActing();
+            } else {
+              finishRound(false);
+            }
+          }
+          botGuessLoop(dt);
+          updateUI();
+        }
+      });
+
+      function resize() {
+        width = Math.max(320, els.stage.clientWidth);
+        height = Math.max(320, els.stage.clientHeight);
+        render.options.width = width;
+        render.options.height = height;
+        render.canvas.width = width * render.options.pixelRatio;
+        render.canvas.height = height * render.options.pixelRatio;
+        render.canvas.style.width = `${width}px`;
+        render.canvas.style.height = `${height}px`;
+        mouse.pixelRatio = render.options.pixelRatio;
+        makeBoundaryBodies();
+      }
+      window.addEventListener('resize', resize);
+
+      document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tool = btn.dataset.tool;
+          if (state.phase !== 'build' && tool !== 'hand') { toast('Building tools are locked during Act phase.'); return; }
+          setTool(tool);
+        });
+      });
+
+      els.startBtn.addEventListener('click', () => startGame(false));
+      els.practiceBtn.addEventListener('click', () => startGame(true));
+      els.readyBtn.addEventListener('click', startActing);
+      els.wiggleBtn.addEventListener('click', () => applyImpulse('wiggle'));
+      els.hopBtn.addEventListener('click', () => applyImpulse('hop'));
+      els.flourishBtn.addEventListener('click', () => applyImpulse('flourish'));
+      els.undoBtn.addEventListener('click', undo);
+      els.clearBtn.addEventListener('click', () => clearStage(false));
+      els.nextBtn.addEventListener('click', nextRoundOrEnd);
+      els.restartBtn.addEventListener('click', () => {
+        els.resultModal.classList.remove('show');
+        startGame(false);
+      });
+      els.muteBtn.addEventListener('click', () => {
+        state.muted = !state.muted;
+        els.muteIcon.textContent = state.muted ? '🔇' : '🔊';
+        toast(state.muted ? 'Sound muted.' : 'Sound on.');
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.repeat) return;
+        const k = e.key.toLowerCase();
+        if (k === ' ') { e.preventDefault(); startActing(); }
+        if (k === '1') setTool('hand');
+        if (k === '2' && state.phase === 'build') setTool('circle');
+        if (k === '3' && state.phase === 'build') setTool('box');
+        if (k === '4' && state.phase === 'build') setTool('limb');
+        if (k === '5' && state.phase === 'build') setTool('link');
+        if (k === '6' && state.phase === 'build') setTool('pin');
+        if (k === 'x' && state.phase === 'build') setTool('erase');
+        if (k === 'z') undo();
+        if (k === 'r' && state.phase === 'build') clearStage(false);
+        if (k === 'q') applyImpulse('wiggle');
+        if (k === 'w') applyImpulse('hop');
+        if (k === 'f') applyImpulse('flourish');
+      });
+
+      document.addEventListener('contextmenu', e => e.preventDefault());
+
+      // Initial UI
+      state.currentWord = WORDS[0];
+      addChat('System', 'Welcome. Start a show to begin.', 'system');
+      setTool('hand');
+      updateUI();
+      resize();
+    })();
+  </script>
 </body>
 </html>
