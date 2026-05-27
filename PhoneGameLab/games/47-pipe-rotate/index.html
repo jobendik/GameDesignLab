@@ -1,0 +1,58 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Pipe Rotate", instructions:"Tap pipes to rotate. Connect source to drain.", restart:start});
+let g, score, COLS=5, ROWS=7;
+// pipe types: 0=empty, 1=straight (NS), 2=corner (NE), 3=T (NES), each with rotation 0..3
+// represented as connection mask N=1,E=2,S=4,W=8
+function start(){
+  g=Array.from({length:ROWS},()=>Array.from({length:COLS},()=>({m:0,fixed:false})));
+  // source top-left, drain bottom-right
+  g[0][0]={m:6, fixed:true}; // E+S=6
+  g[ROWS-1][COLS-1]={m:9, fixed:true}; // N+W=9
+  const shapes=[5,10,3,6,12,9,7,11,13,14]; // straight,corners,T
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) if(!g[r][c].fixed) g[r][c]={m:Lab.choose(shapes), fixed:false};
+  score=0; Lab.setScore(0);
+  Lab.input.onTap=[(x,y)=>{ const cs=cellSize(), off=offset(cs); const c=Math.floor((x-off.x)/cs), r=Math.floor((y-off.y)/cs);
+    if(c<0||c>=COLS||r<0||r>=ROWS||g[r][c].fixed) return;
+    g[r][c].m=rotate(g[r][c].m); Lab.beep(400,.03);
+    if(checkConnect()){ Lab.win("Connected!"); }
+  }];
+  Lab.loop(()=>draw());
+}
+function rotate(m){ // rotate 90deg clockwise: N(1)->E(2), E(2)->S(4), S(4)->W(8), W(8)->N(1)
+  let r=0; if(m&1)r|=2; if(m&2)r|=4; if(m&4)r|=8; if(m&8)r|=1; return r;
+}
+function checkConnect(){
+  const visited=Array.from({length:ROWS},()=>Array(COLS).fill(false));
+  const st=[[0,0]];
+  while(st.length){ const [r,c]=st.pop(); if(visited[r][c]) continue; visited[r][c]=true;
+    if(r===ROWS-1&&c===COLS-1) return true;
+    const m=g[r][c].m;
+    const dirs=[[-1,0,1,4],[0,1,2,8],[1,0,4,1],[0,-1,8,2]]; // dr,dc,outBit,inBit
+    for(const [dr,dc,ob,ib] of dirs){ if(!(m&ob)) continue;
+      const nr=r+dr, nc=c+dc; if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+      if(g[nr][nc].m&ib) st.push([nr,nc]);
+    }
+  } return false;
+}
+function cellSize(){ return Math.min((Lab.W-20)/COLS, (Lab.H-220)/ROWS);}
+function offset(cs){ return {x:(Lab.W-cs*COLS)/2, y:140};}
+function draw(){
+  const c=Lab.ctx; c.fillStyle="#1c1c2c"; c.fillRect(0,0,Lab.W,Lab.H);
+  const cs=cellSize(), off=offset(cs);
+  for(let r=0;r<ROWS;r++) for(let col=0;col<COLS;col++){
+    const x=off.x+col*cs, y=off.y+r*cs, cx=x+cs/2, cy=y+cs/2;
+    c.fillStyle=g[r][col].fixed?"#3a4a6a":"#22253a"; c.fillRect(x+1,y+1,cs-2,cs-2);
+    const m=g[r][col].m;
+    c.strokeStyle=g[r][col].fixed?"#ffd35a":"#7af"; c.lineWidth=cs*0.16; c.lineCap="round";
+    if(m&1){ c.beginPath(); c.moveTo(cx,cy); c.lineTo(cx,y); c.stroke();}
+    if(m&2){ c.beginPath(); c.moveTo(cx,cy); c.lineTo(x+cs,cy); c.stroke();}
+    if(m&4){ c.beginPath(); c.moveTo(cx,cy); c.lineTo(cx,y+cs); c.stroke();}
+    if(m&8){ c.beginPath(); c.moveTo(cx,cy); c.lineTo(x,cy); c.stroke();}
+  }
+  c.fillStyle="#fff"; c.font="14px sans-serif"; c.textAlign="center";
+  c.fillText("Tap pipes to rotate", Lab.W/2, 110);
+}
+start();
+</script></body></html>

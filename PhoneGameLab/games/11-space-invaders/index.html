@@ -1,0 +1,65 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Space Invaders", instructions:"Drag to move ship. Tap to fire.", restart:start});
+let ship,bullets,aliens,dir,step,score,fireT,ebullets,lives,wave;
+function makeWave(){
+  aliens=[]; const cols=8, rows=4;
+  const mx=24, gap=(Lab.W-mx*2)/cols;
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    aliens.push({x:mx+gap*c+gap/2,y:120+r*40,r:14,alive:true,kind:r});
+  }
+}
+function start(){
+  score=0;lives=3;wave=1;
+  ship={x:Lab.W/2,w:50,h:18};
+  bullets=[]; ebullets=[]; makeWave(); dir=1; step=0; fireT=0;
+  Lab.setScore(0);
+  Lab.input.onMove=[x=>{ship.x=Lab.clamp(x,30,Lab.W-30);}];
+  Lab.input.onTap=[()=>{ if(fireT<=0){ bullets.push({x:ship.x,y:Lab.H-70,vy:-500}); fireT=0.18; Lab.beep(800,.04); } }];
+  Lab.loop(dt=>{
+    fireT-=dt;
+    // move aliens
+    step+=dt*(0.6+wave*0.15)*(aliens.filter(a=>a.alive).length<8?2:1);
+    let down=false;
+    if(step>0.5){ step=0;
+      // shift
+      let minX=Infinity,maxX=-Infinity;
+      for(const a of aliens) if(a.alive){minX=Math.min(minX,a.x);maxX=Math.max(maxX,a.x);}
+      const nx=minX+dir*14, nX=maxX+dir*14;
+      if(nx<10||nX>Lab.W-10){ dir*=-1; for(const a of aliens)a.y+=18; }
+      else for(const a of aliens)a.x+=dir*14;
+      // enemy fire
+      const alive=aliens.filter(a=>a.alive);
+      if(alive.length && Math.random()<.4){
+        const e=Lab.choose(alive);
+        ebullets.push({x:e.x,y:e.y,vy:200+wave*20});
+      }
+    }
+    // bullets
+    for(const b of bullets){ b.y+=b.vy*dt; }
+    for(const b of bullets){
+      for(const a of aliens) if(a.alive && Lab.dist(a.x,a.y,b.x,b.y)<a.r+4){a.alive=false;b.dead=true;score+=10;Lab.setScore(score);Lab.beep(1200,.05);}
+    }
+    for(const b of ebullets){ b.y+=b.vy*dt;
+      if(Math.abs(b.x-ship.x)<28 && b.y>Lab.H-70 && b.y<Lab.H-30){ b.dead=true; lives--; Lab.beep(120,.2,'sawtooth'); if(lives<=0){ Lab.gameover({title:"Defeated",message:"Score: "+score}); return; }}
+    }
+    bullets=bullets.filter(b=>b.y>0 && !b.dead);
+    ebullets=ebullets.filter(b=>b.y<Lab.H && !b.dead);
+    if(!aliens.some(a=>a.alive)){ wave++; makeWave(); Lab.toast("Wave "+wave); }
+    if(aliens.some(a=>a.alive && a.y>Lab.H-90)){ Lab.gameover({title:"Invaded!",message:"Score: "+score}); return; }
+    const c=Lab.ctx; c.fillStyle="#05060b"; c.fillRect(0,0,Lab.W,Lab.H);
+    for(const a of aliens) if(a.alive){
+      c.fillStyle=["#3df58a","#5af","#f5a","#ffd35a"][a.kind%4];
+      c.fillRect(a.x-12,a.y-8,24,16);
+    }
+    c.fillStyle="#5af"; c.fillRect(ship.x-25,Lab.H-50,50,16);
+    c.fillRect(ship.x-3,Lab.H-58,6,8);
+    c.fillStyle="#ffd35a"; for(const b of bullets) c.fillRect(b.x-2,b.y-8,4,12);
+    c.fillStyle="#ff5577"; for(const b of ebullets) c.fillRect(b.x-2,b.y,4,12);
+    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
+    c.fillText("❤️ "+lives+"  •  Wave "+wave, Lab.W/2, 70);
+  });
+}
+start();
+</script></body></html>

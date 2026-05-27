@@ -1,0 +1,52 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Pool", instructions:"Drag from cue ball to aim & set power, release to break.", restart:start});
+let balls, cue, aiming, sx,sy,ex,ey, pockets;
+function start(){
+  balls=[]; const cx=Lab.W/2, cy=Lab.H*0.45;
+  // rack 6 balls
+  for(let r=0;r<3;r++)for(let i=0;i<=r;i++) balls.push({x:cx-r*8+i*16, y:cy-r*16, vx:0,vy:0, r:10, c:`hsl(${(r*3+i)*40},80%,55%)`});
+  cue={x:Lab.W/2, y:Lab.H*0.8, vx:0, vy:0, r:11};
+  pockets=[{x:24,y:24},{x:Lab.W/2,y:18},{x:Lab.W-24,y:24},{x:24,y:Lab.H-24},{x:Lab.W/2,y:Lab.H-18},{x:Lab.W-24,y:Lab.H-24}];
+  Lab.setScore(0);
+  Lab.input.onDown=[(x,y)=>{ if(allStopped()){ aiming=true; sx=x; sy=y; ex=x; ey=y;}}];
+  Lab.input.onMove=[(x,y)=>{ if(aiming){ ex=x; ey=y; }}];
+  Lab.input.onUp=[(x,y)=>{ if(!aiming) return; aiming=false;
+    const dx=sx-x, dy=sy-y; const pw=Math.min(Math.hypot(dx,dy),200);
+    if(pw<10) return;
+    const a=Math.atan2(dy,dx);
+    cue.vx=Math.cos(a)*pw*5; cue.vy=Math.sin(a)*pw*5;
+  }];
+  Lab.loop(dt=>{
+    const all=[...balls,cue];
+    for(const b of all){ b.x+=b.vx*dt; b.y+=b.vy*dt; b.vx*=0.992; b.vy*=0.992;
+      if(Math.abs(b.vx)<2 && Math.abs(b.vy)<2){ b.vx=0; b.vy=0;}
+      if(b.x<40+b.r){b.x=40+b.r;b.vx*=-1;} if(b.x>Lab.W-40-b.r){b.x=Lab.W-40-b.r;b.vx*=-1;}
+      if(b.y<40+b.r){b.y=40+b.r;b.vy*=-1;} if(b.y>Lab.H-40-b.r){b.y=Lab.H-40-b.r;b.vy*=-1;}
+    }
+    for(let i=0;i<all.length;i++) for(let j=i+1;j<all.length;j++){
+      const a=all[i], b=all[j]; const dx=b.x-a.x, dy=b.y-a.y, d=Math.hypot(dx,dy)||0.01;
+      if(d<a.r+b.r){
+        const nx=dx/d, ny=dy/d; const overlap=a.r+b.r-d;
+        a.x-=nx*overlap/2; a.y-=ny*overlap/2;
+        b.x+=nx*overlap/2; b.y+=ny*overlap/2;
+        const dot=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+        if(dot<0){ a.vx+=nx*dot; a.vy+=ny*dot; b.vx-=nx*dot; b.vy-=ny*dot;}
+      }
+    }
+    // pockets
+    for(let i=balls.length-1;i>=0;i--){ for(const p of pockets){ if(Lab.dist(balls[i].x,balls[i].y,p.x,p.y)<26){ balls.splice(i,1); Lab.setScore(parseInt(document.getElementById('lab-score').textContent)+1); Lab.beep(900,.08); break;}}}
+    for(const p of pockets){ if(Lab.dist(cue.x,cue.y,p.x,p.y)<26){ cue.x=Lab.W/2; cue.y=Lab.H*0.8; cue.vx=0; cue.vy=0; Lab.toast("Scratch!"); break;}}
+    if(!balls.length){ Lab.win("Cleared!"); return; }
+    const c=Lab.ctx; c.fillStyle="#103018"; c.fillRect(0,0,Lab.W,Lab.H);
+    c.fillStyle="#0a4a26"; c.fillRect(40,40,Lab.W-80,Lab.H-80);
+    for(const p of pockets){ c.beginPath(); c.fillStyle="#000"; c.arc(p.x,p.y,16,0,Lab.TAU); c.fill();}
+    for(const b of balls){ c.beginPath(); c.fillStyle=b.c; c.arc(b.x,b.y,b.r,0,Lab.TAU); c.fill();}
+    c.beginPath(); c.fillStyle="#fff"; c.arc(cue.x,cue.y,cue.r,0,Lab.TAU); c.fill();
+    if(aiming){ c.strokeStyle="#fff"; c.lineWidth=2; c.setLineDash([4,6]); c.beginPath(); c.moveTo(cue.x,cue.y); c.lineTo(cue.x+(sx-ex)*1.5, cue.y+(sy-ey)*1.5); c.stroke(); c.setLineDash([]);}
+  });
+}
+function allStopped(){ if(Math.hypot(cue.vx,cue.vy)>1) return false; for(const b of balls) if(Math.hypot(b.vx,b.vy)>1) return false; return true; }
+start();
+</script></body></html>

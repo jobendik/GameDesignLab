@@ -1,0 +1,67 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Suika Merge", instructions:"Tap to drop. Same fruit merges into bigger fruit.", restart:start});
+let fruits, next, score, dead, dropX, lineY;
+const TIERS=[
+ {r:16,hue:0},{r:22,hue:30},{r:28,hue:60},{r:36,hue:100},{r:44,hue:160},{r:54,hue:220},{r:64,hue:280},{r:78,hue:320}
+];
+function start(){
+  fruits=[]; score=0; dead=false; next=Lab.randInt(0,3); dropX=Lab.W/2;
+  lineY=120;
+  Lab.setScore(0);
+  Lab.input.onMove=[(x)=>{ const t=TIERS[next]; dropX=Lab.clamp(x, t.r+10, Lab.W-t.r-10);}];
+  Lab.input.onTap=[(x)=>{ if(dead) return;
+    const t=TIERS[next];
+    fruits.push({x:dropX,y:lineY+t.r,vx:0,vy:0,tier:next});
+    next=Lab.randInt(0,3); Lab.beep(500,.04);
+  }];
+  Lab.loop(dt=>{
+    if(dead) return;
+    const g=900;
+    for(const f of fruits){
+      f.vy+=g*dt; f.x+=f.vx*dt; f.y+=f.vy*dt;
+      const r=TIERS[f.tier].r;
+      if(f.x<r){ f.x=r; f.vx=-f.vx*0.4;}
+      if(f.x>Lab.W-r){ f.x=Lab.W-r; f.vx=-f.vx*0.4;}
+      if(f.y>Lab.H-r-20){ f.y=Lab.H-r-20; f.vy=-f.vy*0.3; f.vx*=0.9;}
+    }
+    // collisions
+    for(let i=0;i<fruits.length;i++) for(let j=i+1;j<fruits.length;j++){
+      const a=fruits[i], b=fruits[j]; if(!a||!b) continue;
+      const ra=TIERS[a.tier].r, rb=TIERS[b.tier].r;
+      const dx=b.x-a.x, dy=b.y-a.y, d=Math.hypot(dx,dy)||0.01;
+      const overlap=(ra+rb)-d;
+      if(overlap>0){
+        if(a.tier===b.tier && a.tier<TIERS.length-1 && d<ra+rb-2){
+          score+=(a.tier+1)*10;
+          const nt=a.tier+1;
+          fruits[i]={x:(a.x+b.x)/2,y:(a.y+b.y)/2,vx:(a.vx+b.vx)/2,vy:(a.vy+b.vy)/2-50,tier:nt};
+          fruits[j]=null;
+          Lab.beep(800+nt*100,.07);
+          Lab.setScore(score);
+        } else {
+          const nx=dx/d, ny=dy/d;
+          a.x-=nx*overlap/2; a.y-=ny*overlap/2;
+          b.x+=nx*overlap/2; b.y+=ny*overlap/2;
+          const dot = (b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+          if(dot<0){ a.vx+=nx*dot*0.5; a.vy+=ny*dot*0.5; b.vx-=nx*dot*0.5; b.vy-=ny*dot*0.5; }
+        }
+      }
+    }
+    fruits=fruits.filter(Boolean);
+    // gameover if fruit rests above line
+    for(const f of fruits){ if(f.y-TIERS[f.tier].r<lineY-5 && Math.abs(f.vy)<10){ dead=true; Lab.gameover({title:"Overflow",message:"Score: "+score}); return; }}
+    const c=Lab.ctx; c.fillStyle="#1a1a2a"; c.fillRect(0,0,Lab.W,Lab.H);
+    c.strokeStyle="#ff5577"; c.setLineDash([6,8]); c.beginPath(); c.moveTo(0,lineY); c.lineTo(Lab.W,lineY); c.stroke(); c.setLineDash([]);
+    // preview
+    const nt=TIERS[next];
+    c.beginPath(); c.fillStyle=`hsl(${nt.hue},80%,60%)`; c.arc(dropX,lineY,nt.r,0,Lab.TAU); c.fill();
+    for(const f of fruits){ const t=TIERS[f.tier];
+      c.beginPath(); c.fillStyle=`hsl(${t.hue},80%,60%)`; c.arc(f.x,f.y,t.r,0,Lab.TAU); c.fill();
+      c.beginPath(); c.strokeStyle="rgba(255,255,255,.3)"; c.arc(f.x,f.y,t.r,0,Lab.TAU); c.stroke();
+    }
+  });
+}
+start();
+</script></body></html>

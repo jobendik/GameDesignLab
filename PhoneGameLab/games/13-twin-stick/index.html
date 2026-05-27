@@ -1,0 +1,60 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Twin-Stick Arena", instructions:"Left thumb = move • Right thumb = shoot direction.", restart:start});
+let p,enemies,bullets,score,lives,t,touches={};
+function start(){
+  p={x:Lab.W/2,y:Lab.H/2,r:14};
+  enemies=[]; bullets=[]; score=0; lives=3; t=0;
+  Lab.setScore(0);
+  const c=Lab.canvas;
+  c.onpointerdown=c.onpointermove=null;
+  c.addEventListener('pointerdown',e=>{
+    const side=e.clientX<Lab.W/2?'L':'R';
+    touches[e.pointerId]={side,sx:e.clientX,sy:e.clientY,x:e.clientX,y:e.clientY};
+    try{c.setPointerCapture(e.pointerId)}catch{}
+  });
+  c.addEventListener('pointermove',e=>{
+    const t=touches[e.pointerId]; if(!t) return;
+    t.x=e.clientX; t.y=e.clientY;
+  });
+  function up(e){ delete touches[e.pointerId]; }
+  c.addEventListener('pointerup',up); c.addEventListener('pointercancel',up);
+  let fireT=0;
+  Lab.loop(dt=>{
+    t+=dt;
+    let mvx=0,mvy=0,shx=0,shy=0;
+    for(const k in touches){ const T=touches[k];
+      const dx=T.x-T.sx, dy=T.y-T.sy, d=Math.hypot(dx,dy)||1;
+      const nx=dx/Math.max(d,40), ny=dy/Math.max(d,40);
+      if(T.side==='L'){ mvx=nx; mvy=ny; } else { if(d>15){ shx=dx/d; shy=dy/d; } }
+    }
+    p.x=Lab.clamp(p.x+mvx*260*dt,20,Lab.W-20);
+    p.y=Lab.clamp(p.y+mvy*260*dt,80,Lab.H-20);
+    fireT-=dt;
+    if((shx||shy) && fireT<=0){ bullets.push({x:p.x,y:p.y,vx:shx*460,vy:shy*460,life:1.2}); fireT=0.15; Lab.beep(700,.04); }
+    if(Math.random()<0.02+t*0.001){
+      const side=Lab.randInt(0,3);
+      let x,y; if(side===0){x=0;y=Math.random()*Lab.H;} else if(side===1){x=Lab.W;y=Math.random()*Lab.H;} else if(side===2){x=Math.random()*Lab.W;y=0;} else {x=Math.random()*Lab.W;y=Lab.H;}
+      enemies.push({x,y,r:12+Math.random()*8});
+    }
+    for(const e of enemies){ const dx=p.x-e.x,dy=p.y-e.y,d=Math.hypot(dx,dy)||1; e.x+=dx/d*60*dt; e.y+=dy/d*60*dt; }
+    for(const b of bullets){ b.x+=b.vx*dt; b.y+=b.vy*dt; b.life-=dt; }
+    bullets=bullets.filter(b=>b.life>0 && b.x>0&&b.x<Lab.W&&b.y>0&&b.y<Lab.H);
+    for(const b of bullets) for(let i=enemies.length-1;i>=0;i--){ const e=enemies[i]; if(Lab.dist(b.x,b.y,e.x,e.y)<e.r){ enemies.splice(i,1); b.life=0; score++; Lab.setScore(score); Lab.beep(1100,.04);}}
+    for(let i=enemies.length-1;i>=0;i--){ const e=enemies[i]; if(Lab.dist(e.x,e.y,p.x,p.y)<e.r+p.r){ enemies.splice(i,1); lives--; Lab.beep(120,.2,'sawtooth'); if(lives<=0){ Lab.gameover({title:"Overrun",message:"Score: "+score}); return; } }}
+    const cx=Lab.ctx; cx.fillStyle="#05060f"; cx.fillRect(0,0,Lab.W,Lab.H);
+    // sticks
+    for(const k in touches){ const T=touches[k];
+      cx.beginPath(); cx.strokeStyle="rgba(120,160,255,.4)"; cx.arc(T.sx,T.sy,40,0,Lab.TAU); cx.stroke();
+      cx.beginPath(); cx.fillStyle="rgba(120,160,255,.7)"; cx.arc(T.x,T.y,20,0,Lab.TAU); cx.fill();
+    }
+    cx.beginPath(); cx.fillStyle="#5af"; cx.arc(p.x,p.y,p.r,0,Lab.TAU); cx.fill();
+    cx.fillStyle="#ff5577"; for(const e of enemies){ cx.beginPath(); cx.arc(e.x,e.y,e.r,0,Lab.TAU); cx.fill();}
+    cx.fillStyle="#ffd35a"; for(const b of bullets){ cx.beginPath(); cx.arc(b.x,b.y,3,0,Lab.TAU); cx.fill();}
+    cx.fillStyle="#7e89b3"; cx.font="14px sans-serif"; cx.textAlign="center";
+    cx.fillText("❤️ "+lives, Lab.W/2, 70);
+  });
+}
+start();
+</script></body></html>

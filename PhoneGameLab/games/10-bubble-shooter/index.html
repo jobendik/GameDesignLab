@@ -1,0 +1,83 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Bubble Shooter", instructions:"Aim & tap to shoot. Match 3+ same-color.", restart:start});
+const COLORS=["#ff5577","#5af","#ffd35a","#3df58a","#f5a","#fff"];
+let grid,cols,rows,R,top,offsetY,nextColor,shot,score,aimX,aimY;
+function key(c,r){return r*cols+c;}
+function cellXY(c,r){ return {x:c*2*R+R+(r%2?R:0)+8, y:top+r*R*1.732}; }
+function start(){
+  score=0; Lab.setScore(0);
+  R=Math.min(20, (Lab.W-16)/14);
+  cols=Math.floor((Lab.W-16)/(2*R)); top=90;
+  rows=8; grid=new Array(cols*rows).fill(null);
+  for(let r=0;r<5;r++)for(let c=0;c<cols-(r%2);c++) grid[key(c,r)]=Lab.choose(COLORS.slice(0,4));
+  nextColor=Lab.choose(COLORS.slice(0,4));
+  shot=null; aimX=Lab.W/2; aimY=Lab.H/2;
+  Lab.input.onMove=[(x,y)=>{aimX=x;aimY=y;}];
+  Lab.input.onTap=[(x,y)=>{
+    if(shot) return;
+    aimX=x;aimY=y;
+    const sx=Lab.W/2, sy=Lab.H-50;
+    let dx=x-sx, dy=y-sy; const d=Math.hypot(dx,dy)||1;
+    if(dy>-20) return; // must aim up
+    shot={x:sx,y:sy,vx:dx/d*520,vy:dy/d*520,color:nextColor};
+    nextColor=Lab.choose(COLORS.slice(0,4));
+  }];
+  Lab.loop(dt=>{
+    const c=Lab.ctx; c.fillStyle="#0b0f1a"; c.fillRect(0,0,Lab.W,Lab.H);
+    // grid
+    for(let i=0;i<grid.length;i++){ if(!grid[i]) continue;
+      const r=Math.floor(i/cols), cc=i-r*cols;
+      const p=cellXY(cc,r);
+      c.beginPath(); c.fillStyle=grid[i]; c.arc(p.x,p.y,R-2,0,Lab.TAU); c.fill();
+    }
+    // shooter
+    const sx=Lab.W/2, sy=Lab.H-50;
+    c.beginPath(); c.fillStyle=nextColor; c.arc(sx,sy,R-2,0,Lab.TAU); c.fill();
+    // aim
+    const dx=aimX-sx, dy=aimY-sy, d=Math.hypot(dx,dy)||1;
+    if(dy<-10){
+      c.strokeStyle="rgba(255,255,255,.3)"; c.setLineDash([4,6]); c.beginPath();
+      c.moveTo(sx,sy); c.lineTo(sx+dx/d*200,sy+dy/d*200); c.stroke(); c.setLineDash([]);
+    }
+    if(shot){
+      shot.x+=shot.vx*dt; shot.y+=shot.vy*dt;
+      if(shot.x<R||shot.x>Lab.W-R) shot.vx*=-1;
+      // collision
+      let hit=false;
+      for(let i=0;i<grid.length;i++){ if(!grid[i]) continue;
+        const r=Math.floor(i/cols), cc=i-r*cols; const p=cellXY(cc,r);
+        if(Lab.dist(p.x,p.y,shot.x,shot.y)<R*1.7){ hit=true; break; }
+      }
+      if(hit||shot.y<top+R){
+        // snap to nearest empty cell
+        let best=-1,bd=Infinity;
+        for(let r=0;r<rows;r++)for(let cc=0;cc<cols-(r%2);cc++){
+          if(grid[key(cc,r)]) continue;
+          const p=cellXY(cc,r); const dd=Lab.dist(p.x,p.y,shot.x,shot.y);
+          if(dd<bd){bd=dd;best=key(cc,r);}
+        }
+        if(best>=0){ grid[best]=shot.color; popMatches(best); }
+        shot=null;
+      }
+      c.beginPath(); c.fillStyle=shot?shot.color:"#fff"; if(shot){c.arc(shot.x,shot.y,R-2,0,Lab.TAU);c.fill();}
+    }
+    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center"; c.fillText("Aim up • tap to shoot", Lab.W/2, 70);
+    if(grid.some((v,i)=>v && Math.floor(i/cols)>=rows-1)) Lab.gameover({title:"Overflow!",message:"Score: "+score});
+  });
+}
+function neighbors(idx){
+  const r=Math.floor(idx/cols), c=idx-r*cols, odd=r%2;
+  const ds=[[c-1,r],[c+1,r],[c+(odd?0:-1),r-1],[c+(odd?1:0),r-1],[c+(odd?0:-1),r+1],[c+(odd?1:0),r+1]];
+  return ds.filter(([cc,rr])=>cc>=0&&rr>=0&&cc<cols-(rr%2)&&rr<rows).map(([cc,rr])=>rr*cols+cc);
+}
+function popMatches(idx){
+  const color=grid[idx]; const seen=new Set([idx]); const stack=[idx];
+  while(stack.length){ const i=stack.pop();
+    for(const n of neighbors(i)) if(grid[n]===color && !seen.has(n)){ seen.add(n); stack.push(n); }
+  }
+  if(seen.size>=3){ for(const i of seen) grid[i]=null; score+=seen.size*10; Lab.setScore(score); Lab.beep(1100,.06); }
+}
+start();
+</script></body></html>
