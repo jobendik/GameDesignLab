@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Slither", instructions:"Move finger anywhere to steer. Collect orbs and avoid AI snakes.", restart:start});
+let me, ais, orbs, alive;
+function start(){
+  me={pts:[], ang:0, sp:120, r:6, score:0};
+  for(let i=0;i<20;i++) me.pts.push({x:Lab.W/2-i*4, y:Lab.H/2});
+  ais=[]; for(let i=0;i<3;i++){ const a={pts:[], ang:Math.random()*Lab.TAU, sp:90, r:5, ai:true, t:0};
+    const sx=Lab.rand(100,Lab.W-100), sy=Lab.rand(100,Lab.H-100);
+    for(let k=0;k<20;k++) a.pts.push({x:sx-k*4,y:sy});
+    ais.push(a);
+  }
+  orbs=[]; for(let i=0;i<40;i++) orbs.push({x:Lab.rand(20,Lab.W-20), y:Lab.rand(20,Lab.H-20)});
+  alive=true; Lab.setScore(0);
+  Lab.loop(dt=>{ if(!alive) return;
+    // target angle from input
+    if(Lab.input.down){ const target=Math.atan2(Lab.input.y-me.pts[0].y, Lab.input.x-me.pts[0].x); let diff=target-me.ang; while(diff>Math.PI)diff-=Lab.TAU; while(diff<-Math.PI)diff+=Lab.TAU; me.ang+=Lab.clamp(diff, -3*dt, 3*dt);}
+    advance(me, dt);
+    for(const a of ais){ a.t-=dt; if(a.t<=0){ a.t=Lab.rand(1,3); a.ang+=Lab.rand(-1,1);} advance(a,dt); }
+    // wraparound
+    for(const s of [me,...ais]){ for(const p of s.pts){ if(p.x<0) p.x+=Lab.W; if(p.x>Lab.W) p.x-=Lab.W; if(p.y<0) p.y+=Lab.H; if(p.y>Lab.H) p.y-=Lab.H;}}
+    // orbs
+    for(let i=orbs.length-1;i>=0;i--){
+      if(Lab.dist(orbs[i].x,orbs[i].y, me.pts[0].x, me.pts[0].y)<me.r+6){ orbs.splice(i,1); me.score++; me.pts.push({...me.pts[me.pts.length-1]}); Lab.setScore(me.score); Lab.beep(700,.04); orbs.push({x:Lab.rand(20,Lab.W-20), y:Lab.rand(20,Lab.H-20)}); continue;}
+      for(const a of ais){ if(Lab.dist(orbs[i].x,orbs[i].y, a.pts[0].x, a.pts[0].y)<a.r+6){ orbs.splice(i,1); a.pts.push({...a.pts[a.pts.length-1]}); orbs.push({x:Lab.rand(20,Lab.W-20), y:Lab.rand(20,Lab.H-20)}); break;}}
+    }
+    // collisions: my head vs AI body
+    for(const a of ais) for(let i=5;i<a.pts.length;i++) if(Lab.dist(me.pts[0].x,me.pts[0].y, a.pts[i].x, a.pts[i].y)<me.r+a.r-2){ alive=false; Lab.gameover({title:"Eaten!",message:"Score: "+me.score}); return;}
+    // my body vs AI head -> AI dies into orbs
+    for(const a of ais){ if(!a.dead) for(let i=5;i<me.pts.length;i++) if(Lab.dist(a.pts[0].x,a.pts[0].y, me.pts[i].x, me.pts[i].y)<me.r+a.r-2){ a.dead=true; for(const p of a.pts) orbs.push({x:p.x,y:p.y});}}
+    for(let i=ais.length-1;i>=0;i--) if(ais[i].dead) ais.splice(i,1);
+    draw();
+  });
+}
+function advance(s,dt){
+  const head=s.pts[0]; const nh={x:head.x+Math.cos(s.ang)*s.sp*dt, y:head.y+Math.sin(s.ang)*s.sp*dt};
+  s.pts.unshift(nh); s.pts.pop();
+}
+function draw(){
+  const c=Lab.ctx; c.fillStyle="#0a0a18"; c.fillRect(0,0,Lab.W,Lab.H);
+  for(const o of orbs){ c.beginPath(); c.fillStyle="#ffd35a"; c.arc(o.x,o.y,4,0,Lab.TAU); c.fill();}
+  for(const s of [me,...ais]){
+    c.strokeStyle=s===me?"#7c6":"#e74"; c.lineWidth=s.r*2; c.lineCap="round"; c.lineJoin="round"; c.beginPath();
+    for(let i=0;i<s.pts.length;i++){ if(i===0) c.moveTo(s.pts[i].x,s.pts[i].y); else c.lineTo(s.pts[i].x,s.pts[i].y);}
+    c.stroke();
+  }
+}
+start();
+</script></body></html>
