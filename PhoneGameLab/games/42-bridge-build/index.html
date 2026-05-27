@@ -1,0 +1,66 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Bridge Build", instructions:"Hold to grow a bridge. Release to drop it onto the next platform.", restart:start});
+let platforms, hero, bridge, holding, state, score, scrollX;
+function start(){
+  platforms=[{x:0,w:100}]; let x=100;
+  for(let i=0;i<8;i++){ const gap=Lab.randInt(60,150); x+=gap; const w=Lab.randInt(40,100); platforms.push({x,w}); x+=w; }
+  hero={x:80, y:Lab.H*0.55, vy:0};
+  bridge={x:100, len:0, falling:false, angle:0};
+  state="grow"; score=0; scrollX=0; Lab.setScore(0); holding=false;
+  Lab.input.onDown=[()=>{ if(state==="grow") holding=true;}];
+  Lab.input.onUp=[()=>{ if(state==="grow" && holding){ holding=false; bridge.falling=true; state="fall";}}];
+  Lab.loop(dt=>{
+    if(state==="grow" && holding){ bridge.len+=180*dt; }
+    if(state==="fall"){ bridge.angle+=4*dt; if(bridge.angle>Math.PI/2){ bridge.angle=Math.PI/2; state="walk";}}
+    if(state==="walk"){
+      hero.x+=140*dt;
+      const tip = bridge.x+bridge.len;
+      const next = platforms[score+1];
+      if(hero.x>=tip-5){
+        if(next && hero.x>=next.x && hero.x<=next.x+next.w){
+          score++; Lab.setScore(score);
+          // align hero & advance
+          state="scroll";
+        } else {
+          // fall
+          state="die";
+        }
+      }
+    }
+    if(state==="scroll"){
+      scrollX += 300*dt;
+      hero.x -= 300*dt;
+      if(hero.x <= 80){
+        const off = 80 - hero.x;
+        // shift everything
+        const shift = scrollX;
+        for(const p of platforms) p.x -= shift;
+        bridge.x -= shift; hero.x = 80; scrollX=0;
+        bridge={x: platforms[score].x+platforms[score].w-2, len:0, falling:false, angle:0};
+        state="grow";
+        // generate more
+        if(platforms.length-score<4){ let lx=platforms[platforms.length-1].x+platforms[platforms.length-1].w;
+          const gap=Lab.randInt(60,150); lx+=gap; const w=Lab.randInt(40,100); platforms.push({x:lx,w});}
+      }
+    }
+    if(state==="die"){ hero.y+=600*dt; if(hero.y>Lab.H+100){ Lab.gameover({title:"Splash",message:"Score: "+score}); return;}}
+    const c=Lab.ctx; c.fillStyle="#1c2238"; c.fillRect(0,0,Lab.W,Lab.H);
+    c.fillStyle="#2c3a5a";
+    for(const p of platforms) c.fillRect(p.x, Lab.H*0.6, p.w, Lab.H*0.4);
+    // bridge
+    c.save(); c.translate(bridge.x, Lab.H*0.6); c.rotate(bridge.angle - Math.PI/2 + (state==="grow"||state==="fall"&&bridge.angle<Math.PI/2?0:0));
+    // simpler: draw rotated about base
+    c.restore();
+    c.save(); c.translate(bridge.x, Lab.H*0.6);
+    c.rotate(state==="grow"? -Math.PI/2 : (state==="fall"? -Math.PI/2 + bridge.angle : 0));
+    c.fillStyle="#ddd"; c.fillRect(-2, 0, 4, bridge.len);
+    c.restore();
+    c.fillStyle="#ffd35a"; c.fillRect(hero.x-10, hero.y-20, 20, 20);
+    c.fillStyle="#fff"; c.font="14px sans-serif"; c.textAlign="center";
+    c.fillText("Hold to grow bridge", Lab.W/2, 50);
+  });
+}
+start();
+</script></body></html>

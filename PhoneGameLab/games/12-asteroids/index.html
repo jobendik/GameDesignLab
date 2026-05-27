@@ -1,0 +1,43 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Asteroids", instructions:"Drag to steer toward your finger. Tap-and-hold to thrust. Double-tap to fire.", restart:start});
+let ship,rocks,bullets,score,lives,lastTap=0,thrust=false;
+function spawnRock(r,x,y){ const ang=Math.random()*Lab.TAU, sp=40+Math.random()*60;
+  rocks.push({x:x??Math.random()*Lab.W, y:y??Math.random()*Lab.H, vx:Math.cos(ang)*sp, vy:Math.sin(ang)*sp, r}); }
+function start(){
+  ship={x:Lab.W/2,y:Lab.H/2,a:-Math.PI/2,vx:0,vy:0};
+  rocks=[]; bullets=[]; score=0; lives=3; Lab.setScore(0);
+  for(let i=0;i<5;i++){ const r=40; let x,y; do{x=Math.random()*Lab.W;y=Math.random()*Lab.H;}while(Lab.dist(x,y,ship.x,ship.y)<150); spawnRock(r,x,y);}
+  Lab.input.onDown=[(x,y)=>{ thrust=true; const now=performance.now(); if(now-lastTap<300){ // double-tap fire
+    bullets.push({x:ship.x,y:ship.y,vx:Math.cos(ship.a)*500+ship.vx,vy:Math.sin(ship.a)*500+ship.vy,life:1.0});
+    Lab.beep(900,.04);
+  } lastTap=now;}];
+  Lab.input.onUp=[()=>{thrust=false;}];
+  Lab.input.onMove=[(x,y)=>{ ship.a=Math.atan2(y-ship.y,x-ship.x); }];
+  Lab.loop(dt=>{
+    if(thrust){ ship.vx+=Math.cos(ship.a)*220*dt; ship.vy+=Math.sin(ship.a)*220*dt; }
+    ship.vx*=0.995; ship.vy*=0.995;
+    ship.x=(ship.x+ship.vx*dt+Lab.W)%Lab.W; ship.y=(ship.y+ship.vy*dt+Lab.H)%Lab.H;
+    for(const r of rocks){ r.x=(r.x+r.vx*dt+Lab.W)%Lab.W; r.y=(r.y+r.vy*dt+Lab.H)%Lab.H; }
+    for(const b of bullets){ b.x+=b.vx*dt; b.y+=b.vy*dt; b.life-=dt; b.x=(b.x+Lab.W)%Lab.W; b.y=(b.y+Lab.H)%Lab.H; }
+    bullets=bullets.filter(b=>b.life>0);
+    for(const b of bullets){ for(let i=rocks.length-1;i>=0;i--){ const r=rocks[i]; if(Lab.dist(r.x,r.y,b.x,b.y)<r.r){
+      rocks.splice(i,1); b.life=0; score+=Math.round(50*(40/r.r)); Lab.setScore(score); Lab.beep(1100,.06);
+      if(r.r>22){ spawnRock(r.r*0.5,r.x,r.y); spawnRock(r.r*0.5,r.x,r.y); }
+    }}}
+    for(const r of rocks){ if(Lab.dist(r.x,r.y,ship.x,ship.y)<r.r+8){ lives--; ship.x=Lab.W/2; ship.y=Lab.H/2; ship.vx=ship.vy=0; Lab.beep(120,.2,'sawtooth'); if(lives<=0){Lab.gameover({title:"Crash",message:"Score: "+score}); return;} break;}}
+    if(!rocks.length){ Lab.win("Cleared! Score: "+score); return; }
+    const c=Lab.ctx; c.fillStyle="#05050a"; c.fillRect(0,0,Lab.W,Lab.H);
+    c.strokeStyle="#fff"; c.lineWidth=2;
+    for(const r of rocks){ c.beginPath(); c.arc(r.x,r.y,r.r,0,Lab.TAU); c.stroke(); }
+    c.fillStyle="#ffd35a"; for(const b of bullets){ c.beginPath(); c.arc(b.x,b.y,2,0,Lab.TAU); c.fill(); }
+    c.save(); c.translate(ship.x,ship.y); c.rotate(ship.a);
+    c.strokeStyle=thrust?"#ff5577":"#5af"; c.beginPath(); c.moveTo(14,0); c.lineTo(-10,8); c.lineTo(-6,0); c.lineTo(-10,-8); c.closePath(); c.stroke();
+    c.restore();
+    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
+    c.fillText("❤️ "+lives+" • Hold thrust, double-tap fire", Lab.W/2, 70);
+  });
+}
+start();
+</script></body></html>

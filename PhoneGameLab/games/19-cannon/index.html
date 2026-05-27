@@ -1,0 +1,60 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Cannon", instructions:"Drag from cannon to aim; release to fire (parabolic).", restart:start});
+let cannon, ball, targets, aiming, sx,sy, ex,ey, score, shots;
+function makeTargets(){
+  targets=[];
+  for(let i=0;i<5;i++){
+    targets.push({x:Lab.rand(Lab.W*0.4, Lab.W-40), y:Lab.rand(120, Lab.H-80), r:24});
+  }
+}
+function start(){
+  cannon={x:60,y:Lab.H-60}; ball=null; aiming=false; score=0; shots=10;
+  Lab.setScore(0); makeTargets();
+  Lab.input.onDown=[(x,y)=>{ if(ball) return; aiming=true; sx=x; sy=y; ex=x; ey=y; }];
+  Lab.input.onMove=[(x,y)=>{ if(aiming){ ex=x; ey=y; } }];
+  Lab.input.onUp=[(x,y)=>{ if(!aiming) return; aiming=false;
+    if(shots<=0) return;
+    const dx=sx-x, dy=sy-y; const pw=Math.min(Math.hypot(dx,dy),200);
+    if(pw<10) return;
+    shots--;
+    const ang=Math.atan2(dy,dx);
+    ball={x:cannon.x,y:cannon.y, vx:Math.cos(ang)*pw*7, vy:Math.sin(ang)*pw*7};
+  }];
+  Lab.loop(dt=>{
+    if(ball){ ball.vy+=700*dt; ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
+      for(let i=targets.length-1;i>=0;i--){ const t=targets[i]; if(Lab.dist(t.x,t.y,ball.x,ball.y)<t.r+8){ targets.splice(i,1); score++; Lab.setScore(score); Lab.beep(900,.06);}}
+      if(ball.y>Lab.H||ball.x>Lab.W||ball.x<0) ball=null;
+    }
+    if(!targets.length){ Lab.win("All down! Shots used: "+(10-shots)); return; }
+    if(shots<=0 && !ball){ Lab.gameover({title:"Out of shots",message:"Hit "+score}); return; }
+    const c=Lab.ctx; c.fillStyle="#2b1d0f"; c.fillRect(0,0,Lab.W,Lab.H);
+    c.fillStyle="#3a2516"; c.fillRect(0,Lab.H-40,Lab.W,40);
+    // cannon
+    c.fillStyle="#666"; c.beginPath(); c.arc(cannon.x,cannon.y,18,0,Lab.TAU); c.fill();
+    let bangle = -1;
+    if(aiming){ bangle = Math.atan2(sy-ey, sx-ex); }
+    c.save(); c.translate(cannon.x,cannon.y); c.rotate(bangle); c.fillStyle="#888"; c.fillRect(0,-7,40,14); c.restore();
+    // targets
+    for(const t of targets){
+      c.beginPath(); c.fillStyle="#ff5577"; c.arc(t.x,t.y,t.r,0,Lab.TAU); c.fill();
+      c.beginPath(); c.fillStyle="#fff"; c.arc(t.x,t.y,t.r*0.6,0,Lab.TAU); c.fill();
+      c.beginPath(); c.fillStyle="#ff5577"; c.arc(t.x,t.y,t.r*0.25,0,Lab.TAU); c.fill();
+    }
+    if(ball){ c.beginPath(); c.fillStyle="#222"; c.arc(ball.x,ball.y,8,0,Lab.TAU); c.fill(); }
+    if(aiming){
+      const dx=sx-ex, dy=sy-ey; const pw=Math.min(Math.hypot(dx,dy),200);
+      const ang=Math.atan2(dy,dx);
+      // predicted trajectory
+      let px=cannon.x, py=cannon.y, vx=Math.cos(ang)*pw*7, vy=Math.sin(ang)*pw*7;
+      c.strokeStyle="rgba(255,255,255,.4)"; c.setLineDash([4,6]); c.beginPath(); c.moveTo(px,py);
+      for(let i=0;i<60;i++){ px+=vx*0.04; py+=vy*0.04; vy+=700*0.04; c.lineTo(px,py); if(py>Lab.H) break; }
+      c.stroke(); c.setLineDash([]);
+    }
+    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
+    c.fillText("Shots left: "+shots+"  •  Targets: "+targets.length, Lab.W/2, 70);
+  });
+}
+start();
+</script></body></html>

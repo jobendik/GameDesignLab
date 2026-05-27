@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Tower Defense", instructions:"Tap to place towers (10 gold). They auto-fire at enemies on the path.", restart:start});
+let path, towers, enemies, bullets, gold, lives, wave, spawnT, waveCount;
+function start(){
+  path=[{x:0,y:Lab.H*0.3},{x:Lab.W*0.7,y:Lab.H*0.3},{x:Lab.W*0.7,y:Lab.H*0.6},{x:Lab.W*0.2,y:Lab.H*0.6},{x:Lab.W*0.2,y:Lab.H*0.85},{x:Lab.W,y:Lab.H*0.85}];
+  towers=[]; enemies=[]; bullets=[]; gold=30; lives=10; wave=1; spawnT=0; waveCount=10;
+  Lab.setScore(0);
+  Lab.input.onTap=[(x,y)=>{ if(gold<10) return; // not too close to path
+    for(let i=0;i<path.length-1;i++){ const d=pointToSeg(x,y,path[i],path[i+1]); if(d<26) return;}
+    for(const t of towers) if(Lab.dist(x,y,t.x,t.y)<30) return;
+    towers.push({x,y,r:80,cd:0, dmg:1}); gold-=10; Lab.beep(500,.05);
+  }];
+  Lab.loop(dt=>{
+    spawnT-=dt;
+    if(spawnT<=0 && waveCount>0){ enemies.push({i:0, t:0, hp:wave+1, sp:50+wave*5, alive:true}); waveCount--; spawnT=1.2;}
+    if(!enemies.length && waveCount<=0){ wave++; waveCount=10+wave*2; gold+=10; Lab.toast("Wave "+wave);}
+    for(const e of enemies){ const a=path[e.i], b=path[e.i+1]; if(!b){ e.alive=false; lives--; continue;}
+      const seg=Math.hypot(b.x-a.x,b.y-a.y); e.t+=e.sp*dt/seg;
+      if(e.t>=1){ e.t=0; e.i++; }
+    }
+    for(const t of towers){ t.cd-=dt; if(t.cd<=0){ let best=null, bd=t.r;
+      for(const e of enemies) if(e.alive){ const p=enemyPos(e); const d=Lab.dist(p.x,p.y,t.x,t.y); if(d<bd){bd=d; best=e;}}
+      if(best){ const p=enemyPos(best); bullets.push({x:t.x,y:t.y, tx:p.x,ty:p.y, target:best, sp:300, dmg:t.dmg}); t.cd=0.6;}}}
+    for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i]; const p=b.target.alive?enemyPos(b.target):{x:b.tx,y:b.ty};
+      const dx=p.x-b.x, dy=p.y-b.y, d=Math.hypot(dx,dy)||0.01;
+      b.x+=dx/d*b.sp*dt; b.y+=dy/d*b.sp*dt;
+      if(d<10){ if(b.target.alive){ b.target.hp-=b.dmg; if(b.target.hp<=0){ b.target.alive=false; gold+=2;}} bullets.splice(i,1);}
+    }
+    enemies=enemies.filter(e=>e.alive);
+    Lab.setScore("G:"+gold+" L:"+lives+" W:"+wave);
+    if(lives<=0){ Lab.gameover({title:"Overrun",message:"Wave "+wave}); return;}
+    draw();
+  });
+}
+function enemyPos(e){ const a=path[e.i], b=path[e.i+1]; return {x:Lab.lerp(a.x,b.x,e.t), y:Lab.lerp(a.y,b.y,e.t)};}
+function pointToSeg(px,py,a,b){ const dx=b.x-a.x, dy=b.y-a.y; const t=Lab.clamp(((px-a.x)*dx+(py-a.y)*dy)/(dx*dx+dy*dy),0,1); const x=a.x+t*dx, y=a.y+t*dy; return Math.hypot(px-x,py-y);}
+function draw(){
+  const c=Lab.ctx; c.fillStyle="#23331a"; c.fillRect(0,0,Lab.W,Lab.H);
+  c.strokeStyle="#6a5a3a"; c.lineWidth=40; c.lineCap="round"; c.lineJoin="round"; c.beginPath();
+  for(let i=0;i<path.length;i++){ if(i===0) c.moveTo(path[i].x,path[i].y); else c.lineTo(path[i].x,path[i].y);} c.stroke();
+  for(const t of towers){ c.beginPath(); c.fillStyle="#69d"; c.arc(t.x,t.y,12,0,Lab.TAU); c.fill();
+    c.strokeStyle="rgba(105,153,221,.2)"; c.beginPath(); c.arc(t.x,t.y,t.r,0,Lab.TAU); c.stroke();}
+  for(const e of enemies){ const p=enemyPos(e); c.beginPath(); c.fillStyle="#e74"; c.arc(p.x,p.y,10,0,Lab.TAU); c.fill();
+    c.fillStyle="#0f0"; c.fillRect(p.x-12, p.y-16, 24*Math.max(0,e.hp)/( /* approx */ 5), 3);}
+  for(const b of bullets){ c.beginPath(); c.fillStyle="#fff"; c.arc(b.x,b.y,3,0,Lab.TAU); c.fill();}
+}
+start();
+</script></body></html>

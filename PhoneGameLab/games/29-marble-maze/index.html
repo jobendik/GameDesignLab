@@ -1,0 +1,72 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+Lab.init({title:"Marble Maze", instructions:"Drag the marble through the maze to the green goal.", restart:start});
+let grid, cell, cols, rows, ox, oy, ball, goal, won, t;
+function genMaze(C,R){
+  // simple DFS
+  const g=Array.from({length:R},()=>Array.from({length:C},()=>({n:1,e:1,s:1,w:1,v:false})));
+  const st=[[0,0]]; g[0][0].v=true;
+  const di=[[0,-1,'n','s'],[1,0,'e','w'],[0,1,'s','n'],[-1,0,'w','e']];
+  while(st.length){
+    const [x,y]=st[st.length-1];
+    const opts=di.filter(([dx,dy])=>{ const nx=x+dx,ny=y+dy; return nx>=0&&ny>=0&&nx<C&&ny<R&&!g[ny][nx].v;});
+    if(!opts.length){ st.pop(); continue; }
+    const [dx,dy,a,b]=Lab.choose(opts); const nx=x+dx,ny=y+dy;
+    g[y][x][a]=0; g[ny][nx][b]=0; g[ny][nx].v=true; st.push([nx,ny]);
+  }
+  return g;
+}
+function start(){
+  cols=8; rows=12;
+  cell=Math.min((Lab.W-30)/cols,(Lab.H-180)/rows);
+  ox=(Lab.W-cell*cols)/2; oy=100;
+  grid=genMaze(cols,rows);
+  ball={x:ox+cell/2,y:oy+cell/2,r:cell*0.3};
+  goal={x:ox+cell*(cols-0.5),y:oy+cell*(rows-0.5)};
+  won=false; t=0;
+  Lab.input.onMove=[(x,y)=>{ if(!Lab.input.down||won) return;
+    // try to move toward pointer with collision against walls
+    let nx=x, ny=y;
+    // snap incrementally
+    const dx=Lab.clamp(nx-ball.x,-8,8), dy=Lab.clamp(ny-ball.y,-8,8);
+    moveBall(dx,0); moveBall(0,dy);
+  }];
+  Lab.loop(dt=>{
+    if(!won) t+=dt;
+    if(Lab.dist(ball.x,ball.y,goal.x,goal.y)<cell*0.4 && !won){ won=true; Lab.win("Time: "+t.toFixed(1)+"s"); }
+    const c=Lab.ctx; c.fillStyle="#0b0f1a"; c.fillRect(0,0,Lab.W,Lab.H);
+    c.strokeStyle="#5af"; c.lineWidth=2;
+    for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+      const cx=ox+x*cell, cy=oy+y*cell, g=grid[y][x];
+      if(g.n){ c.beginPath(); c.moveTo(cx,cy); c.lineTo(cx+cell,cy); c.stroke();}
+      if(g.w){ c.beginPath(); c.moveTo(cx,cy); c.lineTo(cx,cy+cell); c.stroke();}
+      if(x===cols-1 && g.e){ c.beginPath(); c.moveTo(cx+cell,cy); c.lineTo(cx+cell,cy+cell); c.stroke();}
+      if(y===rows-1 && g.s){ c.beginPath(); c.moveTo(cx,cy+cell); c.lineTo(cx+cell,cy+cell); c.stroke();}
+    }
+    c.fillStyle="#3df58a"; c.fillRect(goal.x-cell*0.3,goal.y-cell*0.3,cell*0.6,cell*0.6);
+    c.beginPath(); c.fillStyle="#fff"; c.arc(ball.x,ball.y,ball.r,0,Lab.TAU); c.fill();
+    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
+    c.fillText("⏱ "+t.toFixed(1), Lab.W/2, 70);
+  });
+}
+function moveBall(dx,dy){
+  // bound to one cell at a time
+  let steps=Math.max(Math.abs(dx),Math.abs(dy));
+  const sx=steps?dx/steps:0, sy=steps?dy/steps:0;
+  for(let i=0;i<steps;i++){
+    const nx=ball.x+sx, ny=ball.y+sy;
+    const cx=Math.floor((ball.x-ox)/cell), cy=Math.floor((ball.y-oy)/cell);
+    const lx=(ball.x-ox)-cx*cell, ly=(ball.y-oy)-cy*cell;
+    if(cx<0||cy<0||cx>=cols||cy>=rows) return;
+    const g=grid[cy][cx];
+    // check walls
+    if(sx>0 && g.e && lx>cell-ball.r-1) return;
+    if(sx<0 && g.w && lx<ball.r+1) return;
+    if(sy>0 && g.s && ly>cell-ball.r-1) return;
+    if(sy<0 && g.n && ly<ball.r+1) return;
+    ball.x=nx; ball.y=ny;
+  }
+}
+start();
+</script></body></html>
