@@ -1,0 +1,1443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Orbit Drift — Sling & Tap Prototype</title>
+  <style>
+    :root {
+      --bg0: #050812;
+      --bg1: #0a1024;
+      --cyan: #63f7ff;
+      --blue: #6287ff;
+      --pink: #ff5db8;
+      --orange: #ffb86b;
+      --green: #86ffb4;
+      --red: #ff5177;
+      --text: #e9f6ff;
+      --muted: rgba(233, 246, 255, 0.62);
+      --panel: rgba(8, 15, 34, 0.72);
+      --line: rgba(158, 231, 255, 0.22);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 30% 20%, rgba(71, 113, 255, 0.20), transparent 35%),
+        radial-gradient(circle at 70% 75%, rgba(255, 93, 184, 0.12), transparent 34%),
+        linear-gradient(180deg, var(--bg1), var(--bg0));
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      touch-action: none;
+      user-select: none;
+    }
+
+    #game {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      cursor: pointer;
+    }
+
+    .hud {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: clamp(14px, 2.4vw, 26px);
+    }
+
+    .topbar,
+    .bottombar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .panel {
+      pointer-events: auto;
+      background: linear-gradient(180deg, rgba(12, 20, 45, 0.78), rgba(6, 10, 22, 0.62));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 16px 60px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.06);
+      backdrop-filter: blur(14px);
+      padding: 12px 14px;
+    }
+
+    .title {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 220px;
+    }
+
+    .title strong {
+      letter-spacing: 0.16em;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      color: var(--cyan);
+      text-shadow: 0 0 18px rgba(99, 247, 255, 0.55);
+    }
+
+    .title span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, auto);
+      gap: 10px;
+      align-items: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat {
+      min-width: 74px;
+      text-align: center;
+      padding: 7px 9px;
+      border-radius: 13px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+    }
+
+    .stat label {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+
+    .stat b {
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .controls {
+      display: flex;
+      gap: 9px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: 520px;
+    }
+
+    button {
+      color: var(--text);
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(158, 231, 255, 0.22);
+      border-radius: 13px;
+      padding: 10px 12px;
+      font-weight: 750;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+
+    button:hover {
+      background: rgba(99, 247, 255, 0.13);
+      border-color: rgba(99, 247, 255, 0.48);
+    }
+
+    button.primary {
+      background: linear-gradient(135deg, rgba(99, 247, 255, 0.28), rgba(98, 135, 255, 0.19));
+      border-color: rgba(99, 247, 255, 0.55);
+      color: #f7fdff;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      min-width: min(480px, calc(100vw - 32px));
+      text-align: center;
+      padding: 22px 24px;
+      border-radius: 24px;
+      background: rgba(5, 10, 24, 0.72);
+      border: 1px solid rgba(158, 231, 255, 0.24);
+      box-shadow: 0 24px 80px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.06);
+      backdrop-filter: blur(16px);
+      opacity: 0;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .toast.visible {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .toast h1 {
+      margin: 0 0 6px;
+      font-size: clamp(25px, 5vw, 48px);
+      letter-spacing: -0.04em;
+      line-height: 0.95;
+      text-shadow: 0 0 34px rgba(99,247,255,0.35);
+    }
+
+    .toast p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+      font-size: 14px;
+    }
+
+    .hint {
+      max-width: 560px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    kbd {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 24px;
+      height: 22px;
+      padding: 0 7px;
+      border-radius: 7px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.13);
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 800;
+      box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
+    }
+
+    @media (max-width: 720px) {
+      .topbar { align-items: stretch; }
+      .title { min-width: 0; flex: 1; }
+      .stats { grid-template-columns: repeat(3, 1fr); width: 100%; }
+      .stat { min-width: 0; }
+      .bottombar { align-items: flex-end; }
+      .hint { display: none; }
+      .controls { max-width: 100%; gap: 7px; }
+      button { padding: 9px 10px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div class="hud">
+    <div class="topbar">
+      <div class="panel title">
+        <strong>Orbit Drift</strong>
+        <span>Sling from loop to loop. One tap. Pure momentum.</span>
+      </div>
+      <div class="panel stats">
+        <div class="stat"><label>Level</label><b id="levelText">1</b></div>
+        <div class="stat"><label>Time</label><b id="timeText">0.00</b></div>
+        <div class="stat"><label>Berry</label><b id="berryText">0/0</b></div>
+      </div>
+    </div>
+
+    <div class="bottombar">
+      <div class="panel hint">
+        Tap / click / <kbd>Space</kbd> to release. Hit another orbit ring to latch. Reach the portal. Collect the optional berry for a harder route.
+      </div>
+      <div class="panel controls">
+        <button id="restartBtn">Restart</button>
+        <button id="zenBtn">Zen: Off</button>
+        <button id="endlessBtn">Endless</button>
+        <button id="nextBtn" class="primary">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast visible" id="toast">
+    <h1>Orbit Drift</h1>
+    <p>Tap while orbiting to sling yourself forward. Timing is the entire game.</p>
+  </div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const canvas = document.getElementById('game');
+      const ctx = canvas.getContext('2d');
+      const levelText = document.getElementById('levelText');
+      const timeText = document.getElementById('timeText');
+      const berryText = document.getElementById('berryText');
+      const toast = document.getElementById('toast');
+      const restartBtn = document.getElementById('restartBtn');
+      const nextBtn = document.getElementById('nextBtn');
+      const zenBtn = document.getElementById('zenBtn');
+      const endlessBtn = document.getElementById('endlessBtn');
+
+      const DESIGN_W = 960;
+      const DESIGN_H = 540;
+      const TAU = Math.PI * 2;
+      const PLAYER_R = 8;
+      const LATCH_TOLERANCE = 18;
+      const AIR_DRAG = 0.996;
+      const BOUNCE = 0.74;
+      const WALL_FRICTION = 0.985;
+      const BASE_GRAVITY = 280;
+      const MAX_SPEED = 980;
+
+      let DPR = 1;
+      let viewScale = 1;
+      let viewX = 0;
+      let viewY = 0;
+      let lastTime = performance.now();
+      let levelIndex = 0;
+      let currentLevel = null;
+      let zen = false;
+      let endless = false;
+      let endlessSeed = 1;
+      let messageTimer = 3.4;
+      let audio = null;
+
+      const pointer = { down: false, x: 0, y: 0 };
+
+      const state = {
+        mode: 'attached',
+        time: 0,
+        deaths: 0,
+        releasedAt: -999,
+        attachedLoop: 0,
+        previousLoop: -1,
+        angle: 0,
+        player: { x: 0, y: 0, vx: 0, vy: 0 },
+        cameraShake: 0,
+        particles: [],
+        trail: [],
+        berries: 0,
+        totalBerries: 0,
+        best: new Map(),
+        won: false,
+        slowmo: 0,
+        levelStarted: false,
+      };
+
+      const levels = [
+        {
+          name: 'First Orbit',
+          gravity: BASE_GRAVITY,
+          start: 0,
+          loops: [
+            { x: 210, y: 312, r: 52, speed: 2.15, dir: 1 },
+            { x: 455, y: 220, r: 50, speed: 2.35, dir: -1 },
+            { x: 690, y: 316, r: 56, speed: 2.10, dir: 1 },
+          ],
+          exit: { x: 835, y: 248, r: 24 },
+          berries: [{ x: 512, y: 386, r: 10 }],
+          walls: [
+            { x: 86, y: 446, w: 794, h: 18 },
+            { x: 80, y: 96, w: 18, h: 350 },
+            { x: 862, y: 96, w: 18, h: 350 },
+          ],
+          hazards: [],
+          bumpers: [],
+          fields: [],
+          portals: [],
+        },
+        {
+          name: 'Glass Needle',
+          gravity: 300,
+          start: 0,
+          loops: [
+            { x: 170, y: 344, r: 48, speed: 2.8, dir: 1 },
+            { x: 390, y: 186, r: 46, speed: 2.45, dir: 1 },
+            { x: 613, y: 354, r: 48, speed: 2.7, dir: -1 },
+            { x: 780, y: 204, r: 44, speed: 2.4, dir: 1 },
+          ],
+          exit: { x: 842, y: 105, r: 23 },
+          berries: [{ x: 494, y: 92, r: 10 }],
+          walls: [
+            { x: 66, y: 454, w: 828, h: 18 },
+            { x: 66, y: 70, w: 18, h: 402 },
+            { x: 876, y: 70, w: 18, h: 402 },
+            { x: 472, y: 206, w: 20, h: 178 },
+          ],
+          hazards: [
+            { type: 'circle', x: 500, y: 275, r: 23 },
+          ],
+          bumpers: [],
+          fields: [],
+          portals: [],
+        },
+        {
+          name: 'Moving Target',
+          gravity: 275,
+          start: 0,
+          loops: [
+            { x: 150, y: 280, r: 52, speed: 2.15, dir: 1 },
+            { x: 410, y: 260, r: 50, speed: 2.65, dir: -1, move: { x1: 360, y1: 170, x2: 440, y2: 360, period: 3.6, phase: 0.2 } },
+            { x: 668, y: 288, r: 48, speed: 2.55, dir: 1, move: { x1: 620, y1: 360, x2: 735, y2: 190, period: 4.4, phase: 0.65 } },
+          ],
+          exit: { x: 842, y: 286, r: 24 },
+          berries: [{ x: 485, y: 438, r: 10 }],
+          walls: [
+            { x: 58, y: 464, w: 844, h: 18 },
+            { x: 58, y: 58, w: 18, h: 424 },
+            { x: 884, y: 58, w: 18, h: 424 },
+            { x: 304, y: 70, w: 350, h: 14 },
+          ],
+          hazards: [
+            { type: 'rect', x: 506, y: 234, w: 36, h: 88 },
+          ],
+          bumpers: [],
+          fields: [],
+          portals: [],
+        },
+        {
+          name: 'Gravity Well',
+          gravity: 235,
+          start: 0,
+          loops: [
+            { x: 170, y: 178, r: 50, speed: 2.35, dir: 1 },
+            { x: 392, y: 360, r: 46, speed: 2.55, dir: -1 },
+            { x: 636, y: 174, r: 54, speed: 2.1, dir: 1 },
+            { x: 790, y: 370, r: 42, speed: 3.0, dir: -1 },
+          ],
+          exit: { x: 850, y: 132, r: 24 },
+          berries: [{ x: 504, y: 265, r: 10 }],
+          walls: [
+            { x: 70, y: 462, w: 820, h: 18 },
+            { x: 70, y: 62, w: 18, h: 418 },
+            { x: 872, y: 62, w: 18, h: 418 },
+          ],
+          hazards: [],
+          bumpers: [{ x: 515, y: 108, r: 24, power: 410 }],
+          fields: [{ x: 520, y: 270, r: 122, strength: 520, mode: 'pull' }],
+          portals: [],
+        },
+        {
+          name: 'Mirror Gate',
+          gravity: 260,
+          start: 0,
+          loops: [
+            { x: 160, y: 305, r: 50, speed: 2.55, dir: 1 },
+            { x: 370, y: 172, r: 48, speed: 2.35, dir: -1 },
+            { x: 612, y: 356, r: 50, speed: 2.8, dir: 1 },
+            { x: 802, y: 194, r: 45, speed: 2.6, dir: -1 },
+          ],
+          exit: { x: 846, y: 80, r: 23 },
+          berries: [{ x: 738, y: 438, r: 10 }],
+          walls: [
+            { x: 66, y: 464, w: 828, h: 18 },
+            { x: 66, y: 62, w: 18, h: 420 },
+            { x: 876, y: 62, w: 18, h: 420 },
+            { x: 458, y: 82, w: 18, h: 164 },
+            { x: 458, y: 326, w: 18, h: 120 },
+          ],
+          hazards: [{ type: 'circle', x: 472, y: 286, r: 20 }],
+          bumpers: [{ x: 266, y: 424, r: 22, power: 350 }],
+          fields: [{ x: 696, y: 260, r: 95, strength: -470, mode: 'push' }],
+          portals: [],
+        },
+        {
+          name: 'Split Space',
+          gravity: 250,
+          start: 0,
+          loops: [
+            { x: 144, y: 190, r: 48, speed: 2.75, dir: 1 },
+            { x: 340, y: 360, r: 46, speed: 2.45, dir: -1 },
+            { x: 565, y: 210, r: 44, speed: 3.0, dir: 1 },
+            { x: 790, y: 344, r: 52, speed: 2.2, dir: -1 },
+          ],
+          exit: { x: 848, y: 126, r: 24 },
+          berries: [{ x: 484, y: 444, r: 10 }],
+          walls: [
+            { x: 58, y: 464, w: 844, h: 18 },
+            { x: 58, y: 60, w: 18, h: 422 },
+            { x: 884, y: 60, w: 18, h: 422 },
+            { x: 238, y: 78, w: 522, h: 16 },
+          ],
+          hazards: [{ type: 'rect', x: 458, y: 236, w: 42, h: 92 }],
+          bumpers: [{ x: 700, y: 438, r: 20, power: 470 }],
+          fields: [],
+          portals: [
+            { a: { x: 244, y: 142, r: 20 }, b: { x: 692, y: 382, r: 20 }, cooldown: 0 },
+          ],
+        },
+      ];
+
+      function createAudio() {
+        if (audio) return audio;
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        const ac = new AC();
+        const master = ac.createGain();
+        master.gain.value = 0.18;
+        master.connect(ac.destination);
+        audio = { ac, master, last: 0 };
+        return audio;
+      }
+
+      function sound(type) {
+        const a = createAudio();
+        if (!a) return;
+        const now = a.ac.currentTime;
+        const osc = a.ac.createOscillator();
+        const gain = a.ac.createGain();
+        osc.connect(gain);
+        gain.connect(a.master);
+        let f0 = 240, f1 = 160, dur = 0.12, wave = 'sine';
+        if (type === 'release') { f0 = 180; f1 = 460; dur = 0.09; wave = 'triangle'; }
+        if (type === 'latch') { f0 = 680; f1 = 360; dur = 0.13; wave = 'sine'; }
+        if (type === 'berry') { f0 = 680; f1 = 1180; dur = 0.18; wave = 'triangle'; }
+        if (type === 'death') { f0 = 160; f1 = 52; dur = 0.28; wave = 'sawtooth'; }
+        if (type === 'win') { f0 = 520; f1 = 1040; dur = 0.42; wave = 'sine'; }
+        if (type === 'bumper') { f0 = 120; f1 = 620; dur = 0.12; wave = 'square'; }
+        osc.type = wave;
+        osc.frequency.setValueAtTime(f0, now);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(30, f1), now + dur);
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.exponentialRampToValueAtTime(0.45, now + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+        osc.start(now);
+        osc.stop(now + dur + 0.02);
+      }
+
+      function resize() {
+        DPR = Math.min(2, window.devicePixelRatio || 1);
+        canvas.width = Math.floor(innerWidth * DPR);
+        canvas.height = Math.floor(innerHeight * DPR);
+        canvas.style.width = `${innerWidth}px`;
+        canvas.style.height = `${innerHeight}px`;
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        viewScale = Math.min(innerWidth / DESIGN_W, innerHeight / DESIGN_H);
+        viewX = (innerWidth - DESIGN_W * viewScale) / 2;
+        viewY = (innerHeight - DESIGN_H * viewScale) / 2;
+      }
+
+      function cloneLevel(level) {
+        return JSON.parse(JSON.stringify(level));
+      }
+
+      function seeded(seed) {
+        let s = seed >>> 0;
+        return () => {
+          s = (s * 1664525 + 1013904223) >>> 0;
+          return s / 4294967296;
+        };
+      }
+
+      function generateEndless(seed) {
+        const rnd = seeded(seed);
+        const loops = [];
+        const count = 4 + Math.floor(rnd() * 3);
+        for (let i = 0; i < count; i++) {
+          const t = count === 1 ? 0 : i / (count - 1);
+          loops.push({
+            x: 130 + t * 700 + (rnd() - 0.5) * 55,
+            y: 160 + rnd() * 220,
+            r: 42 + rnd() * 18,
+            speed: 2.0 + rnd() * 1.15,
+            dir: rnd() > 0.5 ? 1 : -1,
+            move: rnd() > 0.70 ? {
+              x1: 130 + t * 700 - 35,
+              y1: 130 + rnd() * 260,
+              x2: 130 + t * 700 + 35,
+              y2: 130 + rnd() * 260,
+              period: 3.0 + rnd() * 2.2,
+              phase: rnd()
+            } : undefined
+          });
+        }
+        const hazards = [];
+        const bumpers = [];
+        const fields = [];
+        if (rnd() > 0.35) hazards.push({ type: 'circle', x: 390 + rnd() * 230, y: 180 + rnd() * 180, r: 16 + rnd() * 16 });
+        if (rnd() > 0.55) hazards.push({ type: 'rect', x: 450 + rnd() * 120, y: 220 + rnd() * 80, w: 28 + rnd() * 26, h: 72 + rnd() * 70 });
+        if (rnd() > 0.50) bumpers.push({ x: 240 + rnd() * 520, y: 400 + rnd() * 50, r: 19 + rnd() * 8, power: 330 + rnd() * 200 });
+        if (rnd() > 0.60) fields.push({ x: 365 + rnd() * 250, y: 220 + rnd() * 120, r: 80 + rnd() * 60, strength: rnd() > 0.5 ? 470 : -410, mode: rnd() > 0.5 ? 'pull' : 'push' });
+        return {
+          name: `Endless ${seed}`,
+          gravity: 240 + rnd() * 90,
+          start: 0,
+          loops,
+          exit: { x: 845, y: 120 + rnd() * 280, r: 24 },
+          berries: [{ x: 250 + rnd() * 540, y: 70 + rnd() * 390, r: 10 }],
+          walls: [
+            { x: 58, y: 464, w: 844, h: 18 },
+            { x: 58, y: 60, w: 18, h: 422 },
+            { x: 884, y: 60, w: 18, h: 422 },
+          ],
+          hazards,
+          bumpers,
+          fields,
+          portals: [],
+        };
+      }
+
+      function loadLevel(index, useEndless = false) {
+        endless = useEndless;
+        currentLevel = useEndless ? generateEndless(endlessSeed) : cloneLevel(levels[index % levels.length]);
+        for (const loop of currentLevel.loops) {
+          loop.baseX = loop.x;
+          loop.baseY = loop.y;
+          loop.prevX = loop.x;
+          loop.prevY = loop.y;
+          loop.vx = 0;
+          loop.vy = 0;
+        }
+        state.mode = 'attached';
+        state.time = 0;
+        state.deaths = 0;
+        state.releasedAt = -999;
+        state.attachedLoop = currentLevel.start || 0;
+        state.previousLoop = -1;
+        state.angle = -Math.PI / 2;
+        state.cameraShake = 0;
+        state.particles.length = 0;
+        state.trail.length = 0;
+        state.berries = 0;
+        state.totalBerries = currentLevel.berries.length;
+        state.won = false;
+        state.slowmo = 0;
+        state.levelStarted = false;
+        for (const b of currentLevel.berries) b.collected = false;
+        for (const p of currentLevel.portals) p.cooldown = 0;
+        syncAttachedPlayer();
+        updateHud();
+        showMessage(useEndless ? 'Endless Drift' : currentLevel.name, 'Tap at the exact angle. The same loop can feel totally different depending on release timing.', 2.4);
+      }
+
+      function syncAttachedPlayer() {
+        const loop = currentLevel.loops[state.attachedLoop];
+        state.player.x = loop.x + Math.cos(state.angle) * loop.r;
+        state.player.y = loop.y + Math.sin(state.angle) * loop.r;
+        state.player.vx = 0;
+        state.player.vy = 0;
+      }
+
+      function release() {
+        const loop = currentLevel.loops[state.attachedLoop];
+        const tangentX = -Math.sin(state.angle) * loop.dir;
+        const tangentY = Math.cos(state.angle) * loop.dir;
+        const angularSpeed = Math.abs(loop.speed) * loop.r;
+        const calibrated = clamp(angularSpeed * 1.42 + 275, 520, 710);
+        state.player.vx = tangentX * calibrated + (loop.vx || 0);
+        state.player.vy = tangentY * calibrated + (loop.vy || 0);
+        state.previousLoop = state.attachedLoop;
+        state.releasedAt = state.time;
+        state.mode = 'flying';
+        state.levelStarted = true;
+        spawnBurst(state.player.x, state.player.y, '#63f7ff', 18, 190);
+        sound('release');
+      }
+
+      function attach(loopIndex) {
+        const loop = currentLevel.loops[loopIndex];
+        state.attachedLoop = loopIndex;
+        state.angle = Math.atan2(state.player.y - loop.y, state.player.x - loop.x);
+        state.mode = 'attached';
+        state.previousLoop = -1;
+        state.cameraShake = Math.max(state.cameraShake, 3.5);
+        spawnBurst(state.player.x, state.player.y, '#86ffb4', 16, 130);
+        sound('latch');
+        syncAttachedPlayer();
+      }
+
+      function die(reason = 'Signal lost') {
+        if (zen) {
+          state.player.vx *= -0.35;
+          state.player.vy *= -0.35;
+          state.cameraShake = 7;
+          spawnBurst(state.player.x, state.player.y, '#ff5177', 24, 180);
+          sound('death');
+          return;
+        }
+        state.mode = 'dead';
+        state.deaths++;
+        state.cameraShake = 10;
+        spawnBurst(state.player.x, state.player.y, '#ff5177', 34, 240);
+        sound('death');
+        showMessage(reason, 'Tap to restart instantly.', 1.05);
+      }
+
+      function win() {
+        if (state.won) return;
+        state.won = true;
+        state.mode = 'won';
+        state.cameraShake = 9;
+        const key = endless ? `endless-${endlessSeed}` : `level-${levelIndex}`;
+        const previous = state.best.get(key);
+        if (!previous || state.time < previous) state.best.set(key, state.time);
+        spawnBurst(currentLevel.exit.x, currentLevel.exit.y, '#ffb86b', 72, 360);
+        sound('win');
+        showMessage('Portal reached', `${formatTime(state.time)} • berries ${state.berries}/${state.totalBerries}. Tap for next.`, 99);
+      }
+
+      function showMessage(title, subtitle, duration = 2.0) {
+        toast.innerHTML = `<h1>${title}</h1><p>${subtitle}</p>`;
+        toast.classList.add('visible');
+        messageTimer = duration;
+      }
+
+      function hideMessage() {
+        toast.classList.remove('visible');
+      }
+
+      function action() {
+        createAudio();
+        if (audio && audio.ac.state === 'suspended') audio.ac.resume();
+        if (state.mode === 'attached') release();
+        else if (state.mode === 'dead') loadLevel(levelIndex, endless);
+        else if (state.mode === 'won') nextLevel();
+      }
+
+      function nextLevel() {
+        if (endless) {
+          endlessSeed++;
+          loadLevel(levelIndex, true);
+          return;
+        }
+        levelIndex = (levelIndex + 1) % levels.length;
+        loadLevel(levelIndex, false);
+      }
+
+      function updateHud() {
+        levelText.textContent = endless ? `∞-${endlessSeed}` : `${levelIndex + 1}/${levels.length}`;
+        timeText.textContent = formatTime(state.time);
+        berryText.textContent = `${state.berries}/${state.totalBerries}`;
+        zenBtn.textContent = `Zen: ${zen ? 'On' : 'Off'}`;
+      }
+
+      function formatTime(t) {
+        return t.toFixed(2);
+      }
+
+      function clamp(v, min, max) {
+        return Math.max(min, Math.min(max, v));
+      }
+
+      function dist(a, b, c, d) {
+        return Math.hypot(a - c, b - d);
+      }
+
+      function normalize(x, y) {
+        const m = Math.hypot(x, y) || 1;
+        return { x: x / m, y: y / m };
+      }
+
+      function reflect(vx, vy, nx, ny, restitution = BOUNCE) {
+        const dot = vx * nx + vy * ny;
+        return {
+          vx: (vx - (1 + restitution) * dot * nx) * WALL_FRICTION,
+          vy: (vy - (1 + restitution) * dot * ny) * WALL_FRICTION,
+        };
+      }
+
+      function updateLoopMotion(t, dt) {
+        for (const loop of currentLevel.loops) {
+          loop.prevX = loop.x;
+          loop.prevY = loop.y;
+          if (loop.move) {
+            const m = loop.move;
+            const s = (Math.sin(((t / m.period) + m.phase) * TAU) + 1) / 2;
+            const eased = s * s * (3 - 2 * s);
+            loop.x = m.x1 + (m.x2 - m.x1) * eased;
+            loop.y = m.y1 + (m.y2 - m.y1) * eased;
+          } else {
+            loop.x = loop.baseX;
+            loop.y = loop.baseY;
+          }
+          loop.vx = (loop.x - loop.prevX) / Math.max(0.0001, dt);
+          loop.vy = (loop.y - loop.prevY) / Math.max(0.0001, dt);
+        }
+      }
+
+      function update(dt) {
+        if (!currentLevel) return;
+        dt = Math.min(dt, 1 / 30);
+        if (state.slowmo > 0) {
+          state.slowmo -= dt;
+          dt *= 0.36;
+        }
+        if (messageTimer > 0) {
+          messageTimer -= dt;
+          if (messageTimer <= 0) hideMessage();
+        }
+        if (state.mode !== 'dead' && state.mode !== 'won' && state.levelStarted) state.time += dt;
+        updateLoopMotion(state.time, dt);
+        for (const p of currentLevel.portals) p.cooldown = Math.max(0, p.cooldown - dt);
+
+        if (state.mode === 'attached') {
+          const loop = currentLevel.loops[state.attachedLoop];
+          state.angle += loop.speed * loop.dir * dt;
+          syncAttachedPlayer();
+          state.trail.push({ x: state.player.x, y: state.player.y, life: 0.42 });
+        }
+
+        if (state.mode === 'flying') {
+          physics(dt);
+        }
+
+        updateParticles(dt);
+        updateTrail(dt);
+        state.cameraShake = Math.max(0, state.cameraShake - dt * 18);
+        updateHud();
+      }
+
+      function physics(dt) {
+        const p = state.player;
+        p.vy += currentLevel.gravity * dt;
+
+        for (const field of currentLevel.fields) {
+          const dx = field.x - p.x;
+          const dy = field.y - p.y;
+          const d = Math.hypot(dx, dy);
+          if (d < field.r && d > 1) {
+            const falloff = 1 - d / field.r;
+            const n = normalize(dx, dy);
+            const sign = field.strength >= 0 ? 1 : -1;
+            const force = Math.abs(field.strength) * falloff * falloff * sign;
+            p.vx += n.x * force * dt;
+            p.vy += n.y * force * dt;
+          }
+        }
+
+        p.vx *= Math.pow(AIR_DRAG, dt * 60);
+        p.vy *= Math.pow(AIR_DRAG, dt * 60);
+        const speed = Math.hypot(p.vx, p.vy);
+        if (speed > MAX_SPEED) {
+          const k = MAX_SPEED / speed;
+          p.vx *= k;
+          p.vy *= k;
+        }
+
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        state.trail.push({ x: p.x, y: p.y, life: 0.64 });
+
+        collideWalls();
+        collideBumpers();
+        checkPortals();
+        checkBerries();
+        checkHazards();
+        checkLatching();
+        checkExit();
+
+        if (p.x < -140 || p.x > DESIGN_W + 140 || p.y < -180 || p.y > DESIGN_H + 180) die('Lost in space');
+      }
+
+      function collideWalls() {
+        const p = state.player;
+        for (const w of currentLevel.walls) {
+          const cx = clamp(p.x, w.x, w.x + w.w);
+          const cy = clamp(p.y, w.y, w.y + w.h);
+          const dx = p.x - cx;
+          const dy = p.y - cy;
+          const d = Math.hypot(dx, dy);
+          if (d < PLAYER_R && d > 0.001) {
+            const nx = dx / d;
+            const ny = dy / d;
+            p.x = cx + nx * PLAYER_R;
+            p.y = cy + ny * PLAYER_R;
+            const r = reflect(p.vx, p.vy, nx, ny);
+            p.vx = r.vx;
+            p.vy = r.vy;
+            state.cameraShake = Math.max(state.cameraShake, 2.4);
+            spawnBurst(p.x, p.y, '#9ee7ff', 5, 90);
+          } else if (d <= 0.001 && p.x >= w.x && p.x <= w.x + w.w && p.y >= w.y && p.y <= w.y + w.h) {
+            const left = Math.abs(p.x - w.x);
+            const right = Math.abs(p.x - (w.x + w.w));
+            const top = Math.abs(p.y - w.y);
+            const bottom = Math.abs(p.y - (w.y + w.h));
+            const min = Math.min(left, right, top, bottom);
+            let nx = 0, ny = 0;
+            if (min === left) { nx = -1; p.x = w.x - PLAYER_R; }
+            else if (min === right) { nx = 1; p.x = w.x + w.w + PLAYER_R; }
+            else if (min === top) { ny = -1; p.y = w.y - PLAYER_R; }
+            else { ny = 1; p.y = w.y + w.h + PLAYER_R; }
+            const r = reflect(p.vx, p.vy, nx, ny);
+            p.vx = r.vx;
+            p.vy = r.vy;
+          }
+        }
+      }
+
+      function collideBumpers() {
+        const p = state.player;
+        for (const b of currentLevel.bumpers) {
+          const dx = p.x - b.x;
+          const dy = p.y - b.y;
+          const d = Math.hypot(dx, dy);
+          if (d < b.r + PLAYER_R) {
+            const n = normalize(dx, dy);
+            p.x = b.x + n.x * (b.r + PLAYER_R + 0.5);
+            p.y = b.y + n.y * (b.r + PLAYER_R + 0.5);
+            const refl = reflect(p.vx, p.vy, n.x, n.y, 1.05);
+            p.vx = refl.vx + n.x * b.power;
+            p.vy = refl.vy + n.y * b.power;
+            state.cameraShake = Math.max(state.cameraShake, 5);
+            spawnBurst(p.x, p.y, '#ffb86b', 20, 260);
+            sound('bumper');
+          }
+        }
+      }
+
+      function checkPortals() {
+        const p = state.player;
+        for (const portal of currentLevel.portals) {
+          if (portal.cooldown > 0) continue;
+          const da = dist(p.x, p.y, portal.a.x, portal.a.y);
+          const db = dist(p.x, p.y, portal.b.x, portal.b.y);
+          if (da < portal.a.r + PLAYER_R) teleport(portal, portal.a, portal.b);
+          else if (db < portal.b.r + PLAYER_R) teleport(portal, portal.b, portal.a);
+        }
+      }
+
+      function teleport(portal, from, to) {
+        const p = state.player;
+        const speed = Math.hypot(p.vx, p.vy);
+        const n = normalize(p.vx, p.vy || -1);
+        spawnBurst(p.x, p.y, '#b867ff', 20, 180);
+        p.x = to.x + n.x * (to.r + PLAYER_R + 4);
+        p.y = to.y + n.y * (to.r + PLAYER_R + 4);
+        p.vx = n.x * Math.max(speed, 420);
+        p.vy = n.y * Math.max(speed, 420);
+        portal.cooldown = 0.5;
+        state.cameraShake = Math.max(state.cameraShake, 4);
+        spawnBurst(p.x, p.y, '#b867ff', 20, 220);
+      }
+
+      function checkBerries() {
+        const p = state.player;
+        for (const b of currentLevel.berries) {
+          if (!b.collected && dist(p.x, p.y, b.x, b.y) < b.r + PLAYER_R + 4) {
+            b.collected = true;
+            state.berries++;
+            state.slowmo = 0.10;
+            spawnBurst(b.x, b.y, '#ff5db8', 28, 240);
+            sound('berry');
+          }
+        }
+      }
+
+      function checkHazards() {
+        const p = state.player;
+        for (const h of currentLevel.hazards) {
+          if (h.type === 'circle') {
+            if (dist(p.x, p.y, h.x, h.y) < h.r + PLAYER_R - 1) die('Shattered');
+          } else if (h.type === 'rect') {
+            const cx = clamp(p.x, h.x, h.x + h.w);
+            const cy = clamp(p.y, h.y, h.y + h.h);
+            if (dist(p.x, p.y, cx, cy) < PLAYER_R) die('Shattered');
+          }
+        }
+      }
+
+      function checkLatching() {
+        const p = state.player;
+        for (let i = 0; i < currentLevel.loops.length; i++) {
+          if (i === state.previousLoop && state.time - state.releasedAt < 0.24) continue;
+          const loop = currentLevel.loops[i];
+          const d = dist(p.x, p.y, loop.x, loop.y);
+          const ringDistance = Math.abs(d - loop.r);
+          if (ringDistance < LATCH_TOLERANCE) {
+            const radial = normalize(p.x - loop.x, p.y - loop.y);
+            const inwardSpeed = -(p.vx * radial.x + p.vy * radial.y);
+            const speed = Math.hypot(p.vx, p.vy);
+            if (speed > 80 && (inwardSpeed > -260 || ringDistance < 8)) {
+              attach(i);
+              return;
+            }
+          }
+        }
+      }
+
+      function checkExit() {
+        const p = state.player;
+        if (dist(p.x, p.y, currentLevel.exit.x, currentLevel.exit.y) < currentLevel.exit.r + PLAYER_R) win();
+      }
+
+      function updateParticles(dt) {
+        for (let i = state.particles.length - 1; i >= 0; i--) {
+          const part = state.particles[i];
+          part.life -= dt;
+          part.x += part.vx * dt;
+          part.y += part.vy * dt;
+          part.vx *= Math.pow(0.965, dt * 60);
+          part.vy *= Math.pow(0.965, dt * 60);
+          part.vy += 40 * dt;
+          if (part.life <= 0) state.particles.splice(i, 1);
+        }
+      }
+
+      function updateTrail(dt) {
+        for (let i = state.trail.length - 1; i >= 0; i--) {
+          state.trail[i].life -= dt;
+          if (state.trail[i].life <= 0) state.trail.splice(i, 1);
+        }
+        if (state.trail.length > 70) state.trail.splice(0, state.trail.length - 70);
+      }
+
+      function spawnBurst(x, y, color, count, power) {
+        for (let i = 0; i < count; i++) {
+          const a = Math.random() * TAU;
+          const s = power * (0.18 + Math.random() * 0.82);
+          state.particles.push({
+            x, y,
+            vx: Math.cos(a) * s,
+            vy: Math.sin(a) * s,
+            r: 1.4 + Math.random() * 2.7,
+            color,
+            life: 0.34 + Math.random() * 0.54,
+            maxLife: 0.88,
+          });
+        }
+      }
+
+      function draw() {
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        ctx.clearRect(0, 0, innerWidth, innerHeight);
+        drawBackground();
+        ctx.save();
+        const shake = state.cameraShake;
+        const sx = shake ? (Math.random() - 0.5) * shake : 0;
+        const sy = shake ? (Math.random() - 0.5) * shake : 0;
+        ctx.translate(viewX + sx, viewY + sy);
+        ctx.scale(viewScale, viewScale);
+        drawWorld();
+        ctx.restore();
+      }
+
+      function drawBackground() {
+        const g = ctx.createLinearGradient(0, 0, 0, innerHeight);
+        g.addColorStop(0, '#090f24');
+        g.addColorStop(1, '#040712');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, innerWidth, innerHeight);
+
+        ctx.save();
+        ctx.globalAlpha = 0.28;
+        ctx.strokeStyle = 'rgba(99,247,255,0.09)';
+        ctx.lineWidth = 1;
+        const grid = 32 * viewScale;
+        for (let x = (viewX % grid); x < innerWidth; x += grid) {
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, innerHeight); ctx.stroke();
+        }
+        for (let y = (viewY % grid); y < innerHeight; y += grid) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(innerWidth, y); ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function drawWorld() {
+        ctx.save();
+        drawSoftVignette();
+        drawFields();
+        drawWalls();
+        drawPortals();
+        drawLoops();
+        drawExit();
+        drawBerries();
+        drawBumpers();
+        drawHazards();
+        drawTrajectoryHint();
+        drawTrail();
+        drawPlayer();
+        drawParticles();
+        drawLabels();
+        ctx.restore();
+      }
+
+      function drawSoftVignette() {
+        ctx.save();
+        const grd = ctx.createRadialGradient(DESIGN_W/2, DESIGN_H/2, 80, DESIGN_W/2, DESIGN_H/2, 620);
+        grd.addColorStop(0, 'rgba(255,255,255,0.015)');
+        grd.addColorStop(1, 'rgba(0,0,0,0.36)');
+        ctx.fillStyle = grd;
+        ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+        ctx.restore();
+      }
+
+      function drawWalls() {
+        for (const w of currentLevel.walls) {
+          roundRect(w.x, w.y, w.w, w.h, 8);
+          ctx.fillStyle = 'rgba(150, 208, 255, 0.09)';
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = 'rgba(158,231,255,0.26)';
+          ctx.stroke();
+          glowStroke('rgba(99,247,255,0.10)', 8, () => {
+            roundRect(w.x, w.y, w.w, w.h, 8);
+            ctx.stroke();
+          });
+        }
+      }
+
+      function drawLoops() {
+        for (let i = 0; i < currentLevel.loops.length; i++) {
+          const loop = currentLevel.loops[i];
+          const attached = state.mode === 'attached' && state.attachedLoop === i;
+          const pulse = Math.sin(performance.now() * 0.003 + i) * 0.5 + 0.5;
+          ctx.save();
+          ctx.translate(loop.x, loop.y);
+          ctx.lineWidth = attached ? 5 : 3;
+          ctx.strokeStyle = attached ? 'rgba(99,247,255,0.95)' : 'rgba(158,231,255,0.58)';
+          ctx.beginPath();
+          ctx.arc(0, 0, loop.r, 0, TAU);
+          ctx.stroke();
+          glowStroke(attached ? 'rgba(99,247,255,0.50)' : 'rgba(99,247,255,0.20)', attached ? 22 : 12, () => {
+            ctx.beginPath(); ctx.arc(0, 0, loop.r, 0, TAU); ctx.stroke();
+          });
+
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = `rgba(255,255,255,${0.18 + pulse * 0.10})`;
+          ctx.setLineDash([4, 10]);
+          ctx.beginPath();
+          ctx.arc(0, 0, loop.r - 10, 0, TAU);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          const arrowAngle = performance.now() * 0.001 * loop.speed * loop.dir + i;
+          const ax = Math.cos(arrowAngle) * loop.r;
+          const ay = Math.sin(arrowAngle) * loop.r;
+          drawChevron(ax, ay, arrowAngle + (loop.dir > 0 ? Math.PI / 2 : -Math.PI / 2), attached ? '#ffffff' : '#9ee7ff', attached ? 1 : 0.65);
+          ctx.restore();
+        }
+      }
+
+      function drawExit() {
+        const e = currentLevel.exit;
+        const t = performance.now() * 0.003;
+        ctx.save();
+        ctx.translate(e.x, e.y);
+        for (let i = 0; i < 3; i++) {
+          ctx.rotate(t * (i % 2 ? -1 : 1) + i);
+          ctx.strokeStyle = i === 0 ? 'rgba(255,184,107,0.9)' : 'rgba(255,184,107,0.26)';
+          ctx.lineWidth = i === 0 ? 3 : 1.4;
+          ctx.beginPath();
+          for (let a = 0; a < 6; a++) {
+            const ang = a / 6 * TAU;
+            const r = e.r + i * 8;
+            const x = Math.cos(ang) * r;
+            const y = Math.sin(ang) * r;
+            if (a === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.stroke();
+        }
+        glowStroke('rgba(255,184,107,0.52)', 22, () => {
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU); ctx.stroke();
+        });
+        ctx.fillStyle = 'rgba(255,184,107,0.18)';
+        ctx.beginPath(); ctx.arc(0, 0, e.r - 4, 0, TAU); ctx.fill();
+        ctx.restore();
+      }
+
+      function drawBerries() {
+        for (const b of currentLevel.berries) {
+          if (b.collected) continue;
+          const t = performance.now() * 0.004;
+          ctx.save();
+          ctx.translate(b.x, b.y + Math.sin(t + b.x) * 2.5);
+          ctx.rotate(t);
+          ctx.fillStyle = 'rgba(255,93,184,0.22)';
+          ctx.strokeStyle = 'rgba(255,93,184,0.92)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          for (let i = 0; i < 5; i++) {
+            const a = i / 5 * TAU - Math.PI / 2;
+            const x = Math.cos(a) * b.r;
+            const y = Math.sin(a) * b.r;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          glowStroke('rgba(255,93,184,0.45)', 16, () => { ctx.beginPath(); ctx.arc(0, 0, b.r, 0, TAU); ctx.stroke(); });
+          ctx.restore();
+        }
+      }
+
+      function drawHazards() {
+        for (const h of currentLevel.hazards) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255,81,119,0.95)';
+          ctx.fillStyle = 'rgba(255,81,119,0.18)';
+          ctx.lineWidth = 2.2;
+          if (h.type === 'circle') {
+            ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, TAU); ctx.fill(); ctx.stroke();
+            glowStroke('rgba(255,81,119,0.46)', 18, () => { ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, TAU); ctx.stroke(); });
+            for (let i = 0; i < 8; i++) {
+              const a = i / 8 * TAU + performance.now() * 0.001;
+              ctx.beginPath();
+              ctx.moveTo(h.x + Math.cos(a) * (h.r + 3), h.y + Math.sin(a) * (h.r + 3));
+              ctx.lineTo(h.x + Math.cos(a) * (h.r + 13), h.y + Math.sin(a) * (h.r + 13));
+              ctx.stroke();
+            }
+          } else {
+            roundRect(h.x, h.y, h.w, h.h, 8);
+            ctx.fill(); ctx.stroke();
+            glowStroke('rgba(255,81,119,0.46)', 18, () => { roundRect(h.x, h.y, h.w, h.h, 8); ctx.stroke(); });
+          }
+          ctx.restore();
+        }
+      }
+
+      function drawBumpers() {
+        for (const b of currentLevel.bumpers) {
+          const t = performance.now() * 0.005;
+          ctx.save();
+          ctx.translate(b.x, b.y);
+          ctx.rotate(t);
+          ctx.strokeStyle = 'rgba(255,184,107,0.94)';
+          ctx.fillStyle = 'rgba(255,184,107,0.14)';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.arc(0, 0, b.r, 0, TAU); ctx.fill(); ctx.stroke();
+          for (let i = 0; i < 4; i++) {
+            ctx.rotate(Math.PI / 2);
+            ctx.beginPath();
+            ctx.moveTo(b.r - 8, 0);
+            ctx.lineTo(b.r + 8, 0);
+            ctx.stroke();
+          }
+          glowStroke('rgba(255,184,107,0.42)', 17, () => { ctx.beginPath(); ctx.arc(0, 0, b.r, 0, TAU); ctx.stroke(); });
+          ctx.restore();
+        }
+      }
+
+      function drawFields() {
+        for (const f of currentLevel.fields) {
+          ctx.save();
+          const pull = f.strength >= 0;
+          ctx.strokeStyle = pull ? 'rgba(98,135,255,0.27)' : 'rgba(184,103,255,0.28)';
+          ctx.fillStyle = pull ? 'rgba(98,135,255,0.055)' : 'rgba(184,103,255,0.055)';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, TAU); ctx.fill(); ctx.stroke();
+          ctx.setLineDash([2, 10]);
+          for (let r = f.r * 0.35; r < f.r; r += 24) {
+            ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, TAU); ctx.stroke();
+          }
+          ctx.setLineDash([]);
+          const t = performance.now() * 0.0015 * (pull ? 1 : -1);
+          for (let i = 0; i < 10; i++) {
+            const a = i / 10 * TAU + t;
+            const x = f.x + Math.cos(a) * f.r * 0.72;
+            const y = f.y + Math.sin(a) * f.r * 0.72;
+            drawChevron(x, y, a + (pull ? Math.PI : 0), pull ? '#6287ff' : '#b867ff', 0.52);
+          }
+          ctx.restore();
+        }
+      }
+
+      function drawPortals() {
+        for (const p of currentLevel.portals) {
+          drawPortalNode(p.a, '#b867ff');
+          drawPortalNode(p.b, '#b867ff');
+          ctx.save();
+          ctx.setLineDash([6, 10]);
+          ctx.strokeStyle = 'rgba(184,103,255,0.18)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(p.a.x, p.a.y); ctx.lineTo(p.b.x, p.b.y); ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      function drawPortalNode(node, color) {
+        const t = performance.now() * 0.004;
+        ctx.save();
+        ctx.translate(node.x, node.y);
+        ctx.rotate(t);
+        ctx.strokeStyle = color;
+        ctx.fillStyle = 'rgba(184,103,255,0.10)';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, 0, node.r, 0, TAU); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(0, 0, node.r * 0.52, 0, TAU); ctx.stroke();
+        glowStroke('rgba(184,103,255,0.48)', 18, () => { ctx.beginPath(); ctx.arc(0, 0, node.r, 0, TAU); ctx.stroke(); });
+        ctx.restore();
+      }
+
+      function drawTrajectoryHint() {
+        if (state.mode !== 'attached') return;
+        const loop = currentLevel.loops[state.attachedLoop];
+        const tangentX = -Math.sin(state.angle) * loop.dir;
+        const tangentY = Math.cos(state.angle) * loop.dir;
+        const p = { x: state.player.x, y: state.player.y, vx: tangentX * 590, vy: tangentY * 590 };
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([1, 12]);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        let x = p.x, y = p.y, vx = p.vx, vy = p.vy;
+        for (let i = 0; i < 38; i++) {
+          vy += currentLevel.gravity * 0.016;
+          x += vx * 0.016;
+          y += vy * 0.016;
+          if (i % 2 === 0) ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
+      function drawTrail() {
+        ctx.save();
+        for (let i = 0; i < state.trail.length; i++) {
+          const tr = state.trail[i];
+          const a = clamp(tr.life / 0.64, 0, 1) * (i / state.trail.length);
+          ctx.fillStyle = `rgba(99,247,255,${a * 0.22})`;
+          ctx.beginPath();
+          ctx.arc(tr.x, tr.y, PLAYER_R * (0.35 + a), 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      function drawPlayer() {
+        const p = state.player;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        const speed = Math.hypot(p.vx, p.vy);
+        const squash = state.mode === 'flying' ? clamp(speed / 760, 0, 1) : 0;
+        if (state.mode === 'flying') ctx.rotate(Math.atan2(p.vy, p.vx));
+        ctx.scale(1 + squash * 0.35, 1 - squash * 0.12);
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = 'rgba(99,247,255,0.95)';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(0, 0, PLAYER_R, 0, TAU); ctx.fill(); ctx.stroke();
+        glowFill('rgba(99,247,255,0.58)', 18, () => { ctx.beginPath(); ctx.arc(0, 0, PLAYER_R + 1, 0, TAU); ctx.fill(); });
+        ctx.restore();
+      }
+
+      function drawParticles() {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (const part of state.particles) {
+          const a = clamp(part.life / part.maxLife, 0, 1);
+          ctx.globalAlpha = a;
+          ctx.fillStyle = part.color;
+          ctx.beginPath();
+          ctx.arc(part.x, part.y, part.r * (0.7 + a), 0, TAU);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+
+      function drawLabels() {
+        ctx.save();
+        ctx.font = '700 12px Inter, system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(233,246,255,0.48)';
+        ctx.textAlign = 'center';
+        ctx.fillText(currentLevel.name, DESIGN_W / 2, 36);
+        if (zen) {
+          ctx.fillStyle = 'rgba(134,255,180,0.72)';
+          ctx.fillText('ZEN MODE: hazards bounce instead of reset', DESIGN_W / 2, 56);
+        }
+        ctx.restore();
+      }
+
+      function drawChevron(x, y, angle, color, alpha = 1) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-5, -4);
+        ctx.lineTo(2, 0);
+        ctx.lineTo(-5, 4);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function glowStroke(color, blur, drawFn) {
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = blur;
+        ctx.strokeStyle = color;
+        drawFn();
+        ctx.restore();
+      }
+
+      function glowFill(color, blur, drawFn) {
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = blur;
+        ctx.fillStyle = color;
+        drawFn();
+        ctx.restore();
+      }
+
+      function roundRect(x, y, w, h, r) {
+        r = Math.min(r, w / 2, h / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+      }
+
+      function screenToWorld(clientX, clientY) {
+        return {
+          x: (clientX - viewX) / viewScale,
+          y: (clientY - viewY) / viewScale,
+        };
+      }
+
+      function loop(now) {
+        const dt = (now - lastTime) / 1000;
+        lastTime = now;
+        update(dt);
+        draw();
+        requestAnimationFrame(loop);
+      }
+
+      canvas.addEventListener('pointerdown', (e) => {
+        pointer.down = true;
+        const w = screenToWorld(e.clientX, e.clientY);
+        pointer.x = w.x; pointer.y = w.y;
+        action();
+      }, { passive: false });
+
+      canvas.addEventListener('pointermove', (e) => {
+        const w = screenToWorld(e.clientX, e.clientY);
+        pointer.x = w.x; pointer.y = w.y;
+      }, { passive: false });
+
+      canvas.addEventListener('pointerup', () => { pointer.down = false; }, { passive: false });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' || e.code === 'Enter') {
+          e.preventDefault();
+          action();
+        }
+        if (e.code === 'KeyR') loadLevel(levelIndex, endless);
+        if (e.code === 'KeyN') nextLevel();
+        if (e.code === 'KeyZ') { zen = !zen; updateHud(); }
+      });
+
+      restartBtn.addEventListener('click', (e) => { e.stopPropagation(); loadLevel(levelIndex, endless); });
+      nextBtn.addEventListener('click', (e) => { e.stopPropagation(); nextLevel(); });
+      zenBtn.addEventListener('click', (e) => { e.stopPropagation(); zen = !zen; updateHud(); });
+      endlessBtn.addEventListener('click', (e) => { e.stopPropagation(); endlessSeed = 1 + Math.floor(Math.random() * 9999); loadLevel(levelIndex, true); });
+
+      window.addEventListener('resize', resize);
+      resize();
+      loadLevel(0, false);
+      requestAnimationFrame((t) => { lastTime = t; requestAnimationFrame(loop); });
+    })();
+  </script>
+</body>
+</html>
