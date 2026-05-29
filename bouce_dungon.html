@@ -1,0 +1,1571 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Bounce Dungeon - One Tap Roguelite Prototype</title>
+<style>
+  :root {
+    --bg: #090b18;
+    --panel: rgba(17, 22, 45, 0.92);
+    --ink: #f3f7ff;
+    --muted: #9fb0d8;
+    --gold: #ffd166;
+    --cyan: #61f4ff;
+    --pink: #ff4fd8;
+    --green: #5cff9a;
+    --red: #ff5570;
+  }
+
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 50% 20%, #1a2453 0%, #0b1026 44%, #050611 100%);
+    color: var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    touch-action: none;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  #rotateHint {
+    position: fixed;
+    inset: auto 16px 16px 16px;
+    padding: 10px 14px;
+    border-radius: 14px;
+    color: rgba(255,255,255,.75);
+    background: rgba(0,0,0,.22);
+    text-align: center;
+    font-size: 12px;
+    pointer-events: none;
+  }
+
+  @media (orientation: portrait) {
+    #rotateHint { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="rotateHint">Best i portrettmodus på mobil</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ============================================================
+  // BOUNCE DUNGEON
+  // One-tap portrait roguelite prototype.
+  // No assets. No libraries. Everything drawn with canvas.
+  // ============================================================
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d", { alpha: false });
+
+  const W = 360;
+  const H = 640;
+  let dpr = 1;
+  let scale = 1;
+  let ox = 0;
+  let oy = 0;
+
+  const TAU = Math.PI * 2;
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const irand = (a, b) => Math.floor(rand(a, b + 1));
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const dist = (a, b, c, d) => Math.hypot(a - c, b - d);
+  const easeOutBack = t => {
+    const c1 = 1.70158, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  };
+
+  function resize() {
+    dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(innerWidth * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    scale = Math.min(innerWidth / W, innerHeight / H);
+    ox = (innerWidth - W * scale) * 0.5;
+    oy = (innerHeight - H * scale) * 0.5;
+  }
+  addEventListener("resize", resize, { passive: true });
+  resize();
+
+  function screenToWorld(clientX, clientY) {
+    return {
+      x: (clientX - ox) / scale,
+      y: (clientY - oy) / scale
+    };
+  }
+
+  // ============================================================
+  // Audio: optional, generated after first user interaction.
+  // ============================================================
+
+  let audioCtx = null;
+  let audioEnabled = true;
+
+  function initAudio() {
+    if (!audioEnabled || audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (err) {
+      audioEnabled = false;
+    }
+  }
+
+  function beep(type = "tap") {
+    if (!audioCtx || !audioEnabled) return;
+
+    const now = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+
+    let f0 = 420, f1 = 240, dur = 0.08, wave = "sine", vol = 0.055;
+    if (type === "perfect") { f0 = 860; f1 = 1220; dur = 0.12; wave = "triangle"; vol = 0.075; }
+    if (type === "coin") { f0 = 940; f1 = 1320; dur = 0.07; wave = "square"; vol = 0.04; }
+    if (type === "hit") { f0 = 160; f1 = 90; dur = 0.11; wave = "sawtooth"; vol = 0.065; }
+    if (type === "goal") { f0 = 280; f1 = 880; dur = 0.32; wave = "triangle"; vol = 0.09; }
+    if (type === "hurt") { f0 = 180; f1 = 80; dur = 0.20; wave = "sawtooth"; vol = 0.085; }
+    if (type === "upgrade") { f0 = 520; f1 = 1040; dur = 0.22; wave = "triangle"; vol = 0.08; }
+
+    o.type = wave;
+    o.frequency.setValueAtTime(f0, now);
+    o.frequency.exponentialRampToValueAtTime(Math.max(40, f1), now + dur);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(vol, now + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start(now);
+    o.stop(now + dur + 0.02);
+  }
+
+  // ============================================================
+  // Persistent meta.
+  // ============================================================
+
+  const SAVE_KEY = "bounce_dungeon_proto_v1";
+
+  const meta = {
+    bestRoom: 1,
+    lifetimeCoins: 0,
+    runs: 0,
+    wins: 0
+  };
+
+  function loadMeta() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return;
+      Object.assign(meta, JSON.parse(raw));
+    } catch (_) {}
+  }
+
+  function saveMeta() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(meta));
+    } catch (_) {}
+  }
+
+  loadMeta();
+
+  // ============================================================
+  // Game state.
+  // ============================================================
+
+  let state = "menu";
+  let last = performance.now();
+  let t = 0;
+  let shake = 0;
+  let flash = 0;
+
+  const roomBounds = { l: 26, r: W - 26, t: 92, b: H - 54 };
+
+  let run = null;
+  let hero = null;
+  let ball = null; // not used; kept out deliberately. This is bounce combat, not football.
+  let enemies = [];
+  let coins = [];
+  let spikes = [];
+  let bumpers = [];
+  let particles = [];
+  let texts = [];
+  let upgradeCards = [];
+  let buttons = [];
+  let roomClearTimer = 0;
+  let tapCooldown = 0;
+  let tutorialStep = 0;
+  let stuckTimer = 0;
+
+  function newRun() {
+    run = {
+      room: 1,
+      coins: 0,
+      kills: 0,
+      hp: 3,
+      maxHp: 3,
+      stats: {
+        bounce: 1.0,
+        spin: 1.0,
+        magnet: 0,
+        shock: 0,
+        speed: 1.0,
+        coinMult: 1.0
+      }
+    };
+    meta.runs++;
+    saveMeta();
+    tutorialStep = 0;
+    startRoom();
+    state = "play";
+  }
+
+  function startRoom() {
+    roomClearTimer = 0;
+    tapCooldown = 0;
+    stuckTimer = 0;
+    enemies = [];
+    coins = [];
+    spikes = [];
+    bumpers = [];
+    particles = [];
+    texts = [];
+
+    hero = {
+      x: W * 0.5,
+      y: H - 105,
+      r: 14,
+      vx: rand(-1, 1) < 0 ? -145 : 145,
+      vy: -260,
+      spin: 0,
+      inv: 1.0,
+      squash: 0,
+      trail: [],
+      lastX: W * 0.5,
+      lastY: H - 105
+    };
+
+    const room = run.room;
+    const enemyCount = Math.min(7, 2 + Math.floor(room * 0.85));
+    const coinCount = Math.min(18, 7 + room * 2);
+
+    // Bumpers create the "dungeon pinball" feel and make movement readable.
+    const bumperCount = Math.min(4, 1 + Math.floor(room / 2));
+    for (let i = 0; i < bumperCount; i++) {
+      bumpers.push({
+        x: rand(roomBounds.l + 52, roomBounds.r - 52),
+        y: rand(roomBounds.t + 130, roomBounds.b - 120),
+        w: rand(56, 88),
+        h: 12,
+        hue: rand(180, 300),
+        pulse: rand(0, TAU)
+      });
+    }
+
+    // Enemies: slimes on the ground, bats in the air.
+    for (let i = 0; i < enemyCount; i++) {
+      const isBat = room > 2 && Math.random() < 0.38;
+      if (isBat) {
+        enemies.push({
+          type: "bat",
+          x: rand(roomBounds.l + 32, roomBounds.r - 32),
+          y: rand(roomBounds.t + 95, roomBounds.b - 230),
+          baseY: 0,
+          r: 11,
+          vx: rand(-68, 68) || 55,
+          vy: 0,
+          hp: room > 7 && Math.random() < 0.25 ? 2 : 1,
+          maxHp: room > 7 && Math.random() < 0.25 ? 2 : 1,
+          phase: rand(0, TAU),
+          dead: false
+        });
+        enemies[enemies.length - 1].baseY = enemies[enemies.length - 1].y;
+      } else {
+        enemies.push({
+          type: "slime",
+          x: rand(roomBounds.l + 38, roomBounds.r - 38),
+          y: roomBounds.b - 13,
+          r: 13,
+          vx: rand(-55, 55) || 50,
+          vy: 0,
+          hp: room > 5 && Math.random() < 0.35 ? 2 : 1,
+          maxHp: room > 5 && Math.random() < 0.35 ? 2 : 1,
+          phase: rand(0, TAU),
+          dead: false
+        });
+      }
+    }
+
+    // Hazards are introduced gently.
+    const spikeCount = Math.max(0, Math.min(5, Math.floor((room - 2) / 2)));
+    for (let i = 0; i < spikeCount; i++) {
+      spikes.push({
+        x: rand(roomBounds.l + 34, roomBounds.r - 34),
+        y: rand(roomBounds.t + 130, roomBounds.b - 90),
+        r: 12,
+        pulse: rand(0, TAU)
+      });
+    }
+
+    for (let i = 0; i < coinCount; i++) {
+      coins.push({
+        x: rand(roomBounds.l + 26, roomBounds.r - 26),
+        y: rand(roomBounds.t + 68, roomBounds.b - 70),
+        r: 5.5,
+        taken: false,
+        phase: rand(0, TAU),
+        vx: 0,
+        vy: 0
+      });
+    }
+
+    addText(W / 2, 128, "ROOM " + run.room, "#ffffff", 22, 1.2);
+  }
+
+  function completeRoom() {
+    const base = 18 + run.room * 4;
+    const bonus = Math.round(coins.filter(c => c.taken).length * 2 * run.stats.coinMult);
+    const reward = base + bonus;
+    run.coins += reward;
+    meta.lifetimeCoins += reward;
+    meta.bestRoom = Math.max(meta.bestRoom, run.room + 1);
+    saveMeta();
+
+    addBurst(W / 2, 110, 45, "#ffd166");
+    beep("goal");
+    shake = 0.35;
+    flash = 0.35;
+
+    generateUpgrades();
+    state = "upgrade";
+  }
+
+  function generateUpgrades() {
+    const pool = [
+      {
+        title: "Stronger Bounce",
+        icon: "↟",
+        desc: "+12% power bounce",
+        apply: () => run.stats.bounce += 0.12
+      },
+      {
+        title: "Longer Spin",
+        icon: "⟳",
+        desc: "+18% attack-ring time",
+        apply: () => run.stats.spin += 0.18
+      },
+      {
+        title: "Magnet Boots",
+        icon: "◉",
+        desc: "Coins drift toward you",
+        apply: () => run.stats.magnet += 18
+      },
+      {
+        title: "Extra Heart",
+        icon: "♥",
+        desc: "+1 max HP and heal",
+        apply: () => { run.maxHp += 1; run.hp = Math.min(run.maxHp, run.hp + 2); }
+      },
+      {
+        title: "Shock Tap",
+        icon: "✦",
+        desc: "Perfect taps blast enemies",
+        apply: () => run.stats.shock += 1
+      },
+      {
+        title: "Coin Fever",
+        icon: "◆",
+        desc: "+25% coin rewards",
+        apply: () => run.stats.coinMult += 0.25
+      },
+      {
+        title: "Quick Feet",
+        icon: "»",
+        desc: "+8% sideways speed",
+        apply: () => run.stats.speed += 0.08
+      },
+      {
+        title: "Snack Heart",
+        icon: "+",
+        desc: "Heal 2 HP",
+        apply: () => run.hp = Math.min(run.maxHp, run.hp + 2)
+      }
+    ];
+
+    upgradeCards = [];
+    const used = new Set();
+    while (upgradeCards.length < 3) {
+      const i = irand(0, pool.length - 1);
+      if (used.has(i)) continue;
+      used.add(i);
+      upgradeCards.push(pool[i]);
+    }
+  }
+
+  // ============================================================
+  // Input.
+  // ============================================================
+
+  function pointerDown(ev) {
+    ev.preventDefault();
+    initAudio();
+
+    const p = ev.touches && ev.touches.length
+      ? screenToWorld(ev.touches[0].clientX, ev.touches[0].clientY)
+      : screenToWorld(ev.clientX, ev.clientY);
+
+    if (state === "menu") {
+      handleMenuTap(p);
+    } else if (state === "play") {
+      handleGameTap();
+    } else if (state === "upgrade") {
+      handleUpgradeTap(p);
+    } else if (state === "gameover") {
+      handleGameOverTap(p);
+    }
+  }
+
+  canvas.addEventListener("pointerdown", pointerDown, { passive: false });
+
+  function handleMenuTap(p) {
+    for (const b of buttons) {
+      if (hitRect(p, b)) {
+        if (b.action === "play") newRun();
+        if (b.action === "reset") {
+          localStorage.removeItem(SAVE_KEY);
+          meta.bestRoom = 1; meta.lifetimeCoins = 0; meta.runs = 0; meta.wins = 0;
+          saveMeta();
+          beep("hurt");
+        }
+        return;
+      }
+    }
+    newRun();
+  }
+
+  function handleGameTap() {
+    if (!hero || tapCooldown > 0) return;
+
+    const q = timingQuality();
+    const mult = q.mult;
+    const dir = hero.vx >= 0 ? -1 : 1;
+    const sideways = (145 + run.room * 2) * run.stats.speed * (0.9 + 0.25 * mult);
+
+    hero.vx = dir * sideways;
+    hero.vy = Math.min(hero.vy, -245 * run.stats.bounce * mult);
+    hero.spin = (0.20 + 0.11 * mult) * run.stats.spin;
+    hero.squash = 1;
+
+    tapCooldown = q.name === "PERFECT" ? 0.12 : 0.16;
+
+    const color = q.name === "PERFECT" ? "#ffd166" : q.name === "GOOD" ? "#61f4ff" : "#ffffff";
+    addText(hero.x, hero.y - 30, q.name, color, q.name === "PERFECT" ? 19 : 15, 0.65);
+    addBurst(hero.x, hero.y, q.name === "PERFECT" ? 20 : 9, color);
+    beep(q.name === "PERFECT" ? "perfect" : "tap");
+
+    if (q.name === "PERFECT" && run.stats.shock > 0) {
+      shockwave(hero.x, hero.y, 52 + run.stats.shock * 16);
+    }
+
+    if (tutorialStep < 3) tutorialStep++;
+  }
+
+  function handleUpgradeTap(p) {
+    const cardY = 230;
+    for (let i = 0; i < upgradeCards.length; i++) {
+      const r = { x: 28, y: cardY + i * 92, w: W - 56, h: 76 };
+      if (hitRect(p, r)) {
+        upgradeCards[i].apply();
+        beep("upgrade");
+        run.room++;
+        startRoom();
+        state = "play";
+        return;
+      }
+    }
+  }
+
+  function handleGameOverTap(p) {
+    for (const b of buttons) {
+      if (hitRect(p, b)) {
+        if (b.action === "play") newRun();
+        if (b.action === "menu") state = "menu";
+      }
+    }
+  }
+
+  function hitRect(p, r) {
+    return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+  }
+
+  function timingQuality() {
+    // A big, forgiving sinusoidal timing window.
+    const v = (Math.sin(t * 5.2) + 1) * 0.5;
+    if (v > 0.86) return { name: "PERFECT", mult: 1.45, value: v };
+    if (v > 0.64) return { name: "GOOD", mult: 1.18, value: v };
+    if (v > 0.32) return { name: "OK", mult: 1.0, value: v };
+    return { name: "WEAK", mult: 0.82, value: v };
+  }
+
+  // ============================================================
+  // Simulation.
+  // ============================================================
+
+  function update(dt) {
+    t += dt;
+    shake = Math.max(0, shake - dt);
+    flash = Math.max(0, flash - dt);
+
+    particles = particles.filter(p => p.life > 0);
+    texts = texts.filter(x => x.life > 0);
+
+    for (const p of particles) {
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= Math.pow(0.05, dt);
+      p.vy += (p.g || 0) * dt;
+    }
+
+    for (const f of texts) {
+      f.life -= dt;
+      f.y += f.vy * dt;
+      f.x += f.vx * dt;
+    }
+
+    if (state === "play") updatePlay(dt);
+  }
+
+  function updatePlay(dt) {
+    tapCooldown = Math.max(0, tapCooldown - dt);
+    if (!hero) return;
+
+    hero.inv = Math.max(0, hero.inv - dt);
+    hero.spin = Math.max(0, hero.spin - dt);
+    hero.squash = Math.max(0, hero.squash - dt * 4);
+
+    hero.lastX = hero.x;
+    hero.lastY = hero.y;
+
+    hero.vy += 620 * dt;
+    hero.vx *= Math.pow(0.996, dt * 60);
+    hero.vx = clamp(hero.vx, -230, 230);
+    hero.vy = clamp(hero.vy, -520, 560);
+    hero.x += hero.vx * dt;
+    hero.y += hero.vy * dt;
+
+    hero.trail.push({ x: hero.x, y: hero.y, life: 0.28 });
+    if (hero.trail.length > 18) hero.trail.shift();
+    for (const tr of hero.trail) tr.life -= dt;
+    hero.trail = hero.trail.filter(tr => tr.life > 0);
+
+    collideHeroWithRoom();
+    collideHeroWithBumpers();
+
+    for (const e of enemies) updateEnemy(e, dt);
+    enemies = enemies.filter(e => !e.dead);
+
+    updateCoins(dt);
+    updateHazards(dt);
+    resolveEnemyContacts();
+
+    if (enemies.length === 0) {
+      roomClearTimer += dt;
+      const px = W / 2, py = roomBounds.t + 40;
+      if (roomClearTimer < 0.1) {
+        addText(W / 2, 158, "PORTAL OPEN!", "#61f4ff", 18, 1.0);
+        addBurst(px, py, 34, "#61f4ff");
+      }
+
+      // Portal collision.
+      const portalR = 25 + Math.sin(t * 8) * 2;
+      if (dist(hero.x, hero.y, px, py) < hero.r + portalR && roomClearTimer > 0.35) {
+        completeRoom();
+        return;
+      }
+    }
+
+    // Anti-stuck: if almost no movement for too long, kick upward.
+    const moved = dist(hero.x, hero.y, hero.lastX, hero.lastY);
+    if (moved < 0.15) stuckTimer += dt; else stuckTimer = 0;
+    if (stuckTimer > 1.5) {
+      hero.vy = -310;
+      hero.vx = (Math.random() < 0.5 ? -1 : 1) * 150;
+      stuckTimer = 0;
+      addText(hero.x, hero.y - 22, "BOUNCE!", "#61f4ff", 14, 0.6);
+    }
+  }
+
+  function collideHeroWithRoom() {
+    if (hero.x - hero.r < roomBounds.l) {
+      hero.x = roomBounds.l + hero.r;
+      hero.vx = Math.abs(hero.vx) * 0.94;
+      wallBurst(hero.x, hero.y, "#61f4ff");
+    }
+    if (hero.x + hero.r > roomBounds.r) {
+      hero.x = roomBounds.r - hero.r;
+      hero.vx = -Math.abs(hero.vx) * 0.94;
+      wallBurst(hero.x, hero.y, "#61f4ff");
+    }
+    if (hero.y - hero.r < roomBounds.t) {
+      hero.y = roomBounds.t + hero.r;
+      hero.vy = Math.abs(hero.vy) * 0.72;
+      wallBurst(hero.x, hero.y, "#ffd166");
+    }
+    if (hero.y + hero.r > roomBounds.b) {
+      hero.y = roomBounds.b - hero.r;
+      hero.vy = -Math.max(Math.abs(hero.vy) * 0.78, 205 * run.stats.bounce);
+      hero.vx += rand(-10, 10);
+      hero.squash = 1;
+      wallBurst(hero.x, hero.y + hero.r, "#5cff9a");
+      beep("tap");
+    }
+  }
+
+  function collideHeroWithBumpers() {
+    for (const b of bumpers) {
+      const cx = clamp(hero.x, b.x - b.w / 2, b.x + b.w / 2);
+      const cy = clamp(hero.y, b.y - b.h / 2, b.y + b.h / 2);
+      const dx = hero.x - cx, dy = hero.y - cy;
+      const d = Math.hypot(dx, dy);
+      if (d < hero.r + 1) {
+        const nx = d > 0.001 ? dx / d : 0;
+        const ny = d > 0.001 ? dy / d : -1;
+        hero.x = cx + nx * (hero.r + 1);
+        hero.y = cy + ny * (hero.r + 1);
+        const dot = hero.vx * nx + hero.vy * ny;
+        hero.vx -= 1.85 * dot * nx;
+        hero.vy -= 1.85 * dot * ny;
+        hero.vy -= 70 * run.stats.bounce;
+        addBurst(hero.x, hero.y, 12, "#61f4ff");
+        shake = Math.max(shake, 0.08);
+      }
+    }
+  }
+
+  function updateEnemy(e, dt) {
+    e.phase += dt * 3;
+    if (e.type === "slime") {
+      e.x += e.vx * dt;
+      e.y = roomBounds.b - e.r + Math.sin(t * 6 + e.phase) * 1.5;
+      if (e.x - e.r < roomBounds.l || e.x + e.r > roomBounds.r) {
+        e.vx *= -1;
+        e.x = clamp(e.x, roomBounds.l + e.r, roomBounds.r - e.r);
+      }
+    } else {
+      e.x += e.vx * dt;
+      e.y = e.baseY + Math.sin(t * 2.5 + e.phase) * 34;
+      if (e.x - e.r < roomBounds.l || e.x + e.r > roomBounds.r) {
+        e.vx *= -1;
+        e.x = clamp(e.x, roomBounds.l + e.r, roomBounds.r - e.r);
+      }
+    }
+  }
+
+  function updateCoins(dt) {
+    for (const c of coins) {
+      if (c.taken) continue;
+      c.phase += dt * 4;
+
+      const magnetRange = 34 + run.stats.magnet;
+      const d = dist(c.x, c.y, hero.x, hero.y);
+      if (run.stats.magnet > 0 && d < magnetRange) {
+        const a = Math.atan2(hero.y - c.y, hero.x - c.x);
+        c.vx += Math.cos(a) * 360 * dt;
+        c.vy += Math.sin(a) * 360 * dt;
+      }
+
+      c.x += c.vx * dt;
+      c.y += c.vy * dt;
+      c.vx *= Math.pow(0.03, dt);
+      c.vy *= Math.pow(0.03, dt);
+
+      if (d < hero.r + c.r + 3) {
+        c.taken = true;
+        run.coins += 1;
+        addText(c.x, c.y - 8, "+1", "#ffd166", 12, 0.45);
+        addBurst(c.x, c.y, 8, "#ffd166");
+        beep("coin");
+      }
+    }
+  }
+
+  function updateHazards(dt) {
+    for (const s of spikes) {
+      s.pulse += dt * 4;
+      if (hero.inv <= 0 && dist(hero.x, hero.y, s.x, s.y) < hero.r + s.r - 2) {
+        damageHero(s.x, s.y);
+      }
+    }
+  }
+
+  function resolveEnemyContacts() {
+    for (const e of enemies) {
+      const d = dist(hero.x, hero.y, e.x, e.y);
+      if (d < hero.r + e.r) {
+        const attack = hero.spin > 0 || (hero.vy > 155 && hero.y < e.y - 3);
+        if (attack) {
+          damageEnemy(e);
+          const a = Math.atan2(hero.y - e.y, hero.x - e.x);
+          hero.vx += Math.cos(a) * 120;
+          hero.vy = -Math.max(270 * run.stats.bounce, Math.abs(hero.vy) * 0.62);
+          hero.spin = Math.max(hero.spin, 0.05);
+        } else if (hero.inv <= 0) {
+          damageHero(e.x, e.y);
+        }
+      }
+    }
+  }
+
+  function damageEnemy(e) {
+    e.hp -= 1;
+    addBurst(e.x, e.y, 18, e.type === "bat" ? "#ff4fd8" : "#5cff9a");
+    addText(e.x, e.y - 20, "HIT!", "#ffffff", 13, 0.45);
+    beep("hit");
+    shake = Math.max(shake, 0.12);
+
+    if (e.hp <= 0) {
+      e.dead = true;
+      run.kills++;
+      addText(e.x, e.y - 24, "POP!", "#ffd166", 15, 0.6);
+      for (let i = 0; i < 3; i++) {
+        coins.push({
+          x: e.x + rand(-8, 8),
+          y: e.y + rand(-8, 8),
+          r: 5.5,
+          taken: false,
+          phase: rand(0, TAU),
+          vx: rand(-90, 90),
+          vy: rand(-140, -50)
+        });
+      }
+    }
+  }
+
+  function damageHero(fromX, fromY) {
+    run.hp -= 1;
+    hero.inv = 1.1;
+    hero.spin = 0;
+    const a = Math.atan2(hero.y - fromY, hero.x - fromX);
+    hero.vx = Math.cos(a) * 220;
+    hero.vy = -260;
+    addBurst(hero.x, hero.y, 26, "#ff5570");
+    addText(hero.x, hero.y - 24, "-1 HEART", "#ff5570", 15, 0.85);
+    beep("hurt");
+    shake = 0.28;
+    flash = 0.22;
+
+    if (run.hp <= 0) {
+      meta.bestRoom = Math.max(meta.bestRoom, run.room);
+      saveMeta();
+      state = "gameover";
+    }
+  }
+
+  function shockwave(x, y, radius) {
+    addText(x, y - 38, "SHOCK!", "#ffd166", 16, 0.55);
+    for (const e of enemies) {
+      if (dist(x, y, e.x, e.y) < radius + e.r) {
+        e.hp -= 1;
+        addBurst(e.x, e.y, 16, "#ffd166");
+        if (e.hp <= 0) {
+          e.dead = true;
+          run.kills++;
+        }
+      }
+    }
+    for (let i = 0; i < 42; i++) {
+      const a = Math.random() * TAU;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * rand(90, 260),
+        vy: Math.sin(a) * rand(90, 260),
+        r: rand(1.5, 3.5),
+        life: rand(0.22, 0.5),
+        color: "#ffd166",
+        g: 0
+      });
+    }
+    shake = Math.max(shake, 0.18);
+  }
+
+  // ============================================================
+  // FX helpers.
+  // ============================================================
+
+  function addBurst(x, y, n, color) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * TAU;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * rand(35, 190),
+        vy: Math.sin(a) * rand(35, 190),
+        r: rand(1.4, 4.2),
+        life: rand(0.22, 0.72),
+        color,
+        g: rand(0, 60)
+      });
+    }
+  }
+
+  function wallBurst(x, y, color) {
+    for (let i = 0; i < 4; i++) {
+      particles.push({
+        x: x + rand(-3, 3),
+        y: y + rand(-3, 3),
+        vx: rand(-50, 50),
+        vy: rand(-90, 20),
+        r: rand(1.4, 3.2),
+        life: rand(0.18, 0.34),
+        color,
+        g: 90
+      });
+    }
+  }
+
+  function addText(x, y, text, color, size, life) {
+    texts.push({
+      x, y, text, color, size, life,
+      maxLife: life,
+      vx: rand(-8, 8),
+      vy: -38
+    });
+  }
+
+  // ============================================================
+  // Rendering.
+  // ============================================================
+
+  function render() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#070914";
+    ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+
+    let sx = 0, sy = 0;
+    if (shake > 0) {
+      sx = rand(-1, 1) * shake * 12;
+      sy = rand(-1, 1) * shake * 12;
+    }
+
+    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (ox + sx), dpr * (oy + sy));
+    drawBackground();
+
+    if (state === "menu") drawMenu();
+    if (state === "play") drawPlay();
+    if (state === "upgrade") drawUpgrade();
+    if (state === "gameover") drawGameOver();
+
+    drawScreenFrame();
+
+    if (flash > 0) {
+      ctx.save();
+      ctx.globalAlpha = flash * 0.32;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+  }
+
+  function drawBackground() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#10183c");
+    g.addColorStop(0.55, "#0a1028");
+    g.addColorStop(1, "#060711");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    for (let i = 0; i < 40; i++) {
+      const x = (i * 91 + Math.sin(t * 0.2 + i) * 40) % W;
+      const y = (i * 47 + t * 8) % H;
+      ctx.globalAlpha = 0.05 + (i % 5) * 0.015;
+      ctx.fillStyle = i % 2 ? "#61f4ff" : "#ff4fd8";
+      ctx.beginPath();
+      ctx.arc(x, y, 1.2 + (i % 3), 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawPlay() {
+    drawDungeon();
+    drawBumpers();
+    drawCoins();
+    drawSpikes();
+    drawPortal();
+    drawEnemies();
+    drawHero();
+    drawParticlesAndTexts();
+    drawHUD();
+    drawTutorial();
+  }
+
+  function drawDungeon() {
+    const b = roomBounds;
+
+    ctx.save();
+    roundedRect(b.l - 8, b.t - 8, b.r - b.l + 16, b.b - b.t + 16, 24);
+    ctx.fillStyle = "#11172f";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(97,244,255,.25)";
+    ctx.stroke();
+
+    const pitch = ctx.createLinearGradient(0, b.t, 0, b.b);
+    pitch.addColorStop(0, "#17234a");
+    pitch.addColorStop(1, "#0c1630");
+    roundedRect(b.l, b.t, b.r - b.l, b.b - b.t, 18);
+    ctx.fillStyle = pitch;
+    ctx.fill();
+
+    ctx.save();
+    ctx.clip();
+    for (let y = b.t; y < b.b; y += 34) {
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = y / 34 % 2 < 1 ? "#61f4ff" : "#ffffff";
+      ctx.fillRect(b.l, y, b.r - b.l, 17);
+    }
+
+    // Tile grid.
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = "#7ffcff";
+    ctx.lineWidth = 1;
+    for (let x = b.l + 28; x < b.r; x += 28) {
+      ctx.beginPath();
+      ctx.moveTo(x, b.t);
+      ctx.lineTo(x, b.b);
+      ctx.stroke();
+    }
+    for (let y = b.t + 28; y < b.b; y += 28) {
+      ctx.beginPath();
+      ctx.moveTo(b.l, y);
+      ctx.lineTo(b.r, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Top portal gate decoration.
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = "#ffd166";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(W / 2, b.t + 40, 38, 0, TAU);
+    ctx.stroke();
+
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBumpers() {
+    for (const b of bumpers) {
+      ctx.save();
+      const pulse = (Math.sin(t * 5 + b.pulse) + 1) * 0.5;
+      ctx.shadowColor = "#61f4ff";
+      ctx.shadowBlur = 8 + pulse * 8;
+      roundedRect(b.x - b.w / 2, b.y - b.h / 2, b.w, b.h, 8);
+      ctx.fillStyle = "rgba(97,244,255,.22)";
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,.42)";
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawCoins() {
+    for (const c of coins) {
+      if (c.taken) continue;
+      const bob = Math.sin(t * 5 + c.phase) * 2;
+      ctx.save();
+      ctx.translate(c.x, c.y + bob);
+      ctx.shadowColor = "#ffd166";
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = "#ffd166";
+      ctx.beginPath();
+      ctx.arc(0, 0, c.r, 0, TAU);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = "#fff9c8";
+      ctx.beginPath();
+      ctx.arc(-2, -2, c.r * 0.35, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawSpikes() {
+    for (const s of spikes) {
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(t * 1.3 + s.pulse);
+      ctx.shadowColor = "#ff5570";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "#ff5570";
+      for (let i = 0; i < 6; i++) {
+        ctx.rotate(TAU / 6);
+        ctx.beginPath();
+        ctx.moveTo(0, -s.r - 8);
+        ctx.lineTo(5, -4);
+        ctx.lineTo(-5, -4);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.fillStyle = "#2d1024";
+      ctx.beginPath();
+      ctx.arc(0, 0, s.r * 0.7, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawPortal() {
+    if (!run || enemies.length > 0) return;
+    const x = W / 2;
+    const y = roomBounds.t + 40;
+    const r = 24 + Math.sin(t * 7) * 2;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(t * 2);
+    ctx.shadowColor = "#61f4ff";
+    ctx.shadowBlur = 22;
+    const grad = ctx.createRadialGradient(0, 0, 2, 0, 0, r);
+    grad.addColorStop(0, "#ffffff");
+    grad.addColorStop(0.35, "#61f4ff");
+    grad.addColorStop(1, "rgba(97,244,255,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 4, 0, Math.PI * 1.55);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawEnemies() {
+    for (const e of enemies) {
+      ctx.save();
+      ctx.translate(e.x, e.y);
+      const hurt = e.hp < e.maxHp;
+      ctx.shadowColor = e.type === "bat" ? "#ff4fd8" : "#5cff9a";
+      ctx.shadowBlur = 10;
+      if (e.type === "slime") {
+        ctx.scale(1.15 + Math.sin(t * 8 + e.phase) * 0.04, 0.85 - Math.sin(t * 8 + e.phase) * 0.03);
+        ctx.fillStyle = hurt ? "#ffe066" : "#5cff9a";
+        ctx.beginPath();
+        ctx.arc(0, 0, e.r, Math.PI, 0);
+        ctx.lineTo(e.r, e.r * 0.72);
+        ctx.quadraticCurveTo(0, e.r * 1.05, -e.r, e.r * 0.72);
+        ctx.closePath();
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#091221";
+        ctx.beginPath(); ctx.arc(-4, -2, 2, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(4, -2, 2, 0, TAU); ctx.fill();
+      } else {
+        ctx.fillStyle = hurt ? "#ffe066" : "#ff4fd8";
+        ctx.beginPath();
+        ctx.arc(0, 0, e.r, 0, TAU);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-e.r, 0, 11, 5, Math.sin(t * 12) * 0.3, 0, TAU);
+        ctx.ellipse(e.r, 0, 11, 5, -Math.sin(t * 12) * 0.3, 0, TAU);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#091221";
+        ctx.beginPath(); ctx.arc(-3, -2, 1.8, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(3, -2, 1.8, 0, TAU); ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawHero() {
+    if (!hero) return;
+
+    // Trail.
+    for (let i = 0; i < hero.trail.length; i++) {
+      const tr = hero.trail[i];
+      ctx.globalAlpha = clamp(tr.life / 0.28, 0, 1) * 0.25;
+      ctx.fillStyle = "#61f4ff";
+      ctx.beginPath();
+      ctx.arc(tr.x, tr.y, hero.r * (0.45 + i / hero.trail.length * 0.2), 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    const q = timingQuality();
+    const ringPulse = 1 + q.value * 0.28;
+    const ringColor = q.name === "PERFECT" ? "#ffd166" : q.name === "GOOD" ? "#61f4ff" : "rgba(255,255,255,.45)";
+
+    ctx.save();
+    ctx.translate(hero.x, hero.y);
+
+    // Timing ring.
+    ctx.shadowColor = ringColor;
+    ctx.shadowBlur = q.name === "PERFECT" ? 18 : 9;
+    ctx.lineWidth = q.name === "PERFECT" ? 4 : 2;
+    ctx.strokeStyle = ringColor;
+    ctx.globalAlpha = q.name === "WEAK" ? 0.28 : 0.85;
+    ctx.beginPath();
+    ctx.arc(0, 0, hero.r * 2.05 * ringPulse, -Math.PI / 2, -Math.PI / 2 + TAU * q.value);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Spin attack ring.
+    if (hero.spin > 0) {
+      ctx.shadowColor = "#ffd166";
+      ctx.shadowBlur = 18;
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = `rgba(255,209,102,${clamp(hero.spin * 4, 0, 1)})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, hero.r + 12 + Math.sin(t * 20) * 2, 0, TAU);
+      ctx.stroke();
+    }
+
+    // Invulnerability blink.
+    if (hero.inv > 0 && Math.floor(hero.inv * 15) % 2 === 0) ctx.globalAlpha = 0.55;
+
+    const squash = hero.squash > 0 ? Math.sin(hero.squash * Math.PI) * 0.13 : 0;
+    ctx.scale(1 + squash, 1 - squash);
+
+    ctx.shadowColor = "#61f4ff";
+    ctx.shadowBlur = 16;
+    const body = ctx.createRadialGradient(-5, -6, 2, 0, 0, hero.r);
+    body.addColorStop(0, "#ffffff");
+    body.addColorStop(0.25, "#61f4ff");
+    body.addColorStop(1, "#2972ff");
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.arc(0, 0, hero.r, 0, TAU);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#081126";
+    ctx.beginPath(); ctx.arc(-4, -3, 2.2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(5, -3, 2.2, 0, TAU); ctx.fill();
+
+    ctx.strokeStyle = "#081126";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(1, 3, 5, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+
+    // Direction arrow.
+    ctx.fillStyle = "#ffd166";
+    ctx.beginPath();
+    if (hero.vx >= 0) {
+      ctx.moveTo(hero.r + 8, 0);
+      ctx.lineTo(hero.r + 1, -5);
+      ctx.lineTo(hero.r + 1, 5);
+    } else {
+      ctx.moveTo(-hero.r - 8, 0);
+      ctx.lineTo(-hero.r - 1, -5);
+      ctx.lineTo(-hero.r - 1, 5);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawParticlesAndTexts() {
+    for (const p of particles) {
+      ctx.globalAlpha = clamp(p.life / 0.5, 0, 1);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    for (const f of texts) {
+      const a = clamp(f.life / f.maxLife, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.font = `900 ${f.size}px Inter, system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(0,0,0,.55)";
+      ctx.strokeText(f.text, f.x, f.y);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, f.x, f.y);
+      ctx.restore();
+    }
+  }
+
+  function drawHUD() {
+    ctx.save();
+
+    // Top HUD.
+    roundedRect(16, 16, W - 32, 58, 18);
+    ctx.fillStyle = "rgba(8,12,28,.78)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.10)";
+    ctx.stroke();
+
+    ctx.font = "900 18px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "left";
+    ctx.fillText("ROOM " + run.room, 30, 40);
+
+    ctx.font = "800 13px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText("◆ " + run.coins, 30, 61);
+
+    // Hearts.
+    ctx.textAlign = "right";
+    for (let i = 0; i < run.maxHp; i++) {
+      const x = W - 30 - i * 18;
+      drawHeart(x, 42, i < run.hp ? "#ff5570" : "rgba(255,255,255,.18)", 7);
+    }
+
+    // Enemy pips.
+    ctx.textAlign = "center";
+    ctx.font = "800 12px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#9fb0d8";
+    ctx.fillText(enemies.length > 0 ? "Defeat monsters → open portal" : "Jump into the portal!", W / 2, 68);
+
+    // Bottom control strip.
+    roundedRect(24, H - 42, W - 48, 28, 14);
+    ctx.fillStyle = "rgba(8,12,28,.70)";
+    ctx.fill();
+    ctx.font = "900 12px Inter, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffffff";
+    const q = timingQuality();
+    const label = q.name === "PERFECT" ? "TAP NOW: PERFECT POWER BOUNCE!" : "TAP: flip direction + attack bounce";
+    ctx.fillText(label, W / 2, H - 24);
+
+    ctx.restore();
+  }
+
+  function drawTutorial() {
+    if (run.room > 1 || tutorialStep >= 3) return;
+    const lines = [
+      "Tap when the ring glows.",
+      "Tap flips direction and attacks.",
+      "Destroy monsters. Enter portal."
+    ];
+    const msg = lines[tutorialStep] || lines[2];
+    ctx.save();
+    const y = 92;
+    roundedRect(36, y, W - 72, 44, 16);
+    ctx.fillStyle = "rgba(255,209,102,.13)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,209,102,.4)";
+    ctx.stroke();
+    ctx.font = "900 14px Inter, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fff8d6";
+    ctx.fillText(msg, W / 2, y + 27);
+    ctx.restore();
+  }
+
+  function drawMenu() {
+    buttons = [];
+
+    ctx.save();
+    ctx.textAlign = "center";
+
+    // Animated dungeon orb.
+    ctx.translate(W / 2, 132);
+    for (let i = 0; i < 3; i++) {
+      ctx.rotate(t * 0.25 + i);
+      ctx.globalAlpha = 0.20;
+      ctx.strokeStyle = i % 2 ? "#ff4fd8" : "#61f4ff";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 90 - i * 13, 35 + i * 6, i * 0.7, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = "#61f4ff";
+    ctx.shadowBlur = 24;
+    ctx.fillStyle = "#61f4ff";
+    ctx.beginPath();
+    ctx.arc(0, 0, 34 + Math.sin(t * 4) * 2, 0, TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#081126";
+    ctx.beginPath(); ctx.arc(-10, -6, 4, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(10, -6, 4, 0, TAU); ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "#081126";
+    ctx.beginPath(); ctx.arc(0, 4, 12, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.font = "1000 34px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "#61f4ff";
+    ctx.shadowBlur = 18;
+    ctx.fillText("BOUNCE", W / 2, 218);
+    ctx.shadowColor = "#ff4fd8";
+    ctx.fillText("DUNGEON", W / 2, 253);
+
+    ctx.shadowBlur = 0;
+    ctx.font = "700 14px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#9fb0d8";
+    wrapText("One-tap physics roguelite. Bounce, smash, collect, upgrade.", W / 2, 284, 286, 18);
+
+    const play = { x: 42, y: 350, w: W - 84, h: 70, action: "play" };
+    drawButton(play, "PLAY RUN", "Tap anywhere during the run", "#61f4ff");
+    buttons.push(play);
+
+    // Meta card.
+    roundedRect(42, 438, W - 84, 88, 20);
+    ctx.fillStyle = "rgba(17,22,45,.86)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.1)";
+    ctx.stroke();
+
+    ctx.font = "900 14px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("BEST ROOM: " + meta.bestRoom, W / 2, 467);
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText("LIFETIME COINS: " + meta.lifetimeCoins, W / 2, 493);
+
+    const reset = { x: 108, y: 548, w: 144, h: 42, action: "reset" };
+    drawSmallButton(reset, "RESET SAVE");
+    buttons.push(reset);
+
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.font = "700 11px Inter, system-ui, sans-serif";
+    ctx.fillText("Prototype: portrait, code-drawn, no assets", W / 2, 616);
+
+    ctx.restore();
+  }
+
+  function drawUpgrade() {
+    drawDungeon();
+    drawParticlesAndTexts();
+
+    ctx.save();
+    ctx.textAlign = "center";
+
+    roundedRect(18, 30, W - 36, H - 60, 26);
+    ctx.fillStyle = "rgba(8,12,28,.88)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(97,244,255,.24)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.font = "1000 25px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("ROOM CLEARED!", W / 2, 82);
+
+    ctx.font = "800 14px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText("Coins: " + run.coins + "   HP: " + run.hp + "/" + run.maxHp, W / 2, 110);
+
+    ctx.font = "800 13px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#9fb0d8";
+    ctx.fillText("Choose one upgrade", W / 2, 143);
+
+    const cardY = 230;
+    for (let i = 0; i < upgradeCards.length; i++) {
+      const u = upgradeCards[i];
+      const y = cardY + i * 92;
+      const pulse = 1 + Math.sin(t * 4 + i) * 0.01;
+      ctx.save();
+      ctx.translate(W / 2, y + 38);
+      ctx.scale(pulse, pulse);
+      roundedRect(-(W - 56) / 2, -38, W - 56, 76, 20);
+      const g = ctx.createLinearGradient(-140, -38, 140, 38);
+      g.addColorStop(0, "rgba(97,244,255,.16)");
+      g.addColorStop(1, "rgba(255,79,216,.13)");
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,.18)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.font = "1000 28px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#ffd166";
+      ctx.fillText(u.icon, -122, 8);
+
+      ctx.textAlign = "left";
+      ctx.font = "1000 16px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(u.title, -88, -8);
+      ctx.font = "700 12px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#9fb0d8";
+      ctx.fillText(u.desc, -88, 15);
+      ctx.restore();
+    }
+
+    ctx.font = "800 12px Inter, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(255,255,255,.6)";
+    ctx.fillText("Next room gets harder. Your build gets crazier.", W / 2, 560);
+    ctx.restore();
+  }
+
+  function drawGameOver() {
+    buttons = [];
+
+    drawDungeon();
+    drawParticlesAndTexts();
+
+    ctx.save();
+    ctx.textAlign = "center";
+
+    roundedRect(28, 94, W - 56, 418, 28);
+    ctx.fillStyle = "rgba(8,12,28,.90)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,85,112,.35)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.font = "1000 30px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ff5570";
+    ctx.shadowColor = "#ff5570";
+    ctx.shadowBlur = 18;
+    ctx.fillText("RUN OVER", W / 2, 154);
+    ctx.shadowBlur = 0;
+
+    ctx.font = "900 16px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("Reached Room " + run.room, W / 2, 202);
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText("Coins this run: " + run.coins, W / 2, 231);
+    ctx.fillStyle = "#9fb0d8";
+    ctx.fillText("Best Room: " + meta.bestRoom, W / 2, 260);
+
+    const play = { x: 54, y: 326, w: W - 108, h: 62, action: "play" };
+    drawButton(play, "PLAY AGAIN", "New one-tap run", "#61f4ff");
+    buttons.push(play);
+
+    const menu = { x: 84, y: 414, w: W - 168, h: 44, action: "menu" };
+    drawSmallButton(menu, "MAIN MENU");
+    buttons.push(menu);
+
+    ctx.restore();
+  }
+
+  function drawButton(b, title, sub, color) {
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 18 + Math.sin(t * 4) * 4;
+    roundedRect(b.x, b.y, b.w, b.h, 24);
+    const g = ctx.createLinearGradient(b.x, b.y, b.x + b.w, b.y + b.h);
+    g.addColorStop(0, color);
+    g.addColorStop(1, "#ff4fd8");
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255,255,255,.55)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#071020";
+    ctx.font = "1000 22px Inter, system-ui, sans-serif";
+    ctx.fillText(title, b.x + b.w / 2, b.y + 30);
+    ctx.font = "800 11px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(7,16,32,.75)";
+    ctx.fillText(sub, b.x + b.w / 2, b.y + 51);
+    ctx.restore();
+  }
+
+  function drawSmallButton(b, label) {
+    ctx.save();
+    roundedRect(b.x, b.y, b.w, b.h, 16);
+    ctx.fillStyle = "rgba(255,255,255,.08)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.font = "900 12px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(label, b.x + b.w / 2, b.y + b.h / 2 + 4);
+    ctx.restore();
+  }
+
+  function drawScreenFrame() {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.08)";
+    ctx.lineWidth = 2;
+    roundedRect(7, 7, W - 14, H - 14, 28);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function roundedRect(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawHeart(x, y, color, size) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(size / 10, size / 10);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(0, 8);
+    ctx.bezierCurveTo(-15, -3, -8, -14, 0, -6);
+    ctx.bezierCurveTo(8, -14, 15, -3, 0, 8);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function wrapText(text, x, y, maxWidth, lineHeight) {
+    const words = text.split(" ");
+    let line = "";
+    for (const word of words) {
+      const test = line + word + " ";
+      if (ctx.measureText(test).width > maxWidth && line.length > 0) {
+        ctx.fillText(line.trim(), x, y);
+        line = word + " ";
+        y += lineHeight;
+      } else {
+        line = test;
+      }
+    }
+    ctx.fillText(line.trim(), x, y);
+  }
+
+  // ============================================================
+  // Main loop.
+  // ============================================================
+
+  function loop(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>

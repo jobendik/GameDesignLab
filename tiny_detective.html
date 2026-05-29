@@ -1,0 +1,1769 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Tiny Detective Café - Prototype</title>
+<style>
+  :root{
+    --bg:#070814;
+    --panel:rgba(22,20,42,.93);
+    --ink:#fff8ef;
+    --muted:#b9adc8;
+    --gold:#ffd166;
+    --pink:#ff7ac8;
+    --cyan:#7ae7ff;
+    --green:#72ff9b;
+    --red:#ff6077;
+    --coffee:#8b5e3c;
+  }
+
+  html,body{
+    margin:0;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:
+      radial-gradient(circle at 50% 10%, #392458 0%, #151428 48%, #060713 100%);
+    color:var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    touch-action:none;
+    overscroll-behavior:none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+
+  #game{
+    display:block;
+    width:100vw;
+    height:100vh;
+    cursor:pointer;
+    touch-action:none;
+  }
+
+  #landscapeHint{
+    position:fixed;
+    left:16px;
+    right:16px;
+    bottom:14px;
+    padding:9px 12px;
+    border-radius:14px;
+    background:rgba(0,0,0,.25);
+    color:rgba(255,255,255,.72);
+    text-align:center;
+    font-size:12px;
+    pointer-events:none;
+  }
+
+  @media (orientation: portrait){
+    #landscapeHint{ display:none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="landscapeHint">Best i portrettmodus på mobil</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ============================================================
+  // TINY DETECTIVE CAFÉ
+  // Cozy café-service + observation mystery prototype.
+  //
+  // Core loop:
+  // 1. Serve café customers quickly.
+  // 2. Correct service builds Trust and reveals clues.
+  // 3. Use the clue traits to pick the correct suspect.
+  // 4. Choose one upgrade and solve a harder case.
+  //
+  // No assets. No libraries. Canvas + generated WebAudio only.
+  // ============================================================
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d", { alpha:false });
+
+  const W = 360;
+  const H = 640;
+  const TAU = Math.PI * 2;
+
+  let dpr = 1;
+  let scale = 1;
+  let ox = 0;
+  let oy = 0;
+  let last = performance.now();
+  let t = 0;
+  let shake = 0;
+  let flash = 0;
+
+  const rand = (a,b)=>a+Math.random()*(b-a);
+  const irand = (a,b)=>Math.floor(rand(a,b+1));
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp = (a,b,u)=>a+(b-a)*u;
+  const dist = (a,b,c,d)=>Math.hypot(a-c,b-d);
+
+  function resize(){
+    dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(innerWidth * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    scale = Math.min(innerWidth / W, innerHeight / H);
+    ox = (innerWidth - W * scale) * .5;
+    oy = (innerHeight - H * scale) * .5;
+  }
+  addEventListener("resize", resize, { passive:true });
+  resize();
+
+  function screenToWorld(clientX, clientY){
+    return {
+      x:(clientX - ox)/scale,
+      y:(clientY - oy)/scale
+    };
+  }
+
+  // ============================================================
+  // Audio.
+  // ============================================================
+
+  let audioCtx = null;
+  let audioEnabled = true;
+
+  function initAudio(){
+    if(audioCtx || !audioEnabled) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch(_) {
+      audioEnabled = false;
+    }
+  }
+
+  function sfx(type){
+    if(!audioCtx || !audioEnabled) return;
+    const now = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+
+    let f0=420, f1=260, dur=.08, wave="sine", vol=.05;
+    if(type==="serve"){ f0=520; f1=880; dur=.08; wave="triangle"; vol=.06; }
+    if(type==="wrong"){ f0=180; f1=120; dur=.13; wave="sawtooth"; vol=.055; }
+    if(type==="clue"){ f0=640; f1=1280; dur=.18; wave="triangle"; vol=.075; }
+    if(type==="coin"){ f0=980; f1=1480; dur=.07; wave="square"; vol=.035; }
+    if(type==="case"){ f0=330; f1=980; dur=.36; wave="triangle"; vol=.09; }
+    if(type==="fail"){ f0=160; f1=70; dur=.28; wave="sawtooth"; vol=.075; }
+    if(type==="upgrade"){ f0=700; f1=1320; dur=.22; wave="triangle"; vol=.075; }
+    if(type==="select"){ f0=430; f1=620; dur=.06; wave="sine"; vol=.045; }
+
+    o.type = wave;
+    o.frequency.setValueAtTime(f0, now);
+    o.frequency.exponentialRampToValueAtTime(Math.max(40,f1), now+dur);
+    g.gain.setValueAtTime(.0001, now);
+    g.gain.exponentialRampToValueAtTime(vol, now+.012);
+    g.gain.exponentialRampToValueAtTime(.0001, now+dur);
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start(now);
+    o.stop(now+dur+.03);
+  }
+
+  // ============================================================
+  // Save/meta.
+  // ============================================================
+
+  const SAVE_KEY = "tiny_detective_cafe_proto_v1";
+  const meta = {
+    bestCase:1,
+    totalCoins:0,
+    solved:0,
+    runs:0
+  };
+
+  function loadMeta(){
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if(raw) Object.assign(meta, JSON.parse(raw));
+    } catch(_){}
+  }
+
+  function saveMeta(){
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(meta)); } catch(_){}
+  }
+
+  loadMeta();
+
+  // ============================================================
+  // Data.
+  // ============================================================
+
+  const ORDERS = [
+    { id:"coffee", name:"Coffee", icon:"☕", color:"#c78b54" },
+    { id:"tea", name:"Tea", icon:"🍵", color:"#72ff9b" },
+    { id:"cake", name:"Cake", icon:"🍰", color:"#ff9bd6" },
+    { id:"sandwich", name:"Toast", icon:"🥪", color:"#ffd166" }
+  ];
+
+  const TRAITS = [
+    { id:"red_scarf", label:"red scarf", icon:"🧣", color:"#ff6077" },
+    { id:"gold_key", label:"gold key", icon:"🔑", color:"#ffd166" },
+    { id:"blue_hat", label:"blue hat", icon:"🎩", color:"#7ae7ff" },
+    { id:"green_book", label:"green book", icon:"📗", color:"#72ff9b" },
+    { id:"purple_glove", label:"purple glove", icon:"🧤", color:"#d18cff" },
+    { id:"umbrella", label:"umbrella", icon:"☂", color:"#ff7ac8" },
+    { id:"muddy_boots", label:"muddy boots", icon:"🥾", color:"#b9825c" },
+    { id:"silver_pin", label:"silver pin", icon:"✦", color:"#e7eefc" },
+    { id:"camera", label:"camera", icon:"📷", color:"#c6c9d8" },
+    { id:"newspaper", label:"newspaper", icon:"📰", color:"#fff8ef" }
+  ];
+
+  const NAMES = [
+    "Mira Vale", "Otto Finch", "Lina Moss", "Nora Quill", "Felix Grey",
+    "Ivy Bell", "Theo North", "Ada Bloom", "Pip Sterling", "Vera Fox",
+    "Rune Vale", "Elsa Moon", "Milo Reed", "June Ash", "Kira Cloud"
+  ];
+
+  const INCIDENTS = [
+    "The Missing Sugar Spoon",
+    "The Vanishing Velvet Muffin",
+    "The Locked Pantry Mystery",
+    "The Disappearing Receipt",
+    "The Midnight Espresso Case",
+    "The Stolen Jazz Ticket",
+    "The Secret Menu Note",
+    "The Case of the Cold Teapot"
+  ];
+
+  const TABLES = [
+    { x:78,  y:190 },
+    { x:180, y:178 },
+    { x:282, y:196 },
+    { x:94,  y:315 },
+    { x:218, y:318 }
+  ];
+
+  // ============================================================
+  // Game state.
+  // ============================================================
+
+  let state = "menu";
+  let mode = "cafe";
+  let run = null;
+  let caseData = null;
+  let customers = [];
+  let particles = [];
+  let texts = [];
+  let buttons = [];
+  let rewardCards = [];
+  let selectedCustomer = null;
+  let selectedTray = null;
+  let spawnTimer = 0;
+  let tutorialStep = 0;
+  let wrongGuesses = 0;
+  let jiggle = null;
+
+  function newRun(){
+    meta.runs++;
+    saveMeta();
+
+    run = {
+      caseNo:1,
+      coins:0,
+      renown:0,
+      trust:0,
+      maxTrust:8,
+      patienceBonus:0,
+      clueSpeed:0,
+      tipBonus:0,
+      focus:0,
+      casesSolved:0
+    };
+
+    startCase();
+    state = "cafe";
+  }
+
+  function startCase(){
+    caseData = generateCase(run.caseNo);
+    customers = [];
+    particles = [];
+    texts = [];
+    selectedCustomer = null;
+    selectedTray = null;
+    spawnTimer = .6;
+    tutorialStep = 0;
+    wrongGuesses = 0;
+
+    run.trust = 0;
+    run.focus = 0;
+
+    caseData.timer = 48 + Math.min(10, run.caseNo * 1.5);
+    caseData.maxTimer = caseData.timer;
+    caseData.served = 0;
+    caseData.missed = 0;
+    caseData.cluesFound = [];
+    caseData.revealedCount = 0;
+    caseData.minClues = Math.min(3, 2 + Math.floor(run.caseNo/3));
+    caseData.closed = false;
+
+    addText(W/2, 118, "CASE " + run.caseNo, "#ffffff", 23, 1.05);
+    addText(W/2, 148, caseData.title, "#ffd166", 13, 1.05);
+  }
+
+  function generateCase(caseNo){
+    const title = INCIDENTS[(caseNo-1) % INCIDENTS.length];
+
+    const shuffledTraits = shuffle([...TRAITS]);
+    const culpritTraits = shuffledTraits.slice(0,3);
+    const decoyTraits = shuffledTraits.slice(3,10);
+
+    const culpritIndex = irand(0,2);
+    const suspects = [];
+
+    for(let i=0;i<3;i++){
+      let traits;
+      if(i === culpritIndex){
+        traits = [...culpritTraits];
+      } else {
+        // Decoys share 1-2 traits with culprit so the choice is readable but not trivial.
+        const sharedCount = i === ((culpritIndex+1)%3) ? 2 : 1;
+        traits = [
+          ...shuffle([...culpritTraits]).slice(0, sharedCount),
+          ...shuffle([...decoyTraits]).slice(0, 3-sharedCount)
+        ];
+        traits = shuffle(traits);
+      }
+
+      suspects.push({
+        name: uniqueName(suspects.map(s=>s.name)),
+        traits,
+        color: ["#7ae7ff","#ff7ac8","#ffd166"][i],
+        faceSeed: rand(0,TAU)
+      });
+    }
+
+    const clueTraits = shuffle([...culpritTraits]);
+    const clues = clueTraits.map(tr => ({
+      trait:tr,
+      text: clueText(tr)
+    }));
+
+    return {
+      title,
+      suspects,
+      culpritIndex,
+      clues,
+      timer:48,
+      maxTimer:48,
+      served:0,
+      missed:0,
+      cluesFound:[],
+      revealedCount:0,
+      minClues:3,
+      closed:false
+    };
+  }
+
+  function uniqueName(used){
+    let n = NAMES[irand(0,NAMES.length-1)];
+    let guard = 0;
+    while(used.includes(n) && guard++ < 20) n = NAMES[irand(0,NAMES.length-1)];
+    return n;
+  }
+
+  function clueText(trait){
+    const options = [
+      `A witness noticed a ${trait.label}.`,
+      `Someone mentioned the ${trait.label}.`,
+      `The culprit was linked to a ${trait.label}.`,
+      `A quiet guest pointed at the ${trait.label}.`,
+      `The clue board says: ${trait.label}.`
+    ];
+    return options[irand(0, options.length-1)];
+  }
+
+  function shuffle(arr){
+    for(let i=arr.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [arr[i],arr[j]] = [arr[j],arr[i]];
+    }
+    return arr;
+  }
+
+  // ============================================================
+  // Input.
+  // ============================================================
+
+  function pointerDown(ev){
+    ev.preventDefault();
+    initAudio();
+
+    const p = ev.touches && ev.touches.length
+      ? screenToWorld(ev.touches[0].clientX, ev.touches[0].clientY)
+      : screenToWorld(ev.clientX, ev.clientY);
+
+    if(state === "menu") handleMenuTap(p);
+    else if(state === "cafe") handleCafeTap(p);
+    else if(state === "suspects") handleSuspectTap(p);
+    else if(state === "reward") handleRewardTap(p);
+    else if(state === "gameover") handleGameOverTap(p);
+  }
+
+  canvas.addEventListener("pointerdown", pointerDown, { passive:false });
+
+  function handleMenuTap(p){
+    for(const b of buttons){
+      if(hitRect(p,b)){
+        if(b.action === "play") newRun();
+        if(b.action === "reset"){
+          localStorage.removeItem(SAVE_KEY);
+          meta.bestCase = 1; meta.totalCoins = 0; meta.solved = 0; meta.runs = 0;
+          saveMeta();
+          sfx("wrong");
+        }
+        return;
+      }
+    }
+    newRun();
+  }
+
+  function handleCafeTap(p){
+    // Tray first.
+    const tray = getTrayRects();
+    for(let i=0;i<tray.length;i++){
+      if(hitRect(p,tray[i])){
+        const order = ORDERS[i];
+        selectedTray = order.id;
+        sfx("select");
+
+        // Smart serve if no customer selected: serve most urgent customer with this order.
+        if(selectedCustomer === null){
+          const target = mostUrgentCustomerFor(order.id);
+          if(target){
+            serveCustomer(target, order.id);
+            return;
+          }
+        } else {
+          const c = customers.find(x=>x.id === selectedCustomer);
+          if(c) {
+            serveCustomer(c, order.id);
+            return;
+          }
+        }
+
+        addText(W/2, 504, order.name.toUpperCase(), order.color, 13, .45);
+        tutorialStep = Math.max(tutorialStep, 1);
+        return;
+      }
+    }
+
+    // Customers.
+    for(const c of customers){
+      if(c.leaving) continue;
+      if(dist(p.x,p.y,c.x,c.y) < 38 || hitRect(p, {x:c.x-44,y:c.y-72,w:88,h:104})){
+        if(selectedTray){
+          serveCustomer(c, selectedTray);
+        } else {
+          selectedCustomer = c.id;
+          addText(c.x, c.y-62, "SELECTED", "#7ae7ff", 11, .35);
+          sfx("select");
+          tutorialStep = Math.max(tutorialStep, 1);
+        }
+        return;
+      }
+    }
+
+    // End early if enough clues.
+    const solveBtn = { x:96, y:454, w:168, h:34 };
+    if(hitRect(p, solveBtn) && caseData.cluesFound.length >= caseData.minClues){
+      state = "suspects";
+      selectedCustomer = null;
+      selectedTray = null;
+      sfx("clue");
+    }
+  }
+
+  function handleSuspectTap(p){
+    const rects = getSuspectRects();
+    for(let i=0;i<rects.length;i++){
+      if(hitRect(p, rects[i])){
+        chooseSuspect(i);
+        return;
+      }
+    }
+  }
+
+  function handleRewardTap(p){
+    for(let i=0;i<rewardCards.length;i++){
+      const r = { x:28, y:220+i*94, w:W-56, h:76 };
+      if(hitRect(p,r)){
+        rewardCards[i].apply();
+        run.caseNo++;
+        startCase();
+        state = "cafe";
+        sfx("upgrade");
+        return;
+      }
+    }
+  }
+
+  function handleGameOverTap(p){
+    for(const b of buttons){
+      if(hitRect(p,b)){
+        if(b.action === "play") newRun();
+        if(b.action === "menu") state = "menu";
+      }
+    }
+  }
+
+  function hitRect(p,r){ return p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h; }
+
+  // ============================================================
+  // Café gameplay.
+  // ============================================================
+
+  let nextCustomerId = 1;
+
+  function spawnCustomer(){
+    const free = TABLES.filter(tab => !customers.some(c => !c.leaving && dist(c.x,c.y,tab.x,tab.y) < 36));
+    if(!free.length) return;
+
+    const table = free[irand(0, free.length-1)];
+    const order = ORDERS[irand(0, ORDERS.length-1)];
+    const hasClue = caseData.revealedCount < caseData.clues.length && Math.random() < (.34 + run.clueSpeed*.04);
+
+    const personTraits = [];
+    const culpritTrait = hasClue ? caseData.clues[caseData.revealedCount].trait : null;
+
+    // Visually, guests may carry traits. Clue guests always carry the clue trait.
+    if(culpritTrait) personTraits.push(culpritTrait);
+    const available = TRAITS.filter(tr => !personTraits.some(p => p.id === tr.id));
+    while(personTraits.length < 2 && Math.random() < .58){
+      personTraits.push(available.splice(irand(0, available.length-1),1)[0]);
+    }
+
+    const patience = 9.0 + run.patienceBonus + Math.max(0, 2.2 - run.caseNo*.12);
+    customers.push({
+      id:nextCustomerId++,
+      x:table.x,
+      y:table.y,
+      vx:0,
+      vy:0,
+      order:order.id,
+      patience,
+      maxPatience:patience,
+      hasClue,
+      clueIndex: hasClue ? caseData.revealedCount : -1,
+      traits:personTraits,
+      mood:1,
+      bob:rand(0,TAU),
+      leaving:false,
+      leaveT:0,
+      wrong:0,
+      color:["#7ae7ff","#ff7ac8","#ffd166","#72ff9b","#d18cff"][irand(0,4)]
+    });
+
+    if(hasClue) caseData.revealedCount++;
+  }
+
+  function mostUrgentCustomerFor(orderId){
+    let best = null;
+    let bestPatience = Infinity;
+    for(const c of customers){
+      if(!c.leaving && c.order === orderId && c.patience < bestPatience){
+        best = c;
+        bestPatience = c.patience;
+      }
+    }
+    return best;
+  }
+
+  function serveCustomer(c, orderId){
+    if(!c || c.leaving) return;
+
+    if(orderId !== c.order){
+      c.wrong++;
+      c.patience -= 1.8;
+      selectedTray = null;
+      selectedCustomer = null;
+      addText(c.x, c.y-64, "WRONG ORDER", "#ff6077", 12, .55);
+      addBurst(c.x, c.y-24, 12, "#ff6077");
+      jiggle = { id:c.id, t:.25 };
+      sfx("wrong");
+      tutorialStep = Math.max(tutorialStep, 2);
+      return;
+    }
+
+    const order = ORDERS.find(o=>o.id===c.order);
+    const patiencePct = c.patience / c.maxPatience;
+    const tip = 2 + Math.floor(patiencePct * 4) + run.tipBonus;
+    run.coins += tip;
+    meta.totalCoins += tip;
+    saveMeta();
+
+    caseData.served++;
+    run.trust = clamp(run.trust + 1, 0, run.maxTrust);
+    run.focus += 1;
+
+    addText(c.x, c.y-68, "+" + tip + " COINS", "#ffd166", 12, .55);
+    addText(c.x, c.y-50, "THANKS!", "#72ff9b", 12, .45);
+    addBurst(c.x, c.y-22, 16, order.color);
+    sfx("serve");
+    if(tip > 4) sfx("coin");
+
+    if(c.hasClue && c.clueIndex >= 0){
+      revealClue(c.clueIndex, c.x, c.y);
+    } else if(run.focus >= 3 + Math.max(0, 2 - run.clueSpeed) && caseData.cluesFound.length < caseData.clues.length){
+      // A guaranteed clue drip so the player can solve every case.
+      const idx = nextUnfoundClueIndex();
+      if(idx !== -1){
+        run.focus = 0;
+        revealClue(idx, c.x, c.y);
+      }
+    }
+
+    c.leaving = true;
+    c.leaveT = .48;
+    selectedTray = null;
+    selectedCustomer = null;
+    tutorialStep = Math.max(tutorialStep, 2);
+  }
+
+  function nextUnfoundClueIndex(){
+    for(let i=0;i<caseData.clues.length;i++){
+      if(!caseData.cluesFound.includes(i)) return i;
+    }
+    return -1;
+  }
+
+  function revealClue(index, x, y){
+    if(caseData.cluesFound.includes(index)) return;
+    caseData.cluesFound.push(index);
+    const clue = caseData.clues[index];
+    addText(x, y-84, "CLUE!", "#ffd166", 18, .8);
+    addBurst(x, y-56, 32, "#ffd166");
+    sfx("clue");
+    flash = Math.max(flash, .15);
+
+    if(caseData.cluesFound.length >= caseData.minClues){
+      addText(W/2, 442, "ENOUGH CLUES — SOLVE!", "#7ae7ff", 15, .8);
+    }
+  }
+
+  function chooseSuspect(index){
+    const correct = index === caseData.culpritIndex;
+    if(correct){
+      const base = 24 + run.caseNo*7;
+      const bonus = caseData.cluesFound.length * 5 + Math.max(0, Math.floor(caseData.timer)) + run.trust*2;
+      const reward = base + bonus;
+      run.coins += reward;
+      run.renown += 1;
+      run.casesSolved++;
+      meta.totalCoins += reward;
+      meta.bestCase = Math.max(meta.bestCase, run.caseNo+1);
+      meta.solved += 1;
+      saveMeta();
+
+      addBurst(W/2, 170, 60, "#ffd166");
+      addText(W/2, 112, "CASE SOLVED!", "#ffd166", 24, 1.0);
+      sfx("case");
+      flash = .35;
+      shake = .22;
+      generateRewards();
+      state = "reward";
+    } else {
+      wrongGuesses++;
+      shake = .22;
+      flash = .12;
+      sfx("fail");
+      addText(W/2, 104, "WRONG LEAD", "#ff6077", 22, .8);
+
+      // Forgiving: wrong guesses reveal one more clue, then let player try again.
+      const idx = nextUnfoundClueIndex();
+      if(idx !== -1){
+        caseData.cluesFound.push(idx);
+        addText(W/2, 132, "A NEW CLUE APPEARS", "#ffd166", 13, .8);
+      }
+
+      if(wrongGuesses >= 2){
+        // Still not harsh, but ends the run if player ignores clues repeatedly.
+        state = "gameover";
+      }
+    }
+  }
+
+  function generateRewards(){
+    const pool = [
+      {
+        title:"Faster Barista",
+        icon:"☕",
+        color:"#c78b54",
+        desc:"+1.5s customer patience.",
+        apply:()=>run.patienceBonus += 1.5
+      },
+      {
+        title:"Better Tips",
+        icon:"◆",
+        color:"#ffd166",
+        desc:"+1 coin per correct order.",
+        apply:()=>run.tipBonus += 1
+      },
+      {
+        title:"Clue Notebook",
+        icon:"📗",
+        color:"#72ff9b",
+        desc:"Clues appear more often.",
+        apply:()=>run.clueSpeed += 1
+      },
+      {
+        title:"Larger Trust Jar",
+        icon:"♥",
+        color:"#ff7ac8",
+        desc:"+2 max Trust.",
+        apply:()=>run.maxTrust += 2
+      },
+      {
+        title:"Warm Lighting",
+        icon:"✦",
+        color:"#7ae7ff",
+        desc:"Start next case with +2 Trust.",
+        apply:()=>{ run.maxTrust += 1; run.trust = Math.min(run.maxTrust, run.trust+2); }
+      },
+      {
+        title:"Repair Fund",
+        icon:"+",
+        color:"#72ff9b",
+        desc:"+25 coins instantly.",
+        apply:()=>{ run.coins += 25; meta.totalCoins += 25; saveMeta(); }
+      }
+    ];
+
+    rewardCards = [];
+    const used = new Set();
+    while(rewardCards.length < 3){
+      const i = irand(0, pool.length-1);
+      if(used.has(i)) continue;
+      used.add(i);
+      rewardCards.push(pool[i]);
+    }
+  }
+
+  // ============================================================
+  // Update.
+  // ============================================================
+
+  function update(dt){
+    t += dt;
+    shake = Math.max(0, shake-dt);
+    flash = Math.max(0, flash-dt);
+
+    if(jiggle){
+      jiggle.t -= dt;
+      if(jiggle.t <= 0) jiggle = null;
+    }
+
+    particles = particles.filter(p=>p.life>0);
+    texts = texts.filter(f=>f.life>0);
+
+    for(const p of particles){
+      p.life -= dt;
+      p.x += p.vx*dt;
+      p.y += p.vy*dt;
+      p.vx *= Math.pow(.06, dt);
+      p.vy += (p.g||0)*dt;
+    }
+
+    for(const f of texts){
+      f.life -= dt;
+      f.x += f.vx*dt;
+      f.y += f.vy*dt;
+    }
+
+    if(state === "cafe") updateCafe(dt);
+  }
+
+  function updateCafe(dt){
+    caseData.timer -= dt;
+    if(caseData.timer <= 0){
+      if(caseData.cluesFound.length >= caseData.minClues){
+        state = "suspects";
+        sfx("clue");
+      } else {
+        state = "gameover";
+        sfx("fail");
+        shake = .3;
+      }
+      return;
+    }
+
+    spawnTimer -= dt;
+    const targetCustomers = Math.min(5, 2 + Math.floor(run.caseNo/2));
+    if(spawnTimer <= 0 && customers.filter(c=>!c.leaving).length < targetCustomers){
+      spawnCustomer();
+      spawnTimer = Math.max(.55, 1.75 - run.caseNo*.06 + rand(-.2,.25));
+    }
+
+    for(const c of customers){
+      c.bob += dt*3.2;
+      if(c.leaving){
+        c.leaveT -= dt;
+        c.y -= dt*30;
+        c.vx += rand(-12,12)*dt;
+        c.x += c.vx*dt;
+        if(c.leaveT <= 0) c.gone = true;
+        continue;
+      }
+
+      c.patience -= dt;
+      if(c.patience <= 0){
+        c.leaving = true;
+        c.leaveT = .6;
+        c.gone = true;
+        caseData.missed++;
+        run.trust = Math.max(0, run.trust - 1);
+        addText(c.x, c.y-58, "LEFT!", "#ff6077", 13, .55);
+        addBurst(c.x, c.y-25, 12, "#ff6077");
+        sfx("wrong");
+      }
+    }
+
+    customers = customers.filter(c=>!c.gone);
+  }
+
+  // ============================================================
+  // FX.
+  // ============================================================
+
+  function addBurst(x,y,n,color){
+    for(let i=0;i<n;i++){
+      const a = Math.random()*TAU;
+      particles.push({
+        x,y,
+        vx:Math.cos(a)*rand(25,150),
+        vy:Math.sin(a)*rand(25,150),
+        r:rand(1.3,3.9),
+        life:rand(.2,.7),
+        color,
+        g:rand(0,55)
+      });
+    }
+  }
+
+  function addText(x,y,text,color,size,life){
+    texts.push({
+      x,y,text,color,size,life,maxLife:life,
+      vx:rand(-5,5),
+      vy:-32
+    });
+  }
+
+  // ============================================================
+  // Render.
+  // ============================================================
+
+  function render(){
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle = "#070814";
+    ctx.fillRect(0,0,canvas.width/dpr,canvas.height/dpr);
+
+    let sx=0, sy=0;
+    if(shake>0){
+      sx = rand(-1,1)*shake*13;
+      sy = rand(-1,1)*shake*13;
+    }
+
+    ctx.setTransform(dpr*scale,0,0,dpr*scale,dpr*(ox+sx),dpr*(oy+sy));
+    drawBackground();
+
+    if(state === "menu") drawMenu();
+    if(state === "cafe") drawCafe();
+    if(state === "suspects") drawSuspects();
+    if(state === "reward") drawReward();
+    if(state === "gameover") drawGameOver();
+
+    drawFrame();
+
+    if(flash > 0){
+      ctx.save();
+      ctx.globalAlpha = flash*.32;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0,0,W,H);
+      ctx.restore();
+    }
+  }
+
+  function drawBackground(){
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,"#392458");
+    g.addColorStop(.52,"#17162d");
+    g.addColorStop(1,"#070814");
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+
+    // Cozy dust/star motes.
+    for(let i=0;i<42;i++){
+      const x = (i*83 + Math.sin(t*.18+i)*28) % W;
+      const y = (i*49 + t*6) % H;
+      ctx.globalAlpha = .035 + (i%4)*.012;
+      ctx.fillStyle = i%3 ? "#ffd166" : "#ff7ac8";
+      ctx.beginPath();
+      ctx.arc(x,y,1.2+(i%3)*.6,0,TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawCafe(){
+    drawCafeRoom();
+    drawCustomers();
+    drawParticlesAndTexts();
+    drawHud();
+    drawClueBoard();
+    drawTray();
+    drawSolveButton();
+    drawTutorial();
+  }
+
+  function drawCafeRoom(){
+    ctx.save();
+
+    // Main café card.
+    roundedRect(18,78,W-36,410,28);
+    ctx.fillStyle = "rgba(42,28,48,.92)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,209,102,.16)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Wall.
+    const wall = ctx.createLinearGradient(0,80,0,250);
+    wall.addColorStop(0,"#45305e");
+    wall.addColorStop(1,"#2a1c34");
+    roundedRect(28,88,W-56,160,20);
+    ctx.fillStyle = wall;
+    ctx.fill();
+
+    // Window.
+    roundedRect(54,108,88,72,16);
+    ctx.fillStyle = "#121c3f";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(122,231,255,.35)";
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(122,231,255,.18)";
+    ctx.beginPath();
+    ctx.moveTo(98,108); ctx.lineTo(98,180);
+    ctx.moveTo(54,144); ctx.lineTo(142,144);
+    ctx.stroke();
+
+    // Shelf.
+    roundedRect(190,118,108,14,7);
+    ctx.fillStyle = "#8b5e3c";
+    ctx.fill();
+    for(let i=0;i<4;i++){
+      ctx.fillStyle = ["#ffd166","#72ff9b","#ff7ac8","#7ae7ff"][i];
+      roundedRect(202+i*22,92+Math.sin(t*2+i)*1,14,28,5);
+      ctx.fill();
+    }
+
+    // Floor.
+    const floor = ctx.createLinearGradient(0,245,0,488);
+    floor.addColorStop(0,"#6d4a38");
+    floor.addColorStop(1,"#3d2530");
+    roundedRect(28,238,W-56,240,20);
+    ctx.fillStyle = floor;
+    ctx.fill();
+
+    // Floor boards.
+    ctx.strokeStyle = "rgba(255,255,255,.08)";
+    ctx.lineWidth = 1;
+    for(let y=258;y<470;y+=30){
+      ctx.beginPath();
+      ctx.moveTo(30,y);
+      ctx.lineTo(W-30,y);
+      ctx.stroke();
+    }
+    for(let x=50;x<W-30;x+=48){
+      ctx.beginPath();
+      ctx.moveTo(x,245);
+      ctx.lineTo(x+24,478);
+      ctx.stroke();
+    }
+
+    // Tables.
+    for(const tab of TABLES){
+      drawTable(tab.x, tab.y + 28);
+    }
+
+    ctx.restore();
+  }
+
+  function drawTable(x,y){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.shadowColor = "rgba(0,0,0,.45)";
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = "#4f2f25";
+    ctx.beginPath();
+    ctx.ellipse(0,0,34,15,0,0,TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#8b5e3c";
+    ctx.beginPath();
+    ctx.ellipse(0,-3,34,15,0,0,TAU);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.12)";
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawCustomers(){
+    for(const c of customers){
+      const selected = selectedCustomer === c.id;
+      const order = ORDERS.find(o=>o.id===c.order);
+      const patiencePct = clamp(c.patience/c.maxPatience, 0, 1);
+      let jx = 0;
+      if(jiggle && jiggle.id === c.id) jx = Math.sin(jiggle.t*85)*4;
+
+      ctx.save();
+      ctx.translate(c.x + jx, c.y + Math.sin(c.bob)*2);
+
+      // Selection glow.
+      if(selected){
+        ctx.shadowColor = "#7ae7ff";
+        ctx.shadowBlur = 20;
+        ctx.strokeStyle = "#7ae7ff";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0,0,33,0,TAU);
+        ctx.stroke();
+      }
+
+      // Body.
+      ctx.shadowColor = c.color;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = c.color;
+      ctx.beginPath();
+      ctx.arc(0,0,20,0,TAU);
+      ctx.fill();
+
+      // Hair/head top.
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "#37243a";
+      ctx.beginPath();
+      ctx.arc(0,-6,19,Math.PI,TAU);
+      ctx.fill();
+
+      // Face.
+      ctx.fillStyle = "#ffe3c2";
+      ctx.beginPath();
+      ctx.arc(0,-1,14,0,TAU);
+      ctx.fill();
+
+      // Eyes / expression.
+      ctx.fillStyle = "#251727";
+      ctx.beginPath(); ctx.arc(-5,-3,1.8,0,TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(5,-3,1.8,0,TAU); ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "#251727";
+      ctx.beginPath();
+      if(patiencePct > .35) ctx.arc(0,3,5,.1*Math.PI,.9*Math.PI);
+      else ctx.arc(0,8,5,1.1*Math.PI,1.9*Math.PI);
+      ctx.stroke();
+
+      // Trait badges on customer.
+      for(let i=0;i<c.traits.length;i++){
+        const tr = c.traits[i];
+        ctx.save();
+        ctx.translate(-17+i*34, 21);
+        ctx.fillStyle = "rgba(255,255,255,.9)";
+        ctx.beginPath();
+        ctx.arc(0,0,9,0,TAU);
+        ctx.fill();
+        ctx.font = "11px serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(tr.icon,0,1);
+        ctx.restore();
+      }
+
+      // Order bubble.
+      ctx.save();
+      ctx.translate(0,-48);
+      ctx.shadowColor = order.color;
+      ctx.shadowBlur = 12;
+      roundedRect(-24,-18,48,34,15);
+      ctx.fillStyle = "rgba(255,248,239,.96)";
+      ctx.fill();
+      ctx.strokeStyle = order.color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.font = "20px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(order.icon,0,0);
+      if(c.hasClue){
+        ctx.fillStyle = "#ffd166";
+        ctx.beginPath();
+        ctx.arc(20,-15,7,0,TAU);
+        ctx.fill();
+        ctx.fillStyle = "#382000";
+        ctx.font = "900 10px Inter, system-ui, sans-serif";
+        ctx.fillText("!",20,-11);
+      }
+      ctx.restore();
+
+      // Patience bar.
+      ctx.save();
+      ctx.translate(-24,30);
+      roundedRect(0,0,48,5,3);
+      ctx.fillStyle = "rgba(0,0,0,.45)";
+      ctx.fill();
+      roundedRect(0,0,48*patiencePct,5,3);
+      ctx.fillStyle = patiencePct>.55 ? "#72ff9b" : patiencePct>.25 ? "#ffd166" : "#ff6077";
+      ctx.fill();
+      ctx.restore();
+
+      ctx.restore();
+    }
+  }
+
+  function drawParticlesAndTexts(){
+    for(const p of particles){
+      const a = clamp(p.life / .6, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    for(const f of texts){
+      const a = clamp(f.life / f.maxLife, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.font = `900 ${f.size}px Inter, system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(0,0,0,.62)";
+      ctx.strokeText(f.text, f.x, f.y);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, f.x, f.y);
+      ctx.restore();
+    }
+
+    ctx.globalAlpha = 1;
+  }
+
+  function drawHud(){
+    ctx.save();
+
+    roundedRect(16,16,W-32,54,18);
+    ctx.fillStyle = "rgba(9,10,25,.82)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.10)";
+    ctx.stroke();
+
+    ctx.textAlign = "left";
+    ctx.font = "1000 16px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#fff8ef";
+    ctx.fillText("CASE " + run.caseNo, 30, 38);
+
+    ctx.font = "800 11px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText("◆ " + run.coins + "   Solved " + run.casesSolved, 30, 58);
+
+    // Timer.
+    const timerPct = clamp(caseData.timer / caseData.maxTimer, 0, 1);
+    ctx.textAlign = "right";
+    ctx.font = "1000 16px Inter, system-ui, sans-serif";
+    ctx.fillStyle = timerPct>.33 ? "#7ae7ff" : "#ff6077";
+    ctx.fillText(Math.ceil(caseData.timer) + "s", W-30, 38);
+
+    roundedRect(W-136, 48, 106, 9, 5);
+    ctx.fillStyle = "rgba(255,255,255,.14)";
+    ctx.fill();
+    roundedRect(W-136, 48, 106*timerPct, 9, 5);
+    ctx.fillStyle = timerPct>.33 ? "#7ae7ff" : "#ff6077";
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawClueBoard(){
+    ctx.save();
+
+    roundedRect(24, 388, W-48, 58, 18);
+    ctx.fillStyle = "rgba(9,10,25,.62)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,209,102,.18)";
+    ctx.stroke();
+
+    ctx.font = "900 11px Inter, system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText("CLUES", 38, 409);
+
+    for(let i=0;i<3;i++){
+      const x = 86 + i*76;
+      const found = caseData.cluesFound[i] !== undefined;
+      roundedRect(x-24, 417, 48, 20, 10);
+      ctx.fillStyle = found ? "rgba(255,209,102,.22)" : "rgba(255,255,255,.08)";
+      ctx.fill();
+      ctx.strokeStyle = found ? "#ffd166" : "rgba(255,255,255,.12)";
+      ctx.stroke();
+
+      ctx.textAlign = "center";
+      if(found){
+        const clue = caseData.clues[caseData.cluesFound[i]];
+        ctx.font = "13px serif";
+        ctx.fillText(clue.trait.icon, x, 432);
+      } else {
+        ctx.font = "900 12px Inter, system-ui, sans-serif";
+        ctx.fillStyle = "rgba(255,255,255,.35)";
+        ctx.fillText("?", x, 432);
+      }
+    }
+
+    // Tiny text line with last clue.
+    const lastIdx = caseData.cluesFound[caseData.cluesFound.length-1];
+    ctx.textAlign = "center";
+    ctx.font = "700 9px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(255,248,239,.74)";
+    const line = lastIdx !== undefined ? caseData.clues[lastIdx].text : "Serve guests to reveal witness clues.";
+    fitText(line, W/2, 443, W-70);
+
+    ctx.restore();
+  }
+
+  function drawTray(){
+    const rects = getTrayRects();
+    ctx.save();
+
+    roundedRect(16, 500, W-32, 122, 24);
+    ctx.fillStyle = "rgba(9,10,25,.82)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.10)";
+    ctx.stroke();
+
+    ctx.textAlign = "center";
+    ctx.font = "800 10px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(255,248,239,.65)";
+    const label = selectedCustomer === null
+      ? "Tap food to smart-serve, or tap guest first."
+      : "Guest selected. Tap the correct order.";
+    ctx.fillText(label, W/2, 516);
+
+    for(let i=0;i<rects.length;i++){
+      const r = rects[i];
+      const o = ORDERS[i];
+      const selected = selectedTray === o.id;
+
+      ctx.save();
+      ctx.translate(r.x, r.y);
+
+      ctx.shadowColor = o.color;
+      ctx.shadowBlur = selected ? 18 : 8;
+
+      roundedRect(0,0,r.w,r.h,16);
+      const g = ctx.createLinearGradient(0,0,0,r.h);
+      g.addColorStop(0, "rgba(255,255,255,.20)");
+      g.addColorStop(1, "rgba(255,255,255,.06)");
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.strokeStyle = selected ? "#ffffff" : o.color;
+      ctx.lineWidth = selected ? 3 : 1.5;
+      ctx.stroke();
+
+      ctx.font = "26px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(o.icon, r.w/2, 30);
+
+      ctx.font = "900 10px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#fff8ef";
+      ctx.fillText(o.name, r.w/2, 58);
+
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  function getTrayRects(){
+    const gap = 8;
+    const cardW = (W - 44 - gap*3)/4;
+    const y = 532;
+    const arr = [];
+    for(let i=0;i<4;i++){
+      arr.push({ x:22+i*(cardW+gap), y, w:cardW, h:76 });
+    }
+    return arr;
+  }
+
+  function drawSolveButton(){
+    const enough = caseData.cluesFound.length >= caseData.minClues;
+    ctx.save();
+    const r = { x:96, y:454, w:168, h:34 };
+    roundedRect(r.x,r.y,r.w,r.h,17);
+    ctx.fillStyle = enough ? "rgba(122,231,255,.23)" : "rgba(255,255,255,.07)";
+    ctx.fill();
+    ctx.strokeStyle = enough ? "#7ae7ff" : "rgba(255,255,255,.12)";
+    ctx.lineWidth = enough ? 2 : 1;
+    ctx.stroke();
+
+    ctx.textAlign = "center";
+    ctx.font = "900 12px Inter, system-ui, sans-serif";
+    ctx.fillStyle = enough ? "#fff8ef" : "rgba(255,255,255,.42)";
+    ctx.fillText(enough ? "SOLVE THE CASE" : "NEED MORE CLUES", W/2, 476);
+    ctx.restore();
+  }
+
+  function drawTutorial(){
+    if(run.caseNo > 1 || tutorialStep >= 3) return;
+
+    const lines = [
+      "Serve orders to earn trust.",
+      "Tap a guest, then the right food.",
+      "Golden ! guests can reveal clues."
+    ];
+    const msg = lines[tutorialStep] || lines[2];
+
+    ctx.save();
+    roundedRect(34, 78, W-68, 40, 15);
+    ctx.fillStyle = "rgba(255,209,102,.15)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,209,102,.36)";
+    ctx.stroke();
+    ctx.font = "900 12px Inter, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fff4ca";
+    ctx.fillText(msg, W/2, 103);
+    ctx.restore();
+  }
+
+  function drawSuspects(){
+    drawCafeRoom();
+    drawParticlesAndTexts();
+
+    ctx.save();
+
+    roundedRect(18, 24, W-36, H-48, 26);
+    ctx.fillStyle = "rgba(9,10,25,.92)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,209,102,.22)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.textAlign = "center";
+    ctx.font = "1000 24px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#fff8ef";
+    ctx.fillText("WHO DID IT?", W/2, 66);
+
+    ctx.font = "800 12px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#b9adc8";
+    ctx.fillText(caseData.title, W/2, 88);
+
+    // Clue row.
+    roundedRect(34, 104, W-68, 76, 18);
+    ctx.fillStyle = "rgba(255,255,255,.07)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,209,102,.18)";
+    ctx.stroke();
+
+    ctx.font = "900 11px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText("MATCH THESE CLUES", W/2, 124);
+
+    const found = caseData.cluesFound.map(i=>caseData.clues[i]);
+    for(let i=0;i<found.length;i++){
+      const clue = found[i];
+      const x = W/2 - (found.length-1)*38 + i*76;
+      ctx.font = "24px serif";
+      ctx.fillText(clue.trait.icon, x, 153);
+      ctx.font = "700 8px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255,248,239,.72)";
+      fitText(clue.trait.label.toUpperCase(), x, 169, 68);
+      ctx.fillStyle = "#ffd166";
+    }
+
+    const rects = getSuspectRects();
+    for(let i=0;i<rects.length;i++){
+      drawSuspectCard(caseData.suspects[i], rects[i], i);
+    }
+
+    ctx.font = "800 11px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.fillText("Tap the suspect whose traits match your clues.", W/2, 606);
+
+    ctx.restore();
+  }
+
+  function getSuspectRects(){
+    return [
+      { x:30, y:204, w:W-60, h:106 },
+      { x:30, y:326, w:W-60, h:106 },
+      { x:30, y:448, w:W-60, h:106 }
+    ];
+  }
+
+  function drawSuspectCard(s, r, index){
+    ctx.save();
+    ctx.translate(r.x,r.y);
+
+    ctx.shadowColor = s.color;
+    ctx.shadowBlur = 11;
+    roundedRect(0,0,r.w,r.h,22);
+    const g = ctx.createLinearGradient(0,0,r.w,r.h);
+    g.addColorStop(0,"rgba(255,255,255,.14)");
+    g.addColorStop(1,"rgba(255,255,255,.05)");
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.stroke();
+
+    // Portrait.
+    ctx.save();
+    ctx.translate(48,53);
+    ctx.shadowColor = s.color;
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = s.color;
+    ctx.beginPath();
+    ctx.arc(0,0,25,0,TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#ffe3c2";
+    ctx.beginPath();
+    ctx.arc(0,-3,18,0,TAU);
+    ctx.fill();
+    ctx.fillStyle = "#2c1b30";
+    ctx.beginPath();
+    ctx.arc(0,-10,18,Math.PI,TAU);
+    ctx.fill();
+    ctx.fillStyle = "#241426";
+    ctx.beginPath(); ctx.arc(-6,-5,2,0,TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(6,-5,2,0,TAU); ctx.fill();
+    ctx.strokeStyle = "#241426";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0,3,5,.1*Math.PI,.9*Math.PI);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.textAlign = "left";
+    ctx.font = "1000 16px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#fff8ef";
+    ctx.fillText(s.name, 88, 32);
+
+    ctx.font = "800 10px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#b9adc8";
+    ctx.fillText("Suspect " + (index+1), 88, 50);
+
+    // Traits.
+    for(let i=0;i<s.traits.length;i++){
+      const tr = s.traits[i];
+      const x = 96 + i*62;
+      const y = 75;
+
+      const isClue = caseData.cluesFound.some(ci => caseData.clues[ci].trait.id === tr.id);
+      ctx.save();
+      ctx.translate(x,y);
+      ctx.shadowColor = isClue ? "#ffd166" : tr.color;
+      ctx.shadowBlur = isClue ? 15 : 5;
+      ctx.fillStyle = isClue ? "rgba(255,209,102,.25)" : "rgba(255,255,255,.09)";
+      ctx.beginPath();
+      ctx.arc(0,0,18,0,TAU);
+      ctx.fill();
+      ctx.strokeStyle = isClue ? "#ffd166" : "rgba(255,255,255,.16)";
+      ctx.stroke();
+      ctx.font = "20px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(tr.icon,0,1);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  function drawReward(){
+    drawCafeRoom();
+    drawParticlesAndTexts();
+
+    ctx.save();
+
+    roundedRect(18, 30, W-36, H-60, 26);
+    ctx.fillStyle = "rgba(9,10,25,.93)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(122,231,255,.24)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.textAlign = "center";
+    ctx.font = "1000 24px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText("CASE SOLVED!", W/2, 82);
+
+    ctx.font = "800 13px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#fff8ef";
+    ctx.fillText("Coins: " + run.coins + "   Renown: " + run.renown, W/2, 108);
+
+    ctx.fillStyle = "#b9adc8";
+    ctx.fillText("Choose a café upgrade", W/2, 142);
+
+    for(let i=0;i<rewardCards.length;i++){
+      const r = { x:28, y:220+i*94, w:W-56, h:76 };
+      const u = rewardCards[i];
+
+      ctx.save();
+      ctx.translate(r.x,r.y);
+      ctx.shadowColor = u.color;
+      ctx.shadowBlur = 12;
+      roundedRect(0,0,r.w,r.h,20);
+      const g = ctx.createLinearGradient(0,0,r.w,r.h);
+      g.addColorStop(0,"rgba(255,209,102,.15)");
+      g.addColorStop(1,"rgba(255,122,200,.10)");
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = u.color;
+      ctx.lineWidth = 1.7;
+      ctx.stroke();
+
+      ctx.font = "1000 27px Inter, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = u.color;
+      ctx.fillText(u.icon,38,47);
+
+      ctx.textAlign = "left";
+      ctx.font = "1000 16px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#fff8ef";
+      ctx.fillText(u.title,72,31);
+
+      ctx.font = "700 12px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#b9adc8";
+      ctx.fillText(u.desc,72,54);
+
+      ctx.restore();
+    }
+
+    ctx.font = "800 11px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.fillText("Next case: more customers, tighter timing, better rewards.", W/2, 560);
+
+    ctx.restore();
+  }
+
+  function drawMenu(){
+    buttons = [];
+
+    ctx.save();
+    ctx.textAlign = "center";
+
+    // Cozy animated sign.
+    ctx.save();
+    ctx.translate(W/2, 132);
+    ctx.rotate(Math.sin(t*1.3)*.025);
+    ctx.shadowColor = "#ffd166";
+    ctx.shadowBlur = 18;
+    roundedRect(-95,-42,190,84,24);
+    ctx.fillStyle = "rgba(255,209,102,.18)";
+    ctx.fill();
+    ctx.strokeStyle = "#ffd166";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.font = "38px serif";
+    ctx.fillText("☕", -44, 10);
+    ctx.font = "34px serif";
+    ctx.fillText("🔎", 36, 8);
+    ctx.restore();
+
+    ctx.font = "1000 31px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#fff8ef";
+    ctx.shadowColor = "#ffd166";
+    ctx.shadowBlur = 16;
+    ctx.fillText("TINY DETECTIVE", W/2, 218);
+    ctx.shadowColor = "#ff7ac8";
+    ctx.fillText("CAFÉ", W/2, 254);
+    ctx.shadowBlur = 0;
+
+    ctx.font = "700 14px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#b9adc8";
+    wrapText("Serve cozy café guests, uncover clues, and solve tiny mysteries.", W/2, 287, 286, 18);
+
+    const play = { x:42, y:354, w:W-84, h:70, action:"play" };
+    drawButton(play, "OPEN CAFÉ", "Serve orders. Find clues.", "#ffd166");
+    buttons.push(play);
+
+    roundedRect(42, 442, W-84, 88, 20);
+    ctx.fillStyle = "rgba(22,20,42,.86)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.10)";
+    ctx.stroke();
+
+    ctx.font = "900 14px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#fff8ef";
+    ctx.fillText("BEST CASE: " + meta.bestCase, W/2, 471);
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText("TOTAL COINS: " + meta.totalCoins, W/2, 498);
+
+    const reset = { x:108, y:550, w:144, h:42, action:"reset" };
+    drawSmallButton(reset, "RESET SAVE");
+    buttons.push(reset);
+
+    ctx.fillStyle = "rgba(255,255,255,.52)";
+    ctx.font = "700 11px Inter, system-ui, sans-serif";
+    ctx.fillText("Prototype: code-drawn, mobile-first, no assets", W/2, 618);
+
+    ctx.restore();
+  }
+
+  function drawGameOver(){
+    buttons = [];
+
+    drawCafeRoom();
+    drawParticlesAndTexts();
+
+    ctx.save();
+    ctx.textAlign = "center";
+
+    roundedRect(28, 96, W-56, 414, 28);
+    ctx.fillStyle = "rgba(9,10,25,.93)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,96,119,.36)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.font = "1000 29px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#ff6077";
+    ctx.shadowColor = "#ff6077";
+    ctx.shadowBlur = 18;
+    ctx.fillText("CASE COLD", W/2, 156);
+    ctx.shadowBlur = 0;
+
+    ctx.font = "900 16px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#fff8ef";
+    ctx.fillText("Reached Case " + (run ? run.caseNo : 1), W/2, 206);
+
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText("Coins this run: " + (run ? run.coins : 0), W/2, 235);
+
+    ctx.fillStyle = "#b9adc8";
+    ctx.fillText("Best Case: " + meta.bestCase, W/2, 264);
+
+    const play = { x:54, y:328, w:W-108, h:62, action:"play" };
+    drawButton(play, "TRY AGAIN", "New mystery run", "#ffd166");
+    buttons.push(play);
+
+    const menu = { x:84, y:416, w:W-168, h:44, action:"menu" };
+    drawSmallButton(menu, "MAIN MENU");
+    buttons.push(menu);
+
+    ctx.restore();
+  }
+
+  function drawButton(b,title,sub,color){
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 18 + Math.sin(t*4)*4;
+    roundedRect(b.x,b.y,b.w,b.h,24);
+    const g = ctx.createLinearGradient(b.x,b.y,b.x+b.w,b.y+b.h);
+    g.addColorStop(0,color);
+    g.addColorStop(1,"#ff7ac8");
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255,255,255,.55)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#2b1b20";
+    ctx.font = "1000 22px Inter, system-ui, sans-serif";
+    ctx.fillText(title,b.x+b.w/2,b.y+30);
+    ctx.font = "800 11px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(43,27,32,.75)";
+    ctx.fillText(sub,b.x+b.w/2,b.y+51);
+    ctx.restore();
+  }
+
+  function drawSmallButton(b,label){
+    ctx.save();
+    roundedRect(b.x,b.y,b.w,b.h,16);
+    ctx.fillStyle = "rgba(255,255,255,.08)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.font = "900 12px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#fff8ef";
+    ctx.fillText(label,b.x+b.w/2,b.y+b.h/2+4);
+    ctx.restore();
+  }
+
+  function drawFrame(){
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.08)";
+    ctx.lineWidth = 2;
+    roundedRect(7,7,W-14,H-14,28);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function roundedRect(x,y,w,h,r){
+    r = Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function wrapText(text,x,y,maxWidth,lineHeight){
+    const words = text.split(" ");
+    let line = "";
+    for(const word of words){
+      const test = line + word + " ";
+      if(ctx.measureText(test).width > maxWidth && line.length>0){
+        ctx.fillText(line.trim(),x,y);
+        line = word + " ";
+        y += lineHeight;
+      } else {
+        line = test;
+      }
+    }
+    ctx.fillText(line.trim(),x,y);
+  }
+
+  function fitText(text,x,y,maxWidth){
+    let size = 9;
+    ctx.font = `700 ${size}px Inter, system-ui, sans-serif`;
+    while(ctx.measureText(text).width > maxWidth && size > 6){
+      size -= .5;
+      ctx.font = `700 ${size}px Inter, system-ui, sans-serif`;
+    }
+    ctx.fillText(text,x,y);
+  }
+
+  // ============================================================
+  // Loop.
+  // ============================================================
+
+  function loop(now){
+    const dt = Math.min(.033, (now-last)/1000);
+    last = now;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
