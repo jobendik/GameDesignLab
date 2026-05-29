@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#060817" />
+<title>Neon Pin Climb — learning prototype</title>
+<style>
+  :root{
+    --bg:#060817;
+    --cyan:#58f7ff;
+    --pink:#ff4fd8;
+    --gold:#ffd25a;
+    --green:#7dff8a;
+    --ink:#edf7ff;
+  }
+  html,body{
+    margin:0;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background: radial-gradient(circle at 50% 20%, #14204a 0%, #070916 45%, #02030a 100%);
+    color:var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    touch-action:none;
+    user-select:none;
+  }
+  canvas{display:block;width:100vw;height:100vh;}
+  #hud{
+    position:fixed;
+    left:0;right:0;top:0;
+    padding: env(safe-area-inset-top) 14px 0 14px;
+    box-sizing:border-box;
+    pointer-events:none;
+    text-shadow:0 0 12px rgba(88,247,255,.8);
+  }
+  .toprow{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+    padding-top:10px;
+  }
+  .pill{
+    min-width:82px;
+    padding:9px 11px;
+    border:1px solid rgba(88,247,255,.35);
+    border-radius:16px;
+    background:rgba(5,10,28,.50);
+    box-shadow:0 0 18px rgba(88,247,255,.16) inset, 0 8px 30px rgba(0,0,0,.28);
+    backdrop-filter:blur(10px);
+  }
+  .label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#9cb9df;}
+  .value{font-size:22px;font-weight:900;line-height:1.05;}
+  #centerHint{
+    position:fixed;
+    left:50%;top:50%;transform:translate(-50%,-50%);
+    width:min(500px, calc(100vw - 36px));
+    box-sizing:border-box;
+    text-align:center;
+    padding:24px 20px;
+    border-radius:28px;
+    background:linear-gradient(180deg, rgba(10,18,48,.86), rgba(8,8,22,.72));
+    border:1px solid rgba(88,247,255,.35);
+    box-shadow:0 0 40px rgba(88,247,255,.16), 0 0 80px rgba(255,79,216,.10) inset;
+    backdrop-filter: blur(18px);
+  }
+  #centerHint h1{
+    margin:0 0 6px;
+    font-size:clamp(30px, 7vw, 54px);
+    letter-spacing:.02em;
+    line-height:.95;
+    color:white;
+    text-shadow:0 0 18px rgba(88,247,255,.75), 0 0 34px rgba(255,79,216,.42);
+  }
+  #centerHint p{
+    margin:10px auto 0;
+    color:#bdd0f6;
+    max-width:420px;
+    font-size:14px;
+    line-height:1.45;
+  }
+  #centerHint button{
+    margin-top:18px;
+    padding:13px 24px;
+    border:0;
+    border-radius:999px;
+    background:linear-gradient(90deg, #58f7ff, #ff4fd8);
+    color:#07101d;
+    font-weight:950;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    cursor:pointer;
+    box-shadow:0 0 22px rgba(88,247,255,.55), 0 0 32px rgba(255,79,216,.28);
+  }
+  #mobileHelp{
+    position:fixed;
+    left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 12px);
+    display:flex;
+    justify-content:space-between;
+    padding:0 18px;
+    box-sizing:border-box;
+    pointer-events:none;
+    opacity:.78;
+  }
+  .padHint{
+    width:92px;height:56px;border-radius:20px;
+    display:grid;place-items:center;
+    font-weight:900;letter-spacing:.1em;
+    color:rgba(237,247,255,.72);
+    border:1px solid rgba(88,247,255,.25);
+    background:rgba(5,10,28,.26);
+    box-shadow:0 0 20px rgba(88,247,255,.10) inset;
+  }
+  .smallNote{font-size:11px;color:#91a6cc;margin-top:8px;}
+  @media (hover:hover) and (pointer:fine){
+    #mobileHelp{display:none;}
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div class="toprow">
+    <div class="pill"><div class="label">Time</div><div class="value" id="timeTxt">60.0</div></div>
+    <div class="pill" style="text-align:center"><div class="label">Level</div><div class="value" id="levelTxt">1</div></div>
+    <div class="pill" style="text-align:right"><div class="label">Score</div><div class="value" id="scoreTxt">0</div></div>
+  </div>
+</div>
+<div id="centerHint">
+  <h1>NEON PIN<br>CLIMB</h1>
+  <p>A learning-only original prototype: vertical neon pinball, timed gates, flippers, bumpers and endless upward pressure.</p>
+  <p><b>Keyboard:</b> A/D or ←/→. Space flips both. <br><b>Mobile:</b> tap left/right side of the screen.</p>
+  <button id="startBtn">Start run</button>
+  <div class="smallNote">Not a PinOut copy. No original art, name, layout, audio, or exact rules are used.</div>
+</div>
+<div id="mobileHelp"><div class="padHint">LEFT</div><div class="padHint">RIGHT</div></div>
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d', { alpha:false });
+  const timeTxt = document.getElementById('timeTxt');
+  const levelTxt = document.getElementById('levelTxt');
+  const scoreTxt = document.getElementById('scoreTxt');
+  const centerHint = document.getElementById('centerHint');
+  const startBtn = document.getElementById('startBtn');
+
+  const WORLD_W = 420;
+  const MODULE_H = 760;
+  const MODULES = 10;
+  const GRAVITY = -760;
+  const BALL_R = 10.5;
+
+  let W = 1, H = 1, DPR = 1, SCALE = 1;
+  let boardLeft = 0;
+
+  function resize(){
+    DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    W = Math.floor(innerWidth * DPR);
+    H = Math.floor(innerHeight * DPR);
+    canvas.width = W;
+    canvas.height = H;
+    SCALE = Math.min(W / WORLD_W, H / 760);
+    boardLeft = W * 0.5 - WORLD_W * SCALE * 0.5;
+  }
+  addEventListener('resize', resize, {passive:true});
+  resize();
+
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+  const hypot = Math.hypot;
+  const TAU = Math.PI * 2;
+  const rnd = (a,b)=>a + Math.random() * (b-a);
+
+  function dot(ax,ay,bx,by){ return ax*bx + ay*by; }
+  function len(x,y){ return Math.hypot(x,y) || 0.000001; }
+  function norm(x,y){ const l = len(x,y); return {x:x/l,y:y/l}; }
+
+  function w2s(x,y){
+    return {
+      x: boardLeft + x * SCALE,
+      y: H * 0.72 - (y - game.cameraY) * SCALE
+    };
+  }
+  function s2w(sx,sy){
+    return {
+      x: (sx * DPR - boardLeft) / SCALE,
+      y: game.cameraY + (H * 0.72 - sy * DPR) / SCALE
+    };
+  }
+
+  class Segment {
+    constructor(x1,y1,x2,y2,r=5,type='rail'){
+      this.x1=x1;this.y1=y1;this.x2=x2;this.y2=y2;this.r=r;this.type=type;
+      this.nx=0;this.ny=0;
+    }
+  }
+  class Bumper {
+    constructor(x,y,r,kind='cyan'){
+      this.x=x;this.y=y;this.r=r;this.kind=kind;this.phase=Math.random()*TAU;this.pulse=0;
+    }
+  }
+  class Gate {
+    constructor(y, bonus, label){
+      this.y=y; this.x1=122; this.x2=298; this.bonus=bonus; this.label=label; this.done=false;
+      this.flash=0;
+    }
+  }
+  class Flipper {
+    constructor(side, x, y){
+      this.side = side;
+      this.x = x; this.y = y;
+      this.len = 84;
+      if(side === 'L'){
+        this.rest = -20 * Math.PI/180;
+        this.up = 36 * Math.PI/180;
+      } else {
+        this.rest = 200 * Math.PI/180;
+        this.up = 144 * Math.PI/180;
+      }
+      this.angle = this.rest;
+      this.prevAngle = this.angle;
+      this.omega = 0;
+      this.active = false;
+      this.cool = 0;
+    }
+    update(dt){
+      this.prevAngle = this.angle;
+      const target = this.active ? this.up : this.rest;
+      const speed = this.active ? 24 : 14;
+      this.angle += (target - this.angle) * clamp(dt * speed, 0, 1);
+      this.omega = (this.angle - this.prevAngle) / Math.max(0.0001, dt);
+      this.cool = Math.max(0, this.cool - dt);
+    }
+    endpoints(){
+      return {
+        x1:this.x, y1:this.y,
+        x2:this.x + Math.cos(this.angle)*this.len,
+        y2:this.y + Math.sin(this.angle)*this.len
+      };
+    }
+  }
+
+  const game = {
+    state:'title',
+    t:0,
+    time:60,
+    score:0,
+    bestY:0,
+    level:1,
+    cameraY:0,
+    checkpointY:82,
+    checkpointX:210,
+    ball:{x:210,y:130,px:210,py:130,vx:120,vy:380,r:BALL_R,glow:0},
+    segments:[], bumpers:[], gates:[], flippers:[], particles:[], texts:[], trail:[],
+    left:false, right:false,
+    shake:0,
+    combo:0,
+  };
+
+  function addText(txt,x,y,color='#ffffff',size=18){
+    game.texts.push({txt,x,y,vy:55,life:1.0,color,size});
+  }
+  function burst(x,y,n,color,force=1){
+    for(let i=0;i<n;i++){
+      const a = Math.random()*TAU;
+      const sp = rnd(70,260)*force;
+      game.particles.push({
+        x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp + rnd(20,80),
+        r:rnd(1.5,4.5), life:rnd(.35,.9), maxLife:1, color
+      });
+    }
+  }
+
+  function buildWorld(){
+    const segs=[], bumps=[], gates=[], flips=[];
+    const wallR = 7;
+    // Continuous safe side rails. The climb path is never fully blocked.
+    segs.push(new Segment(30,-80,30,MODULE_H*MODULES+260,wallR,'wall'));
+    segs.push(new Segment(390,-80,390,MODULE_H*MODULES+260,wallR,'wall'));
+    segs.push(new Segment(92,0,328,0,wallR,'floor'));
+    segs.push(new Segment(30,-80,92,0,wallR,'wall'));
+    segs.push(new Segment(390,-80,328,0,wallR,'wall'));
+
+    for(let i=0;i<MODULES;i++){
+      const y = i*MODULE_H;
+      const flipY = y + 98;
+      flips.push(new Flipper('L', 148, flipY));
+      flips.push(new Flipper('R', 272, flipY));
+
+      // Lower safety scoops that guide the ball back to flippers.
+      segs.push(new Segment(30,y+38,110,y+88,5,'guide'));
+      segs.push(new Segment(390,y+38,310,y+88,5,'guide'));
+      segs.push(new Segment(72,y+148,152,y+198,4,'rail'));
+      segs.push(new Segment(348,y+148,268,y+198,4,'rail'));
+
+      // Alternating ramps and deflectors. They are deliberately short and offset so there is always a route upward.
+      if(i % 2 === 0){
+        segs.push(new Segment(48,y+300,172,y+386,5,'rail'));
+        segs.push(new Segment(372,y+410,246,y+500,5,'rail'));
+        segs.push(new Segment(102,y+590,190,y+642,4,'rail'));
+      } else {
+        segs.push(new Segment(372,y+300,248,y+386,5,'rail'));
+        segs.push(new Segment(48,y+410,174,y+500,5,'rail'));
+        segs.push(new Segment(318,y+590,230,y+642,4,'rail'));
+      }
+
+      // Short central "fins" create pinball rhythm without sealing the passage.
+      segs.push(new Segment(176,y+250,244,y+282,4,'fin'));
+      segs.push(new Segment(244,y+520,176,y+552,4,'fin'));
+
+      // Neon bumpers.
+      bumps.push(new Bumper(210, y+332, 24, i%2?'pink':'cyan'));
+      bumps.push(new Bumper(i%2?122:298, y+462, 18, 'gold'));
+      bumps.push(new Bumper(i%2?302:118, y+610, 15, 'green'));
+
+      const bonus = i < 3 ? 9 : i < 7 ? 7 : 5;
+      gates.push(new Gate(y+704, bonus, `GATE ${i+1}`));
+    }
+    // Finish celebration gate.
+    gates.push(new Gate(MODULE_H*MODULES + 80, 20, 'FINAL'));
+    game.segments=segs; game.bumpers=bumps; game.gates=gates; game.flippers=flips;
+  }
+
+  buildWorld();
+
+  function resetRun(){
+    for(const g of game.gates){ g.done=false; g.flash=0; }
+    for(const b of game.bumpers){ b.pulse=0; }
+    Object.assign(game, {
+      state:'playing', t:0, time:60, score:0, bestY:0, level:1,
+      cameraY:0, checkpointY:82, checkpointX:210,
+      particles:[], texts:[], trail:[], shake:0, combo:0
+    });
+    game.ball = {x:210,y:132,px:210,py:132,vx:110,vy:420,r:BALL_R,glow:0};
+    centerHint.style.display='none';
+    burst(210,135,36,'#58f7ff',1.1);
+    addText('LAUNCH!',210,180,'#58f7ff',24);
+  }
+
+  function showOverlay(title, body, button='Restart'){
+    centerHint.style.display='block';
+    centerHint.innerHTML = `<h1>${title}</h1><p>${body}</p><button id="restartBtn">${button}</button><div class="smallNote">A/D or ←/→ · Space flips both · Tap left/right side on mobile</div>`;
+    document.getElementById('restartBtn').onclick = resetRun;
+  }
+
+  startBtn.onclick = resetRun;
+
+  const activePointers = new Map();
+  function updatePointerControls(){
+    let L=false,R=false;
+    for(const p of activePointers.values()){
+      if(p.x < innerWidth * 0.5) L=true; else R=true;
+    }
+    game.left = L; game.right = R;
+  }
+  addEventListener('pointerdown', e=>{
+    if(e.target && e.target.tagName === 'BUTTON') return;
+    activePointers.set(e.pointerId, {x:e.clientX,y:e.clientY});
+    updatePointerControls();
+  }, {passive:false});
+  addEventListener('pointermove', e=>{
+    if(activePointers.has(e.pointerId)) activePointers.set(e.pointerId, {x:e.clientX,y:e.clientY});
+    updatePointerControls();
+  }, {passive:false});
+  function pointerEnd(e){ activePointers.delete(e.pointerId); updatePointerControls(); }
+  addEventListener('pointerup', pointerEnd, {passive:true});
+  addEventListener('pointercancel', pointerEnd, {passive:true});
+
+  const keys = new Set();
+  addEventListener('keydown', e=>{
+    keys.add(e.code);
+    if(game.state !== 'playing' && (e.code === 'Space' || e.code === 'Enter')) resetRun();
+  });
+  addEventListener('keyup', e=>keys.delete(e.code));
+
+  function updateInput(){
+    const kL = keys.has('ArrowLeft') || keys.has('KeyA') || keys.has('KeyZ');
+    const kR = keys.has('ArrowRight') || keys.has('KeyD') || keys.has('Slash');
+    const both = keys.has('Space') || keys.has('ArrowUp') || keys.has('KeyW');
+    for(const f of game.flippers){
+      f.active = both || (f.side === 'L' ? (game.left || kL) : (game.right || kR));
+    }
+  }
+
+  function collideSegment(ball, x1,y1,x2,y2, radius, restitution=0.72, moving=null){
+    const abx=x2-x1, aby=y2-y1;
+    const apx=ball.x-x1, apy=ball.y-y1;
+    const ab2 = abx*abx + aby*aby || 1;
+    const t = clamp((apx*abx + apy*aby)/ab2, 0, 1);
+    const cx=x1+abx*t, cy=y1+aby*t;
+    let dx=ball.x-cx, dy=ball.y-cy;
+    let d=hypot(dx,dy);
+    const minD = ball.r + radius;
+    if(d >= minD) return false;
+    if(d < 0.0001){
+      const n = norm(-aby, abx); dx=n.x; dy=n.y; d=1;
+    }
+    const nx=dx/d, ny=dy/d;
+    const pen = minD - d;
+    ball.x += nx * pen;
+    ball.y += ny * pen;
+
+    let relVx = ball.vx, relVy = ball.vy;
+    if(moving){
+      // Local point velocity from flipper angular motion.
+      const rx = cx - moving.x;
+      const ry = cy - moving.y;
+      const surfVx = -moving.omega * ry;
+      const surfVy =  moving.omega * rx;
+      relVx -= surfVx;
+      relVy -= surfVy;
+    }
+    const vn = relVx*nx + relVy*ny;
+    if(vn < 0){
+      const impulse = -(1+restitution)*vn;
+      ball.vx += impulse * nx;
+      ball.vy += impulse * ny;
+      const tx = -ny, ty = nx;
+      const vt = ball.vx*tx + ball.vy*ty;
+      ball.vx -= vt * tx * 0.035;
+      ball.vy -= vt * ty * 0.035;
+
+      if(moving && moving.active){
+        // Readable arcade kick: enough to make the flippers feel powerful without destroying physics.
+        const lift = 260 + Math.min(420, Math.abs(moving.omega) * 32);
+        ball.vx += nx * 145 + (moving.side === 'L' ? 115 : -115);
+        ball.vy += Math.abs(ny) * lift + 210;
+        if(moving.cool <= 0){
+          burst(cx,cy,14,moving.side==='L'?'#58f7ff':'#ff4fd8',.9);
+          game.shake = Math.max(game.shake, 5);
+          moving.cool = .08;
+        }
+      }
+    }
+    return true;
+  }
+
+  function collideBumper(ball,b){
+    const dx=ball.x-b.x, dy=ball.y-b.y;
+    const d=hypot(dx,dy);
+    const minD=ball.r+b.r;
+    if(d >= minD) return false;
+    const nx=dx/(d||1), ny=dy/(d||1);
+    const pen=minD-d;
+    ball.x += nx*pen;
+    ball.y += ny*pen;
+    const vn=ball.vx*nx + ball.vy*ny;
+    if(vn < 0){
+      ball.vx -= (1+1.15)*vn*nx;
+      ball.vy -= (1+1.15)*vn*ny;
+    }
+    // bumper impulse always pushes out, slightly upward to support vertical flow.
+    ball.vx += nx*180;
+    ball.vy += ny*180 + 115;
+    b.pulse = 1;
+    game.combo++;
+    game.score += 100 * game.combo;
+    game.shake = Math.max(game.shake, 4);
+    const color = b.kind==='pink'?'#ff4fd8':b.kind==='gold'?'#ffd25a':b.kind==='green'?'#7dff8a':'#58f7ff';
+    burst(b.x,b.y,18,color,1.0);
+    addText('+'+(100*game.combo),b.x,b.y+32,color,16);
+    return true;
+  }
+
+  function resetToCheckpoint(){
+    const b=game.ball;
+    b.x = game.checkpointX;
+    b.y = game.checkpointY;
+    b.px = b.x; b.py = b.y;
+    b.vx = rnd(-90,90);
+    b.vy = 460;
+    game.time = Math.max(1, game.time - 4);
+    game.combo = 0;
+    burst(b.x,b.y,38,'#ff4fd8',1.1);
+    addText('-4 SEC', b.x, b.y+50, '#ff4fd8', 20);
+  }
+
+  function updatePhysics(dt){
+    const b = game.ball;
+    b.px=b.x; b.py=b.y;
+
+    for(const f of game.flippers) f.update(dt);
+
+    b.vy += GRAVITY * dt;
+    const speed = hypot(b.vx,b.vy);
+    const maxSpeed = 1180;
+    if(speed > maxSpeed){ b.vx = b.vx/speed*maxSpeed; b.vy = b.vy/speed*maxSpeed; }
+
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+
+    // Soft air drag to keep pinball controllable.
+    b.vx *= Math.pow(0.998, dt*60);
+    b.vy *= Math.pow(0.999, dt*60);
+
+    // Collisions: several light passes produce stable ball/rail behavior.
+    for(let pass=0; pass<3; pass++){
+      for(const s of game.segments){
+        // Skip very distant segments.
+        if(Math.max(s.y1,s.y2) < b.y - 80 || Math.min(s.y1,s.y2) > b.y + 120) continue;
+        collideSegment(b,s.x1,s.y1,s.x2,s.y2,s.r, s.type==='wall'?0.74:0.78, null);
+      }
+      for(const f of game.flippers){
+        if(Math.abs(f.y - b.y) > 100) continue;
+        const e = f.endpoints();
+        collideSegment(b,e.x1,e.y1,e.x2,e.y2,8,0.82,f);
+      }
+      for(const bum of game.bumpers){
+        if(Math.abs(bum.y - b.y) > bum.r + 46) continue;
+        collideBumper(b,bum);
+      }
+    }
+
+    // Prevent impossible side escape.
+    if(b.x < 38+b.r){ b.x=38+b.r; b.vx=Math.abs(b.vx)*.75; }
+    if(b.x > 382-b.r){ b.x=382-b.r; b.vx=-Math.abs(b.vx)*.75; }
+
+    if(b.y > game.bestY){
+      const gained = b.y - game.bestY;
+      game.bestY = b.y;
+      game.score += Math.floor(gained * 1.3);
+    }
+
+    // Timed gates. Crossing through the central gate gives bonus time and sets checkpoint.
+    for(const g of game.gates){
+      if(!g.done && b.py < g.y && b.y >= g.y && b.x > g.x1 && b.x < g.x2){
+        g.done = true; g.flash = 1;
+        game.time += g.bonus;
+        game.score += 1600 + g.bonus*100;
+        game.combo = 0;
+        game.checkpointY = g.y - 92;
+        game.checkpointX = 210;
+        b.vy += 240;
+        game.shake = Math.max(game.shake, 12);
+        burst(210,g.y,90,'#ffd25a',1.25);
+        addText('+'+g.bonus+' SEC',210,g.y+52,'#ffd25a',26);
+      }
+    }
+
+    const fallingLimit = game.cameraY - 560;
+    if(b.y < fallingLimit || b.y < -80){ resetToCheckpoint(); }
+
+    game.level = clamp(1 + Math.floor(Math.max(0,b.y) / MODULE_H), 1, MODULES+1);
+  }
+
+  function updateParticles(dt){
+    for(let i=game.particles.length-1;i>=0;i--){
+      const p=game.particles[i];
+      p.life-=dt;
+      p.x += p.vx*dt; p.y += p.vy*dt;
+      p.vy -= 120*dt; p.vx *= .992;
+      if(p.life<=0) game.particles.splice(i,1);
+    }
+    for(let i=game.texts.length-1;i>=0;i--){
+      const t=game.texts[i];
+      t.life-=dt;
+      t.y += t.vy*dt;
+      if(t.life<=0) game.texts.splice(i,1);
+    }
+    for(const bum of game.bumpers){ bum.pulse = Math.max(0, bum.pulse - dt*3.2); bum.phase += dt*2; }
+    for(const g of game.gates) g.flash = Math.max(0, g.flash - dt*1.7);
+    game.shake = Math.max(0, game.shake - dt*18);
+  }
+
+  let acc = 0, last = performance.now();
+  function frame(now){
+    const rawDt = Math.min(0.05, (now-last)/1000);
+    last = now;
+    if(game.state === 'playing'){
+      updateInput();
+      game.time -= rawDt;
+      acc += rawDt;
+      const step = 1/120;
+      let guard=0;
+      while(acc >= step && guard++ < 8){
+        updatePhysics(step);
+        acc -= step;
+      }
+      game.t += rawDt;
+      game.cameraY = lerp(game.cameraY, Math.max(game.cameraY, game.ball.y - 128), 0.045);
+      game.trail.push({x:game.ball.x,y:game.ball.y,life:.45});
+      if(game.trail.length>32) game.trail.shift();
+      for(const tr of game.trail) tr.life -= rawDt;
+      game.trail = game.trail.filter(tr=>tr.life>0);
+      if(game.time <= 0){
+        game.time = 0; game.state='over';
+        showOverlay('TIME UP', `Score: <b>${Math.floor(game.score).toLocaleString()}</b><br>Highest level reached: <b>${game.level}</b>`, 'Restart');
+      }
+      if(game.ball.y > MODULE_H*MODULES + 110){
+        game.state='over';
+        showOverlay('RUN CLEAR', `You reached the end of this prototype course.<br>Score: <b>${Math.floor(game.score).toLocaleString()}</b>`, 'Play again');
+      }
+    }
+    updateParticles(rawDt);
+    draw();
+    updateHud();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  function updateHud(){
+    timeTxt.textContent = game.time.toFixed(1);
+    levelTxt.textContent = String(game.level);
+    scoreTxt.textContent = Math.floor(game.score).toLocaleString();
+  }
+
+  function drawGlowLine(x1,y1,x2,y2,color,width,alpha=1){
+    const a=w2s(x1,y1), b=w2s(x2,y2);
+    ctx.save();
+    ctx.globalAlpha=alpha;
+    ctx.lineCap='round';
+    ctx.shadowColor=color;
+    ctx.shadowBlur=18*SCALE;
+    ctx.strokeStyle=color;
+    ctx.lineWidth=width*SCALE;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    ctx.shadowBlur=0;
+    ctx.strokeStyle='rgba(255,255,255,.86)';
+    ctx.lineWidth=Math.max(1, width*.26*SCALE);
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    ctx.restore();
+  }
+  function drawCircleGlow(x,y,r,color,fillAlpha=.22){
+    const p=w2s(x,y);
+    ctx.save();
+    ctx.shadowColor=color; ctx.shadowBlur=28*SCALE;
+    ctx.fillStyle=color.replace(')', ','+fillAlpha+')').replace('rgb','rgba');
+    ctx.beginPath(); ctx.arc(p.x,p.y,r*SCALE,0,TAU); ctx.fill();
+    ctx.shadowBlur=0;
+    const grad = ctx.createRadialGradient(p.x-r*SCALE*.25,p.y-r*SCALE*.35,r*SCALE*.1,p.x,p.y,r*SCALE);
+    grad.addColorStop(0,'rgba(255,255,255,.96)');
+    grad.addColorStop(.22,color);
+    grad.addColorStop(1,'rgba(0,0,0,.08)');
+    ctx.fillStyle=grad;
+    ctx.beginPath(); ctx.arc(p.x,p.y,r*SCALE*.72,0,TAU); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawBackground(){
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#111747');
+    g.addColorStop(.45,'#070917');
+    g.addColorStop(1,'#02030a');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+    ctx.save();
+    const shakeX = rnd(-game.shake,game.shake)*DPR*.25;
+    const shakeY = rnd(-game.shake,game.shake)*DPR*.25;
+    ctx.translate(shakeX,shakeY);
+    // Board glow column.
+    const colX = boardLeft, colW = WORLD_W*SCALE;
+    const bg=ctx.createLinearGradient(colX,0,colX+colW,0);
+    bg.addColorStop(0,'rgba(88,247,255,.04)');
+    bg.addColorStop(.5,'rgba(255,79,216,.055)');
+    bg.addColorStop(1,'rgba(88,247,255,.04)');
+    ctx.fillStyle=bg;
+    ctx.fillRect(colX,0,colW,H);
+
+    // Moving grid, using world coordinates for reliable parallax.
+    ctx.lineWidth=1*DPR;
+    for(let gy = Math.floor((game.cameraY-620)/80)*80; gy < game.cameraY+900; gy+=80){
+      const a=w2s(30,gy), b=w2s(390,gy);
+      const fade = 1 - Math.min(1, Math.abs(a.y - H*.5)/(H*.75));
+      ctx.strokeStyle=`rgba(88,247,255,${0.035 + fade*.055})`;
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    }
+    for(let gx=60; gx<=360; gx+=60){
+      const a=w2s(gx, game.cameraY-650), b=w2s(gx, game.cameraY+920);
+      ctx.strokeStyle='rgba(255,79,216,.035)';
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawWorld(){
+    ctx.save();
+    const sx = rnd(-game.shake,game.shake)*DPR*.2;
+    const sy = rnd(-game.shake,game.shake)*DPR*.2;
+    ctx.translate(sx,sy);
+    const visibleMin = game.cameraY - 720;
+    const visibleMax = game.cameraY + 900;
+
+    // Module labels and lane tint.
+    for(let i=0;i<MODULES;i++){
+      const y=i*MODULE_H;
+      if(y+MODULE_H < visibleMin || y > visibleMax) continue;
+      const p=w2s(210,y+690);
+      ctx.save();
+      ctx.globalAlpha=.18;
+      ctx.fillStyle=i%2?'#ff4fd8':'#58f7ff';
+      ctx.font=`${48*SCALE}px Inter, Arial`;
+      ctx.textAlign='center';
+      ctx.fontKerning='none';
+      ctx.fillText(String(i+1).padStart(2,'0'),p.x,p.y);
+      ctx.restore();
+    }
+
+    // Gates.
+    for(const g of game.gates){
+      if(g.y < visibleMin || g.y > visibleMax) continue;
+      const color = g.done ? '#7dff8a' : '#ffd25a';
+      const a=w2s(g.x1,g.y), b=w2s(g.x2,g.y);
+      ctx.save();
+      ctx.globalAlpha = g.done ? .48 : .92;
+      ctx.lineCap='round';
+      ctx.shadowColor=color; ctx.shadowBlur=(18 + 30*g.flash)*SCALE;
+      ctx.strokeStyle=color; ctx.lineWidth=(8 + 7*g.flash)*SCALE;
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+      ctx.shadowBlur=0;
+      ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=1.5*SCALE;
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+      ctx.font=`${10*SCALE}px Inter, Arial`; ctx.textAlign='center'; ctx.fillStyle='rgba(255,255,255,.70)';
+      ctx.fillText(g.done?'CHECKPOINT':`+${g.bonus} SEC`,(a.x+b.x)/2,a.y-12*SCALE);
+      ctx.restore();
+    }
+
+    // Static rails.
+    for(const s of game.segments){
+      const minY=Math.min(s.y1,s.y2), maxY=Math.max(s.y1,s.y2);
+      if(maxY < visibleMin || minY > visibleMax) continue;
+      const color = s.type==='wall'?'#58f7ff':s.type==='floor'?'#ffd25a':s.type==='guide'?'#ff4fd8':s.type==='fin'?'#7dff8a':'#58f7ff';
+      drawGlowLine(s.x1,s.y1,s.x2,s.y2,color, s.r*1.7, s.type==='wall'? .92:.82);
+    }
+
+    // Bumpers.
+    for(const b of game.bumpers){
+      if(b.y+b.r < visibleMin || b.y-b.r > visibleMax) continue;
+      const color = b.kind==='pink'?'#ff4fd8':b.kind==='gold'?'#ffd25a':b.kind==='green'?'#7dff8a':'#58f7ff';
+      const rr = b.r * (1 + b.pulse*.28 + Math.sin(game.t*4+b.phase)*.025);
+      drawCircleGlow(b.x,b.y,rr,color,.18+b.pulse*.25);
+    }
+
+    // Flippers.
+    for(const f of game.flippers){
+      if(f.y < visibleMin || f.y > visibleMax) continue;
+      const e=f.endpoints();
+      drawGlowLine(e.x1,e.y1,e.x2,e.y2,f.side==='L'?'#58f7ff':'#ff4fd8',13,f.active?1:.78);
+      drawCircleGlow(f.x,f.y,9,f.side==='L'?'#58f7ff':'#ff4fd8',.28);
+    }
+
+    // Particles.
+    for(const p of game.particles){
+      if(p.y < visibleMin || p.y > visibleMax) continue;
+      const s=w2s(p.x,p.y);
+      const a=clamp(p.life/.7,0,1);
+      ctx.save();
+      ctx.globalAlpha=a;
+      ctx.shadowColor=p.color; ctx.shadowBlur=12*SCALE;
+      ctx.fillStyle=p.color;
+      ctx.beginPath(); ctx.arc(s.x,s.y,p.r*SCALE,0,TAU); ctx.fill();
+      ctx.restore();
+    }
+
+    // Ball trail.
+    for(let i=0;i<game.trail.length;i++){
+      const tr=game.trail[i], s=w2s(tr.x,tr.y);
+      const a=tr.life/.45;
+      ctx.save(); ctx.globalAlpha=a*.38;
+      ctx.shadowColor='#58f7ff'; ctx.shadowBlur=20*SCALE;
+      ctx.fillStyle='#58f7ff';
+      ctx.beginPath(); ctx.arc(s.x,s.y,BALL_R*SCALE*(.55+a*.35),0,TAU); ctx.fill();
+      ctx.restore();
+    }
+
+    // Ball.
+    const bp=w2s(game.ball.x,game.ball.y);
+    ctx.save();
+    ctx.shadowColor='#ffffff'; ctx.shadowBlur=26*SCALE;
+    const br=BALL_R*SCALE;
+    const grad=ctx.createRadialGradient(bp.x-br*.35,bp.y-br*.4,br*.1,bp.x,bp.y,br*1.25);
+    grad.addColorStop(0,'#ffffff');
+    grad.addColorStop(.22,'#dffcff');
+    grad.addColorStop(.55,'#58f7ff');
+    grad.addColorStop(1,'#0a4b6b');
+    ctx.fillStyle=grad;
+    ctx.beginPath(); ctx.arc(bp.x,bp.y,br,0,TAU); ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=1.4*SCALE;
+    ctx.stroke();
+    ctx.restore();
+
+    // Floating score/time texts.
+    for(const tx of game.texts){
+      const p=w2s(tx.x,tx.y);
+      ctx.save();
+      ctx.globalAlpha=clamp(tx.life,0,1);
+      ctx.fillStyle=tx.color;
+      ctx.shadowColor=tx.color; ctx.shadowBlur=18*SCALE;
+      ctx.font=`900 ${tx.size*SCALE}px Inter, Arial`;
+      ctx.textAlign='center';
+      ctx.fillText(tx.txt,p.x,p.y);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  function drawAimHint(){
+    if(game.state !== 'playing') return;
+    // A small local trajectory predictor, not a perfect solution. Useful for learning how the bounce system behaves.
+    const b=game.ball;
+    const pts=[];
+    let x=b.x,y=b.y,vx=b.vx,vy=b.vy;
+    for(let i=0;i<28;i++){
+      vy += GRAVITY * 0.035;
+      x += vx * 0.035;
+      y += vy * 0.035;
+      if(x<40 || x>380){ vx *= -0.72; x=clamp(x,40,380); }
+      pts.push({x,y});
+    }
+    ctx.save();
+    ctx.lineWidth=2*SCALE;
+    ctx.setLineDash([5*SCALE,8*SCALE]);
+    ctx.strokeStyle='rgba(255,210,90,.33)';
+    ctx.beginPath();
+    for(let i=0;i<pts.length;i++){
+      const p=w2s(pts[i].x,pts[i].y);
+      if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  function draw(){
+    drawBackground();
+    drawWorld();
+    drawAimHint();
+
+    if(game.state === 'title'){
+      // idle attract mode: pulse the title area with a fake ball glow behind it.
+      const p=w2s(210,180+Math.sin(performance.now()/600)*20);
+      ctx.save(); ctx.globalAlpha=.22; ctx.shadowColor='#58f7ff'; ctx.shadowBlur=60*SCALE; ctx.fillStyle='#58f7ff';
+      ctx.beginPath(); ctx.arc(p.x,p.y,28*SCALE,0,TAU); ctx.fill(); ctx.restore();
+    }
+  }
+})();
+</script>
+</body>
+</html>
