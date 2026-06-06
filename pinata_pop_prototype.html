@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Piñata Pop Prototype</title>
+<style>
+  :root {
+    --bg1:#25104a;
+    --bg2:#5222a8;
+    --pink:#ff4fa3;
+    --yellow:#ffd84a;
+    --cyan:#35e8ff;
+    --green:#7cff6b;
+    --white:#fff7ff;
+    --dark:#170723;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 15%, #7030ff 0%, #2a114f 45%, #10051d 100%);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    touch-action: none;
+    user-select: none;
+  }
+  #wrap {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #08030f;
+  }
+  canvas {
+    display: block;
+    width: min(100vw, calc(100vh * 9 / 16));
+    height: min(100vh, calc(100vw * 16 / 9));
+    max-width: 100vw;
+    max-height: 100vh;
+    background: #20103e;
+    border-radius: 0;
+    box-shadow: 0 0 60px rgba(255,79,163,.28);
+  }
+  .hudButton {
+    position: fixed;
+    border: 2px solid rgba(255,255,255,.24);
+    background: rgba(255,255,255,.10);
+    color: white;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: grid;
+    place-items: center;
+    font-weight: 900;
+    text-shadow: 0 2px 0 rgba(0,0,0,.35);
+    box-shadow: 0 12px 30px rgba(0,0,0,.35), inset 0 0 18px rgba(255,255,255,.10);
+    cursor: pointer;
+  }
+  .hudButton:active, .hudButton.down { transform: scale(.95); background: rgba(255,255,255,.20); }
+  #leftBtn, #rightBtn {
+    bottom: max(14px, env(safe-area-inset-bottom));
+    width: 29vw; max-width: 155px; height: 74px;
+    border-radius: 24px;
+    font-size: 34px;
+  }
+  #leftBtn { left: 14px; }
+  #rightBtn { right: 14px; }
+  #shootBtn {
+    right: 18px;
+    top: max(86px, env(safe-area-inset-top));
+    width: 76px; height: 76px;
+    border-radius: 50%;
+    font-size: 28px;
+    background: radial-gradient(circle at 40% 30%, rgba(255,255,255,.36), rgba(255,79,163,.18));
+  }
+  #pauseBtn {
+    left: 18px;
+    top: max(86px, env(safe-area-inset-top));
+    width: 58px; height: 58px;
+    border-radius: 18px;
+    font-size: 22px;
+  }
+  @media (min-width: 900px) {
+    #leftBtn, #rightBtn, #shootBtn { opacity: .35; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+</div>
+<button id="pauseBtn" class="hudButton">Ⅱ</button>
+<button id="shootBtn" class="hudButton">POP</button>
+<button id="leftBtn" class="hudButton">◀</button>
+<button id="rightBtn" class="hudButton">▶</button>
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const W = 540;
+  const H = 960;
+  const DPR = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  const TAU = Math.PI * 2;
+  const rand = (a,b) => a + Math.random() * (b-a);
+  const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+  const lerp = (a,b,t) => a + (b-a)*t;
+  const dist2 = (a,b,c,d) => (a-c)*(a-c)+(b-d)*(b-d);
+  const now = () => performance.now() / 1000;
+
+  const input = { left:false, right:false, shoot:false, shootPressed:false };
+  const keys = new Set();
+
+  const colors = {
+    pink:'#ff4fa3', yellow:'#ffd84a', cyan:'#35e8ff', green:'#7cff6b', purple:'#a96bff', orange:'#ff9d3d', red:'#ff3d5f', blue:'#42a5ff'
+  };
+
+  const LEVELS = [
+    { name:'Candy Courtyard', time:75, pinatas:[{x:180,y:180,s:3,vx:115},{x:380,y:150,s:2,vx:-120}], platforms:[{x:135,y:600,w:270,h:20}] },
+    { name:'Sugar Rooftops', time:80, pinatas:[{x:145,y:170,s:3,vx:135},{x:395,y:210,s:3,vx:-130}], platforms:[{x:70,y:650,w:160,h:20},{x:310,y:540,w:170,h:20}] },
+    { name:'Fiesta Factory', time:85, pinatas:[{x:115,y:180,s:3,vx:155},{x:275,y:140,s:2,vx:110},{x:430,y:210,s:3,vx:-150}], platforms:[{x:55,y:620,w:150,h:20},{x:335,y:620,w:150,h:20},{x:185,y:480,w:170,h:20}] },
+    { name:'Confetti Canyon', time:90, pinatas:[{x:110,y:170,s:4,vx:135},{x:415,y:180,s:3,vx:-160}], platforms:[{x:45,y:680,w:140,h:20},{x:350,y:680,w:140,h:20},{x:140,y:520,w:260,h:20}] },
+    { name:'Mega Piñata Party', time:100, pinatas:[{x:270,y:130,s:4,vx:170},{x:120,y:245,s:3,vx:145},{x:420,y:245,s:3,vx:-145}], platforms:[{x:40,y:690,w:140,h:20},{x:360,y:690,w:140,h:20},{x:95,y:535,w:135,h:20},{x:310,y:535,w:135,h:20}] }
+  ];
+
+  const state = {
+    mode:'title',
+    levelIndex:0,
+    score:0,
+    best:+localStorage.getItem('pinataPopBest') || 0,
+    lives:3,
+    timeLeft:75,
+    combo:0,
+    comboTimer:0,
+    shake:0,
+    flash:0,
+    slowmo:0,
+    lastShot:0,
+    shotCooldown:.34,
+    doubleShot:false,
+    rapid:false,
+    magnet:false,
+    shield:false,
+    upgradeChoices:[],
+    levelClearTimer:0,
+    titleBob:0,
+    paused:false
+  };
+
+  const player = { x:W/2, y:H-145, w:42, h:58, vx:0, speed:305, invuln:0, face:0, blink:0, squash:0 };
+  let pinatas = [];
+  let shots = [];
+  let candies = [];
+  let particles = [];
+  let floatText = [];
+  let platforms = [];
+  let stars = [];
+
+  for (let i=0;i<80;i++) stars.push({x:rand(0,W), y:rand(0,H), r:rand(.5,2.1), a:rand(.15,.75), tw:rand(.5,2.5)});
+
+  function sizeRadius(s){ return [0,18,28,42,58][s] || 18; }
+  function bounceStrength(s){ return [0,500,560,640,725][s] || 520; }
+
+  function resetRun(){
+    state.levelIndex = 0;
+    state.score = 0;
+    state.lives = 3;
+    state.combo = 0;
+    state.comboTimer = 0;
+    state.doubleShot = false;
+    state.rapid = false;
+    state.magnet = false;
+    state.shield = false;
+    state.shotCooldown = .34;
+    startLevel(0);
+    state.mode = 'play';
+  }
+
+  function startLevel(i){
+    const lvl = LEVELS[i % LEVELS.length];
+    state.timeLeft = lvl.time;
+    pinatas = lvl.pinatas.map((p,idx) => makePinata(p.x,p.y,p.s,p.vx,idx));
+    shots = []; candies = []; particles = []; floatText = [];
+    platforms = lvl.platforms.map(p => ({...p}));
+    player.x = W/2; player.y = H-145; player.vx = 0; player.invuln = 1.5;
+    state.levelClearTimer = 0;
+    burst(W/2,H-230,34,colors.yellow,1.2);
+    addText(W/2, 170, lvl.name, '#fff7b8', 30);
+  }
+
+  function makePinata(x,y,s,vx,seed=0){
+    const palette = [colors.pink, colors.cyan, colors.yellow, colors.green, colors.purple, colors.orange];
+    return {
+      x,y,s, r:sizeRadius(s), vx, vy:rand(-80,60),
+      rot:rand(-.2,.2), spin:rand(-1.8,1.8),
+      color: palette[(s + seed) % palette.length],
+      accent: palette[(s + seed + 2) % palette.length],
+      angry:0, blink:rand(1,4), dead:false, seed:Math.random()*100
+    };
+  }
+
+  function addText(x,y,text,color='#fff',size=24){ floatText.push({x,y,text,color,size,life:1.0,vy:-55}); }
+
+  function burst(x,y,n,color,force=1){
+    for(let i=0;i<n;i++){
+      const a=rand(0,TAU), sp=rand(55,260)*force;
+      particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:rand(.25,.75),max:rand(.25,.75),r:rand(2,7),color,shape:Math.random()<.55?'rect':'circle',rot:rand(0,TAU),spin:rand(-8,8)});
+    }
+  }
+
+  function candyBurst(x,y,amount=8){
+    const list=[colors.yellow, colors.pink, colors.cyan, colors.green, colors.orange];
+    for(let i=0;i<amount;i++){
+      const a=rand(-Math.PI*.95, -Math.PI*.05), sp=rand(90,260);
+      candies.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,value:10,life:7,r:8,color:list[i%list.length],spin:rand(-8,8),rot:rand(0,TAU)});
+    }
+  }
+
+  function shoot(){
+    const t=now();
+    const cd = state.rapid ? .18 : state.shotCooldown;
+    if(t - state.lastShot < cd) return;
+    state.lastShot = t;
+    const base = { x:player.x, y:player.y-46, vy:-780, life:1.35, hit:false, w:8 };
+    if(state.doubleShot){
+      shots.push({...base, x:player.x-14});
+      shots.push({...base, x:player.x+14});
+    } else shots.push(base);
+    player.squash = .18;
+    state.shake = Math.max(state.shake, 2.5);
+    burst(player.x, player.y-50, 5, colors.cyan, .45);
+  }
+
+  function splitPinata(p){
+    p.dead = true;
+    state.combo++;
+    state.comboTimer = 1.25;
+    const points = 80 * p.s * state.combo;
+    state.score += points;
+    state.best = Math.max(state.best, state.score);
+    localStorage.setItem('pinataPopBest', state.best);
+    addText(p.x,p.y-12,'+'+points, colors.yellow, 24 + Math.min(16,state.combo*2));
+    burst(p.x,p.y,26+p.s*10,p.color,1.0+p.s*.15);
+    burst(p.x,p.y,16,p.accent,1.2);
+    candyBurst(p.x,p.y, 4 + p.s*3);
+    state.shake = Math.max(state.shake, 6 + p.s*2);
+    state.flash = .08;
+    if(p.s>1){
+      const ns = p.s-1;
+      pinatas.push(makePinata(p.x-12,p.y,ns,-Math.abs(p.vx)*1.05-rand(10,40),p.seed+1));
+      pinatas.push(makePinata(p.x+12,p.y,ns, Math.abs(p.vx)*1.05+rand(10,40),p.seed+2));
+      pinatas[pinatas.length-1].vy = -bounceStrength(ns)*.72;
+      pinatas[pinatas.length-2].vy = -bounceStrength(ns)*.72;
+    } else if(Math.random()<.18){
+      spawnPickup(p.x,p.y);
+    }
+  }
+
+  function spawnPickup(x,y){
+    const types = ['shield','time','rapid','magnet'];
+    candies.push({x,y,vx:rand(-50,50),vy:-180,value:0,life:8,r:13,color:'#fff',type:types[Math.floor(rand(0,types.length))],rot:0,spin:3});
+  }
+
+  function playerHit(){
+    if(player.invuln>0 || state.shield) {
+      if(state.shield){ state.shield=false; burst(player.x,player.y-20,35,colors.cyan,1.3); addText(player.x,player.y-80,'SHIELD!',colors.cyan,26); state.shake=10; player.invuln=1.2; }
+      return;
+    }
+    state.lives--;
+    player.invuln = 2.0;
+    state.combo = 0;
+    state.shake = 18;
+    burst(player.x, player.y-20, 55, colors.red, 1.4);
+    addText(player.x, player.y-90, 'OUCH!', colors.red, 34);
+    if(state.lives<=0){
+      state.mode='gameover';
+      localStorage.setItem('pinataPopBest', Math.max(state.best,state.score));
+    }
+  }
+
+  function chooseUpgrades(){
+    const pool = [
+      {id:'double', title:'DOUBLE POP', desc:'Shoot two candy lances', color:colors.cyan},
+      {id:'rapid', title:'RAPID FIESTA', desc:'Faster shooting', color:colors.pink},
+      {id:'shield', title:'SUGAR SHIELD', desc:'Start with protection', color:colors.green},
+      {id:'time', title:'BONUS TIME', desc:'+20 seconds', color:colors.yellow},
+      {id:'magnet', title:'CANDY MAGNET', desc:'Pull candy rewards', color:colors.purple},
+      {id:'life', title:'EXTRA HEART', desc:'+1 life', color:colors.red}
+    ];
+    state.upgradeChoices = [];
+    while(state.upgradeChoices.length<3){
+      const c = pool[Math.floor(rand(0,pool.length))];
+      if(!state.upgradeChoices.includes(c)) state.upgradeChoices.push(c);
+    }
+    state.mode='upgrade';
+  }
+
+  function applyUpgrade(id){
+    if(id==='double') state.doubleShot = true;
+    if(id==='rapid') state.rapid = true;
+    if(id==='shield') state.shield = true;
+    if(id==='time') state.timeLeft += 20;
+    if(id==='magnet') state.magnet = true;
+    if(id==='life') state.lives = Math.min(5,state.lives+1);
+    state.levelIndex++;
+    if(state.levelIndex >= LEVELS.length){
+      state.mode='win';
+      addText(W/2,H/2,'FIESTA COMPLETE!',colors.yellow,36);
+    } else {
+      startLevel(state.levelIndex);
+      state.mode='play';
+    }
+  }
+
+  function handleButton(el, prop){
+    const down = e => { e.preventDefault(); input[prop]=true; if(prop==='shoot') input.shootPressed=true; el.classList.add('down'); };
+    const up = e => { e.preventDefault(); input[prop]=false; el.classList.remove('down'); };
+    el.addEventListener('pointerdown', down);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('pointerleave', up);
+  }
+  handleButton(document.getElementById('leftBtn'), 'left');
+  handleButton(document.getElementById('rightBtn'), 'right');
+  handleButton(document.getElementById('shootBtn'), 'shoot');
+  document.getElementById('pauseBtn').addEventListener('click', () => {
+    if(state.mode==='play') state.paused=!state.paused;
+    else if(state.mode==='title' || state.mode==='gameover' || state.mode==='win') resetRun();
+  });
+
+  window.addEventListener('keydown', e => {
+    keys.add(e.code);
+    if(['ArrowLeft','ArrowRight','Space','KeyA','KeyD'].includes(e.code)) e.preventDefault();
+    if(e.code==='Space') input.shootPressed=true;
+    if(e.code==='Enter' && (state.mode==='title'||state.mode==='gameover'||state.mode==='win')) resetRun();
+    if(e.code==='Escape' && state.mode==='play') state.paused=!state.paused;
+  });
+  window.addEventListener('keyup', e => keys.delete(e.code));
+
+  canvas.addEventListener('pointerdown', e => {
+    const p = canvasPoint(e);
+    if(state.mode==='title' || state.mode==='gameover' || state.mode==='win') { resetRun(); return; }
+    if(state.mode==='upgrade') {
+      for(let i=0;i<state.upgradeChoices.length;i++){
+        const y = 330 + i*138;
+        if(p.x>60 && p.x<W-60 && p.y>y && p.y<y+106) { applyUpgrade(state.upgradeChoices[i].id); return; }
+      }
+    }
+  });
+
+  function canvasPoint(e){
+    const r = canvas.getBoundingClientRect();
+    return {x:(e.clientX-r.left)/r.width*W, y:(e.clientY-r.top)/r.height*H};
+  }
+
+  function update(dt){
+    state.titleBob += dt;
+    if(state.paused || state.mode!=='play') { updateEffects(dt); return; }
+    input.left = input.left || keys.has('ArrowLeft') || keys.has('KeyA');
+    input.right = input.right || keys.has('ArrowRight') || keys.has('KeyD');
+    input.shoot = input.shoot || keys.has('Space');
+    if(input.shoot || input.shootPressed) shoot();
+    input.shootPressed = false;
+
+    state.timeLeft -= dt;
+    if(state.timeLeft<=0){ state.timeLeft=0; state.mode='gameover'; }
+    if(state.comboTimer>0){ state.comboTimer-=dt; if(state.comboTimer<=0) state.combo=0; }
+    player.invuln=Math.max(0,player.invuln-dt);
+    player.blink-=dt; if(player.blink<0) player.blink=rand(2.5,5.5);
+    player.squash=lerp(player.squash,0,dt*8);
+
+    const dir = (input.right?1:0) - (input.left?1:0);
+    player.vx = lerp(player.vx, dir*player.speed, 1-Math.pow(.001,dt));
+    player.x = clamp(player.x + player.vx*dt, 36, W-36);
+    input.left=false; input.right=false; input.shoot=false;
+
+    for(const s of shots){ s.y += s.vy*dt; s.life -= dt; }
+    shots = shots.filter(s => s.life>0 && s.y>-60 && !s.hit);
+
+    for(const p of pinatas){
+      p.vy += 1120*dt;
+      p.x += p.vx*dt; p.y += p.vy*dt; p.rot += p.spin*dt; p.angry=Math.max(0,p.angry-dt); p.blink-=dt; if(p.blink<0)p.blink=rand(2,5);
+      if(p.x-p.r<14){ p.x=14+p.r; p.vx=Math.abs(p.vx); }
+      if(p.x+p.r>W-14){ p.x=W-14-p.r; p.vx=-Math.abs(p.vx); }
+      const floor = H-98;
+      if(p.y+p.r>floor){ p.y=floor-p.r; p.vy=-bounceStrength(p.s)*rand(.82,1.0); }
+      for(const pl of platforms){
+        if(p.vy>0 && p.x>pl.x-p.r*.7 && p.x<pl.x+pl.w+p.r*.7 && p.y+p.r>pl.y && p.y+p.r<pl.y+28){
+          p.y=pl.y-p.r; p.vy=-bounceStrength(p.s)*rand(.75,.94); p.vx += rand(-15,15);
+        }
+      }
+      if(dist2(p.x,p.y,player.x,player.y-22) < (p.r+24)*(p.r+24)) playerHit();
+    }
+
+    for(const s of shots){
+      for(const p of pinatas){
+        if(!p.dead && Math.abs(s.x-p.x)<p.r+10 && s.y < p.y+p.r && s.y > p.y-p.r-12){
+          s.hit=true; p.angry=.2; splitPinata(p); break;
+        }
+      }
+    }
+    pinatas = pinatas.filter(p=>!p.dead);
+
+    for(const c of candies){
+      c.vy += 760*dt; c.x+=c.vx*dt; c.y+=c.vy*dt; c.life-=dt; c.rot+=c.spin*dt;
+      if(c.y>H-108){ c.y=H-108; c.vy*=-.38; c.vx*=.78; }
+      if(state.magnet || c.type){
+        const dx=player.x-c.x, dy=(player.y-26)-c.y, d=Math.sqrt(dx*dx+dy*dy)||1;
+        if(d<210){ c.vx += dx/d*520*dt; c.vy += dy/d*520*dt; }
+      }
+      if(dist2(c.x,c.y,player.x,player.y-26) < (c.r+24)*(c.r+24)){
+        c.life=0;
+        if(c.type==='shield'){ state.shield=true; addText(player.x,player.y-80,'SHIELD',colors.cyan,24); }
+        else if(c.type==='time'){ state.timeLeft+=8; addText(player.x,player.y-80,'+8 SEC',colors.yellow,24); }
+        else if(c.type==='rapid'){ state.rapid=true; addText(player.x,player.y-80,'RAPID',colors.pink,24); }
+        else if(c.type==='magnet'){ state.magnet=true; addText(player.x,player.y-80,'MAGNET',colors.purple,24); }
+        else { state.score+=c.value; addText(c.x,c.y,'+'+c.value,colors.yellow,16); }
+        burst(c.x,c.y,8,c.color||colors.yellow,.65);
+      }
+    }
+    candies = candies.filter(c=>c.life>0);
+
+    if(pinatas.length===0){
+      state.levelClearTimer += dt;
+      if(state.levelClearTimer>.95) chooseUpgrades();
+    }
+    updateEffects(dt);
+  }
+
+  function updateEffects(dt){
+    state.shake = Math.max(0, state.shake - 35*dt);
+    state.flash = Math.max(0, state.flash - dt);
+    for(const p of particles){ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=500*dt; p.life-=dt; p.rot+=p.spin*dt; }
+    particles = particles.filter(p=>p.life>0);
+    for(const f of floatText){ f.y+=f.vy*dt; f.life-=dt; }
+    floatText = floatText.filter(f=>f.life>0);
+  }
+
+  function draw(){
+    const sx = state.shake ? rand(-state.shake,state.shake) : 0;
+    const sy = state.shake ? rand(-state.shake,state.shake) : 0;
+    ctx.save();
+    ctx.translate(sx,sy);
+    drawBackground();
+    if(state.mode==='title') drawTitle();
+    else {
+      drawWorld();
+      drawHUD();
+      if(state.mode==='upgrade') drawUpgrade();
+      if(state.mode==='gameover') drawGameOver(false);
+      if(state.mode==='win') drawGameOver(true);
+      if(state.paused) drawPause();
+    }
+    if(state.flash>0){ ctx.fillStyle=`rgba(255,255,255,${state.flash*4})`; ctx.fillRect(0,0,W,H); }
+    ctx.restore();
+  }
+
+  function drawBackground(){
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#6e2dff'); g.addColorStop(.45,'#321062'); g.addColorStop(1,'#160720');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    ctx.save();
+    ctx.globalCompositeOperation='screen';
+    const rg=ctx.createRadialGradient(W*.5,H*.1,30,W*.5,H*.1,420);
+    rg.addColorStop(0,'rgba(255,216,74,.32)'); rg.addColorStop(.35,'rgba(255,79,163,.15)'); rg.addColorStop(1,'rgba(53,232,255,0)');
+    ctx.fillStyle=rg; ctx.fillRect(0,0,W,H);
+    for(const s of stars){
+      const a=s.a*(.65+.35*Math.sin(state.titleBob*s.tw+s.x));
+      ctx.fillStyle=`rgba(255,255,255,${a})`; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,TAU); ctx.fill();
+    }
+    ctx.restore();
+    for(let i=0;i<8;i++){
+      ctx.strokeStyle=`rgba(255,255,255,${.035+i*.002})`;
+      ctx.lineWidth=1;
+      ctx.beginPath();
+      ctx.arc(W/2,H*.18,120+i*58,0,TAU);
+      ctx.stroke();
+    }
+    ctx.fillStyle='rgba(0,0,0,.24)'; ctx.fillRect(0,H-98,W,98);
+    ctx.fillStyle='#3a1c42'; ctx.fillRect(0,H-104,W,10);
+    for(let x=-30;x<W+40;x+=50){
+      ctx.fillStyle = x%100===0 ? colors.pink : colors.yellow;
+      ctx.beginPath(); ctx.moveTo(x,H-104); ctx.lineTo(x+25,H-128); ctx.lineTo(x+50,H-104); ctx.closePath(); ctx.fill();
+    }
+  }
+
+  function drawWorld(){
+    for(const pl of platforms) drawPlatform(pl);
+    for(const c of candies) drawCandy(c);
+    for(const s of shots) drawShot(s);
+    for(const p of pinatas) drawPinata(p);
+    drawPlayer();
+    drawParticles();
+    drawFloatText();
+  }
+
+  function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect(x,y,w,h,r); }
+  function drawPlatform(p){
+    ctx.save();
+    roundRect(p.x,p.y,p.w,p.h,10); ctx.fillStyle='rgba(255,255,255,.14)'; ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.24)'; ctx.lineWidth=2; ctx.stroke();
+    for(let x=p.x+8;x<p.x+p.w-10;x+=26){
+      ctx.fillStyle = (x/26|0)%2?colors.cyan:colors.pink;
+      ctx.fillRect(x,p.y+4,14,p.h-8);
+    }
+    ctx.restore();
+  }
+
+  function drawPinata(p){
+    ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+    const squish = 1 + Math.sin(state.titleBob*8+p.seed)*.035;
+    ctx.scale(1/squish, squish);
+    ctx.shadowColor=p.color; ctx.shadowBlur=18;
+    ctx.fillStyle=p.color;
+    ctx.strokeStyle='#210818'; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.ellipse(0,0,p.r*1.05,p.r*.92,0,0,TAU); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur=0;
+    for(let i=-2;i<=2;i++){
+      ctx.fillStyle = i%2===0 ? p.accent : '#fff3';
+      ctx.beginPath();
+      ctx.ellipse(i*p.r*.22, -p.r*.08 + Math.sin(i+state.titleBob*4)*2, p.r*.16, p.r*.9, .3, 0, TAU);
+      ctx.fill();
+    }
+    ctx.strokeStyle='rgba(33,8,24,.38)'; ctx.lineWidth=2;
+    for(let y=-p.r*.48;y<p.r*.56;y+=p.r*.25){
+      ctx.beginPath();
+      for(let x=-p.r*.82;x<=p.r*.82;x+=8){
+        const yy = y + Math.sin(x*.16 + state.titleBob*5)*2;
+        if(x===-p.r*.82) ctx.moveTo(x,yy); else ctx.lineTo(x,yy);
+      }
+      ctx.stroke();
+    }
+    // ears / horns
+    ctx.fillStyle=p.accent; ctx.strokeStyle='#210818'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(-p.r*.48,-p.r*.65); ctx.lineTo(-p.r*.18,-p.r*.98); ctx.lineTo(-p.r*.02,-p.r*.56); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p.r*.48,-p.r*.65); ctx.lineTo(p.r*.18,-p.r*.98); ctx.lineTo(p.r*.02,-p.r*.56); ctx.closePath(); ctx.fill(); ctx.stroke();
+    // face
+    const blink = p.blink<.12;
+    ctx.fillStyle='#fff'; ctx.strokeStyle='#210818'; ctx.lineWidth=2;
+    if(blink){
+      ctx.beginPath(); ctx.moveTo(-p.r*.38,-p.r*.08); ctx.lineTo(-p.r*.16,-p.r*.08); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p.r*.16,-p.r*.08); ctx.lineTo(p.r*.38,-p.r*.08); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.ellipse(-p.r*.27,-p.r*.08,p.r*.15,p.r*.18,0,0,TAU); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(p.r*.27,-p.r*.08,p.r*.15,p.r*.18,0,0,TAU); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#170723';
+      ctx.beginPath(); ctx.arc(-p.r*.25,-p.r*.06,p.r*.07,0,TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.r*.25,-p.r*.06,p.r*.07,0,TAU); ctx.fill();
+    }
+    ctx.strokeStyle='#210818'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(0,p.r*.16,p.r*.22,0,Math.PI); ctx.stroke();
+    // little legs
+    ctx.strokeStyle='#210818'; ctx.lineWidth=4; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(-p.r*.35,p.r*.72); ctx.lineTo(-p.r*.45,p.r*.98); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p.r*.35,p.r*.72); ctx.lineTo(p.r*.45,p.r*.98); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawShot(s){
+    ctx.save();
+    ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=s.w; ctx.lineCap='round';
+    ctx.shadowColor=colors.cyan; ctx.shadowBlur=16;
+    ctx.beginPath(); ctx.moveTo(s.x,s.y+54); ctx.lineTo(s.x,s.y-10); ctx.stroke();
+    ctx.fillStyle=colors.cyan; ctx.beginPath(); ctx.arc(s.x,s.y-10,7,0,TAU); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawCandy(c){
+    ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(c.rot);
+    if(c.type){
+      ctx.shadowColor = c.type==='shield'?colors.cyan:c.type==='time'?colors.yellow:c.type==='rapid'?colors.pink:colors.purple;
+      ctx.shadowBlur=18;
+      ctx.fillStyle=ctx.shadowColor;
+      ctx.beginPath(); ctx.arc(0,0,c.r,0,TAU); ctx.fill();
+      ctx.fillStyle='#170723'; ctx.font='900 11px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(c.type[0].toUpperCase(),0,1);
+    } else {
+      ctx.shadowColor=c.color; ctx.shadowBlur=10;
+      ctx.fillStyle=c.color; roundRect(-11,-7,22,14,6); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.75)'; ctx.fillRect(-4,-7,5,14);
+      ctx.strokeStyle='rgba(20,5,25,.65)'; ctx.lineWidth=2; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPlayer(){
+    ctx.save(); ctx.translate(player.x, player.y);
+    const inv = player.invuln>0 && Math.sin(state.titleBob*25)>0;
+    if(inv) ctx.globalAlpha=.45;
+    if(state.shield){ ctx.strokeStyle=colors.cyan; ctx.lineWidth=4; ctx.shadowColor=colors.cyan; ctx.shadowBlur=18; ctx.beginPath(); ctx.arc(0,-24,44+Math.sin(state.titleBob*8)*3,0,TAU); ctx.stroke(); ctx.shadowBlur=0; }
+    ctx.scale(1+player.squash*.8,1-player.squash*.5);
+    // wheel base
+    ctx.fillStyle='#171426'; ctx.strokeStyle='#08030f'; ctx.lineWidth=4;
+    roundRect(-29,0,58,25,12); ctx.fill(); ctx.stroke();
+    ctx.fillStyle=colors.yellow; ctx.beginPath(); ctx.arc(-16,21,10,0,TAU); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(16,21,10,0,TAU); ctx.fill(); ctx.stroke();
+    // body
+    const bg=ctx.createLinearGradient(-28,-72,28,-12); bg.addColorStop(0,colors.cyan); bg.addColorStop(1,'#2b7dff');
+    ctx.fillStyle=bg; ctx.strokeStyle='#08030f'; ctx.lineWidth=4;
+    roundRect(-28,-72,56,72,18); ctx.fill(); ctx.stroke();
+    // cannon
+    ctx.fillStyle='#302042'; ctx.strokeStyle='#08030f'; ctx.lineWidth=4;
+    roundRect(-10,-90,20,38,8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle=colors.pink; roundRect(-6,-100,12,18,6); ctx.fill(); ctx.stroke();
+    // face eye
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.ellipse(0,-45,17,20,0,0,TAU); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#0b1025'; ctx.beginPath(); ctx.arc(3,-43,7,0,TAU); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(6,-48,2.8,0,TAU); ctx.fill();
+    ctx.strokeStyle='#08030f'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(0,-25,10,.15,Math.PI-.15); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawParticles(){
+    for(const p of particles){
+      ctx.save(); ctx.globalAlpha=clamp(p.life/p.max,0,1); ctx.translate(p.x,p.y); ctx.rotate(p.rot); ctx.fillStyle=p.color;
+      if(p.shape==='rect') roundRect(-p.r,-p.r,p.r*2,p.r*2,2); else { ctx.beginPath(); ctx.arc(0,0,p.r,0,TAU); }
+      ctx.fill(); ctx.restore();
+    }
+  }
+  function drawFloatText(){
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    for(const f of floatText){
+      ctx.save(); ctx.globalAlpha=clamp(f.life,0,1); ctx.font=`900 ${f.size}px system-ui`; ctx.lineWidth=5; ctx.strokeStyle='rgba(20,5,30,.85)'; ctx.strokeText(f.text,f.x,f.y); ctx.fillStyle=f.color; ctx.fillText(f.text,f.x,f.y); ctx.restore();
+    }
+  }
+
+  function drawHUD(){
+    ctx.save();
+    ctx.fillStyle='rgba(0,0,0,.26)'; roundRect(16,18,W-32,58,20); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='900 22px system-ui'; ctx.textAlign='left'; ctx.fillText('Piñata Pop',32,54);
+    ctx.textAlign='right'; ctx.fillText(String(state.score),W-32,54);
+    ctx.font='800 18px system-ui'; ctx.fillStyle=colors.yellow; ctx.textAlign='left'; ctx.fillText('♥'.repeat(state.lives),32,96);
+    ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.fillText(Math.ceil(state.timeLeft)+'s',W/2,96);
+    ctx.textAlign='right'; ctx.fillText('Lv '+(state.levelIndex+1),W-32,96);
+    if(state.combo>1){
+      ctx.font='900 24px system-ui'; ctx.fillStyle=colors.pink; ctx.textAlign='center'; ctx.fillText('COMBO x'+state.combo,W/2,132);
+    }
+    ctx.restore();
+  }
+
+  function drawTitle(){
+    // demo pinatas
+    for(let i=0;i<4;i++){
+      const p=makePinata(95+i*115, 255+Math.sin(state.titleBob*2+i)*18, 2+(i%2), Math.sin(i)*100, i);
+      p.rot=Math.sin(state.titleBob+i)*.18; drawPinata(p);
+    }
+    ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font='1000 60px system-ui'; ctx.lineWidth=8; ctx.strokeStyle='#170723'; ctx.strokeText('PIÑATA',W/2,385); ctx.fillStyle=colors.yellow; ctx.fillText('PIÑATA',W/2,385);
+    ctx.font='1000 76px system-ui'; ctx.strokeText('POP',W/2,452); ctx.fillStyle=colors.pink; ctx.fillText('POP',W/2,452);
+    ctx.font='800 21px system-ui'; ctx.fillStyle='rgba(255,255,255,.92)'; ctx.fillText('Split bouncing candy monsters.',W/2,515); ctx.fillText('Collect candy. Choose upgrades. Survive the fiesta.',W/2,546);
+    drawPlayerTitle(W/2,650);
+    ctx.fillStyle='rgba(255,255,255,.14)'; roundRect(90,770,W-180,72,24); ctx.fill(); ctx.strokeStyle='rgba(255,255,255,.30)'; ctx.stroke();
+    ctx.font='900 24px system-ui'; ctx.fillStyle='#fff'; ctx.fillText('TAP TO PLAY',W/2,807);
+    ctx.font='700 16px system-ui'; ctx.fillStyle='rgba(255,255,255,.72)'; ctx.fillText('Mobile: buttons • Desktop: A/D + Space',W/2,870);
+    ctx.restore();
+  }
+
+  function drawPlayerTitle(x,y){ ctx.save(); player.x=x; player.y=y; drawPlayer(); ctx.restore(); }
+
+  function drawUpgrade(){
+    ctx.save();
+    ctx.fillStyle='rgba(10,3,20,.72)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font='1000 42px system-ui'; ctx.lineWidth=7; ctx.strokeStyle='#170723'; ctx.strokeText('CHOOSE A TREAT',W/2,230); ctx.fillStyle=colors.yellow; ctx.fillText('CHOOSE A TREAT',W/2,230);
+    for(let i=0;i<state.upgradeChoices.length;i++){
+      const c=state.upgradeChoices[i], y=330+i*138;
+      ctx.fillStyle='rgba(255,255,255,.13)'; roundRect(60,y,W-120,106,28); ctx.fill();
+      ctx.strokeStyle=c.color; ctx.lineWidth=3; ctx.shadowColor=c.color; ctx.shadowBlur=10; ctx.stroke(); ctx.shadowBlur=0;
+      ctx.fillStyle=c.color; ctx.font='1000 26px system-ui'; ctx.fillText(c.title,W/2,y+36);
+      ctx.fillStyle='rgba(255,255,255,.86)'; ctx.font='700 18px system-ui'; ctx.fillText(c.desc,W/2,y+70);
+    }
+    ctx.font='700 15px system-ui'; ctx.fillStyle='rgba(255,255,255,.65)'; ctx.fillText('Tap one upgrade to continue',W/2,810);
+    ctx.restore();
+  }
+
+  function drawGameOver(win){
+    ctx.save(); ctx.fillStyle='rgba(10,3,20,.76)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font='1000 52px system-ui'; ctx.lineWidth=8; ctx.strokeStyle='#170723';
+    const title=win?'FIESTA COMPLETE!':'GAME OVER'; ctx.strokeText(title,W/2,330); ctx.fillStyle=win?colors.yellow:colors.pink; ctx.fillText(title,W/2,330);
+    ctx.font='900 28px system-ui'; ctx.fillStyle='#fff'; ctx.fillText('Score: '+state.score,W/2,420); ctx.fillText('Best: '+state.best,W/2,462);
+    ctx.fillStyle='rgba(255,255,255,.14)'; roundRect(90,550,W-180,76,26); ctx.fill(); ctx.strokeStyle='rgba(255,255,255,.30)'; ctx.stroke();
+    ctx.font='900 24px system-ui'; ctx.fillStyle='#fff'; ctx.fillText('TAP TO RESTART',W/2,589);
+    ctx.restore();
+  }
+
+  function drawPause(){
+    ctx.save(); ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillRect(0,0,W,H); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='1000 50px system-ui'; ctx.fillStyle='#fff'; ctx.fillText('PAUSED',W/2,H/2); ctx.font='700 18px system-ui'; ctx.fillText('Tap pause again to continue',W/2,H/2+48); ctx.restore();
+  }
+
+  let last = now();
+  function loop(){
+    const t=now(); const dt=Math.min(.033, t-last); last=t;
+    update(dt); draw(); requestAnimationFrame(loop);
+  }
+  loop();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,2138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Maze Munch Rush — Mobile Arcade Prototype</title>
+<style>
+  :root {
+    --bg0: #050313;
+    --bg1: #0b0730;
+    --cyan: #38e8ff;
+    --pink: #ff3cac;
+    --gold: #ffd23c;
+    --lime: #78ff7a;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    font-family: "Bahnschrift", "DIN Alternate", "Arial Narrow", system-ui, sans-serif;
+  }
+
+  body {
+    background:
+      radial-gradient(circle at 50% 30%, rgba(90, 40, 180, 0.35), transparent 40%),
+      radial-gradient(circle at 20% 80%, rgba(0, 210, 255, 0.25), transparent 45%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 70%, #010006);
+  }
+
+  #game {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    display: block;
+    cursor: crosshair;
+  }
+
+  #boot {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(240, 255, 255, 0.7);
+    letter-spacing: 0.22em;
+    font-size: 13px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="boot">LOADING MAZE FIELD…</div>
+
+<script>
+"use strict";
+
+/*
+  MAZE MUNCH RUSH
+  ---------------------------------------------------------------------------
+  A mobile-first neon maze-chase prototype inspired by the *genre* of classic
+  maze arcade games, not by any protected character/art/maze layout.
+
+  Core loop:
+  - Swipe to buffer the next turn.
+  - Eat neon crystals.
+  - Chain same-colour crystals for bigger rewards.
+  - Collect power-orbs to flip the chase and eat sentinels.
+  - Fill RUSH and activate a short, juicy, high-score frenzy.
+  - Daily seed + random run + local high scores.
+  - No external assets, libraries, images, or fonts.
+*/
+
+/* ==========================================================================
+   SMALL UTILS
+   ========================================================================== */
+
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (a, b, x) => {
+  x = clamp((x - a) / (b - a), 0, 1);
+  return x * x * (3 - 2 * x);
+};
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const manhattan = (ax, ay, bx, by) => Math.abs(ax - bx) + Math.abs(ay - by);
+const hsl = (h, s, l, a = 1) => `hsla(${h},${s}%,${l}%,${a})`;
+const rgba = (r, g, b, a) => `rgba(${r|0},${g|0},${b|0},${a})`;
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function() {
+    a |= 0;
+    a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function seedFromString(str) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function dateKey(offset = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+function storageGet(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function storageSet(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+/* ==========================================================================
+   AUDIO ENGINE
+   ========================================================================== */
+
+const AudioFx = {
+  ctx: null,
+  master: null,
+  muted: storageGet("mmr_muted", false),
+  beatTimer: 0,
+  nextBeat: 0,
+  bpm: 122,
+  active: false,
+
+  init() {
+    if (this.ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+
+    const ctx = this.ctx = new AC();
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -16;
+    comp.knee.value = 18;
+    comp.ratio.value = 5;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.18;
+
+    this.master = ctx.createGain();
+    this.master.gain.value = this.muted ? 0 : 0.55;
+    this.master.connect(comp);
+    comp.connect(ctx.destination);
+  },
+
+  resume() {
+    if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
+  },
+
+  setMuted(muted) {
+    this.muted = muted;
+    storageSet("mmr_muted", muted);
+    if (this.master && this.ctx) {
+      this.master.gain.setTargetAtTime(muted ? 0 : 0.55, this.ctx.currentTime, 0.02);
+    }
+  },
+
+  now() {
+    return this.ctx ? this.ctx.currentTime : 0;
+  },
+
+  envGain(t, g, attack, release) {
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, g), t + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + attack + release);
+    return gain;
+  },
+
+  tone(freq, type, t, dur, gain = 0.15, dest = null) {
+    if (!this.ctx || this.muted) return;
+    const osc = this.ctx.createOscillator();
+    const g = this.envGain(t, gain, 0.006, Math.max(0.03, dur));
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    osc.connect(g);
+    g.connect(dest || this.master);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+  },
+
+  collect(chain, colorIndex) {
+    if (!this.ctx || this.muted) return;
+    const t = this.now();
+    const scale = [0, 3, 5, 7, 10, 12, 15, 17, 19];
+    const semi = scale[chain % scale.length] + Math.floor(chain / scale.length) * 12;
+    const base = [220, 246.94, 261.63, 293.66][colorIndex % 4];
+    this.tone(base * Math.pow(2, semi / 12), "triangle", t, 0.10, 0.12);
+    if (chain >= 8) this.tone(base * 2 * Math.pow(2, semi / 12), "sine", t + 0.018, 0.07, 0.055);
+  },
+
+  chainMilestone() {
+    if (!this.ctx || this.muted) return;
+    const t = this.now();
+    [0, 3, 7, 12].forEach((s, i) => this.tone(330 * Math.pow(2, s / 12), "square", t + i * 0.045, 0.16, 0.08));
+  },
+
+  power() {
+    if (!this.ctx || this.muted) return;
+    const t = this.now();
+    const osc = this.ctx.createOscillator();
+    const g = this.envGain(t, 0.42, 0.01, 0.55);
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(90, t);
+    osc.frequency.exponentialRampToValueAtTime(38, t + 0.34);
+    osc.connect(g);
+    g.connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.65);
+
+    [0, 7, 12].forEach((s, i) => this.tone(220 * Math.pow(2, s / 12), "triangle", t + 0.08 + i * 0.055, 0.26, 0.10));
+  },
+
+  rush() {
+    if (!this.ctx || this.muted) return;
+    const t = this.now();
+    const sub = this.ctx.createOscillator();
+    const g = this.envGain(t, 0.50, 0.005, 0.7);
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(140, t);
+    sub.frequency.exponentialRampToValueAtTime(34, t + 0.42);
+    sub.connect(g);
+    g.connect(this.master);
+    sub.start(t);
+    sub.stop(t + 0.8);
+
+    [12, 19, 24, 31].forEach((s, i) => this.tone(220 * Math.pow(2, s / 12), "sawtooth", t + 0.16 + i * 0.045, 0.22, 0.08));
+  },
+
+  eatEnemy(n) {
+    if (!this.ctx || this.muted) return;
+    const t = this.now();
+    this.tone(180 + n * 70, "square", t, 0.15, 0.20);
+    this.tone(360 + n * 110, "triangle", t + 0.03, 0.13, 0.13);
+  },
+
+  nearMiss() {
+    if (!this.ctx || this.muted) return;
+    const t = this.now();
+    this.tone(720, "sine", t, 0.06, 0.055);
+  },
+
+  death() {
+    if (!this.ctx || this.muted) return;
+    const t = this.now();
+    const osc = this.ctx.createOscillator();
+    const g = this.envGain(t, 0.35, 0.01, 0.55);
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(420, t);
+    osc.frequency.exponentialRampToValueAtTime(60, t + 0.45);
+    osc.connect(g);
+    g.connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.62);
+  },
+
+  tick(dt) {
+    if (!this.ctx || this.muted || G.state !== "play") return;
+
+    const intensity = clamp(G.rush / 100, 0, 1);
+    this.bpm = 116 + intensity * 24 + (G.rushTimer > 0 ? 16 : 0);
+    this.nextBeat -= dt;
+
+    if (this.nextBeat <= 0) {
+      this.nextBeat += 60 / this.bpm;
+      const t = this.now();
+
+      // Very soft heartbeat bed. It is not a full soundtrack, but it creates pulse.
+      if (G.powerTimer > 0 || G.rushTimer > 0 || G.chain >= 10) {
+        this.tone(55, "sine", t, 0.08, 0.045);
+      }
+
+      if (G.rushTimer > 0) {
+        this.tone(440 * Math.pow(2, ([0, 7, 10, 12][G.beatStep % 4]) / 12), "triangle", t, 0.10, 0.04);
+      }
+
+      G.beatStep++;
+    }
+  }
+};
+
+/* ==========================================================================
+   CANVAS + LAYOUT
+   ========================================================================== */
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let W = 0;
+let H = 0;
+let DPR = 1;
+let minDim = 0;
+let boardX = 0;
+let boardY = 0;
+let tile = 16;
+let boardW = 0;
+let boardH = 0;
+let safeTop = 0;
+let safeBottom = 0;
+
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  minDim = Math.min(W, H);
+
+  canvas.width = Math.floor(W * DPR);
+  canvas.height = Math.floor(H * DPR);
+  canvas.style.width = W + "px";
+  canvas.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  safeTop = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("env(safe-area-inset-top)") || 0) || 0;
+  safeBottom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("env(safe-area-inset-bottom)") || 0) || 0;
+
+  const availableW = W * 0.94;
+  const availableH = H * 0.735;
+  tile = Math.floor(Math.min(availableW / COLS, availableH / ROWS));
+  tile = Math.max(11, tile);
+  boardW = tile * COLS;
+  boardH = tile * ROWS;
+  boardX = (W - boardW) / 2;
+  boardY = Math.max(H * 0.128, 66 + safeTop);
+
+  makeGlowSprites();
+}
+window.addEventListener("resize", resize);
+
+/* ==========================================================================
+   OFFSCREEN GLOWS
+   ========================================================================== */
+
+let glowSprites = {};
+
+function makeGlow(size, color) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const x = c.getContext("2d");
+  const g = x.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, color);
+  g.addColorStop(0.28, color.replace(/[\d.]+\)$/g, "0.45)"));
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  x.fillStyle = g;
+  x.fillRect(0, 0, size, size);
+  return c;
+}
+
+function makeGlowSprites() {
+  const size = Math.max(48, Math.round(minDim * 0.16));
+  glowSprites.cyan = makeGlow(size, "rgba(56,232,255,0.9)");
+  glowSprites.pink = makeGlow(size, "rgba(255,60,172,0.9)");
+  glowSprites.gold = makeGlow(size, "rgba(255,210,60,0.9)");
+  glowSprites.lime = makeGlow(size, "rgba(120,255,122,0.9)");
+  glowSprites.white = makeGlow(size, "rgba(255,255,255,0.95)");
+  glowSprites.red = makeGlow(size, "rgba(255,48,82,0.9)");
+}
+
+function drawGlow(sprite, x, y, r, alpha = 1) {
+  if (!sprite) return;
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(sprite, x - r, y - r, r * 2, r * 2);
+  ctx.globalAlpha = 1;
+}
+
+/* ==========================================================================
+   MAZE DATA
+   ========================================================================== */
+
+const RAW_MAZE = [
+  "###################",
+  "#o....#.....#....o#",
+  "#.##..#.###.#..##.#",
+  "#.....#..#..#.....#",
+  "###.#.##.#.##.#.###",
+  "#...#.........#...#",
+  "#.#.###.###.###.#.#",
+  "#.#.....#.#.....#.#",
+  "#.#####.#.#.#####.#",
+  "#.......#.#.......#",
+  "###.###.....###.###",
+  "#.....#..C..#.....#",
+  "#.###.#.###.#.###.#",
+  "#...#...#...#...#.#",
+  "###.#.###.###.#.###",
+  "#.....#.....#.....#",
+  "#.###.#.###.#.###.#",
+  "#o..#.........#..o#",
+  "###.#.##.#.##.#.###",
+  "#.....#..#..#.....#",
+  "#.##..#.###.#..##.#",
+  "#....#.......#....#",
+  "#.##.#.#####.#.##.#",
+  "#.................#",
+  "###################"
+];
+
+const COLS = RAW_MAZE[0].length;
+const ROWS = RAW_MAZE.length;
+const DIRS = [
+  { x: 1, y: 0, name: "right" },
+  { x: -1, y: 0, name: "left" },
+  { x: 0, y: 1, name: "down" },
+  { x: 0, y: -1, name: "up" }
+];
+
+function reverseDir(dir) {
+  if (!dir) return null;
+  return { x: -dir.x, y: -dir.y, name: dir.name };
+}
+
+function isReverse(a, b) {
+  return a && b && a.x === -b.x && a.y === -b.y;
+}
+
+function isWall(tx, ty) {
+  if (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS) return true;
+  return G.walls[ty][tx] === "#";
+}
+
+function tileCenter(tx, ty) {
+  return {
+    x: boardX + (tx + 0.5) * tile,
+    y: boardY + (ty + 0.5) * tile
+  };
+}
+
+function worldX(x) { return boardX + (x + 0.5) * tile; }
+function worldY(y) { return boardY + (y + 0.5) * tile; }
+
+function atCenter(ent, eps = 0.08) {
+  return Math.abs(ent.x - Math.round(ent.x)) < eps && Math.abs(ent.y - Math.round(ent.y)) < eps;
+}
+
+function snap(ent) {
+  ent.x = Math.round(ent.x);
+  ent.y = Math.round(ent.y);
+}
+
+function canMove(ent, dir) {
+  const tx = Math.round(ent.x) + dir.x;
+  const ty = Math.round(ent.y) + dir.y;
+  return !isWall(tx, ty);
+}
+
+function availableDirs(ent) {
+  const dirs = [];
+  for (const d of DIRS) {
+    if (!isWall(Math.round(ent.x) + d.x, Math.round(ent.y) + d.y)) dirs.push(d);
+  }
+  return dirs;
+}
+
+/* ==========================================================================
+   GAME STATE
+   ========================================================================== */
+
+const COLORS = [
+  { name: "cyan", hue: 188, sprite: "cyan", rgb: [56, 232, 255] },
+  { name: "pink", hue: 320, sprite: "pink", rgb: [255, 60, 172] },
+  { name: "gold", hue: 45, sprite: "gold", rgb: [255, 210, 60] },
+  { name: "lime", hue: 118, sprite: "lime", rgb: [120, 255, 122] }
+];
+
+const SENTINEL_COLORS = [
+  { hue: 350, sprite: "red", name: "HUNTER" },
+  { hue: 285, sprite: "pink", name: "AMBUSH" },
+  { hue: 40, sprite: "gold", name: "GUARD" },
+  { hue: 170, sprite: "cyan", name: "WANDER" }
+];
+
+const STATE = {
+  MENU: "menu",
+  PLAY: "play",
+  OVER: "over",
+  PAUSE: "pause"
+};
+
+const G = {
+  state: STATE.MENU,
+  mode: "daily",
+  rng: Math.random,
+  seed: 1,
+
+  walls: [],
+  pellets: [],
+  pelletCount: 0,
+  eaten: 0,
+
+  player: null,
+  enemies: [],
+
+  score: 0,
+  displayScore: 0,
+  best: storageGet("mmr_best", 0),
+  daily: storageGet("mmr_daily", {}),
+  streak: storageGet("mmr_streak", { count: 0, last: null }),
+  tutorialSeen: storageGet("mmr_tutorial_seen", false),
+
+  chain: 0,
+  bestChain: 0,
+  chainColor: -1,
+  chainTimer: 0,
+  perfectChains: 0,
+
+  powerTimer: 0,
+  rush: 0,
+  rushTimer: 0,
+  rushUses: 0,
+
+  nearMissCooldown: 0,
+  nearMisses: 0,
+  enemiesEaten: 0,
+  comboShield: 0,
+
+  runTime: 0,
+  deathTime: 0,
+  levelFlash: 0,
+  shake: 0,
+  zoom: 1,
+  slowmo: 1,
+  beatStep: 0,
+  globalT: 0,
+
+  particles: [],
+  pops: [],
+  rings: [],
+  touchStart: null,
+  desiredDir: { x: 0, y: 0, name: "right" },
+  lastInputTime: 0,
+  menuButtons: {},
+  gameOverButtons: {}
+};
+
+function todayDailyRecord() {
+  const key = dateKey();
+  return G.daily[key] || { best: 0, played: false };
+}
+
+function saveDailyRecord(score) {
+  const key = dateKey();
+  const rec = G.daily[key] || { best: 0, played: false };
+  rec.best = Math.max(rec.best || 0, score);
+  rec.played = true;
+  G.daily[key] = rec;
+  storageSet("mmr_daily", G.daily);
+}
+
+/* ==========================================================================
+   RUN SETUP
+   ========================================================================== */
+
+function startRun(mode = "daily") {
+  AudioFx.init();
+  AudioFx.resume();
+
+  G.mode = mode;
+  G.seed = mode === "daily" ? seedFromString("maze-munch-rush-" + dateKey()) : ((Math.random() * 2 ** 31) | 0);
+  G.rng = mulberry32(G.seed);
+
+  G.state = STATE.PLAY;
+  G.score = 0;
+  G.displayScore = 0;
+  G.chain = 0;
+  G.bestChain = 0;
+  G.chainColor = -1;
+  G.chainTimer = 0;
+  G.perfectChains = 0;
+  G.powerTimer = 0;
+  G.rush = 0;
+  G.rushTimer = 0;
+  G.rushUses = 0;
+  G.nearMissCooldown = 0;
+  G.nearMisses = 0;
+  G.enemiesEaten = 0;
+  G.comboShield = 0;
+  G.runTime = 0;
+  G.deathTime = 0;
+  G.levelFlash = 1;
+  G.shake = 0;
+  G.zoom = 1;
+  G.slowmo = 1;
+  G.beatStep = 0;
+  G.particles.length = 0;
+  G.pops.length = 0;
+  G.rings.length = 0;
+  G.desiredDir = { x: 1, y: 0, name: "right" };
+
+  buildMaze();
+  buildEntities();
+
+  // CrazyGames-ready guarded hook.
+  try {
+    window.CrazyGames?.SDK?.game?.gameplayStart?.();
+  } catch {}
+}
+
+function buildMaze() {
+  G.walls = RAW_MAZE.map(r => r.split(""));
+  G.pellets = [];
+  G.pelletCount = 0;
+  G.eaten = 0;
+
+  for (let y = 0; y < ROWS; y++) {
+    G.pellets[y] = [];
+    for (let x = 0; x < COLS; x++) {
+      const c = RAW_MAZE[y][x];
+
+      if (c === "#") {
+        G.pellets[y][x] = null;
+        continue;
+      }
+
+      if (c === "o") {
+        G.pellets[y][x] = { type: "power", color: -1, eaten: false, pulse: G.rng() * TAU };
+        G.pelletCount++;
+        continue;
+      }
+
+      // Keep spawn area and player start comfortable.
+      const nearSpawn = manhattan(x, y, 9, 11) < 3;
+      const nearPlayer = manhattan(x, y, 9, 23) < 3;
+
+      if (c === "C" || nearSpawn || nearPlayer) {
+        G.pellets[y][x] = null;
+        continue;
+      }
+
+      // Daily seed gives a repeatable colour map, while endless feels fresh.
+      const color = Math.floor(G.rng() * COLORS.length);
+      G.pellets[y][x] = { type: "crystal", color, eaten: false, pulse: G.rng() * TAU };
+      G.pelletCount++;
+    }
+  }
+}
+
+function buildEntities() {
+  G.player = {
+    x: 9,
+    y: 23,
+    dir: { x: 1, y: 0, name: "right" },
+    desired: { x: 1, y: 0, name: "right" },
+    speed: 6.15,
+    faceT: 0,
+    radius: 0.37,
+    alive: true
+  };
+
+  G.enemies = [
+    makeEnemy(9, 11, 0),
+    makeEnemy(8, 11, 1),
+    makeEnemy(10, 11, 2),
+    makeEnemy(9, 10, 3)
+  ];
+}
+
+function makeEnemy(x, y, personality) {
+  return {
+    x, y,
+    homeX: x,
+    homeY: y,
+    dir: DIRS[Math.floor(G.rng() * DIRS.length)],
+    speed: 4.25 + personality * 0.12,
+    personality,
+    spawnDelay: 0.8 + personality * 0.55,
+    eatenTimer: 0,
+    wiggle: G.rng() * TAU,
+    scaredBlink: 0
+  };
+}
+
+/* ==========================================================================
+   INPUT
+   ========================================================================== */
+
+function setDesired(dx, dy) {
+  if (dx === 0 && dy === 0) return;
+  const d = DIRS.find(v => v.x === dx && v.y === dy);
+  if (!d) return;
+  G.desiredDir = d;
+  G.player && (G.player.desired = d);
+  G.lastInputTime = G.globalT;
+}
+
+function pointerPos(e) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: e.clientX - r.left,
+    y: e.clientY - r.top
+  };
+}
+
+function rushButtonRect() {
+  const r = Math.max(34, minDim * 0.105);
+  return { x: W / 2, y: H - r - 20 - safeBottom, r };
+}
+
+function hitCircle(c, p) {
+  return Math.hypot(p.x - c.x, p.y - c.y) <= c.r;
+}
+
+function hitRect(b, p) {
+  return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
+}
+
+function handleTap(p) {
+  if (hitCircle(muteButtonRect(), p)) {
+    AudioFx.init();
+    AudioFx.setMuted(!AudioFx.muted);
+    return true;
+  }
+
+  if (G.state === STATE.PLAY && G.rush >= 100 && G.rushTimer <= 0 && hitCircle(rushButtonRect(), p)) {
+    activateRush();
+    return true;
+  }
+
+  if (G.state === STATE.MENU) {
+    const b = G.menuButtons;
+    if (b.daily && hitRect(b.daily, p)) {
+      startRun("daily");
+      return true;
+    }
+    if (b.endless && hitRect(b.endless, p)) {
+      startRun("endless");
+      return true;
+    }
+  }
+
+  if (G.state === STATE.OVER) {
+    const b = G.gameOverButtons;
+    if (b.again && hitRect(b.again, p)) {
+      startRun(G.mode);
+      return true;
+    }
+    if (b.menu && hitRect(b.menu, p)) {
+      G.state = STATE.MENU;
+      return true;
+    }
+
+    // Fastest possible replay.
+    startRun(G.mode);
+    return true;
+  }
+
+  if (G.state === STATE.PAUSE) {
+    G.state = STATE.PLAY;
+    return true;
+  }
+
+  return false;
+}
+
+canvas.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  AudioFx.init();
+  AudioFx.resume();
+  const p = pointerPos(e);
+  if (handleTap(p)) return;
+  G.touchStart = p;
+});
+
+canvas.addEventListener("pointermove", e => {
+  if (!G.touchStart) return;
+
+  const p = pointerPos(e);
+  const dx = p.x - G.touchStart.x;
+  const dy = p.y - G.touchStart.y;
+  const threshold = Math.max(16, minDim * 0.035);
+
+  if (Math.hypot(dx, dy) > threshold) {
+    const sx = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : -1) : 0;
+    const sy = Math.abs(dx) > Math.abs(dy) ? 0 : (dy > 0 ? 1 : -1);
+
+    // Quality-of-life fix: the first swipe from the title screen starts play.
+    if (G.state === STATE.MENU) {
+      startRun("daily");
+    }
+
+    if (G.state === STATE.PLAY) {
+      setDesired(sx, sy);
+    }
+
+    // Allows repeated swipe gestures without lifting.
+    G.touchStart = p;
+  }
+});
+
+canvas.addEventListener("pointerup", e => {
+  if (!G.touchStart) return;
+  const p = pointerPos(e);
+  const moved = Math.hypot(p.x - G.touchStart.x, p.y - G.touchStart.y);
+  if (moved < Math.max(10, minDim * 0.025)) {
+    // Tap board relative to player as a fallback control.
+    if (G.state === STATE.PLAY && G.player) {
+      const px = worldX(G.player.x);
+      const py = worldY(G.player.y);
+      const dx = p.x - px;
+      const dy = p.y - py;
+      if (Math.abs(dx) > Math.abs(dy)) setDesired(dx > 0 ? 1 : -1, 0);
+      else setDesired(0, dy > 0 ? 1 : -1);
+    }
+  }
+  G.touchStart = null;
+});
+
+canvas.addEventListener("pointercancel", () => {
+  G.touchStart = null;
+});
+
+window.addEventListener("keydown", e => {
+  const k = e.key.toLowerCase();
+  if (["arrowleft", "arrowright", "arrowup", "arrowdown", " ", "enter", "w", "a", "s", "d"].includes(k)) e.preventDefault();
+
+  AudioFx.init();
+  AudioFx.resume();
+
+  if (G.state === STATE.MENU) {
+    if (k === " " || k === "enter") {
+      startRun("daily");
+      return;
+    }
+    if (k === "e") {
+      startRun("endless");
+      return;
+    }
+
+    // Quality-of-life fix: pressing a movement key on the title screen
+    // starts the daily run and immediately applies that direction.
+    if (k === "arrowleft" || k === "a") {
+      startRun("daily");
+      setDesired(-1, 0);
+      return;
+    }
+    if (k === "arrowright" || k === "d") {
+      startRun("daily");
+      setDesired(1, 0);
+      return;
+    }
+    if (k === "arrowup" || k === "w") {
+      startRun("daily");
+      setDesired(0, -1);
+      return;
+    }
+    if (k === "arrowdown" || k === "s") {
+      startRun("daily");
+      setDesired(0, 1);
+      return;
+    }
+    return;
+  }
+
+  if (G.state === STATE.OVER) {
+    if (k === "escape") G.state = STATE.MENU;
+    else startRun(G.mode);
+    return;
+  }
+
+  if (G.state === STATE.PAUSE) {
+    G.state = STATE.PLAY;
+    return;
+  }
+
+  if (k === "m") AudioFx.setMuted(!AudioFx.muted);
+  if (k === "arrowleft" || k === "a") setDesired(-1, 0);
+  if (k === "arrowright" || k === "d") setDesired(1, 0);
+  if (k === "arrowup" || k === "w") setDesired(0, -1);
+  if (k === "arrowdown" || k === "s") setDesired(0, 1);
+  if (k === " " || k === "enter") activateRush();
+  if (k === "escape" && G.state === STATE.PLAY) G.state = STATE.PAUSE;
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && G.state === STATE.PLAY) G.state = STATE.PAUSE;
+});
+
+/* ==========================================================================
+   UPDATE
+   ========================================================================== */
+
+function update(dt) {
+  G.globalT += dt;
+  AudioFx.tick(dt);
+
+  G.levelFlash = Math.max(0, G.levelFlash - dt * 2.2);
+  G.shake = Math.max(0, G.shake - dt * 5);
+  G.displayScore += (G.score - G.displayScore) * Math.min(1, dt * (G.state === STATE.OVER ? 5 : 14));
+
+  updateFx(dt);
+
+  if (G.state === STATE.PLAY) {
+    const targetSlow = G.rushTimer > 0 ? 0.62 : G.powerTimer > 0 ? 0.86 : 1;
+    G.slowmo = lerp(G.slowmo, targetSlow, Math.min(1, dt * 5));
+    const sdt = dt * G.slowmo;
+
+    G.runTime += sdt;
+    G.chainTimer = Math.max(0, G.chainTimer - sdt);
+    G.nearMissCooldown = Math.max(0, G.nearMissCooldown - sdt);
+    G.powerTimer = Math.max(0, G.powerTimer - sdt);
+    G.rushTimer = Math.max(0, G.rushTimer - dt);
+    if (G.rushTimer <= 0 && G.rush > 100) G.rush = 100;
+
+    if (G.chainTimer <= 0 && G.chain > 0) {
+      G.chain = Math.max(0, G.chain - dt * 2.8);
+      if (G.chain < 1) {
+        G.chain = 0;
+        G.chainColor = -1;
+      }
+    }
+
+    updatePlayer(sdt);
+    updateEnemies(sdt);
+    handleCollisions();
+    checkLevelComplete();
+
+    if (!G.tutorialSeen && G.runTime > 18) {
+      G.tutorialSeen = true;
+      storageSet("mmr_tutorial_seen", true);
+    }
+  }
+
+  if (G.state === STATE.OVER) {
+    G.deathTime += dt;
+  }
+}
+
+function updateFx(dt) {
+  for (let i = G.particles.length - 1; i >= 0; i--) {
+    const p = G.particles[i];
+    p.t += dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= Math.exp(-(p.drag || 3) * dt);
+    p.vy *= Math.exp(-(p.drag || 3) * dt);
+    if (p.t >= p.life) G.particles.splice(i, 1);
+  }
+
+  for (let i = G.pops.length - 1; i >= 0; i--) {
+    const p = G.pops[i];
+    p.t += dt;
+    p.y -= dt * p.vy;
+    if (p.t >= p.life) G.pops.splice(i, 1);
+  }
+
+  for (let i = G.rings.length - 1; i >= 0; i--) {
+    const r = G.rings[i];
+    r.t += dt;
+    r.r += r.v * dt;
+    if (r.t >= r.life) G.rings.splice(i, 1);
+  }
+}
+
+function updatePlayer(dt) {
+  const p = G.player;
+  if (!p || !p.alive) return;
+
+  p.faceT += dt * 8;
+  p.desired = G.desiredDir;
+
+  if (atCenter(p)) {
+    snap(p);
+
+    if (canMove(p, p.desired)) {
+      p.dir = p.desired;
+    } else if (!canMove(p, p.dir)) {
+      // Stop in the centre when blocked; this is important for mobile forgiveness.
+      p.dir = { x: 0, y: 0, name: "stop" };
+    }
+  }
+
+  const speed = (p.speed + smooth(0, 120, G.score) * 0.9 + (G.rushTimer > 0 ? 1.2 : 0)) * dt;
+  p.x += p.dir.x * speed;
+  p.y += p.dir.y * speed;
+
+  // Clamp when the next tile is a wall so we do not drift into walls.
+  const cx = Math.round(p.x);
+  const cy = Math.round(p.y);
+  if (p.dir.x !== 0) {
+    const nextX = p.dir.x > 0 ? Math.floor(p.x + 0.5) : Math.ceil(p.x - 0.5);
+    if (isWall(nextX, cy)) p.x = cx;
+  }
+  if (p.dir.y !== 0) {
+    const nextY = p.dir.y > 0 ? Math.floor(p.y + 0.5) : Math.ceil(p.y - 0.5);
+    if (isWall(cx, nextY)) p.y = cy;
+  }
+
+  // Collect pellet at centre-ish.
+  const tx = Math.round(p.x);
+  const ty = Math.round(p.y);
+  if (Math.abs(p.x - tx) < 0.28 && Math.abs(p.y - ty) < 0.28) {
+    collectAt(tx, ty);
+  }
+}
+
+function updateEnemies(dt) {
+  for (const e of G.enemies) {
+    e.wiggle += dt * 6;
+    e.scaredBlink += dt * 12;
+
+    if (e.eatenTimer > 0) {
+      e.eatenTimer -= dt;
+      if (e.eatenTimer <= 0) {
+        e.x = e.homeX;
+        e.y = e.homeY;
+        e.dir = DIRS[Math.floor(G.rng() * DIRS.length)];
+        e.spawnDelay = 1.0;
+      }
+      continue;
+    }
+
+    if (e.spawnDelay > 0) {
+      e.spawnDelay -= dt;
+      continue;
+    }
+
+    if (atCenter(e)) {
+      snap(e);
+      e.dir = chooseEnemyDir(e);
+    }
+
+    const vulnerable = isEnemyVulnerable();
+    const speed = (vulnerable ? e.speed * 0.76 : e.speed + smooth(0, 100, G.score) * 0.45) * dt;
+    e.x += e.dir.x * speed;
+    e.y += e.dir.y * speed;
+
+    const cx = Math.round(e.x);
+    const cy = Math.round(e.y);
+
+    if (e.dir.x !== 0) {
+      const nextX = e.dir.x > 0 ? Math.floor(e.x + 0.5) : Math.ceil(e.x - 0.5);
+      if (isWall(nextX, cy)) {
+        e.x = cx;
+        e.dir = chooseEnemyDir(e, true);
+      }
+    }
+
+    if (e.dir.y !== 0) {
+      const nextY = e.dir.y > 0 ? Math.floor(e.y + 0.5) : Math.ceil(e.y - 0.5);
+      if (isWall(cx, nextY)) {
+        e.y = cy;
+        e.dir = chooseEnemyDir(e, true);
+      }
+    }
+  }
+}
+
+function chooseEnemyDir(e, forced = false) {
+  let dirs = availableDirs(e);
+  if (!forced && dirs.length > 1) dirs = dirs.filter(d => !isReverse(d, e.dir));
+
+  if (dirs.length === 0) return reverseDir(e.dir) || DIRS[0];
+
+  // Frightened sentinels choose a direction that increases distance.
+  if (isEnemyVulnerable()) {
+    let best = dirs[0];
+    let bestScore = -Infinity;
+    for (const d of dirs) {
+      const score = manhattan(Math.round(e.x) + d.x, Math.round(e.y) + d.y, G.player.x, G.player.y) + G.rng() * 1.5;
+      if (score > bestScore) {
+        best = d;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  let targetX = G.player.x;
+  let targetY = G.player.y;
+
+  if (e.personality === 1) {
+    // Ambusher aims a little ahead of the player.
+    targetX += G.player.dir.x * 4;
+    targetY += G.player.dir.y * 4;
+  } else if (e.personality === 2) {
+    // Guard tries to cut off the lower half and power zones.
+    targetX = G.player.y > ROWS * 0.55 ? G.player.x : 9;
+    targetY = G.player.y > ROWS * 0.55 ? 19 : 7;
+  } else if (e.personality === 3) {
+    // Wanderer injects unpredictability.
+    if (G.rng() < 0.38) return dirs[Math.floor(G.rng() * dirs.length)];
+  }
+
+  let best = dirs[0];
+  let bestScore = Infinity;
+  for (const d of dirs) {
+    const nx = Math.round(e.x) + d.x;
+    const ny = Math.round(e.y) + d.y;
+    const score = manhattan(nx, ny, targetX, targetY) + G.rng() * 0.35;
+    if (score < bestScore) {
+      best = d;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function isEnemyVulnerable() {
+  return G.powerTimer > 0 || G.rushTimer > 0;
+}
+
+function collectAt(tx, ty) {
+  if (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS) return;
+  const pellet = G.pellets[ty][tx];
+  if (!pellet || pellet.eaten) return;
+
+  pellet.eaten = true;
+  G.eaten++;
+
+  const pos = tileCenter(tx, ty);
+
+  if (pellet.type === "power") {
+    G.powerTimer = Math.max(G.powerTimer, 7.5);
+    G.rush = Math.min(100, G.rush + 38);
+    G.chainTimer = 4.0;
+    G.score += Math.round(250 * scoreMultiplier());
+    pop(pos.x, pos.y, "POWER!", "gold", 1.35);
+    burst(pos.x, pos.y, "gold", 34, 1.25);
+    ring(pos.x, pos.y, tile * 0.25, "gold", 2.8, 0.55);
+    G.shake += 1.2;
+    G.levelFlash = Math.max(G.levelFlash, 0.7);
+    AudioFx.power();
+    return;
+  }
+
+  const color = pellet.color;
+
+  if (G.chainColor === color) {
+    G.chain++;
+  } else {
+    G.chainColor = color;
+    G.chain = 1;
+  }
+
+  G.bestChain = Math.max(G.bestChain, Math.floor(G.chain));
+  G.chainTimer = 3.0;
+
+  const chainMult = 1 + Math.min(4.0, G.chain * 0.08);
+  const rushMult = G.rushTimer > 0 ? 2.5 : 1;
+  const scoreAdd = Math.round(10 * chainMult * rushMult * scoreMultiplier());
+  G.score += scoreAdd;
+  G.rush = Math.min(100, G.rush + 1.8 + Math.min(5, G.chain * 0.08));
+
+  if (G.chain % 8 === 0) {
+    G.perfectChains++;
+    G.rush = Math.min(100, G.rush + 8);
+    G.shake += 0.45;
+    G.levelFlash = Math.max(G.levelFlash, 0.18);
+    pop(pos.x, pos.y, `${G.chain} CHAIN!`, colorName(color), 1.1);
+    burst(pos.x, pos.y, colorName(color), 18, 0.85);
+    ring(pos.x, pos.y, tile * 0.16, colorName(color), 2.1, 0.35);
+    AudioFx.chainMilestone();
+  } else if (G.chain >= 4) {
+    pop(pos.x, pos.y, `+${scoreAdd}`, colorName(color), 0.72);
+    burst(pos.x, pos.y, colorName(color), 7, 0.45);
+  } else {
+    burst(pos.x, pos.y, colorName(color), 4, 0.28);
+  }
+
+  AudioFx.collect(Math.floor(G.chain), color);
+
+  if (G.chain >= 16 && G.comboShield === 0) {
+    G.comboShield = 1;
+    pop(pos.x, pos.y - tile * 1.0, "COMBO SHIELD", "cyan", 1.0);
+    ring(worldX(G.player.x), worldY(G.player.y), tile * 0.6, "cyan", 2.0, 0.45);
+  }
+}
+
+function scoreMultiplier() {
+  return 1 + smooth(0, 220, G.score) * 0.55;
+}
+
+function colorName(i) {
+  return COLORS[i]?.name || "cyan";
+}
+
+function handleCollisions() {
+  const px = G.player.x;
+  const py = G.player.y;
+
+  for (const e of G.enemies) {
+    if (e.eatenTimer > 0 || e.spawnDelay > 0) continue;
+
+    const d = dist(px, py, e.x, e.y);
+
+    // Near-miss reward for skimming a dangerous enemy without being hit.
+    if (!isEnemyVulnerable() && d < 1.15 && d > 0.62 && G.nearMissCooldown <= 0) {
+      G.nearMissCooldown = 0.65;
+      G.nearMisses++;
+      G.score += 35 + Math.floor(G.chain * 4);
+      G.rush = Math.min(100, G.rush + 6);
+      const x = (worldX(px) + worldX(e.x)) / 2;
+      const y = (worldY(py) + worldY(e.y)) / 2;
+      pop(x, y, "NEAR MISS", "pink", 0.78);
+      burst(x, y, "pink", 10, 0.5);
+      AudioFx.nearMiss();
+    }
+
+    if (d < 0.58) {
+      if (isEnemyVulnerable()) {
+        eatEnemy(e);
+      } else if (G.comboShield > 0) {
+        G.comboShield = 0;
+        G.chain = Math.max(0, Math.floor(G.chain * 0.5));
+        G.chainTimer = 0;
+        scatterEnemies();
+        G.shake += 1.6;
+        G.levelFlash = 0.7;
+        pop(worldX(px), worldY(py), "SHIELD BREAK!", "cyan", 1.2);
+        ring(worldX(px), worldY(py), tile * 0.7, "cyan", 3.5, 0.55);
+        burst(worldX(px), worldY(py), "cyan", 36, 1.1);
+      } else {
+        die();
+        return;
+      }
+    }
+  }
+
+  // Rush magnet: nearby crystals drift visually/score-wise toward the player.
+  if (G.rushTimer > 0) {
+    magnetCollect();
+  }
+}
+
+function eatEnemy(e) {
+  const x = worldX(e.x);
+  const y = worldY(e.y);
+  e.eatenTimer = 2.0;
+  G.enemiesEaten++;
+  G.chain += 3;
+  G.chainTimer = 3.0;
+  G.rush = Math.min(100, G.rush + 10);
+  const pts = 300 + G.enemiesEaten * 120 + Math.floor(G.chain) * 12;
+  G.score += pts * (G.rushTimer > 0 ? 2 : 1);
+
+  pop(x, y, `SMASH +${pts}`, "gold", 1.25);
+  burst(x, y, "gold", 38, 1.25);
+  ring(x, y, tile * 0.35, "gold", 3.1, 0.45);
+  G.shake += 0.9;
+  G.levelFlash = Math.max(G.levelFlash, 0.3);
+  AudioFx.eatEnemy(G.enemiesEaten);
+}
+
+function scatterEnemies() {
+  for (const e of G.enemies) {
+    if (e.eatenTimer <= 0) {
+      e.dir = chooseEnemyDir(e, true);
+      e.spawnDelay = 0.2;
+    }
+  }
+}
+
+function magnetCollect() {
+  const px = worldX(G.player.x);
+  const py = worldY(G.player.y);
+  const radius = tile * 1.65;
+
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const p = G.pellets[y] ? G.pellets[y][x] : null;
+      if (!p || p.eaten || p.type !== "crystal") continue;
+
+      const wx = worldX(x);
+      const wy = worldY(y);
+      if (Math.hypot(wx - px, wy - py) < radius) {
+        collectAt(x, y);
+      }
+    }
+  }
+}
+
+function activateRush() {
+  if (G.state !== STATE.PLAY || G.rush < 100 || G.rushTimer > 0) return;
+  G.rush = 110;
+  G.rushTimer = 5.0;
+  G.powerTimer = Math.max(G.powerTimer, 5.0);
+  G.rushUses++;
+  G.levelFlash = 1;
+  G.shake += 2.0;
+  pop(worldX(G.player.x), worldY(G.player.y), "MUNCH RUSH!", "gold", 1.6);
+  ring(worldX(G.player.x), worldY(G.player.y), tile * 0.6, "gold", 5.8, 0.8);
+  burst(worldX(G.player.x), worldY(G.player.y), "gold", 70, 1.5);
+  AudioFx.rush();
+}
+
+function checkLevelComplete() {
+  if (G.eaten >= G.pelletCount) {
+    const bonus = 1200 + Math.floor(G.chain * 45);
+    G.score += bonus;
+    pop(W / 2, boardY + boardH * 0.5, `MAZE CLEAR +${bonus}`, "gold", 1.5);
+    G.levelFlash = 1;
+    G.shake += 1.5;
+
+    // Refill the same maze with a stronger colour layout and faster enemies.
+    const oldScore = G.score;
+    buildMaze();
+    G.eaten = 0;
+    G.score = oldScore;
+    for (const e of G.enemies) {
+      e.speed += 0.25;
+      e.spawnDelay = 1.0 + G.rng() * 0.8;
+      e.x = e.homeX;
+      e.y = e.homeY;
+    }
+  }
+}
+
+function die() {
+  if (G.state !== STATE.PLAY) return;
+
+  G.state = STATE.OVER;
+  G.deathTime = 0;
+  G.levelFlash = 1;
+  G.shake += 2.5;
+  G.player.alive = false;
+
+  const x = worldX(G.player.x);
+  const y = worldY(G.player.y);
+  burst(x, y, "cyan", 70, 1.6);
+  burst(x, y, "pink", 38, 1.2);
+  ring(x, y, tile * 0.7, "pink", 6.5, 0.8);
+  AudioFx.death();
+
+  const score = Math.floor(G.score);
+  if (score > G.best) {
+    G.best = score;
+    storageSet("mmr_best", G.best);
+  }
+
+  if (G.mode === "daily") {
+    const oldRec = todayDailyRecord();
+    saveDailyRecord(score);
+
+    if (!oldRec.played) {
+      const yesterday = G.streak.last === dateKey(-1);
+      const alreadyToday = G.streak.last === dateKey();
+      if (!alreadyToday) {
+        G.streak = { count: yesterday ? (G.streak.count || 0) + 1 : 1, last: dateKey() };
+        storageSet("mmr_streak", G.streak);
+      }
+    }
+  }
+
+  try {
+    window.CrazyGames?.SDK?.game?.gameplayStop?.();
+    if (score >= G.best) window.CrazyGames?.SDK?.game?.happytime?.();
+  } catch {}
+}
+
+/* ==========================================================================
+   FX HELPERS
+   ========================================================================== */
+
+function spriteFor(name) {
+  return glowSprites[name] || glowSprites.cyan;
+}
+
+function burst(x, y, colorName, count, power = 1) {
+  const col = COLORS.find(c => c.name === colorName);
+  const sprite = colorName === "pink" ? "pink" : colorName === "gold" ? "gold" : colorName === "lime" ? "lime" : colorName === "red" ? "red" : "cyan";
+  const maxParticles = 260;
+  while (G.particles.length > maxParticles) G.particles.shift();
+
+  for (let i = 0; i < count; i++) {
+    const a = G.rng() * TAU;
+    const sp = (40 + G.rng() * 220) * power;
+    G.particles.push({
+      x, y,
+      vx: Math.cos(a) * sp,
+      vy: Math.sin(a) * sp,
+      life: 0.35 + G.rng() * 0.55,
+      t: 0,
+      r: (1.5 + G.rng() * 3.0) * (tile / 18),
+      sprite,
+      drag: 2.4 + G.rng() * 2.2
+    });
+  }
+}
+
+function pop(x, y, text, colorName = "cyan", scale = 1) {
+  G.pops.push({
+    x, y,
+    text,
+    colorName,
+    scale,
+    t: 0,
+    life: 0.72 + scale * 0.12,
+    vy: 34 + scale * 18
+  });
+  if (G.pops.length > 30) G.pops.shift();
+}
+
+function ring(x, y, r, colorName = "cyan", velocity = 2, life = 0.55) {
+  G.rings.push({
+    x, y,
+    r,
+    v: velocity * tile,
+    colorName,
+    t: 0,
+    life
+  });
+}
+
+/* ==========================================================================
+   RENDER
+   ========================================================================== */
+
+function render() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  drawBackground();
+
+  const shakeX = (G.rng() - 0.5) * G.shake * 4;
+  const shakeY = (G.rng() - 0.5) * G.shake * 4;
+
+  ctx.save();
+  ctx.translate(W / 2 + shakeX, H / 2 + shakeY);
+  ctx.scale(G.zoom, G.zoom);
+  ctx.translate(-W / 2, -H / 2);
+
+  drawMaze();
+  drawPellets();
+  drawEnemies();
+  drawPlayer();
+  drawRings();
+  drawParticles();
+
+  ctx.restore();
+
+  drawHud();
+  drawPops();
+  drawVignette();
+  drawMuteButton();
+
+  if (G.levelFlash > 0) {
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = `rgba(255,255,255,${G.levelFlash * 0.32})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  if (G.state === STATE.MENU) drawMenu();
+  if (G.state === STATE.OVER) drawGameOver();
+  if (G.state === STATE.PAUSE) drawPause();
+
+  document.getElementById("boot").style.display = "none";
+}
+
+function drawBackground() {
+  const t = G.globalT;
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#09072c");
+  g.addColorStop(0.55, "#050313");
+  g.addColorStop(1, "#010006");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = "lighter";
+  const pulse = 0.5 + 0.5 * Math.sin(t * 1.7);
+  drawGlow(glowSprites.pink, W * 0.12, H * 0.18, minDim * 0.42, 0.12 + pulse * 0.04);
+  drawGlow(glowSprites.cyan, W * 0.9, H * 0.72, minDim * 0.42, 0.12);
+
+  for (let i = 0; i < 36; i++) {
+    const x = (i * 97 + t * 11) % (W + 120) - 60;
+    const y = (i * 53 + Math.sin(t * 0.6 + i) * 40) % H;
+    ctx.fillStyle = i % 3 === 0 ? "rgba(56,232,255,.24)" : "rgba(255,255,255,.15)";
+    ctx.fillRect(x, y, 1.5, 1.5);
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function drawMaze() {
+  const wallR = Math.max(3, tile * 0.18);
+
+  // Board glass panel.
+  ctx.save();
+  roundRect(boardX - tile * 0.28, boardY - tile * 0.28, boardW + tile * 0.56, boardH + tile * 0.56, tile * 0.6);
+  ctx.fillStyle = "rgba(4, 4, 20, 0.48)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(56,232,255,0.16)";
+  ctx.lineWidth = Math.max(1, tile * 0.08);
+  ctx.stroke();
+  ctx.restore();
+
+  // Floor grid.
+  ctx.strokeStyle = "rgba(255,255,255,0.035)";
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= COLS; x++) {
+    ctx.beginPath();
+    ctx.moveTo(boardX + x * tile, boardY);
+    ctx.lineTo(boardX + x * tile, boardY + boardH);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= ROWS; y++) {
+    ctx.beginPath();
+    ctx.moveTo(boardX, boardY + y * tile);
+    ctx.lineTo(boardX + boardW, boardY + y * tile);
+    ctx.stroke();
+  }
+
+  // Walls.
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      if (!G.walls[y] || G.walls[y][x] !== "#") continue;
+      const wx = boardX + x * tile;
+      const wy = boardY + y * tile;
+
+      const dangerPulse = G.powerTimer <= 0 ? 0.5 + 0.5 * Math.sin(G.globalT * 3 + x * 0.4 + y * 0.2) : 0;
+      roundRect(wx + tile * 0.08, wy + tile * 0.08, tile * 0.84, tile * 0.84, wallR);
+      ctx.fillStyle = G.powerTimer > 0 ? "rgba(23, 15, 56, 0.92)" : "rgba(16, 20, 64, 0.96)";
+      ctx.fill();
+      ctx.strokeStyle = G.powerTimer > 0
+        ? "rgba(255,210,60,0.25)"
+        : `rgba(56,232,255,${0.18 + dangerPulse * 0.09})`;
+      ctx.lineWidth = Math.max(1, tile * 0.045);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawPellets() {
+  const t = G.globalT;
+  ctx.globalCompositeOperation = "lighter";
+
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const p = G.pellets[y] ? G.pellets[y][x] : null;
+      if (!p || p.eaten) continue;
+
+      const cx = worldX(x);
+      const cy = worldY(y);
+
+      if (p.type === "power") {
+        const pulse = 1 + Math.sin(t * 5 + p.pulse) * 0.12;
+        drawGlow(glowSprites.gold, cx, cy, tile * 0.8 * pulse, 0.54);
+        ctx.beginPath();
+        ctx.arc(cx, cy, tile * 0.22 * pulse, 0, TAU);
+        ctx.fillStyle = "rgba(255,244,180,0.95)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,210,60,0.9)";
+        ctx.lineWidth = Math.max(1, tile * 0.07);
+        ctx.stroke();
+      } else {
+        const c = COLORS[p.color];
+        const chainMatch = p.color === G.chainColor && G.chain >= 3;
+        const pulse = 1 + Math.sin(t * 3.5 + p.pulse) * (chainMatch ? 0.18 : 0.08);
+
+        if (chainMatch) {
+          drawGlow(spriteFor(c.sprite), cx, cy, tile * 0.48 * pulse, 0.30);
+        }
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate((t * 0.8 + p.pulse) % TAU);
+        ctx.beginPath();
+        ctx.moveTo(0, -tile * 0.14 * pulse);
+        ctx.lineTo(tile * 0.13 * pulse, 0);
+        ctx.lineTo(0, tile * 0.14 * pulse);
+        ctx.lineTo(-tile * 0.13 * pulse, 0);
+        ctx.closePath();
+        ctx.fillStyle = hsl(c.hue, 95, chainMatch ? 70 : 62, 0.92);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function drawPlayer() {
+  const p = G.player;
+  if (!p || !p.alive) return;
+
+  const x = worldX(p.x);
+  const y = worldY(p.y);
+  const r = tile * 0.46;
+  const t = G.globalT;
+  const rush = G.rushTimer > 0;
+  const power = G.powerTimer > 0;
+
+  ctx.globalCompositeOperation = "lighter";
+
+  // Trail.
+  const speedAngle = Math.atan2(p.dir.y, p.dir.x);
+  for (let i = 1; i <= 6; i++) {
+    const tx = x - p.dir.x * tile * 0.16 * i;
+    const ty = y - p.dir.y * tile * 0.16 * i;
+    drawGlow(rush ? glowSprites.gold : glowSprites.cyan, tx, ty, r * (0.62 - i * 0.05), 0.15 * (1 - i / 7));
+  }
+
+  drawGlow(rush ? glowSprites.gold : power ? glowSprites.white : glowSprites.cyan, x, y, r * (rush ? 2.2 : 1.75), rush ? 0.75 : 0.55);
+  ctx.globalCompositeOperation = "source-over";
+
+  // Squishy body.
+  ctx.save();
+  ctx.translate(x, y);
+  const sx = 1 + Math.abs(p.dir.x) * 0.12 + Math.sin(t * 11) * 0.025;
+  const sy = 1 + Math.abs(p.dir.y) * 0.12 - Math.sin(t * 11) * 0.025;
+  ctx.scale(p.dir.x !== 0 ? sx : 1, p.dir.y !== 0 ? sy : 1);
+
+  const grd = ctx.createRadialGradient(-r * 0.2, -r * 0.3, r * 0.1, 0, 0, r);
+  grd.addColorStop(0, rush ? "#fff7b8" : "#f4ffff");
+  grd.addColorStop(0.45, rush ? "#ffd23c" : "#38e8ff");
+  grd.addColorStop(1, rush ? "#ff8e3c" : "#147cff");
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.76, 0, TAU);
+  ctx.fillStyle = grd;
+  ctx.fill();
+
+  // Mouth / expression, not a Pac-Man wedge.
+  ctx.fillStyle = "rgba(3,10,35,0.82)";
+  ctx.beginPath();
+  ctx.ellipse(r * 0.10, r * 0.16, r * 0.30, r * 0.18, 0, 0, Math.PI);
+  ctx.fill();
+
+  // Eyes look in movement/input direction.
+  const lookX = clamp(p.desired.x, -1, 1) * r * 0.08;
+  const lookY = clamp(p.desired.y, -1, 1) * r * 0.06;
+  drawEye(-r * 0.22, -r * 0.16, lookX, lookY, r);
+  drawEye(r * 0.23, -r * 0.16, lookX, lookY, r);
+
+  ctx.restore();
+}
+
+function drawEye(ex, ey, lx, ly, r) {
+  ctx.beginPath();
+  ctx.arc(ex, ey, r * 0.15, 0, TAU);
+  ctx.fillStyle = "white";
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(ex + lx, ey + ly, r * 0.065, 0, TAU);
+  ctx.fillStyle = "#061029";
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(ex + lx + r * 0.025, ey + ly - r * 0.025, r * 0.022, 0, TAU);
+  ctx.fillStyle = "white";
+  ctx.fill();
+}
+
+function drawEnemies() {
+  for (const e of G.enemies) {
+    if (e.eatenTimer > 0) {
+      drawEnemyEyes(e);
+      continue;
+    }
+    if (e.spawnDelay > 0) continue;
+
+    const x = worldX(e.x);
+    const y = worldY(e.y);
+    const vulnerable = isEnemyVulnerable();
+    const meta = SENTINEL_COLORS[e.personality];
+    const r = tile * 0.47;
+    const blink = Math.sin(e.scaredBlink) > 0;
+    const hue = vulnerable ? (blink && G.powerTimer < 2 ? 0 : 220) : meta.hue;
+
+    ctx.globalCompositeOperation = "lighter";
+    drawGlow(vulnerable ? glowSprites.cyan : spriteFor(meta.sprite), x, y, r * 1.45, vulnerable ? 0.28 : 0.38);
+    ctx.globalCompositeOperation = "source-over";
+
+    ctx.save();
+    ctx.translate(x, y + Math.sin(G.globalT * 5 + e.wiggle) * tile * 0.04);
+    ctx.rotate(Math.sin(G.globalT * 3 + e.wiggle) * 0.08);
+
+    // Diamond/sentinel shape, not ghost silhouette.
+    ctx.beginPath();
+    ctx.moveTo(0, -r * 0.92);
+    ctx.lineTo(r * 0.86, 0);
+    ctx.lineTo(0, r * 0.92);
+    ctx.lineTo(-r * 0.86, 0);
+    ctx.closePath();
+
+    const g = ctx.createLinearGradient(-r, -r, r, r);
+    if (vulnerable) {
+      g.addColorStop(0, "rgba(190,240,255,0.95)");
+      g.addColorStop(1, "rgba(40,120,255,0.95)");
+    } else {
+      g.addColorStop(0, hsl(hue, 95, 72, 0.98));
+      g.addColorStop(1, hsl(hue + 20, 95, 42, 0.98));
+    }
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    ctx.strokeStyle = vulnerable ? "rgba(255,255,255,0.7)" : hsl(hue, 90, 80, 0.75);
+    ctx.lineWidth = Math.max(1, tile * 0.06);
+    ctx.stroke();
+
+    // Eyes.
+    ctx.fillStyle = vulnerable ? "#08122e" : "white";
+    ctx.beginPath();
+    ctx.arc(-r * 0.23, -r * 0.12, r * 0.13, 0, TAU);
+    ctx.arc(r * 0.23, -r * 0.12, r * 0.13, 0, TAU);
+    ctx.fill();
+
+    ctx.fillStyle = vulnerable ? "white" : "#08122e";
+    ctx.beginPath();
+    ctx.arc(-r * 0.23 + e.dir.x * r * 0.04, -r * 0.12 + e.dir.y * r * 0.04, r * 0.055, 0, TAU);
+    ctx.arc(r * 0.23 + e.dir.x * r * 0.04, -r * 0.12 + e.dir.y * r * 0.04, r * 0.055, 0, TAU);
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+function drawEnemyEyes(e) {
+  const x = worldX(e.x);
+  const y = worldY(e.y);
+  const r = tile * 0.22;
+  ctx.fillStyle = "rgba(255,255,255,0.8)";
+  ctx.beginPath();
+  ctx.arc(x - r, y, r * 0.55, 0, TAU);
+  ctx.arc(x + r, y, r * 0.55, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#061029";
+  ctx.beginPath();
+  ctx.arc(x - r + e.dir.x * r * 0.25, y + e.dir.y * r * 0.25, r * 0.25, 0, TAU);
+  ctx.arc(x + r + e.dir.x * r * 0.25, y + e.dir.y * r * 0.25, r * 0.25, 0, TAU);
+  ctx.fill();
+}
+
+function drawParticles() {
+  ctx.globalCompositeOperation = "lighter";
+  for (const p of G.particles) {
+    const k = 1 - p.t / p.life;
+    drawGlow(spriteFor(p.sprite), p.x, p.y, p.r * (4 + k * 3), k * 0.75);
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function drawRings() {
+  ctx.globalCompositeOperation = "lighter";
+  for (const r of G.rings) {
+    const k = 1 - r.t / r.life;
+    const color = r.colorName === "gold" ? "rgba(255,210,60," : r.colorName === "pink" ? "rgba(255,60,172," : "rgba(56,232,255,";
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, r.r, 0, TAU);
+    ctx.strokeStyle = color + (k * 0.9) + ")";
+    ctx.lineWidth = Math.max(1, tile * 0.14 * k);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function drawPops() {
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const p of G.pops) {
+    const k = 1 - p.t / p.life;
+    const c = p.colorName === "gold" ? "255,210,60" : p.colorName === "pink" ? "255,60,172" : p.colorName === "lime" ? "120,255,122" : "56,232,255";
+    const scale = p.scale * (p.t < 0.08 ? lerp(0.5, 1.15, p.t / 0.08) : 1);
+    ctx.globalAlpha = clamp(k * 1.4, 0, 1);
+    ctx.font = `900 ${Math.round(minDim * 0.033 * scale)}px Bahnschrift, system-ui, sans-serif`;
+    ctx.fillStyle = `rgba(${c},1)`;
+    ctx.shadowColor = `rgba(${c},0.75)`;
+    ctx.shadowBlur = 12;
+    ctx.fillText(p.text, p.x, p.y);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+  ctx.textBaseline = "alphabetic";
+}
+
+function drawHud() {
+  if (G.state === STATE.MENU) return;
+
+  const topY = Math.max(18 + safeTop, H * 0.025);
+  const scoreSize = Math.max(28, minDim * 0.082);
+
+  ctx.textAlign = "center";
+  ctx.font = `900 ${Math.round(scoreSize)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "#f4ffff";
+  ctx.shadowColor = "rgba(56,232,255,.55)";
+  ctx.shadowBlur = 16;
+  ctx.fillText(Math.floor(G.displayScore).toLocaleString("en-US"), W / 2, topY + scoreSize * 0.85);
+  ctx.shadowBlur = 0;
+
+  // Mode and high score.
+  ctx.textAlign = "left";
+  ctx.font = `700 ${Math.round(minDim * 0.026)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.58)";
+  ctx.fillText(G.mode === "daily" ? "DAILY MAZE" : "RANDOM RUN", W * 0.04, topY + minDim * 0.02);
+
+  ctx.textAlign = "right";
+  ctx.fillText("BEST " + Math.floor(G.best).toLocaleString("en-US"), W * 0.96, topY + minDim * 0.02);
+
+  // Chain and rush meters.
+  const meterW = Math.min(W * 0.64, 320);
+  const meterH = Math.max(7, minDim * 0.018);
+  const mx = (W - meterW) / 2;
+  const my = boardY + boardH + Math.max(10, minDim * 0.018);
+
+  roundRect(mx, my, meterW, meterH, meterH / 2);
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fill();
+
+  roundRect(mx, my, meterW * clamp(G.rush / 100, 0, 1), meterH, meterH / 2);
+  ctx.fillStyle = G.rush >= 100 ? "rgba(255,210,60,0.95)" : "rgba(56,232,255,0.85)";
+  ctx.fill();
+
+  ctx.textAlign = "center";
+  ctx.font = `800 ${Math.round(minDim * 0.026)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = G.rush >= 100 ? "rgba(255,235,150,1)" : "rgba(255,255,255,0.64)";
+  ctx.fillText(G.rushTimer > 0 ? "MUNCH RUSH ACTIVE" : G.rush >= 100 ? "RUSH READY — TAP ⚡" : "RUSH", W / 2, my + meterH + minDim * 0.032);
+
+  if (G.chain >= 2) {
+    const c = COLORS[G.chainColor] || COLORS[0];
+    ctx.font = `900 ${Math.round(minDim * 0.042 + Math.min(12, G.chain) * 0.45)}px Bahnschrift, system-ui, sans-serif`;
+    ctx.fillStyle = hsl(c.hue, 95, 68, 0.96);
+    ctx.shadowColor = hsl(c.hue, 95, 68, 0.5);
+    ctx.shadowBlur = 12;
+    ctx.fillText(`${Math.floor(G.chain)} ${c.name.toUpperCase()} CHAIN`, W / 2, boardY - minDim * 0.018);
+    ctx.shadowBlur = 0;
+  }
+
+  if (G.comboShield > 0) {
+    ctx.textAlign = "left";
+    ctx.font = `800 ${Math.round(minDim * 0.026)}px Bahnschrift, system-ui, sans-serif`;
+    ctx.fillStyle = "rgba(56,232,255,0.95)";
+    ctx.fillText("◇ SHIELD", W * 0.04, boardY + boardH + minDim * 0.06);
+  }
+
+  // Rush button.
+  if (G.state === STATE.PLAY && G.rush >= 100 && G.rushTimer <= 0) {
+    const b = rushButtonRect();
+    const pulse = 1 + Math.sin(G.globalT * 9) * 0.06;
+    ctx.globalCompositeOperation = "lighter";
+    drawGlow(glowSprites.gold, b.x, b.y, b.r * 1.45 * pulse, 0.55);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r * pulse, 0, TAU);
+    ctx.fillStyle = "rgba(255,210,60,0.20)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,240,170,0.95)";
+    ctx.lineWidth = Math.max(2, minDim * 0.008);
+    ctx.stroke();
+    ctx.font = `900 ${Math.round(b.r * 0.82)}px system-ui`;
+    ctx.fillStyle = "white";
+    ctx.fillText("⚡", b.x, b.y + b.r * 0.24);
+  }
+
+  drawTutorialHints();
+}
+
+function drawTutorialHints() {
+  if (G.tutorialSeen || G.state !== STATE.PLAY) return;
+  let text = "";
+
+  if (G.runTime < 4.0) text = "SWIPE / WASD TO TURN";
+  else if (G.runTime < 8.5) text = "MATCH SAME COLOUR CRYSTALS";
+  else if (G.runTime < 13.0) text = "POWER ORBS FLIP THE CHASE";
+  else if (G.runTime < 18.0) text = "NEAR MISSES FILL RUSH";
+
+  if (!text) return;
+
+  ctx.textAlign = "center";
+  ctx.font = `900 ${Math.round(minDim * 0.038)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.82)";
+  ctx.shadowColor = "rgba(56,232,255,0.55)";
+  ctx.shadowBlur = 12;
+  ctx.fillText(text, W / 2, H - Math.max(88, minDim * 0.18));
+  ctx.shadowBlur = 0;
+}
+
+function drawVignette() {
+  const danger = computeDanger();
+  const g = ctx.createRadialGradient(W / 2, H * 0.45, minDim * 0.22, W / 2, H * 0.5, Math.max(W, H) * 0.7);
+  g.addColorStop(0, "rgba(0,0,0,0)");
+  g.addColorStop(0.7, "rgba(0,0,0,0.20)");
+  g.addColorStop(1, `rgba(${danger > 0.4 ? 255 : 0},${danger > 0.4 ? 20 : 0},${danger > 0.4 ? 60 : 0},${0.48 + danger * 0.22})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function computeDanger() {
+  if (G.state !== STATE.PLAY || isEnemyVulnerable()) return 0;
+  let dmin = Infinity;
+  for (const e of G.enemies) {
+    if (e.eatenTimer > 0 || e.spawnDelay > 0) continue;
+    dmin = Math.min(dmin, dist(G.player.x, G.player.y, e.x, e.y));
+  }
+  return clamp(1 - (dmin - 0.5) / 2.1, 0, 1);
+}
+
+/* ==========================================================================
+   MENUS
+   ========================================================================== */
+
+function drawMenu() {
+  ctx.fillStyle = "rgba(2,2,10,0.45)";
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = "center";
+  const titleY = H * 0.20;
+  const pulse = 1 + Math.sin(G.globalT * 2.0) * 0.025;
+
+  ctx.globalCompositeOperation = "lighter";
+  ctx.font = `900 ${Math.round(minDim * 0.128 * pulse)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,60,172,0.70)";
+  ctx.fillText("MAZE", W / 2 - 4, titleY);
+  ctx.fillStyle = "rgba(56,232,255,0.70)";
+  ctx.fillText("MUNCH", W / 2 + 4, titleY + minDim * 0.105);
+  ctx.globalCompositeOperation = "source-over";
+
+  ctx.fillStyle = "#f4ffff";
+  ctx.fillText("MAZE", W / 2, titleY);
+  ctx.fillText("MUNCH", W / 2, titleY + minDim * 0.105);
+
+  ctx.font = `900 ${Math.round(minDim * 0.045)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,210,60,0.95)";
+  ctx.fillText("RUSH", W / 2, titleY + minDim * 0.165);
+
+  ctx.font = `700 ${Math.round(minDim * 0.030)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.64)";
+  ctx.fillText("Swipe. Chain colours. Flip the chase.", W / 2, titleY + minDim * 0.225);
+
+  const today = todayDailyRecord();
+  const streak = G.streak.count || 0;
+  const panelY = H * 0.43;
+  const bw = Math.min(W * 0.72, 360);
+  const bh = Math.max(56, minDim * 0.12);
+  G.menuButtons.daily = drawButton(W / 2, panelY, bw, bh, "PLAY DAILY MAZE", "cyan", true);
+  G.menuButtons.endless = drawButton(W / 2, panelY + bh + minDim * 0.035, bw * 0.82, bh * 0.78, "RANDOM RUN", "pink", false);
+
+  ctx.textAlign = "center";
+  ctx.font = `800 ${Math.round(minDim * 0.030)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.70)";
+  ctx.fillText("BEST  " + Math.floor(G.best).toLocaleString("en-US"), W / 2, panelY + bh * 2.1 + minDim * 0.055);
+  ctx.fillStyle = "rgba(255,210,60,0.86)";
+  ctx.fillText("TODAY  " + Math.floor(today.best || 0).toLocaleString("en-US") + (streak ? `   ·   🔥 ${streak} DAY` : ""), W / 2, panelY + bh * 2.1 + minDim * 0.095);
+
+  ctx.font = `700 ${Math.round(minDim * 0.026)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.42)";
+  ctx.fillText("Press WASD/arrows or swipe to start. Swipe again to turn.", W / 2, H - Math.max(34, minDim * 0.07));
+}
+
+function drawGameOver() {
+  const score = Math.floor(G.score);
+  const isBest = score >= G.best && score > 0;
+  ctx.fillStyle = "rgba(1,1,8,0.72)";
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = "center";
+  ctx.font = `900 ${Math.round(minDim * 0.068)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = isBest ? "rgba(255,210,60,1)" : "rgba(255,255,255,0.7)";
+  ctx.fillText(isBest ? "NEW BEST!" : runTitle(), W / 2, H * 0.25);
+
+  ctx.font = `900 ${Math.round(minDim * 0.135)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "#f4ffff";
+  ctx.shadowColor = "rgba(56,232,255,.7)";
+  ctx.shadowBlur = 20;
+  ctx.fillText(Math.floor(G.displayScore).toLocaleString("en-US"), W / 2, H * 0.37);
+  ctx.shadowBlur = 0;
+
+  ctx.font = `800 ${Math.round(minDim * 0.030)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.72)";
+  ctx.fillText(`BEST CHAIN ${Math.floor(G.bestChain)}   ·   NEAR MISSES ${G.nearMisses}`, W / 2, H * 0.45);
+  ctx.fillText(`SENTINELS SMASHED ${G.enemiesEaten}   ·   RUSHES ${G.rushUses}`, W / 2, H * 0.49);
+
+  const gap = Math.max(0, G.best - score);
+  if (!isBest && G.best > 0 && gap < G.best * 0.12) {
+    ctx.fillStyle = "rgba(255,210,60,0.95)";
+    ctx.fillText(`ONLY ${gap.toLocaleString("en-US")} FROM BEST`, W / 2, H * 0.54);
+  } else if (G.mode === "daily") {
+    ctx.fillStyle = "rgba(255,210,60,0.82)";
+    ctx.fillText("COME BACK TOMORROW FOR A NEW MAZE", W / 2, H * 0.54);
+  }
+
+  const bw = Math.min(W * 0.66, 330);
+  const bh = Math.max(56, minDim * 0.12);
+  G.gameOverButtons.again = drawButton(W / 2, H * 0.66, bw, bh, "PLAY AGAIN", "cyan", true);
+  G.gameOverButtons.menu = drawButton(W / 2, H * 0.66 + bh + minDim * 0.032, bw * 0.65, bh * 0.72, "MENU", "pink", false);
+}
+
+function runTitle() {
+  if (G.bestChain >= 32) return "CHAIN MONSTER";
+  if (G.nearMisses >= 12) return "EDGE DANCER";
+  if (G.enemiesEaten >= 6) return "SENTINEL EATER";
+  if (G.rushUses >= 2) return "RUSH PILOT";
+  if (G.score >= G.best * 0.9 && G.best > 0) return "SO CLOSE";
+  return "RUN OVER";
+}
+
+function drawPause() {
+  ctx.fillStyle = "rgba(1,1,8,0.65)";
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = "center";
+  ctx.font = `900 ${Math.round(minDim * 0.07)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "#f4ffff";
+  ctx.fillText("PAUSED", W / 2, H * 0.45);
+  ctx.font = `700 ${Math.round(minDim * 0.03)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.58)";
+  ctx.fillText("TAP OR PRESS ANY KEY", W / 2, H * 0.51);
+}
+
+function drawButton(cx, cy, w, h, text, colorName, filled) {
+  const x = cx - w / 2;
+  const y = cy - h / 2;
+  const c = colorName === "pink" ? "255,60,172" : colorName === "gold" ? "255,210,60" : "56,232,255";
+
+  roundRect(x, y, w, h, h * 0.28);
+  ctx.fillStyle = filled ? `rgba(${c},0.18)` : "rgba(255,255,255,0.03)";
+  ctx.fill();
+  ctx.strokeStyle = `rgba(${c},${filled ? 0.92 : 0.48})`;
+  ctx.lineWidth = Math.max(2, minDim * 0.006);
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `900 ${Math.round(h * 0.36)}px Bahnschrift, system-ui, sans-serif`;
+  ctx.fillStyle = filled ? "#f4ffff" : `rgba(${c},0.95)`;
+  ctx.fillText(text, cx, cy + h * 0.03);
+  ctx.textBaseline = "alphabetic";
+
+  return { x, y, w, h };
+}
+
+function muteButtonRect() {
+  const r = Math.max(16, minDim * 0.037);
+  return { x: W - r - 16, y: H - r - 16 - safeBottom, r };
+}
+
+function drawMuteButton() {
+  const b = muteButtonRect();
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.globalAlpha = 0.68;
+  ctx.strokeStyle = "white";
+  ctx.fillStyle = "white";
+  ctx.lineWidth = Math.max(1.5, minDim * 0.004);
+  const s = b.r;
+
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.75, -s * 0.32);
+  ctx.lineTo(-s * 0.25, -s * 0.32);
+  ctx.lineTo(s * 0.12, -s * 0.66);
+  ctx.lineTo(s * 0.12, s * 0.66);
+  ctx.lineTo(-s * 0.25, s * 0.32);
+  ctx.lineTo(-s * 0.75, s * 0.32);
+  ctx.closePath();
+  ctx.fill();
+
+  if (AudioFx.muted) {
+    ctx.beginPath();
+    ctx.moveTo(s * 0.38, -s * 0.50);
+    ctx.lineTo(s * 0.86, s * 0.50);
+    ctx.moveTo(s * 0.86, -s * 0.50);
+    ctx.lineTo(s * 0.38, s * 0.50);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.arc(s * 0.32, 0, s * 0.42, -0.72, 0.72);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(s * 0.32, 0, s * 0.74, -0.72, 0.72);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/* ==========================================================================
+   MAIN LOOP
+   ========================================================================== */
+
+let last = performance.now();
+
+function frame(now) {
+  const rawDt = (now - last) / 1000;
+  last = now;
+  const dt = Math.min(0.05, rawDt);
+
+  update(dt);
+  render();
+
+  requestAnimationFrame(frame);
+}
+
+/* ==========================================================================
+   BOOT
+   ========================================================================== */
+
+resize();
+buildMaze();
+requestAnimationFrame(frame);
+
+/*
+  CrazyGames deployment notes:
+  - Add SDK script before this game script if deploying on CrazyGames.
+  - Keep the guarded lifecycle calls already included:
+      gameplayStart() on run start
+      gameplayStop() on death
+      happytime() on major best-score moment
+  - The game runs standalone without the SDK.
+*/
+
+</script>
+</body>
+</html>

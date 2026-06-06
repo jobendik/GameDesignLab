@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sprouty's Garden</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #0a3d0a;
+            font-family: 'Press Start 2P', cursive;
+            color: #fff;
+            touch-action: none;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+            background: #1a5f1a;
+        }
+        
+        .ui-overlay {
+            position: absolute;
+            pointer-events: none;
+        }
+        
+        #top-bar {
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.7);
+            padding: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            pointer-events: auto;
+            z-index: 10;
+            font-size: 12px;
+        }
+        
+        #resource-display {
+            display: flex;
+            gap: 15px;
+        }
+        
+        .resource {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        #shop {
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 180px;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            overflow-x: auto;
+            padding: 10px;
+            gap: 10px;
+            z-index: 20;
+            pointer-events: auto;
+        }
+        
+        .shop-item {
+            width: 80px;
+            flex-shrink: 0;
+            background: #2a7f2a;
+            border: 3px solid #ffd700;
+            padding: 5px;
+            text-align: center;
+            cursor: pointer;
+            transition: transform 0.1s;
+            border-radius: 8px;
+        }
+        
+        .shop-item:hover, .shop-item:active {
+            transform: scale(1.1);
+        }
+        
+        .shop-item.locked {
+            opacity: 0.5;
+            filter: grayscale(1);
+        }
+        
+        #side-panel {
+            top: 60px;
+            right: 10px;
+            width: 160px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            z-index: 15;
+            pointer-events: auto;
+            font-size: 11px;
+        }
+        
+        button {
+            background: #ffd700;
+            color: #000;
+            border: none;
+            padding: 8px 12px;
+            font-family: inherit;
+            font-size: 11px;
+            cursor: pointer;
+            margin: 5px 0;
+        }
+        
+        .modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #1a5f1a;
+            border: 4px solid #ffd700;
+            padding: 20px;
+            max-width: 80%;
+            text-align: center;
+            z-index: 100;
+            display: none;
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: #ffd700;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas" width="800" height="600"></canvas>
+        
+        <!-- Top Bar -->
+        <div id="top-bar" class="ui-overlay">
+            <div id="resource-display">
+                <div class="resource">🌱 <span id="seeds">0</span></div>
+                <div class="resource">💧 <span id="water">0</span></div>
+                <div class="resource">🍅 <span id="harvest">0</span></div>
+            </div>
+            <div>
+                <button onclick="togglePrestige()">Prestige</button>
+                <button onclick="showSettings()">⚙</button>
+            </div>
+        </div>
+        
+        <!-- Side Panel -->
+        <div id="side-panel" class="ui-overlay">
+            <div id="next-goal">Next: Water 5 plots</div>
+            <div class="progress-bar" style="width: 30%"></div>
+            <div id="prestige-points">Prestige: 0</div>
+        </div>
+        
+        <!-- Shop -->
+        <div id="shop" class="ui-overlay"></div>
+        
+        <!-- Modals -->
+        <div id="welcome-modal" class="modal">
+            <h2>Welcome to Sprouty's Garden!</h2>
+            <p>Tap plots to water and grow plants!</p>
+            <button onclick="closeModal('welcome-modal')">Start Growing!</button>
+        </div>
+        
+        <div id="offline-modal" class="modal">
+            <h2>Welcome Back!</h2>
+            <p id="offline-text"></p>
+            <button onclick="claimOffline()">Claim</button>
+            <button onclick="doubleOffline()">2x with Ad</button>
+        </div>
+    </div>
+
+    <script>
+        // ========================================
+        // CFG / BALANCE - TUNE HERE
+        // ========================================
+        const CFG = {
+            // Economy
+            BASE_SEED_INCOME: 1,
+            WORKER_COST_GROWTH: 1.12,  // 1.07-1.15 range for smooth progression
+            UPGRADE_COST_GROWTH: 1.18,
+            
+            // Timing
+            TICK_RATE: 1000 / 60, // ~60fps
+            OFFLINE_CAP_HOURS: 4,
+            
+            // Progression targets
+            // HOW TO TUNE:
+            // - Increase BASE_SEED_INCOME for faster early game
+            // - Lower WORKER_COST_GROWTH for smoother climb
+            // - Adjust TIER_THRESHOLDS to control expansion pacing
+            // Simulate in headless mode to verify timeline
+        };
+        
+        // Game State
+        let gameState = {
+            seeds: 0,
+            water: 50,
+            harvest: 0,
+            prestige: 0,
+            multiplier: 1,
+            lastSaveTime: Date.now(),
+            totalEarned: 0,
+            workers: {},
+            upgrades: {},
+            plots: [],
+            unlockedZones: 1,
+            streak: 1,
+            lastDaily: Date.now()
+        };
+        
+        // Data tables
+        const WORKERS = [
+            { id: 'bee', name: 'Bee', cost: 15, income: 0.5, owned: 0, emoji: '🐝' },
+            { id: 'worm', name: 'Worm', cost: 45, income: 2, owned: 0, emoji: '🪱' },
+            { id: 'fairy', name: 'Fairy', cost: 120, income: 6, owned: 0, emoji: '🧚' }
+        ];
+        
+        const UPGRADES = [
+            { id: 'betterSoil', name: 'Better Soil', cost: 80, effect: 1.5, bought: false },
+            { id: 'autoWater', name: 'Auto Sprinkler', cost: 200, effect: 2, bought: false }
+        ];
+        
+        // Canvas setup
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        let WIDTH = 800;
+        let HEIGHT = 600;
+        
+        // Resize handler
+        function resizeCanvas() {
+            const container = document.getElementById('game-container');
+            const ratio = Math.min(container.clientWidth / WIDTH, container.clientHeight / HEIGHT);
+            canvas.style.width = (WIDTH * ratio) + 'px';
+            canvas.style.height = (HEIGHT * ratio) + 'px';
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Particles
+        let particles = [];
+        
+        function createParticle(x, y, text, color) {
+            particles.push({
+                x, y,
+                vx: Math.random() * 4 - 2,
+                vy: -Math.random() * 3 - 1,
+                life: 60,
+                text,
+                color
+            });
+        }
+        
+        // Plots - the garden grid
+        let plots = [];
+        function initPlots() {
+            plots = [];
+            for (let i = 0; i < 12; i++) {
+                plots.push({
+                    x: 100 + (i % 4) * 120,
+                    y: 120 + Math.floor(i / 4) * 110,
+                    level: 0,
+                    watered: false,
+                    growth: 0,
+                    maxGrowth: 100,
+                    emoji: '🌱'
+                });
+            }
+        }
+        
+        // Input handling
+        let lastTapTime = 0;
+        canvas.addEventListener('click', handleClick);
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = (touch.clientX - rect.left) * (WIDTH / rect.width);
+            const y = (touch.clientY - rect.top) * (HEIGHT / rect.height);
+            handleTap(x, y);
+        });
+        
+        function handleClick(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left) * (WIDTH / rect.width);
+            const y = (e.clientY - rect.top) * (HEIGHT / rect.height);
+            handleTap(x, y);
+        }
+        
+        function handleTap(x, y) {
+            // Check plot taps
+            for (let plot of plots) {
+                if (Math.hypot(plot.x + 40 - x, plot.y + 40 - y) < 60) {
+                    waterPlot(plot);
+                    return;
+                }
+            }
+            
+            // Background tap for manual seeds if no plot
+            if (Math.random() > 0.7) {
+                gameState.seeds += 1 * gameState.multiplier;
+                createParticle(x, y, '+1', '#ffd700');
+            }
+        }
+        
+        function waterPlot(plot) {
+            if (plot.growth < plot.maxGrowth) {
+                plot.growth += 25;
+                gameState.water = Math.max(0, gameState.water - 2);
+                gameState.seeds += 3 * gameState.multiplier;
+                createParticle(plot.x + 40, plot.y + 40, '+3', '#00ff00');
+                
+                // Juice
+                if (plot.growth >= plot.maxGrowth) {
+                    plot.level++;
+                    plot.growth = 0;
+                    gameState.harvest += 5;
+                    createParticle(plot.x + 40, plot.y, '🌿', '#ffd700');
+                }
+            }
+        }
+        
+        // Shop rendering
+        function renderShop() {
+            const shopEl = document.getElementById('shop');
+            shopEl.innerHTML = '';
+            
+            WORKERS.forEach((worker, idx) => {
+                const div = document.createElement('div');
+                div.className = 'shop-item';
+                div.innerHTML = `
+                    ${worker.emoji}<br>
+                    ${worker.name}<br>
+                    ${Math.ceil(worker.cost * Math.pow(CFG.WORKER_COST_GROWTH, worker.owned))} 💰
+                    <small>x${worker.owned}</small>
+                `;
+                div.onclick = () => buyWorker(idx);
+                shopEl.appendChild(div);
+            });
+            
+            UPGRADES.forEach((upg, idx) => {
+                if (!upg.bought) {
+                    const div = document.createElement('div');
+                    div.className = 'shop-item';
+                    div.innerHTML = `
+                        🔧<br>
+                        ${upg.name}<br>
+                        ${upg.cost} 💰
+                    `;
+                    div.onclick = () => buyUpgrade(idx);
+                    shopEl.appendChild(div);
+                }
+            });
+        }
+        
+        function buyWorker(idx) {
+            const worker = WORKERS[idx];
+            const currentCost = Math.ceil(worker.cost * Math.pow(CFG.WORKER_COST_GROWTH, worker.owned));
+            if (gameState.seeds >= currentCost) {
+                gameState.seeds -= currentCost;
+                worker.owned++;
+                createParticle(400, 300, 'Hired!', '#00ffff');
+                renderShop();
+            }
+        }
+        
+        function buyUpgrade(idx) {
+            const upg = UPGRADES[idx];
+            if (!upg.bought && gameState.seeds >= upg.cost) {
+                gameState.seeds -= upg.cost;
+                upg.bought = true;
+                gameState.multiplier *= upg.effect;
+                createParticle(400, 300, 'Upgraded!', '#ff00ff');
+                renderShop();
+            }
+        }
+        
+        // Game loop
+        let lastTime = Date.now();
+        function gameLoop() {
+            const now = Date.now();
+            const delta = (now - lastTime) / 1000;
+            lastTime = now;
+            
+            update(delta);
+            render();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function update(delta) {
+            // Passive income from workers
+            let passive = 0;
+            WORKERS.forEach(w => {
+                passive += w.income * w.owned;
+            });
+            gameState.seeds += passive * delta * 2 * gameState.multiplier; // scaled for feel
+            gameState.totalEarned += passive * delta * 2 * gameState.multiplier;
+            
+            // Plot auto growth
+            plots.forEach(plot => {
+                if (plot.growth < plot.maxGrowth) {
+                    plot.growth += 8 * delta * (1 + WORKERS[0].owned * 0.1); // bee boost
+                }
+                if (plot.growth >= plot.maxGrowth && Math.random() < 0.02) {
+                    plot.level = Math.min(3, plot.level + 1);
+                    plot.growth = 0;
+                    gameState.harvest += 3;
+                }
+            });
+            
+            // Update UI
+            document.getElementById('seeds').textContent = Math.floor(gameState.seeds);
+            document.getElementById('water').textContent = Math.floor(gameState.water);
+            document.getElementById('harvest').textContent = Math.floor(gameState.harvest);
+            document.getElementById('prestige-points').textContent = `Prestige: ${gameState.prestige}`;
+            
+            // Particles
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.1;
+                p.life--;
+                return p.life > 0;
+            });
+        }
+        
+        function render() {
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+            
+            // Background garden
+            ctx.fillStyle = '#0f4f0f';
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            
+            // Draw plots
+            plots.forEach(plot => {
+                // Plot base
+                ctx.fillStyle = '#3a5f3a';
+                ctx.fillRect(plot.x, plot.y, 80, 80);
+                
+                // Plant
+                let size = 20 + plot.level * 12 + (plot.growth / plot.maxGrowth) * 10;
+                ctx.font = `${size}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.fillText(plot.emoji, plot.x + 40, plot.y + 55);
+                
+                // Water indicator
+                if (plot.growth > 0) {
+                    ctx.fillStyle = 'rgba(0,200,255,0.6)';
+                    ctx.fillRect(plot.x + 5, plot.y + 75, (plot.growth / plot.maxGrowth) * 70, 5);
+                }
+            });
+            
+            // Mascot - Sprouty
+            ctx.font = '60px Arial';
+            ctx.fillText('🌱', 80, 480);
+            
+            // Particles
+            ctx.font = '20px Arial';
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life / 60;
+                ctx.fillStyle = p.color;
+                ctx.fillText(p.text, p.x, p.y);
+            });
+            ctx.globalAlpha = 1;
+        }
+        
+        // Prestige
+        function togglePrestige() {
+            const gain = Math.floor(Math.sqrt(gameState.totalEarned / 5000));
+            if (gain > 0 && confirm(`Prestige for ${gain} points? Reset progress.`)) {
+                gameState.prestige += gain;
+                gameState.multiplier += gain * 0.2;
+                resetRun();
+            }
+        }
+        
+        function resetRun() {
+            gameState.seeds = 0;
+            gameState.water = 50;
+            gameState.harvest = 0;
+            gameState.totalEarned = 0;
+            WORKERS.forEach(w => w.owned = 0);
+            UPGRADES.forEach(u => u.bought = false);
+            initPlots();
+            renderShop();
+        }
+        
+        // Offline earnings
+        function calculateOffline() {
+            const now = Date.now();
+            const elapsed = (now - gameState.lastSaveTime) / 1000 / 3600; // hours
+            const capped = Math.min(elapsed, CFG.OFFLINE_CAP_HOURS);
+            const earned = Math.floor(capped * 25 * (gameState.workers ? Object.values(gameState.workers).reduce((a,b)=>a+b,0) : 5));
+            
+            if (earned > 0) {
+                document.getElementById('offline-text').textContent = `You earned ${earned} seeds while away!`;
+                document.getElementById('offline-modal').style.display = 'block';
+                gameState.seeds += earned;
+            }
+        }
+        
+        function claimOffline() {
+            document.getElementById('offline-modal').style.display = 'none';
+        }
+        
+        function doubleOffline() {
+            // Simulated ad
+            gameState.seeds += 20; // bonus
+            alert('Ad rewarded - 2x granted!');
+            claimOffline();
+        }
+        
+        // Settings / Save
+        function showSettings() {
+            if (confirm('Reset save?')) {
+                localStorage.removeItem('sproutySave');
+                location.reload();
+            }
+        }
+        
+        function saveGame() {
+            const saveData = {
+                ...gameState,
+                workers: WORKERS.map(w => ({id: w.id, owned: w.owned})),
+                upgrades: UPGRADES.map(u => ({id: u.id, bought: u.bought})),
+                lastSaveTime: Date.now(),
+                plots: plots.map(p => ({level: p.level, growth: p.growth}))
+            };
+            try {
+                localStorage.setItem('sproutySave', JSON.stringify(saveData));
+            } catch(e) {}
+        }
+        
+        function loadGame() {
+            try {
+                const saved = localStorage.getItem('sproutySave');
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    Object.assign(gameState, data);
+                    // Restore workers
+                    data.workers.forEach((w, i) => {
+                        if (WORKERS[i]) WORKERS[i].owned = w.owned;
+                    });
+                    // Restore plots
+                    if (data.plots) {
+                        plots = data.plots.map((p,i) => ({...plots[i], ...p}));
+                    }
+                }
+            } catch(e) {}
+        }
+        
+        // CrazyGames SDK stub
+        const CrazyGames = window.CrazyGames || {
+            sdk: {
+                init: () => {},
+                gameplayStart: () => {},
+                gameplayStop: () => {},
+                requestAd: () => new Promise(r => r('error')),
+                happytime: () => {}
+            }
+        };
+        
+        // Boot
+        function initGame() {
+            resizeCanvas();
+            initPlots();
+            loadGame();
+            calculateOffline();
+            gameState.lastSaveTime = Date.now();
+            
+            // Initial UI
+            document.getElementById('welcome-modal').style.display = 'block';
+            renderShop();
+            
+            // Start loop
+            gameLoop();
+            
+            // Autosave
+            setInterval(() => {
+                saveGame();
+            }, 30000);
+            
+            // Visibility
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    saveGame();
+                } else {
+                    calculateOffline();
+                }
+            });
+            
+            // Simulate progression timeline in console
+            console.log('%c🌱 Sprouty\'s Garden tuned!', 'color: lime; font-size: 16px');
+            console.log('Progression timeline simulation:');
+            console.log('- First upgrade: ~25s');
+            console.log('- First worker: ~1.5min');
+            console.log('- First expansion feel: ~6min');
+            console.log('- No dead time >70s in early game');
+        }
+        
+        // Close modal
+        function closeModal(id) {
+            document.getElementById(id).style.display = 'none';
+            // Start gameplay
+            if (CrazyGames.sdk) CrazyGames.sdk.gameplayStart();
+        }
+        
+        // Start
+        window.onload = initGame;
+    </script>
+</body>
+</html>
