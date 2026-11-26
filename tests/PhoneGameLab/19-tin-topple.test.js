@@ -49,7 +49,7 @@ module.exports = {
 
     // 5) wasting every ball costs a life and rebuilds the same fort
     await game(g => g.loadLevel(2)); expect(await until(g => g.state === 'play', 4000), 'fort 3 loaded');
-    const waste = async () => { while (await game(g => g.state === 'play' && g.balls > 0)) { await shoot(-1.5, .05); await wait(700); } };
+    const waste = async () => { while (await game(g => g.state === 'play' && g.balls > 0)) { await shoot(-1.5, .12); await wait(700); } };
     await waste();
     expect(await until(g => g.lives === 2, 9000), 'out of balls with bots standing costs a life');
     expect(await until(g => g.state === 'play', 6000) && await game(g => g.level === 3 && g.balls === 2 && g.bots === 3), 'the fort is rebuilt for another try');

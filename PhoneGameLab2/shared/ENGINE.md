@@ -21,6 +21,8 @@ Lab.init({
   orient: "portrait",                 // 'portrait' (stage ≤ 0.68 aspect, centred on desktop) | 'landscape' | 'any' (fills window)
   music: { style:"dream", key:"D" },  // optional generative music (see Audio)
   restart: start,                     // called for every new run
+  // also: kicker (small label above the title), attract:(dt,t)=>{…} (draws the backdrop behind the splash card),
+  //       theme.fg / theme.muted, lowerIsBetter, formatScore:n=>string, hud:false, autoPause:false, maxDpr
 });
 function start(){ /* reset ALL state here */  Lab.loop(frame); }
 function frame(dt, t){ /* update + draw; dt seconds (≤0.05, ~0 during hit-stop), t = game clock */ }
@@ -37,7 +39,8 @@ Lab.boot();                           // splash → start().  (v1 games called s
   is kept as a backdrop while particles/shake finish, then the card appears (score count-up, best score, confetti on new best).
   Passing `score` records the personal best (`lower:true` for time/moves games; `Lab.init({lowerIsBetter:true, formatScore})`).
 - Pause (button, Esc/P, tab hidden, window blur) is handled by the engine; nothing to do. `Lab.paused` is readable.
-- `Lab.setScore(n|string)` updates the HUD; `Lab.bumpScore()` pops it; `Lab.hint(text)` sets the line at the bottom;
+- `Lab.setScore(n|string)` updates the HUD; `Lab.bumpScore()` pops it; `Lab.hint(text)` sets the line at the bottom
+  (fades on the next touch; `Lab.hint(text,{sticky:true})` stays until replaced);
   `Lab.toast(text, ms)`; `Lab.banner("LEVEL 3", {color, ms})`.
 
 ## Layout
@@ -60,7 +63,7 @@ Test at 390×844 and 844×390 (and 1280×800 desktop).
 - `Lab.fx.burst(x,y,{n,color|colors,speed,spread,angle,life,size,gravity,drag,shape:'circle|square|star|spark|ring|shard',glow})`
 - `Lab.fx.ring(x,y,{r0,r1,color,life,width})` · `Lab.fx.text(x,y,"+10",{color,size,life})` · `Lab.fx.sparks(x,y,angle,{…})` · `Lab.fx.puff(x,y,{…})`
 - `Lab.fx.confetti()` (UI layer) · particles draw automatically after your frame (`Lab.fx.auto=false` + `Lab.fx.draw(ctx)` to layer manually).
-- `Lab.tween(obj,{x:10,scale:1},.3,{ease:'outBack',delay,onDone})` · `Lab.ease.{outCubic,outBack,outElastic,outBounce,inOutQuad,pulse,…}`
+- `Lab.tween(obj,{x:10,scale:1},.3,{ease:'outBack',delay,onDone})` · `Lab.ease.` `linear inQuad outQuad inOutQuad inCubic outCubic inOutCubic outQuart inExpo outExpo inBack outBack inOutBack outElastic outBounce inSine outSine inOutSine (= sine) pulse (0→1→0)`
 - `Lab.damp(current,target,lambda,dt)` for frame-rate independent smoothing. All motion must be dt-based.
 - Honour `Lab.reducedMotion` for anything intense you draw yourself (shake/flash/hitstop already scale down automatically).
 
@@ -75,7 +78,7 @@ Test at 390×844 and 844×390 (and 1280×800 desktop).
 ## Drawing helpers (`Lab.draw`, plain Canvas 2D via `Lab.ctx`)
 `rr, rect(c,x,y,w,h,r,fill,stroke,lw), circle, line, star, poly, heart, text(c,str,x,y,{size,color,align,weight,stroke,shadow}), vgrad,
 glow(c,x,y,r,color,alpha), bg(c,top,bottom,mid?), shadow(c,x,y,rx,ry,alpha), vignette(c,strength)` ·
-`Lab.sprite(key,w,h,(g,w,h)=>{…})` caches expensive procedural art (draw with `drawImage(s,x,y,s.w,s.h)`) ·
+`Lab.sprite(key,w,h,(g,w,h)=>{…})` caches expensive procedural art (draw with `drawImage(s,x,y,s.w,s.h)`; `Lab.sprite.clear('prefix')` evicts by key prefix) ·
 `Lab.color.{shade(col,±amt),mix,alpha,hsl}` · `Lab.font(size,weight)`.
 Avoid per-frame `shadowBlur` on many objects and per-frame gradient creation for many objects — bake into sprites.
 

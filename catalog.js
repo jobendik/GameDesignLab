@@ -1083,7 +1083,7 @@ window.GDL_CATALOG = {
    "path": "PhoneGameLab/games/04-corkslinger/index.html",
    "collection": "PhoneGameLab",
    "title": "Corkslinger",
-   "desc": "Wait for the bell. Out-draw the whole toy box.",
+   "desc": "Wait for the bell. Out-draw the toy box.",
    "genre": [
     "Reflex & Taps"
    ],

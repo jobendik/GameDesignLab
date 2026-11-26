@@ -34,7 +34,7 @@ window.LAB_GAMES = [
     "n": 4,
     "slug": "04-corkslinger",
     "t": "Corkslinger",
-    "d": "Wait for the bell. Out-draw the whole toy box.",
+    "d": "Wait for the bell. Out-draw the toy box.",
     "v2": true
    },
    {

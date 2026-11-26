@@ -70,6 +70,9 @@
     outElastic: t => t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - .75) * (TAU / 3)) + 1,
     outBounce: t => { const n = 7.5625, d = 2.75; if (t < 1 / d) return n * t * t; if (t < 2 / d) return n * (t -= 1.5 / d) * t + .75; if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + .9375; return n * (t -= 2.625 / d) * t + .984375; },
     sine: t => .5 - Math.cos(t * Math.PI) / 2,
+    inOutSine: t => .5 - Math.cos(t * Math.PI) / 2, inSine: t => 1 - Math.cos(t * Math.PI / 2), outSine: t => Math.sin(t * Math.PI / 2),
+    inOutBack: t => t < .5 ? (Math.pow(2 * t, 2) * (3.5949095 * 2 * t - 2.5949095)) / 2 : (Math.pow(2 * t - 2, 2) * (3.5949095 * (t * 2 - 2) + 2.5949095) + 2) / 2,
+    inExpo: t => t === 0 ? 0 : Math.pow(2, 10 * t - 10),
     pulse: t => Math.sin(t * Math.PI), // 0 → 1 → 0
   };
 
@@ -490,7 +493,8 @@
     s = doc.createElement('canvas'); s.width = Math.max(1, Math.ceil(w * dpr)); s.height = Math.max(1, Math.ceil(h * dpr)); s._dpr = dpr; s.w = w; s.h = h;
     const g = s.getContext('2d'); g.scale(dpr, dpr); fn(g, w, h); sprites.set(key, s); return s;
   };
-  Lab.sprite.clear = () => sprites.clear();
+  /* Lab.sprite.clear() drops everything; Lab.sprite.clear('card:') drops only keys starting with that prefix */
+  Lab.sprite.clear = prefix => { if (prefix == null) sprites.clear(); else for (const k of Array.from(sprites.keys())) if (k.indexOf(prefix) === 0) sprites.delete(k); };
   Lab.color = {
     parse: parseColor,
     hsl: (h, s, l, a) => a == null ? `hsl(${h},${s}%,${l}%)` : `hsla(${h},${s}%,${l}%,${a})`,
@@ -586,7 +590,7 @@
     const ptrs = new Map(); let primary = null;
     function xy(e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) }; }
     function sync() { input.pointers = Array.from(ptrs.values()); }
-    function hideHint() { if (instrEl && !instrEl._gone) { instrEl._gone = true; instrEl.classList.add('lab-fade'); } }
+    function hideHint() { if (instrEl && !instrEl._gone && !instrEl._sticky) { instrEl._gone = true; instrEl.classList.add('lab-fade'); } }
     canvas.addEventListener('pointerdown', e => {
       e.preventDefault(); unlockAudio();
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
@@ -788,7 +792,8 @@
   /* little pop animation on the HUD score (use on big gains) */
   Lab.bumpScore = function () { if (!scoreEl || reduced) return; scoreEl.classList.remove('lab-bump'); void scoreEl.offsetWidth; scoreEl.classList.add('lab-bump'); };
   /* replace the hint line under the HUD (objective text, combo, etc.) */
-  Lab.hint = function (text) { if (!instrEl) { instrEl = doc.createElement('div'); instrEl.className = 'lab-instr'; stage.appendChild(instrEl); } instrEl._gone = false; instrEl.classList.remove('lab-fade'); instrEl.textContent = text; };
+  /* Lab.hint(text) fades on the next touch; Lab.hint(text, {sticky:true}) stays until replaced; Lab.hint('') clears */
+  Lab.hint = function (text, o) { if (!instrEl) { instrEl = doc.createElement('div'); instrEl.className = 'lab-instr'; stage.appendChild(instrEl); } instrEl._sticky = !!(o && o.sticky); instrEl._gone = false; instrEl.classList.toggle('lab-fade', !text); instrEl.textContent = text || ''; };
 
   let overlayReady = false;
   /* Lab.gameover({title, message, score, stats:[['Level',3],['Combo','x12']], win, lower, button, delay}) */
