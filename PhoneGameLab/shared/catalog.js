@@ -35,7 +35,9 @@ window.LAB_GAMES = [
     "slug": "04-corkslinger",
     "t": "Corkslinger",
     "d": "Wait for the bell. Out-draw the toy box.",
-    "v2": true
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--04-corkslinger.jpg"
    },
    {
     "n": 5,
@@ -379,7 +381,8 @@ window.LAB_GAMES = [
     "slug": "19-tin-topple",
     "t": "Tin Topple",
     "d": "Topple the block forts. Bonk every tin bot.",
-    "v2": true
+    "v2": true,
+    "score": 8
    },
    {
     "n": 35,
@@ -465,7 +468,8 @@ window.LAB_GAMES = [
     "slug": "27-fizzwhiz",
     "t": "Fizzwhiz",
     "d": "Ride a shaken soda bottle down the sundown boardwalk.",
-    "v2": true
+    "v2": true,
+    "score": 8
    },
    {
     "n": 28,
@@ -496,8 +500,9 @@ window.LAB_GAMES = [
     "n": 31,
     "slug": "31-sinkstones",
     "t": "Sinkstones",
-    "d": "Remember the stones. Cross before they sink.",
-    "v2": true
+    "d": "Remember the path. Cross before it sinks.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 33,

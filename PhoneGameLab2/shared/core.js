@@ -601,7 +601,7 @@
         primary = e.pointerId;
         input.down = true; input.justDown = true;
         input.x = input.px = input.startX = p.x; input.y = input.py = input.startY = p.y;
-        input.dx = input.dy = 0; input.startT = rec.t0;
+        input.dx = input.dy = 0; input.startT = rec.t0; input.pressT = e.timeStamp || rec.t0; // event time on the performance.now() clock (reaction games)
       }
       hideHint();
       fire(input.onDown, p.x, p.y, e.pointerId); fireAuto('down', p.x, p.y, e.pointerId);
@@ -796,7 +796,7 @@
   Lab.hint = function (text, o) { if (!instrEl) { instrEl = doc.createElement('div'); instrEl.className = 'lab-instr'; stage.appendChild(instrEl); } instrEl._sticky = !!(o && o.sticky); instrEl._gone = false; instrEl.classList.toggle('lab-fade', !text); instrEl.textContent = text || ''; };
 
   let overlayReady = false;
-  /* Lab.gameover({title, message, score, stats:[['Level',3],['Combo','x12']], win, lower, button, delay}) */
+  /* Lab.gameover({title, message, score, stats:[['Level',3],['Combo','x12']], win, neutral, lower, button, delay, sound}) */
   Lab.gameover = function (o) {
     if (over) return;
     o = o || {}; over = true; running = false; snap = null;
@@ -807,7 +807,7 @@
     if (typeof score === 'number' && !scoreSubmitted && o.submit !== false) { scoreSubmitted = true; isBest = Lab.submitScore(score, { lower: o.lower }); }
     const best = Lab.best, f = v => opts.formatScore ? opts.formatScore(v) : Lab.fmt(v);
     const win = !!o.win, token = runId;
-    if (o.sound !== false) Lab.sfx(win ? 'win' : 'lose');
+    if (o.sound !== false) Lab.sfx(win ? 'win' : o.neutral ? 'chime' : 'lose'); // neutral: a run that simply finished (time up, all trials done)
     music.duck(.35);
     const stats = (o.stats || []).map(s => `<div class="lab-stat"><span>${s[0]}</span><b>${s[1]}</b></div>`).join('');
     const delay = o.delay == null ? (win ? 350 : 600) : o.delay * 1000;
@@ -816,12 +816,12 @@
       if (win || isBest) fx.confetti();
       const el = doc.createElement('div'); el.className = 'lab-overlay lab-over' + (win ? ' lab-win' : '');
       el.innerHTML = `<div class="lab-card">
-        <h2>${o.title || (win ? 'You win!' : 'Game Over')}</h2>
+        <h2>${o.title || (win ? 'You win!' : o.neutral ? 'Finished!' : 'Game Over')}</h2>
         ${o.message ? `<p>${o.message}</p>` : ''}
         ${explicit ? `<div class="lab-final"><span>${o.scoreLabel || 'Score'}</span><b id="lab-final-n">0</b></div>` : ''}
         ${isBest ? '<div class="lab-newbest">★ New best!</div>' : (best != null && typeof score === 'number' ? `<div class="lab-bestline">Best <b>${f(best)}</b></div>` : '')}
         ${stats ? `<div class="lab-stats">${stats}</div>` : ''}
-        <button class="lab-primary" id="lab-again">${o.button || (win ? 'Play again' : 'Try again')}</button>
+        <button class="lab-primary" id="lab-again">${o.button || (win || o.neutral ? 'Play again' : 'Try again')}</button>
         <div class="small"><a href="../../index.html">← Back to the Lab</a></div>
       </div>`;
       stage.appendChild(el);

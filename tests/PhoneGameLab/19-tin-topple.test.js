@@ -3,7 +3,7 @@
 // restart is clean.  Shots are found with the game's own dry-run solver (same fixed-step rules, no events).
 module.exports = {
   game: 'PhoneGameLab/games/19-tin-topple/index.html',
-  timeout: 150000,
+  timeout: 100000,
   async run({ page, expect, wait, state, game }) {
     const until = (cond, ms) => page.evaluate(([f, ms]) => new Promise(res => { const t0 = performance.now(), c = new Function('g', 'return (' + f + ')(g)'); (function loop() { if (c(window.__lab.game)) res(true); else if (performance.now() - t0 > ms) res(false); else requestAnimationFrame(loop); })(); }), [cond.toString(), ms]);
     // pull-back drag: the pull vector is opposite to the shot, its length sets the power

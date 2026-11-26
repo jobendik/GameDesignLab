@@ -1093,7 +1093,10 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 4,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--04-corkslinger.jpg"
   },
   {
    "id": "PhoneGameLab/05-misfired",
@@ -1374,7 +1377,9 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 19,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/20-frostfoot",
@@ -1522,7 +1527,9 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 27,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/28-cave-flyer",
@@ -1586,7 +1593,7 @@ window.GDL_CATALOG = {
    "path": "PhoneGameLab/games/31-sinkstones/index.html",
    "collection": "PhoneGameLab",
    "title": "Sinkstones",
-   "desc": "Remember the stones. Cross before they sink.",
+   "desc": "Remember the path. Cross before it sinks.",
    "genre": [
     "Runner & Movement"
    ],
@@ -1596,7 +1603,9 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 31,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/32-inkstride",

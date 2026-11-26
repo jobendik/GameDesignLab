@@ -37,6 +37,7 @@ Lab.boot();                           // splash → start().  (v1 games called s
   game and are cancelled on restart. **Do not use `setTimeout`/`setInterval` for gameplay.**
 - `Lab.gameover({title, message?, score, stats:[['Label',value],…], lower?})` / `Lab.win({...})` end the run: logic freezes, the last frame
   is kept as a backdrop while particles/shake finish, then the card appears (score count-up, best score, confetti on new best).
+  `neutral:true` is for runs that simply finish (time up, all trials done): no lose jingle, "Finished!" / "Play again".
   Passing `score` records the personal best (`lower:true` for time/moves games; `Lab.init({lowerIsBetter:true, formatScore})`).
 - Pause (button, Esc/P, tab hidden, window blur) is handled by the engine; nothing to do. `Lab.paused` is readable.
 - `Lab.setScore(n|string)` updates the HUD; `Lab.bumpScore()` pops it; `Lab.hint(text)` sets the line at the bottom
@@ -50,7 +51,7 @@ Scale everything from the stage size (e.g. `const S = Math.min(Lab.W/390, Lab.pl
 Test at 390×844 and 844×390 (and 1280×800 desktop).
 
 ## Input (`Lab.input`)
-- State: `down, x, y, dx, dy, startX, startY, justDown, justUp, pointers[] ({id,x,y,startX,startY})` (multitouch), `keys{}` (by `e.key` and `e.code`),
+- State: `down, x, y, dx, dy, startX, startY, pressT` (press event time on the `performance.now()` clock), `justDown, justUp, pointers[] ({id,x,y,startX,startY})` (multitouch), `keys{}` (by `e.key` and `e.code`),
   `pressed('Space')` (this frame), `axisX()/axisY()` (arrows + WASD → -1/0/1).
 - Handlers (assign arrays inside `start()`): `onDown/onUp/onTap [(x,y,id)]`, `onMove [(x,y,dx,dy,id)]`, `onSwipe [(dx,dy,ms,x,y)]`, `onKey [(key,e)]`.
   Or `Lab.on('tap'|'down'|'up'|'move'|'swipe'|'key', fn)` (auto-removed on restart).
@@ -80,6 +81,8 @@ Test at 390×844 and 844×390 (and 1280×800 desktop).
 glow(c,x,y,r,color,alpha), bg(c,top,bottom,mid?), shadow(c,x,y,rx,ry,alpha), vignette(c,strength)` ·
 `Lab.sprite(key,w,h,(g,w,h)=>{…})` caches expensive procedural art (draw with `drawImage(s,x,y,s.w,s.h)`; `Lab.sprite.clear('prefix')` evicts by key prefix) ·
 `Lab.color.{shade(col,±amt),mix,alpha,hsl}` · `Lab.font(size,weight)`.
+A sprite has a logical size (`s.w`,`s.h`); to bake a full-stage background that survives screen shake, bake it at
+`W+80 × H+80` and draw it at `(-40,-40, s.w, s.h)` — never stretch a `W×H` sprite. Rebuild on `Lab.onResize`.
 Avoid per-frame `shadowBlur` on many objects and per-frame gradient creation for many objects — bake into sprites.
 
 ## Math / utils
