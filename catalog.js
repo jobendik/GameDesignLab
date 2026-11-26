@@ -1673,17 +1673,18 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab/33-shape-gate",
    "path": "PhoneGameLab/games/33-shape-gate/index.html",
    "collection": "PhoneGameLab",
-   "title": "Shape Gate",
-   "desc": "Morph shape to fit the gate's hole.",
+   "title": "Snug",
+   "desc": "Become the shape. Slip through.",
    "genre": [
     "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 33,
-   "v2": false,
+   "v2": true,
    "thumb": "thumbs/PhoneGameLab--33-shape-gate.jpg"
   },
   {
@@ -1761,17 +1762,18 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab/38-plinko",
    "path": "PhoneGameLab/games/38-plinko/index.html",
    "collection": "PhoneGameLab",
-   "title": "Plinko",
-   "desc": "Drop the ball — chase the big multiplier.",
+   "title": "Tumblepeg",
+   "desc": "Drop, thump and ping your way past the quota.",
    "genre": [
     "Stack & Physics"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 38,
-   "v2": false,
+   "v2": true,
    "thumb": "thumbs/PhoneGameLab--38-plinko.jpg"
   },
   {

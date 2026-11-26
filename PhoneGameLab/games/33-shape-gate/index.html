@@ -1,40 +1,283 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Snug</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Shape Gate", instructions:"Tap to morph: ○ → □ → △ → ○. Match the gate!", restart:start});
-let shapes=['circle','square','triangle'];
-let me=0, gates, t, sp;
-function start(){
-  me=0; gates=[]; let x=Lab.W+200;
-  for(let i=0;i<20;i++){ gates.push({x, kind:Lab.choose(shapes), scored:false}); x+=Lab.rand(140,220);}
-  t=0; sp=240; Lab.setScore(0);
-  Lab.input.onTap=[()=>{ me=(me+1)%shapes.length; Lab.beep(700,.04);}];
-  Lab.loop(dt=>{
-    t+=dt; sp=240+t*10;
-    for(const g of gates) g.x-=sp*dt;
-    const px=Lab.W*0.2;
-    for(const g of gates){
-      if(!g.scored && g.x<px-10){
-        g.scored=true;
-        if(shapes[me]!==g.kind){ Lab.gameover({title:"Doesn't fit!",message:"Score: "+Math.floor(t*5)}); return; }
-        else { Lab.beep(900,.05); Lab.setScore(Math.floor(t*10));}
-      }
+(function(){ "use strict";
+/* SNUG — a little shapeshifter hurtles down a poster-print road; become the shape of each cut-out gate to slip through.
+ * Identity: two-colour risograph poster — mustard paper, navy ink outlines with a mis-registered offset, halftone sun.
+ * Controls: one big key per shape (direct pick, no cycling), tap the road to cycle, keys 1-4 / arrows.
+ * Depth:  SNAP — morphing in the last quarter second pays extra (risk the wait); streak multiplier up to x6.
+ * Variety (one new trick per stage): TWINS (back-to-back gates), PEEKABOO (the hole opens late), NO ENTRY (be anything
+ * else), SWITCHEROO (the gate changes its mind) + a fourth shape, lying paint colours, then everything at once, faster.
+ * Shapes are polar radius tables (120 samples) so the body genuinely morphs between outlines.                        */
+Lab.init({
+  title: "Snug", tagline: "Become the shape. Slip through.", category: "Runner & Movement",
+  howto: ["Tap a shape key to become it", "Match each gate's cut-out to slip through", "Morph at the last moment for a SNAP bonus"],
+  theme: { bg: "#e9a52c", bg2: "#f7c95a", fg: "#1b2161", muted: "#6a5a3a", accent: "#e9482f", accent2: "#2f55d4", light: true },
+  orient: "portrait", music: { style: "arcade", key: "D", bpm: 118, vol: .24 }, restart: start,
+  attract: (dt, t) => { if (!gates) { demo = true; reset(); } update(dt, t); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, C = Lab.color;
+const INK = "#1b2161", CREAM = "#fbf0d4", PAPER = "#f4b740";
+const COL = ["#e9482f", "#2f55d4", "#0f9b7a", "#c93a8c"], NAME = ["circle", "square", "triangle", "star"], NOTE = ["C5", "E5", "G5", "B5"];
+const STAGES = [["WARM-UP", ""], ["TWINS", "Two gates, back to back"], ["PEEKABOO", "The hole opens late"], ["NO ENTRY", "Be anything but that shape"], ["SWITCHEROO", "Gates change their mind · new shape!"], ["FULL HOUSE", "Everything at once"]];
+const N = 120;
+function radial(verts) {
+  const out = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const a = i / N * TAU - Math.PI / 2, dx = Math.cos(a), dy = Math.sin(a); let best = 0;
+    for (let j = 0; j < verts.length; j++) {
+      const p = verts[j], q = verts[(j + 1) % verts.length], ex = q[0] - p[0], ey = q[1] - p[1], den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-9) continue;
+      const tt = (p[0] * ey - p[1] * ex) / den, u = (p[0] * dy - p[1] * dx) / den;
+      if (tt > 0 && u >= -1e-6 && u <= 1 + 1e-6) best = Math.max(best, tt);
     }
-    const c=Lab.ctx; c.fillStyle="#0b0f1a"; c.fillRect(0,0,Lab.W,Lab.H);
-    for(const g of gates){
-      c.fillStyle="#162043"; c.fillRect(g.x-40,Lab.H-220,80,180);
-      drawShape(c,g.x,Lab.H-130,40,g.kind,"#5af");
-    }
-    drawShape(c,Lab.W*0.2,Lab.H-130,38,shapes[me],"#ffd35a");
-    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
-    c.fillText("Tap to morph", Lab.W/2, 70);
+    out[i] = best;
+  }
+  return out;
+}
+const ngon = (n, r, rot, inner) => Array.from({ length: inner ? n * 2 : n }, (_, i) => { const m = inner ? n * 2 : n, a = -Math.PI / 2 + (rot || 0) + i * TAU / m, rr = inner && i % 2 ? r * inner : r; return [Math.cos(a) * rr, Math.sin(a) * rr]; });
+const RAD = [new Float32Array(N).fill(.98), radial(ngon(4, 1.24, Math.PI / 4)), radial(ngon(3, 1.36)), radial(ngon(5, 1.34, 0, .56))];
+function shapePath(c, A, x, y, s, sx, sy) { for (let i = 0; i < N; i++) { const a = i / N * TAU - Math.PI / 2, r = A[i] * s; c[i ? "lineTo" : "moveTo"](x + Math.cos(a) * r * (sx || 1), y + Math.sin(a) * r * (sy || 1)); } c.closePath(); }
+
+let W, H, S, CX, HZ, PY, GY, R, btnY, btnH, btnW;
+let demo = false, gates, shape, cur, pop, squeeze, hurtT, blink, lookX, dist, spd, score, streak, bestStreak, mult, lives, stage, stageDone, passed, snaps, alive;
+let genStage, genIdx, genFirst, twinPending, lastShape, lastNeed, morphAt, changed, picked, nShapes, btnPop, now, bobT, clean;
+
+function layout() {
+  W = Lab.W; H = Lab.H; S = Math.min(W / 390, Lab.play.h / 700); CX = W / 2;
+  R = 44 * S; btnH = Math.max(46, 74 * S); btnY = H - Lab.safe.bottom - btnH - 16 * S;
+  HZ = Lab.play.y + Lab.play.h * .2; GY = btnY - 34 * S; PY = GY - 1.55 * R;
+  Lab.sprite.clear("snugbg");
+}
+Lab.onResize(() => { if (gates) layout(); });
+const proj = eta => 1 / (1 + .85 * Math.max(eta, -.9));
+const stageLen = s => Math.min(20, 8 + s * 2);
+const btnX = i => { btnW = Math.min(88 * S, (W - 24) / nShapes - 8); return CX + (i - (nShapes - 1) / 2) * (btnW + 10 * S); };
+
+function reset() {
+  layout();
+  gates = []; shape = 0; cur = Float32Array.from(RAD[0]); pop = 0; squeeze = 0; hurtT = 0; blink = 2; lookX = 0; dist = 0; spd = .82; now = 0; bobT = 0;
+  score = 0; streak = 0; bestStreak = 0; mult = 1; lives = 3; stage = 1; stageDone = 0; passed = 0; snaps = 0; alive = true; clean = 0;
+  genStage = 1; genIdx = 0; genFirst = true; twinPending = false; lastShape = -1; lastNeed = 0; morphAt = -9; changed = false; picked = false; nShapes = 3; btnPop = [0, 0, 0, 0];
+}
+function start() {
+  demo = false; reset();
+  Lab.setScore(0); Lab.hint("Tap a shape key to become it", { sticky: true });
+  Lab.input.onDown = [(x, y) => {
+    if (y > btnY - 12 * S) { let bi = -1, bd = 1e9; for (let i = 0; i < nShapes; i++) { const d = Math.abs(x - btnX(i)); if (d < bd) { bd = d; bi = i; } } pick(bi); }
+    else pick((shape + 1) % nShapes);
+  }];
+  Lab.input.onKey = [k => {
+    const n = "1234".indexOf(k), m = "asdf".indexOf(k.toLowerCase());
+    if (n >= 0 && n < nShapes) pick(n); else if (m >= 0 && m < nShapes) pick(m);
+    else if (k === "ArrowRight" || k === " ") pick((shape + 1) % nShapes); else if (k === "ArrowLeft") pick((shape + nShapes - 1) % nShapes);
+  }];
+  Lab.expose({
+    get score() { return score; }, get lives() { return lives; }, get stage() { return stage; }, get shape() { return shape; }, get streak() { return streak; }, get mult() { return mult; },
+    get passed() { return passed; }, get snaps() { return snaps; }, get speed() { return spd; }, get nShapes() { return nShapes; }, get alive() { return alive; },
+    pick, buttons() { return Array.from({ length: nShapes }, (_, i) => ({ x: btnX(i), y: btnY + btnH / 2 })); },
+    /* nearest unresolved gate: what it shows now and which shapes would pass (once its hole is visible) */
+    next() { const g = gates.find(g => g.eta > 0 && !g.done); if (!g) return null; const ok = []; for (let i = 0; i < nShapes; i++) if (g.kind === "not" ? i !== g.shape : i === g.shape) ok.push(i); return { eta: g.eta, secs: g.eta / spd, kind: g.kind, shape: g.shape, revealed: g.revealed, settled: g.kind !== "flip" || g.flipped, ok }; },
+  });
+  Lab.loop((dt, t) => { update(dt, t); render(t); });
+}
+
+function pick(i) {
+  if (i < 0 || i >= nShapes || !alive || Lab.paused) return;
+  btnPop[i] = 1;
+  if (!picked) { picked = true; if (!demo) Lab.hint(""); }
+  if (i === shape) { if (!demo) Lab.sfx("tick", { pitch: .8 }); return; }
+  shape = i; pop = 1; morphAt = now; changed = true;
+  if (!demo) { Lab.audio.note(NOTE[i], { dur: .09, vol: .16, type: i === 1 ? "square" : "triangle" }); Lab.sfx("flip", { vol: .5, pitch: .9 + i * .12 }); Lab.buzz(6); }
+}
+
+/* ---------- gate stream */
+function genGate() {
+  const s = genStage, len = stageLen(s), lastOfStage = genIdx === len - 1, forced = s <= 5 && (genIdx === 1 || genIdx === 2) ? s : 0, r = Math.random();
+  let gap = 1.3, kind = "plain", twin = false;
+  if (genFirst) { gap = gates.length ? 2.7 : 3.4; genFirst = false; }
+  if (twinPending) { gap = Math.max(.64, .37 * spd); twinPending = false; twin = true; }
+  else if (!lastOfStage && s >= 2) {
+    if (forced === 2 || (!forced && r < .2)) twinPending = true;
+    else if (forced === 3 || (!forced && s >= 3 && r < .4)) kind = "mystery";
+    else if (forced === 4 || (!forced && s >= 4 && r < .58)) kind = "not";
+    else if (forced === 5 || (!forced && s >= 5 && r < .74)) kind = "flip";
+  }
+  const pool = s === 1 && genIdx < 4 ? [0, 1] : s < 5 ? [0, 1, 2] : [0, 1, 2, 3];
+  const other = x => Lab.choose(pool.filter(v => v !== x));
+  let sh = Lab.choose(pool); if (sh === lastShape && (twin || Lab.chance(.85))) sh = other(sh);
+  const g = { eta: (gates.length ? gates[gates.length - 1].eta : 0) + gap, kind, shape: sh, paint: sh, revealed: kind !== "mystery", open: kind === "mystery" ? 0 : 1, flipped: false, flipT: 0, done: false, broken: false, last: lastOfStage, stage: s, okT: 0 };
+  if (kind === "not") { if (Lab.chance(.7)) g.shape = g.paint = lastNeed; }
+  else if (kind === "flip") { g.shape2 = sh; g.shape = g.paint = other(sh); g.flipAt = Math.max(1.3, .64 * spd); lastNeed = sh; }
+  else { lastNeed = sh; if (kind === "plain" && s >= 4 && Lab.chance(.35)) g.paint = other(sh); }
+  if (kind === "mystery") g.reveal = Math.max(1.12, .56 * spd);
+  lastShape = kind === "flip" ? g.shape2 : g.shape;
+  gates.push(g);
+  if (++genIdx >= len) { genStage++; genIdx = 0; genFirst = true; }
+}
+
+function arrive(g) {
+  g.done = true; if (!alive) return;
+  const ok = g.kind === "not" ? shape !== g.shape : shape === g.shape, y = PY, col = COL[g.paint];
+  if (demo) { squeeze = 1; if (g.last) stage++; return; }
+  passed++; stageDone++;
+  if (ok) {
+    streak++; clean++; bestStreak = Math.max(bestStreak, streak); mult = Math.min(6, 1 + Math.floor(streak / 6));
+    const snap = changed && now - morphAt < .26 && g.kind !== "not"; let gain = 10 * mult;
+    if (snap) { gain += 15 * mult; snaps++; fx.text(CX, y - R * 2.5, "SNAP!", { color: "#fff", size: 26 * S + 8, outline: INK }); Lab.sfx("snap"); Lab.sfx("coin", { pitch: 1.1, vol: .7 }); Lab.hitstop(.04); }
+    score += gain; Lab.setScore(score); if (snap || streak % 6 === 0) Lab.bumpScore();
+    squeeze = 1; g.okT = 1;
+    fx.text(CX + R * 1.9, y - R * .6, "+" + gain, { color: INK, size: 16 * S + 6, outline: CREAM });
+    fx.burst(CX, y, { n: 8, colors: [col, CREAM, INK], speed: 240, life: .4, size: 5, shape: "square", gravity: 300 });
+    fx.ring(CX, y, { r0: R, r1: R * 2.4, color: col, width: 4 });
+    Lab.audio.combo(Math.min(streak - 1, 14), { vol: .16 }); Lab.sfx("swish", { vol: .6, pitch: .9 + spd * .2 });
+    if (streak % 6 === 0 && mult <= 6 && streak <= 30) { fx.text(CX, y - R * 3.3, "×" + mult, { color: COL[0], size: 30 * S + 8, outline: CREAM }); Lab.sfx("powerup", { vol: .6 }); }
+  } else {
+    lives--; streak = 0; mult = 1; g.broken = true; hurtT = 1;
+    fx.burst(CX, y, { n: 26, colors: [col, C.shade(col, -.3), CREAM], speed: 460, life: .8, size: 9, shape: "shard", gravity: 900 });
+    fx.text(CX, y - R * 2.4, g.kind === "not" ? "NO ENTRY!" : "NOT A " + NAME[g.shape].toUpperCase() + "!", { color: COL[0], size: 20 * S + 6, outline: CREAM, life: 1.1 });
+    Lab.sfx("crunch"); Lab.sfx("hurt"); Lab.shake(12, .35); Lab.hitstop(.09); Lab.flash("#e9482f", .25, .25); Lab.buzz(40);
+    if (lives <= 0) { alive = false; Lab.after(.7, () => Lab.gameover({ title: "Square peg, round hole", message: stage > 1 ? "Stopped at stage " + stage + " · " + STAGES[Math.min(stage, 6) - 1][0] + "." : "Match the cut-out before the gate arrives.", score, stats: [["Gates cleared", clean], ["Best streak", bestStreak], ["Snaps", snaps]] })); }
+  }
+  changed = false;
+  if (g.last && alive) {
+    const bonus = 50 * stage; score += bonus; Lab.setScore(score); stage++; stageDone = 0;
+    const st = STAGES[Math.min(stage, 6) - 1];
+    Lab.banner("STAGE " + stage, { color: INK, y: .19, ms: 1400 }); Lab.toast(stage > 6 ? "Faster!" : st[0] + (st[1] ? " — " + st[1] : ""), 2200, { y: .27 });
+    fx.text(CX, PY + R * 2.2, "+" + bonus + " stage bonus", { color: INK, size: 15 * S + 5, outline: CREAM, life: 1.3 });
+    Lab.sfx("levelup"); if (lives < 3) { lives++; Lab.sfx("unlock"); }
+    if (stage === 5) { nShapes = 4; btnPop[3] = 1.6; }
+  }
+}
+
+function update(dt, t) {
+  now = t; bobT += dt;
+  spd = Math.min(2.1, .82 + passed * .0105 + (demo ? .3 : 0));
+  const adv = dt * spd; dist += adv;
+  for (const g of gates) {
+    const prev = g.eta; g.eta -= adv;
+    if (!g.revealed && g.eta < g.reveal) { g.revealed = true; if (!demo) Lab.sfx("flip", { pitch: 1.4 }); }
+    if (g.revealed && g.open < 1) g.open = Math.min(1, g.open + dt * 7);
+    if (g.kind === "flip" && !g.flipped && g.eta < g.flipAt) { g.flipped = true; g.shape = g.paint = g.shape2; g.flipT = 1; if (!demo) Lab.sfx("whistle", { pitch: 1.3, vol: .6 }); }
+    if (g.flipT > 0) g.flipT = Math.max(0, g.flipT - dt * 4);
+    if (g.okT > 0) g.okT = Math.max(0, g.okT - dt * 3);
+    if (prev > 0 && g.eta <= 0 && !g.done) arrive(g);
+  }
+  while (gates.length && gates[0].eta < -.85) gates.shift();
+  while (!gates.length || gates[gates.length - 1].eta < 7) genGate();
+  const tg = RAD[shape]; for (let i = 0; i < N; i++) cur[i] = Lab.damp(cur[i], tg[i], 26, dt);
+  pop = Math.max(0, pop - dt * 5); squeeze = Math.max(0, squeeze - dt * 5); hurtT = Math.max(0, hurtT - dt * 1.6);
+  for (let i = 0; i < 4; i++) btnPop[i] = Math.max(0, btnPop[i] - dt * 5);
+  blink -= dt; if (blink < -.12) blink = Lab.rand(1.5, 4.5);
+  if (demo) { const g = gates.find(g => g.eta > 0 && !g.done); if (g && g.eta < 1 && shape !== g.shape) { shape = g.shape; pop = 1; btnPop[shape] = 1; } }
+  else Lab.music.intensity(Lab.clamp((spd - .8) / 1.1 + (mult - 1) * .06, .15, 1));
+}
+
+/* ---------- drawing */
+function bgSprite() {
+  return Lab.sprite("snugbg" + W + "x" + H, W + 80, H + 80, g => {
+    const ox = 40, hz = HZ + 40, cx = CX + 40, w = W + 80, h = H + 80;
+    g.fillStyle = PAPER; g.fillRect(0, 0, w, h);
+    g.save(); g.beginPath(); g.rect(0, 0, w, hz); g.clip(); g.fillStyle = "#f8c95c";
+    for (let i = 0; i < 18; i += 2) { const a0 = Math.PI + i * Math.PI / 18, a1 = a0 + Math.PI / 18, rr = w + h; g.beginPath(); g.moveTo(cx, hz); g.lineTo(cx + Math.cos(a0) * rr, hz + Math.sin(a0) * rr); g.lineTo(cx + Math.cos(a1) * rr, hz + Math.sin(a1) * rr); g.fill(); }
+    const sr = 86 * S; g.fillStyle = INK; g.beginPath(); g.arc(cx + 4, hz + 4, sr, 0, TAU); g.fill();
+    g.fillStyle = CREAM; g.beginPath(); g.arc(cx, hz, sr, 0, TAU); g.fill(); g.strokeStyle = INK; g.lineWidth = 3; g.stroke();
+    g.save(); g.beginPath(); g.arc(cx, hz, sr - 2, 0, TAU); g.clip(); g.fillStyle = "#f2a63a";
+    for (let y = hz - sr; y < hz; y += 7) for (let x = cx - sr + ((y / 7 | 0) % 2) * 3.5; x < cx + sr; x += 7) { const d = Lab.clamp((hz - y) / sr, 0, 1); g.beginPath(); g.arc(x, y, .4 + (1 - d) * 2.6, 0, TAU); g.fill(); }
+    g.restore(); g.restore();
+    g.fillStyle = "#ee9a2b"; g.fillRect(0, hz, w, h - hz);
+    g.fillStyle = "#df8420"; for (let y = hz + 6, r = 0; y < h; y += 11, r++) { const k = (y - hz) / (h - hz); for (let x = (r % 2) * 5.5; x < w; x += 11) { g.beginPath(); g.arc(x, y, .6 + k * 2.4, 0, TAU); g.fill(); } }
+    for (const [x, r, col] of [[-.05, .2, "#0f9b7a"], [.2, .11, "#2f55d4"], [.82, .13, "#e9482f"], [1.04, .22, "#0f9b7a"]]) { g.fillStyle = INK; g.beginPath(); g.arc(ox + x * W + 3, hz + 3, r * W, Math.PI, TAU); g.fill(); g.fillStyle = col; g.beginPath(); g.arc(ox + x * W, hz, r * W, Math.PI, TAU); g.fill(); g.strokeStyle = INK; g.lineWidth = 2.5; g.stroke(); }
+    g.strokeStyle = INK; g.lineWidth = 3; g.beginPath(); g.moveTo(0, hz); g.lineTo(w, hz); g.stroke();
   });
 }
-function drawShape(c,x,y,r,kind,col){
-  c.fillStyle=col;
-  if(kind==='circle'){ c.beginPath(); c.arc(x,y,r,0,Lab.TAU); c.fill();}
-  else if(kind==='square'){ c.fillRect(x-r,y-r,r*2,r*2);}
-  else { c.beginPath(); c.moveTo(x,y-r); c.lineTo(x+r,y+r*0.8); c.lineTo(x-r,y+r*0.8); c.closePath(); c.fill();}
+function drawRoad(c) {
+  const RW = R * 2.7, kb = (H + 40 - HZ) / (GY - HZ), k0 = .04;
+  c.fillStyle = CREAM; c.beginPath(); c.moveTo(CX - RW * k0, HZ + (GY - HZ) * k0); c.lineTo(CX + RW * k0, HZ + (GY - HZ) * k0); c.lineTo(CX + RW * kb, H + 40); c.lineTo(CX - RW * kb, H + 40); c.closePath(); c.fill();
+  c.strokeStyle = INK; c.lineWidth = 3; c.beginPath(); c.moveTo(CX - RW * k0, HZ + (GY - HZ) * k0); c.lineTo(CX - RW * kb, H + 40); c.moveTo(CX + RW * k0, HZ + (GY - HZ) * k0); c.lineTo(CX + RW * kb, H + 40); c.stroke();
+  const ph = dist % .5; c.fillStyle = "#f0d9a4";
+  for (let e = 7 - ph; e > -.8; e -= .5) {
+    const ka = proj(e), kc = proj(e - .2), ya = HZ + (GY - HZ) * ka, yb = HZ + (GY - HZ) * kc, hw = R * .16;
+    c.beginPath(); c.moveTo(CX - hw * ka, ya); c.lineTo(CX + hw * ka, ya); c.lineTo(CX + hw * kc, yb); c.lineTo(CX - hw * kc, yb); c.closePath(); c.fill();
+    c.fillStyle = INK; for (const s of [-1, 1]) { c.beginPath(); c.arc(CX + s * RW * ka * 1.12, ya, Math.max(.8, 5 * S * ka), 0, TAU); c.fill(); } c.fillStyle = "#f0d9a4";
+  }
 }
-start();
+function cardPath(c, x, y, r, g, off) {
+  const w = r * 3.5, top = y - r * 1.75, bot = y + r * 1.55, rad = r * .35;
+  c.beginPath(); c.moveTo(x - w / 2 + off, bot + off); c.lineTo(x - w / 2 + off, top + rad + off); c.arcTo(x - w / 2 + off, top + off, x - w / 2 + rad + off, top + off, rad); c.lineTo(x + w / 2 - rad + off, top + off); c.arcTo(x + w / 2 + off, top + off, x + w / 2 + off, top + rad + off, rad); c.lineTo(x + w / 2 + off, bot + off); c.closePath();
+  if (g.kind === "not") { const hw = r * 1.35, ht = y - r * 1.3; c.moveTo(x - hw + off, bot + off); c.lineTo(x + hw + off, bot + off); c.lineTo(x + hw + off, ht + hw * .6 + off); c.quadraticCurveTo(x + hw + off, ht + off, x + off, ht + off); c.quadraticCurveTo(x - hw + off, ht + off, x - hw + off, ht + hw * .6 + off); c.closePath(); }
+  else if (g.open > 0) { const fl = 1 - ease.pulse(g.flipT) * .9; shapePath(c, RAD[g.shape], x + off, y + off, r * 1.14 * ease.outBack(g.open), fl, 1); }
+}
+function drawGate(c, g) {
+  if (g.broken || g.eta > 6.6) return;
+  const k = proj(g.eta), x = CX, y = HZ + (PY - HZ) * k, r = R * k, lw = Math.max(1.2, 3 * k);
+  const a = g.eta < 0 ? Lab.clamp(1 + g.eta / .45, 0, 1) : Lab.clamp((6.6 - g.eta) / .8, 0, 1); if (a <= 0) return;
+  c.globalAlpha = a;
+  const col = g.kind === "not" ? INK : COL[g.paint];
+  draw.shadow(c, x, y + r * 1.55, r * 2, r * .16, .16);
+  cardPath(c, x, y, r, g, 4 * k); c.fillStyle = g.kind === "not" ? "#0e123f" : INK; c.fill("evenodd");
+  cardPath(c, x, y, r, g, 0); c.fillStyle = g.okT > 0 ? C.mix(col, "#ffffff", g.okT * .5) : col; c.fill("evenodd"); c.strokeStyle = INK; c.lineWidth = lw; c.lineJoin = "round"; c.stroke();
+  if (g.kind === "not") { // hanging prohibition sign: the shape you must NOT be
+    const sy = y - r * 1.85, sr = r * .86;
+    draw.circle(c, x + 3 * k, sy + 3 * k, sr, "#0e123f"); draw.circle(c, x, sy, sr, CREAM, COL[0], Math.max(2, 7 * k));
+    c.beginPath(); shapePath(c, RAD[g.shape], x, sy, sr * .5); c.fillStyle = INK; c.fill();
+    c.strokeStyle = COL[0]; c.lineWidth = Math.max(2, 7 * k); c.beginPath(); c.moveTo(x - sr * .7, sy - sr * .7); c.lineTo(x + sr * .7, sy + sr * .7); c.stroke();
+    c.fillStyle = "#f4b740"; for (let i = -1; i <= 1; i += 2) { c.save(); c.translate(x + i * r * 1.55, y + r * .2); c.rotate(-.5); c.fillRect(-r * .1, -r * 1.1, r * .2, r * 2.2); c.restore(); }
+  } else if (g.open < 1) { // peekaboo shutter
+    const q = 1 - g.open; draw.circle(c, x, y, r * 1.12 * q, CREAM, INK, lw);
+    if (q > .4) draw.text(c, "?", x, y + r * .06, { size: Math.max(6, r * 1.4 * q), color: INK });
+  }
+  if (g.kind === "flip") { // switcheroo badge: pulses until the gate has changed its mind
+    const bx = x + r * 1.45, by = y - r * 1.5, br = r * .42 * (g.flipped ? 1 : 1 + .14 * Math.sin(now * 14));
+    draw.circle(c, bx, by, br, g.flipped ? CREAM : "#ffe27a", INK, lw);
+    c.strokeStyle = INK; c.lineWidth = lw; c.beginPath(); c.arc(bx, by, br * .5, -.3 + now * (g.flipped ? 0 : 6), 4 + now * (g.flipped ? 0 : 6)); c.stroke();
+  }
+  c.globalAlpha = 1;
+}
+function drawPlayer(c, t) {
+  const g = gates.find(g => g.eta > 0 && !g.done), bob = Math.sin(bobT * 5) * 3 * S;
+  const wrong = g && g.revealed && g.eta < 1.05 && (g.kind === "not" ? shape === g.shape : shape !== g.shape && (g.kind !== "flip" || g.flipped));
+  const sq = ease.pulse(squeeze), pp = 1 + ease.outBack(1 - pop) * 0 + Math.sin(pop * Math.PI) * .22, sx = pp * (1 - sq * .16), sy = pp * (1 + sq * .2);
+  const x = CX + (hurtT > 0 ? Math.sin(hurtT * 40) * 7 * hurtT : 0), y = PY + bob, col = COL[shape];
+  draw.shadow(c, CX, GY, R * (1.05 - bob * .01), R * .2, .22);
+  c.beginPath(); shapePath(c, cur, x + 4, y + 4, R, sx, sy); c.fillStyle = INK; c.fill();
+  c.beginPath(); shapePath(c, cur, x, y, R, sx, sy); c.fillStyle = hurtT > .6 ? "#fff" : col; c.fill(); c.strokeStyle = INK; c.lineWidth = 3.5; c.lineJoin = "round"; c.stroke();
+  c.save(); c.clip(); c.fillStyle = "rgba(255,255,255,.22)"; c.beginPath(); c.ellipse(x - R * .3, y - R * .55, R * .7, R * .34, -.4, 0, TAU); c.fill(); c.restore();
+  // face: looks up the road, blinks, gapes when the next gate will not fit
+  const e = R * .12, ex = R * .3, ey = y - R * .12 + (shape === 2 ? R * .2 : 0);
+  c.fillStyle = CREAM; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(x + s * ex, ey, e * 1.5, blink < 0 && !wrong ? e * .25 : e * (wrong ? 2 : 1.6), 0, 0, TAU); c.fill(); }
+  if (!(blink < 0 && !wrong)) { c.fillStyle = INK; for (const s of [-1, 1]) { c.beginPath(); c.arc(x + s * ex, ey - e * .5, e * .8, 0, TAU); c.fill(); } }
+  c.strokeStyle = INK; c.lineWidth = 3; c.lineCap = "round"; c.beginPath();
+  if (wrong || hurtT > 0) { c.fillStyle = INK; c.ellipse(x, ey + R * .36, e * .9, e * 1.1, 0, 0, TAU); c.fill(); } else { c.arc(x, ey + R * .22, R * .16, .15 * Math.PI, .85 * Math.PI); c.stroke(); }
+}
+function drawButtons(c, t) {
+  const g = gates.find(g => g.eta > 0 && !g.done), tutor = !demo && passed < 3 && g && g.revealed ? g.shape : -1;
+  for (let i = 0; i < nShapes; i++) {
+    const x = btnX(i), on = i === shape, p = btnPop[i], dn = on ? 3 : 0, w = btnW * (1 + Math.sin(Math.min(1, p) * Math.PI) * .08 + Math.max(0, p - 1) * .5), h = btnH, y = btnY + dn;
+    draw.rect(c, x - w / 2 + 4, btnY + 5, w, h, 16 * S, INK);
+    draw.rect(c, x - w / 2, y, w, h, 16 * S, on ? COL[i] : CREAM, INK, 3);
+    c.beginPath(); shapePath(c, RAD[i], x, y + h / 2 + (i === 2 ? h * .05 : 0), h * .26); c.fillStyle = on ? CREAM : COL[i]; c.fill(); c.strokeStyle = INK; c.lineWidth = 2.5; c.lineJoin = "round"; c.stroke();
+    if (i === tutor && !on) { const b = Math.abs(Math.sin(t * 6)) * 8 * S, ay = btnY - 10 * S - b; c.fillStyle = INK; c.beginPath(); c.moveTo(x, ay + 9 * S); c.lineTo(x - 9 * S, ay - 5 * S); c.lineTo(x + 9 * S, ay - 5 * S); c.closePath(); c.fill(); }
+  }
+}
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  drawRoad(c);
+  for (let i = gates.length - 1; i >= 0; i--) if (gates[i].eta > 0) drawGate(c, gates[i]);
+  drawPlayer(c, t);
+  for (let i = gates.length - 1; i >= 0; i--) if (gates[i].eta <= 0) drawGate(c, gates[i]);
+  drawButtons(c, t);
+  if (demo) return;
+  // stage strip, lives, multiplier
+  const y0 = Lab.play.y + 14 * S + 4, len = stageLen(stage), pw = Math.min(7, (W * .42) / len - 3);
+  draw.text(c, "STAGE " + stage, 14, y0, { size: 12 * S + 3, color: INK, align: "left" });
+  for (let i = 0; i < len; i++) draw.rect(c, 14 + i * (pw + 3), y0 + 12 * S + 2, pw, 5, 2, i < stageDone ? INK : "rgba(27,33,97,.22)");
+  for (let i = 0; i < 3; i++) { const hx = W - 20 - i * (22 * S + 4), hs = 8 * S + 2; draw.heart(c, hx + 2, y0 + 4, hs, INK); draw.heart(c, hx, y0 + 2, hs, i < lives ? COL[0] : "rgba(27,33,97,.18)"); }
+  if (mult > 1) { const pu = 1 + Math.sin(Math.min(1, (streak % 6 === 0 ? squeeze : 0)) * Math.PI) * .3; draw.text(c, "×" + mult, CX, y0 + 8 * S, { size: (22 * S + 6) * pu, color: COL[0], stroke: CREAM, strokeW: 5 }); }
+  else if (streak > 0) draw.text(c, streak + "/6", CX, y0 + 6 * S, { size: 12 * S + 3, color: "rgba(27,33,97,.6)" });
+}
+Lab.boot();
+})();
 </script></body></html>

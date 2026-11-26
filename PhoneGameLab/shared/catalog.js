@@ -406,8 +406,9 @@ window.LAB_GAMES = [
    {
     "n": 38,
     "slug": "38-plinko",
-    "t": "Plinko",
-    "d": "Drop the ball — chase the big multiplier.",
+    "t": "Tumblepeg",
+    "d": "Drop, thump and ping your way past the quota.",
+    "v2": true,
     "thumb": "../thumbs/PhoneGameLab--38-plinko.jpg"
    },
    {
@@ -527,8 +528,9 @@ window.LAB_GAMES = [
    {
     "n": 33,
     "slug": "33-shape-gate",
-    "t": "Shape Gate",
-    "d": "Morph shape to fit the gate's hole.",
+    "t": "Snug",
+    "d": "Become the shape. Slip through.",
+    "v2": true,
     "thumb": "../thumbs/PhoneGameLab--33-shape-gate.jpg"
    },
    {
