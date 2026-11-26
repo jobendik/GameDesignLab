@@ -1,0 +1,30 @@
+# Changelog
+
+Newest first. One entry per coherent, verified batch of work.
+
+## 2026-11-26 — Phase 0: foundation
+- **Restructure**: 65 standalone games moved to `games/` with clean kebab-case names; `bouce_dungon.html` and the
+  pre-fix `busy-beavers.html` archived as superseded duplicates; `MagicSort.tsx` (non-playable React source) archived;
+  idea list moved to `docs/`. No game deleted.
+- **Dependencies vendored**: three.js r128 + 0.160 (with post-processing addons), matter-js 0.19, phaser 3.90,
+  nipplejs, and 13 open-licensed font families (`vendor/fonts/fonts.css`). Games repointed from CDNs.
+- **Tooling** (`tools/`): `serve.js` (static server), `discover.js` (filesystem inventory), `smoke.js` (headless
+  Chromium: load/render/input/resize/blur checks for every game), `run-tests.js` (gameplay test runner),
+  `shot.js` (3-viewport screenshots), `contact-sheet.js`, `thumbs.js` (launcher thumbnails), `build-catalog.js`
+  (generated catalogs), `build-docs.js` (generated inventory/review index), `sync-shared.js`.
+- **Baseline captured**: `docs/baseline/` — smoke report for all 217 files (214 loaded cleanly; `NeonHagen` blank
+  without CDNs, two phone games crashed on `let top`) and contact sheets of every game before changes.
+- **Phone engine v2** (`PhoneGameLab/shared/core.js`, mirrored to `PhoneGameLab2/shared/`), backward compatible
+  with all 150 v1 games: stage with portrait/landscape framing, safe areas and DPR budget; HUD, splash, pause
+  (button/Esc/auto on blur), game-over card with score count-up, best score and stats; multitouch + keyboard input;
+  dt-clamped loop with hit-stop, slow-mo, shake, flash; timers and tweens on the game clock; particles, rings,
+  floating text, confetti; drawing/colour helpers and sprite cache; procedural audio (45 SFX presets, tone/noise
+  synth, pentatonic combo ladder, 10-style generative music with intensity layers, persistent mute); personal bests
+  and play history in `localStorage` (shared with the arcade); reduced-motion support; `?seed`/`?autostart`/`?fps`
+  and `window.__lab` test hooks; bundled Fredoka typeface.
+- **Pocket Pals** (`PhoneGameLab2/shared/pals.js`): six original procedural mascots with nine moods, squash,
+  arms, eye-look, blinking and breathing, plus six cozy backdrops — the new identity of Phone Game Lab 2.
+- **Reference game**: `PhoneGameLab/games/37-star-jar` (was `37-suika-merge`) rebuilt from scratch with a gameplay
+  test and review (2 → 8).
+- **Docs**: `QUALITY_STANDARD.md`, `MASTER_PLAN.md`, `PROGRESS.md`, generated `GAME_INVENTORY.md` / `GAME_REVIEWS.md`,
+  briefs for parallel work in `docs/briefs/`, review template in `docs/reviews/`.
