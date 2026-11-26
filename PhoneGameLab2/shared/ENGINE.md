@@ -44,8 +44,11 @@ Lab.boot();                           // splash → start().  (v1 games called s
   (fades on the next touch; `Lab.hint(text,{sticky:true})` stays until replaced);
   `Lab.toast(text, ms)`; `Lab.banner("LEVEL 3", {color, ms})`.
 
+- `Lab.setTheme({fg,accent,…,light})` retints the HUD at runtime (the HUD score is DOM text: keep it readable when your sky changes).
+- Testing tip: scores that tick continuously are racy across separate reads — read game score and HUD state in one `page.evaluate`.
+
 ## Layout
-`Lab.W, Lab.H` (CSS px, change on resize → `Lab.onResize(fn)`), `Lab.dpr`, `Lab.play {x,y,w,h}` (area below the HUD and inside safe
+`Lab.W, Lab.H` (CSS px, change on resize → `Lab.onResize(fn)` — register it ONCE at top level, not inside `start()`; it persists across restarts), `Lab.dpr`, `Lab.play {x,y,w,h}` (area below the HUD and inside safe
 areas — keep gameplay-critical things inside it), `Lab.safe {top,bottom,left,right}`, `Lab.hudH`.
 Scale everything from the stage size (e.g. `const S = Math.min(Lab.W/390, Lab.play.h/700)`), never hardcode pixel positions.
 Test at 390×844 and 844×390 (and 1280×800 desktop).
@@ -69,11 +72,14 @@ Test at 390×844 and 844×390 (and 1280×800 desktop).
 - Honour `Lab.reducedMotion` for anything intense you draw yourself (shake/flash/hitstop already scale down automatically).
 
 ## Audio (procedural, autoplay-safe, user can mute sound/music in the pause menu or with M)
-- `Lab.sfx(name,{pitch})` presets: tap click tick pop bubble coin gem pickup hit thud knock bounce boing jump land whoosh swish slide flip
+- `Lab.sfx(name,{pitch,vol})` (vol = multiplier) presets: tap click tick pop bubble coin gem pickup hit thud knock bounce boing jump land whoosh swish slide flip
   drop shoot laser zap explode boom crunch splash glass powerup levelup win lose error hurt unlock star whistle heartbeat warn spring snap chime
 - `Lab.audio.combo(n)` — rising pentatonic ladder for streaks/chains. `Lab.audio.note('E5',{type,dur,vol})`, `Lab.audio.tone({f,f2,type,dur,vol,delay,lp})`,
   `Lab.audio.noise({dur,vol,lp|hp|bp,f2})` for custom sounds. Vary pitch with game state (size, speed, combo) so audio carries information.
+- Continuous sounds (rolling, wind, engines, charging): `const h = Lab.audio.loop({noise:true,bp:600,vol:0})` or `({type:'sawtooth',f:90,lp:800})`,
+  then `h.set({vol,f,cutoff})` each frame and `h.stop()`. Loops stop on restart/game over and mute while paused — create them in `start()`.
 - Music: `music:{style, key, bpm?, seed?, vol?}` in `Lab.init`; styles: bounce chill drive tense dream arcade puzzle funk march spooky.
+  `Lab.music.onBeat = (beat, isDownbeat) => {…}` fires on each quarter note in sync with the audio (set it in `start()`), `Lab.music.beatDur` = s/beat.
   `Lab.music.intensity(0..1)` adds/removes layers — tie it to danger / speed / progress. (`win`/`lose` jingles play automatically.)
 
 ## Drawing helpers (`Lab.draw`, plain Canvas 2D via `Lab.ctx`)

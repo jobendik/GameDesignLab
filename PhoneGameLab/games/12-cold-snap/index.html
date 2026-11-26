@@ -1,43 +1,261 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Cold Snap</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Asteroids", instructions:"Drag to steer toward your finger. Tap-and-hold to thrust. Double-tap to fire.", restart:start});
-let ship,rocks,bullets,score,lives,lastTap=0,thrust=false;
-function spawnRock(r,x,y){ const ang=Math.random()*Lab.TAU, sp=40+Math.random()*60;
-  rocks.push({x:x??Math.random()*Lab.W, y:y??Math.random()*Lab.H, vx:Math.cos(ang)*sp, vy:Math.sin(ang)*sp, r}); }
-function start(){
-  ship={x:Lab.W/2,y:Lab.H/2,a:-Math.PI/2,vx:0,vy:0};
-  rocks=[]; bullets=[]; score=0; lives=3; Lab.setScore(0);
-  for(let i=0;i<5;i++){ const r=40; let x,y; do{x=Math.random()*Lab.W;y=Math.random()*Lab.H;}while(Lab.dist(x,y,ship.x,ship.y)<150); spawnRock(r,x,y);}
-  Lab.input.onDown=[(x,y)=>{ thrust=true; const now=performance.now(); if(now-lastTap<300){ // double-tap fire
-    bullets.push({x:ship.x,y:ship.y,vx:Math.cos(ship.a)*500+ship.vx,vy:Math.sin(ship.a)*500+ship.vy,life:1.0});
-    Lab.beep(900,.04);
-  } lastTap=now;}];
-  Lab.input.onUp=[()=>{thrust=false;}];
-  Lab.input.onMove=[(x,y)=>{ ship.a=Math.atan2(y-ship.y,x-ship.x); }];
-  Lab.loop(dt=>{
-    if(thrust){ ship.vx+=Math.cos(ship.a)*220*dt; ship.vy+=Math.sin(ship.a)*220*dt; }
-    ship.vx*=0.995; ship.vy*=0.995;
-    ship.x=(ship.x+ship.vx*dt+Lab.W)%Lab.W; ship.y=(ship.y+ship.vy*dt+Lab.H)%Lab.H;
-    for(const r of rocks){ r.x=(r.x+r.vx*dt+Lab.W)%Lab.W; r.y=(r.y+r.vy*dt+Lab.H)%Lab.H; }
-    for(const b of bullets){ b.x+=b.vx*dt; b.y+=b.vy*dt; b.life-=dt; b.x=(b.x+Lab.W)%Lab.W; b.y=(b.y+Lab.H)%Lab.H; }
-    bullets=bullets.filter(b=>b.life>0);
-    for(const b of bullets){ for(let i=rocks.length-1;i>=0;i--){ const r=rocks[i]; if(Lab.dist(r.x,r.y,b.x,b.y)<r.r){
-      rocks.splice(i,1); b.life=0; score+=Math.round(50*(40/r.r)); Lab.setScore(score); Lab.beep(1100,.06);
-      if(r.r>22){ spawnRock(r.r*0.5,r.x,r.y); spawnRock(r.r*0.5,r.x,r.y); }
-    }}}
-    for(const r of rocks){ if(Lab.dist(r.x,r.y,ship.x,ship.y)<r.r+8){ lives--; ship.x=Lab.W/2; ship.y=Lab.H/2; ship.vx=ship.vy=0; Lab.beep(120,.2,'sawtooth'); if(lives<=0){Lab.gameover({title:"Crash",message:"Score: "+score}); return;} break;}}
-    if(!rocks.length){ Lab.win("Cleared! Score: "+score); return; }
-    const c=Lab.ctx; c.fillStyle="#05050a"; c.fillRect(0,0,Lab.W,Lab.H);
-    c.strokeStyle="#fff"; c.lineWidth=2;
-    for(const r of rocks){ c.beginPath(); c.arc(r.x,r.y,r.r,0,Lab.TAU); c.stroke(); }
-    c.fillStyle="#ffd35a"; for(const b of bullets){ c.beginPath(); c.arc(b.x,b.y,2,0,Lab.TAU); c.fill(); }
-    c.save(); c.translate(ship.x,ship.y); c.rotate(ship.a);
-    c.strokeStyle=thrust?"#ff5577":"#5af"; c.beginPath(); c.moveTo(14,0); c.lineTo(-10,8); c.lineTo(-6,0); c.lineTo(-10,-8); c.closePath(); c.stroke();
-    c.restore();
-    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
-    c.fillText("❤️ "+lives+" • Hold thrust, double-tap fire", Lab.W/2, 70);
+(function(){ "use strict";
+/* COLD SNAP — a drift-and-shoot game on a wrap-around polar sea.
+ * Identity: seen from above — teal water, faceted white ice with a pale underwater skirt, a small orange tug that leaves
+ * a foam wake, amber sunstones. Cold, quiet palette; chugging engine, cracking ice, a driving pulse that thickens with the ice.
+ * Core: bergs split into floes, floes into chunks, chunks shatter. The tug has real inertia: it glides, so you thrust,
+ * flip and fire while drifting. It fires by itself (with a little aim assist), leaving one thumb free to steer.
+ * Controls: a stick that appears wherever you touch — drag a little to turn only, further to thrust. Arrows on keyboard.
+ * Hook: shattered chunks release sunstones that sink within seconds. Scooping them out of the debris field builds the
+ * multiplier (x1..x6, which melts away if you stop collecting) and every 8th stone fires a SUNBURST of flares all round.
+ * From wave 3 a Tusker charges straight across the sea along a line it shows you first.                             */
+Lab.init({
+  title: "Cold Snap", tagline: "Break the drifting ice. Scoop the sunstones before they sink.", category: "Arcade & Action",
+  howto: ["Drag anywhere: a little to turn, further to thrust", "The tug fires by itself: bergs split, then shatter", "Grab sunstones quickly to build the multiplier"],
+  theme: { bg: "#082a36", bg2: "#135264", accent: "#ff8a4c", accent2: "#7fe3f0" },
+  orient: "portrait", music: { style: "drive", key: "E", bpm: 104, vol: .36 }, restart: start,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU;
+const TIER = [{ r: 15, hp: 1, pts: 100 }, { r: 27, hp: 2, pts: 50 }, { r: 44, hp: 3, pts: 20 }];
+let S, top, ship, ice, shots, gems, rams, wake, stick, score, lives, wave, chain, chainT, bestMult, stones, burst, fireT, wakeT, chugT, ramT, pending, alive, hintT, glints, broke;
+
+// engine workaround: Lab.buzz before the first tap makes Chrome log a console error (possible with ?autostart=1 + auto-fire)
+const buzz = ms => { const ua = navigator.userActivation; if (!ua || ua.hasBeenActive) Lab.buzz(ms); };
+const mult = () => Math.min(6, 1 + Math.floor(chain / 4));
+function layout() { S = Math.min(Lab.W / 390, Lab.play.h / 700); top = Lab.play.y - 6; }
+Lab.onResize((W, H) => {
+  if (!ship) return; const oT = top, oS = S, oW = W_, oH = H_; layout(); const kx = Lab.W / oW, ky = (Lab.H - top) / (oH - oT), ks = S / oS;
+  for (const a of [[ship], ice, shots, gems, rams, wake]) for (const o of a) { o.x *= kx; o.y = top + (o.y - oT) * ky; if (o.vx != null) { o.vx *= ks; o.vy *= ks; } }
+  for (const i of ice) i.r = TIER[i.tier].r * S; W_ = Lab.W; H_ = Lab.H; stick.on = false;
+});
+let W_, H_;
+
+function start() {
+  layout(); W_ = Lab.W; H_ = Lab.H;
+  ship = { x: Lab.W / 2, y: top + (Lab.H - top) * .58, vx: 0, vy: 0, a: -Math.PI / 2, inv: 1.5, thr: 0, recoil: 0 };
+  ice = []; shots = []; gems = []; rams = []; wake = []; stick = { on: false, id: null, ax: 0, ay: 0, x: 0, y: 0 };
+  score = 0; lives = 3; wave = 0; chain = 0; chainT = 0; bestMult = 1; stones = 0; burst = 0; fireT = .4; wakeT = 0; chugT = 0; ramT = 10; pending = false; alive = true; hintT = 0; broke = 0;
+  glints = Array.from({ length: 26 }, () => ({ x: Math.random(), y: Math.random(), p: Lab.rand(0, TAU), v: Lab.rand(.5, 1.4), w: Lab.rand(6, 14) }));
+  Lab.setScore(0);
+  Lab.input.onDown = [(x, y, id) => { if (!stick.on) { stick.on = true; stick.id = id; stick.ax = stick.x = x; stick.ay = stick.y = y; } }];
+  Lab.input.onMove = [(x, y, dx, dy, id) => {
+    if (!stick.on || id !== stick.id) return; stick.x = x; stick.y = y;
+    const d = Lab.dist(x, y, stick.ax, stick.ay), max = 66 * S; if (d > max) { stick.ax = x - (x - stick.ax) / d * max; stick.ay = y - (y - stick.ay) / d * max; } // the stick follows a wandering thumb
+  }];
+  Lab.input.onUp = [(x, y, id) => { if (id === stick.id) stick.on = false; }];
+  Lab.expose({
+    get score() { return score; }, get lives() { return lives; }, get wave() { return wave; }, get mult() { return mult(); }, get chain() { return chain; }, get stones() { return stones; }, get broke() { return broke; },
+    get ship() { return { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, a: ship.a, inv: ship.inv, speed: Math.hypot(ship.vx, ship.vy) / S }; },
+    get ice() { return ice.map(i => ({ x: i.x, y: i.y, r: i.r, tier: i.tier, hp: i.hp })); }, get gems() { return gems.map(g => ({ x: g.x, y: g.y })); }, get shots() { return shots.length; }, get rams() { return rams.length; },
+    get field() { return { top, W: Lab.W, H: Lab.H, S }; },
+    /* test helpers */
+    clearIce() { ice = []; rams = []; }, spawnIce(tier, x, y, vx, vy) { ice.push(mkIce(tier, x, y, vx || 0, vy || 0)); }, spawnGem(x, y) { gems.push({ x, y, vx: 0, vy: 0, t: 0 }); },
+    setLives(n) { lives = n; }, calm(on) { ship.inv = on ? 1e9 : 0; }, stop() { ship.vx = ship.vy = 0; }, ram() { ramT = 0; },
+  });
+  nextWave();
+  Lab.loop(frame);
+}
+function mkIce(tier, x, y, vx, vy) {
+  const n = 9 + tier, shape = []; for (let i = 0; i < n; i++) shape.push(.78 + Math.random() * .3);
+  return { tier, x, y, vx, vy, r: TIER[tier].r * S, hp: TIER[tier].hp, rot: Lab.rand(0, TAU), vr: Lab.rand(-.5, .5) * (3 - tier) * .5, shape, flash: 0, wob: 0 };
+}
+function nextWave() {
+  wave++; pending = false; const n = Math.min(2 + wave, 7), sp = (26 + Math.min(wave, 12) * 5) * S;
+  for (let i = 0; i < n; i++) {
+    let x, y, g = 0; do { x = Lab.rand(0, Lab.W); y = Lab.rand(top, Lab.H); } while (Lab.dist(x, y, ship.x, ship.y) < 200 * S && g++ < 40);
+    const a = Lab.rand(0, TAU), v = sp * Lab.rand(.6, 1.3), b = mkIce(wave === 1 && i === 2 ? 1 : 2, x, y, Math.cos(a) * v, Math.sin(a) * v); b.wob = 1; ice.push(b);
+  }
+  ramT = Lab.rand(7, 11);
+  if (wave > 1) { Lab.banner("WAVE " + wave, { color: "#bff3fa", ms: 1000 }); Lab.sfx("whistle", { pitch: .8 }); }
+}
+
+/* ---------------------------------------------------------------- actions */
+function fire() {
+  let a = ship.a, best = 1e9; // gentle aim assist: snap to ice within ~11° of the bow
+  for (const i of ice) { const d = Lab.dist(i.x, i.y, ship.x, ship.y); if (d > 330 * S) continue; const da = Math.abs(Lab.angleDiff(ship.a, Math.atan2(i.y - ship.y, i.x - ship.x))); if (da < .2 + i.r / d * .5 && d < best) { best = d; a = Math.atan2(i.y - ship.y, i.x - ship.x); } }
+  for (const r of rams) { if (r.state !== "dash") continue; const d = Lab.dist(r.x, r.y, ship.x, ship.y), da = Math.abs(Lab.angleDiff(ship.a, Math.atan2(r.y - ship.y, r.x - ship.x))); if (da < .3 && d < best) { best = d; a = Math.atan2(r.y - ship.y, r.x - ship.x); } }
+  flare(ship.x + Math.cos(ship.a) * 15 * S, ship.y + Math.sin(ship.a) * 15 * S, a, .78); ship.recoil = 1;
+  Lab.audio.tone({ f: 1250, f2: 640, dur: .05, type: "sine", vol: .045 });
+}
+function flare(x, y, a, life) { if (shots.length < 60) shots.push({ x, y, vx: Math.cos(a) * 560 * S + ship.vx * .4, vy: Math.sin(a) * 560 * S + ship.vy * .4, life }); }
+function hitIce(b, s) {
+  b.hp--; b.flash = 1; const ang = s ? Math.atan2(s.vy, s.vx) : Lab.rand(0, TAU);
+  fx.burst(s ? s.x : b.x, s ? s.y : b.y, { n: 5, colors: ["#fff", "#c9f2f8"], speed: 150 * S, size: 2.6 * S, life: .35, shape: "shard", gravity: 0, angle: ang + Math.PI, spread: 1.6 });
+  if (b.hp > 0) { Lab.sfx("knock", { pitch: 1.5 - b.tier * .3 }); b.vx += Math.cos(ang) * 10 * S; b.vy += Math.sin(ang) * 10 * S; return; }
+  ice.splice(ice.indexOf(b), 1); broke++;
+  const g = TIER[b.tier].pts * mult(); score += g; Lab.setScore(score);
+  fx.text(b.x, b.y, "+" + g, { color: "#eafcff", size: (13 + (2 - b.tier) * 3) * Math.max(.85, S), life: .6 });
+  fx.burst(b.x, b.y, { n: 8 + b.tier * 7, colors: ["#fff", "#c9f2f8", "#8fdbe8"], speed: (170 + b.tier * 60) * S, size: (3 + b.tier) * S, life: .6, shape: "shard", gravity: 0, drag: 2.2 });
+  fx.ring(b.x, b.y, { r0: b.r * .5, r1: b.r * 1.9, color: "#dff9ff", width: (2 + b.tier) * S, life: .35 });
+  if (b.tier === 2) { Lab.sfx("explode", { pitch: 1.1 }); Lab.sfx("crunch", { pitch: .6 }); Lab.shake(6, .22); Lab.hitstop(.035); buzz(18); }
+  else if (b.tier === 1) { Lab.sfx("crunch", { pitch: .95 }); Lab.shake(2.5, .12); }
+  else { Lab.sfx("glass", { pitch: 1 + Math.random() * .3 }); }
+  if (b.tier > 0) for (const sd of [-1, 1]) {
+    const pa = ang + sd * Math.PI / 2 + Lab.rand(-.4, .4), kick = Lab.rand(42, 78) * S, c = mkIce(b.tier - 1, b.x + Math.cos(pa) * b.r * .45, b.y + Math.sin(pa) * b.r * .45, b.vx * .7 + Math.cos(pa) * kick + Math.cos(ang) * 22 * S, b.vy * .7 + Math.sin(pa) * kick + Math.sin(ang) * 22 * S);
+    c.wob = 1; ice.push(c);
+  } else if (Lab.chance(.78) && gems.length < 30) gems.push({ x: b.x, y: b.y, vx: b.vx * .5, vy: b.vy * .5, t: 0 });
+  if (!ice.length && !pending && alive) { pending = true; const bonus = 100 * wave; score += bonus; Lab.setScore(score); Lab.bumpScore(); Lab.sfx("levelup"); fx.text(Lab.W / 2, top + (Lab.H - top) * .36, "sea cleared  +" + bonus, { color: "#ffd98a", size: 20 * Math.max(.85, S), life: 1.3 }); Lab.after(1.5, () => { if (alive) nextWave(); }); }
+}
+function grab(g) {
+  const m0 = mult(); chain++; stones++; chainT = 7; burst++; const pts = 25 * mult(); score += pts; Lab.setScore(score);
+  Lab.audio.combo(Math.min(chain, 16), { vol: .17, type: "sine" }); Lab.sfx("gem", { pitch: .9 + mult() * .06 }); buzz(8);
+  fx.burst(g.x, g.y, { n: 6, colors: ["#ffc233", "#fff2c2"], speed: 130 * S, size: 2.6 * S, life: .4, gravity: 0, shape: "star" });
+  if (mult() > m0) { bestMult = Math.max(bestMult, mult()); Lab.bumpScore(); fx.text(ship.x, ship.y - 34 * S, "×" + mult(), { color: "#ffc233", size: 26 * S }); Lab.sfx("pickup", { pitch: 1 + mult() * .08 }); }
+  if (burst >= 8) { burst = 0; for (let i = 0; i < 16; i++) flare(ship.x, ship.y, i / 16 * TAU + ship.a, .6); Lab.sfx("powerup", { pitch: 1.2 }); Lab.flash("#ffd98a", .2, .25); fx.ring(ship.x, ship.y, { r0: 14 * S, r1: 150 * S, color: "#ffc233", width: 5 * S, life: .45 }); fx.text(ship.x, ship.y - 54 * S, "SUNBURST", { color: "#ffd98a", size: 18 * Math.max(.85, S) }); }
+}
+function wreck() {
+  if (ship.inv > 0 || !alive) return;
+  lives--; chain = 0; burst = 0; ship.inv = 2.4; Lab.shake(13, .45); Lab.hitstop(.09); Lab.flash("#ff8a4c", .25, .35); Lab.sfx("hurt"); Lab.sfx("splash", { pitch: .7 }); Lab.sfx("thud"); buzz(60);
+  fx.burst(ship.x, ship.y, { n: 28, colors: ["#ff8a4c", "#fff", "#ffd98a", "#8fdbe8"], speed: 320 * S, size: 4 * S, life: .9, gravity: 0, drag: 2, shape: "shard" });
+  fx.ring(ship.x, ship.y, { r0: 12 * S, r1: 160 * S, color: "#fff", width: 6 * S, life: .5 });
+  for (const b of ice) { const d = Lab.dist(b.x, b.y, ship.x, ship.y) || 1; if (d < 170 * S) { b.vx += (b.x - ship.x) / d * 150 * S; b.vy += (b.y - ship.y) / d * 150 * S; } }
+  ship.vx *= .2; ship.vy *= .2;
+  if (lives <= 0) { alive = false; Lab.gameover({ title: "Hull breached", score, stats: [["Wave", wave], ["Best multiplier", "×" + bestMult], ["Sunstones", stones]] }); }
+}
+const wrapX = (o, m) => { if (o.x < -m) o.x += Lab.W + 2 * m; else if (o.x > Lab.W + m) o.x -= Lab.W + 2 * m; };
+const wrapY = (o, m) => { if (o.y < top - m) o.y += Lab.H - top + 2 * m; else if (o.y > Lab.H + m) o.y -= Lab.H - top + 2 * m; };
+
+/* ---------------------------------------------------------------- frame */
+function frame(dt, t) {
+  hintT += dt;
+  if (stick.on && !Lab.input.pointers.some(p => p.id === stick.id)) stick.on = false;
+  // helm
+  let thr = 0;
+  if (stick.on) { const dx = stick.x - stick.ax, dy = stick.y - stick.ay, d = Math.hypot(dx, dy); if (d > 9 * S) ship.a += Lab.angleDiff(ship.a, Math.atan2(dy, dx)) * (1 - Math.exp(-16 * dt)); thr = Lab.clamp((d - 22 * S) / (40 * S), 0, 1); }
+  else { ship.a += Lab.input.axisX() * 3.7 * dt; if (Lab.input.axisY() < 0) thr = 1; }
+  if (!alive) thr = 0;
+  ship.thr = Lab.damp(ship.thr, thr, 10, dt); ship.recoil = Lab.damp(ship.recoil, 0, 16, dt); ship.inv = Math.max(0, ship.inv - dt);
+  ship.vx += Math.cos(ship.a) * 470 * S * thr * dt; ship.vy += Math.sin(ship.a) * 470 * S * thr * dt;
+  const drag = Math.exp(-(thr > 0 ? .95 : .42) * dt); ship.vx *= drag; ship.vy *= drag;
+  const sp = Math.hypot(ship.vx, ship.vy), cap = 315 * S; if (sp > cap) { ship.vx *= cap / sp; ship.vy *= cap / sp; }
+  ship.x += ship.vx * dt; ship.y += ship.vy * dt; wrapX(ship, 12 * S); wrapY(ship, 12 * S);
+  wakeT -= dt; if (wakeT <= 0 && sp > 26 * S && alive) { wakeT = .04; if (wake.length < 56) wake.push({ x: ship.x - Math.cos(ship.a) * 12 * S + Lab.rand(-2, 2) * S, y: ship.y - Math.sin(ship.a) * 12 * S + Lab.rand(-2, 2) * S, t: 0, r: (3 + thr * 3) * S }); }
+  if (thr > .05) { chugT -= dt; if (chugT <= 0) { chugT = .13; Lab.audio.noise({ dur: .1, vol: .03 + thr * .03, bp: 240, q: 1.2 }); fx.burst(ship.x - Math.cos(ship.a) * 14 * S, ship.y - Math.sin(ship.a) * 14 * S, { n: 2, color: "rgba(255,255,255,.75)", speed: 90 * S, size: 2.6 * S, life: .4, gravity: 0, angle: ship.a + Math.PI, spread: .9, vx: ship.vx * .3, vy: ship.vy * .3 }); } }
+  for (const w of wake) w.t += dt / .95; if (wake.length && wake[0].t >= 1) wake = wake.filter(w => w.t < 1);
+  // flares
+  fireT -= dt; if (fireT <= 0 && alive) { if (ice.length || rams.length) { fire(); fireT = .24; } else fireT = .1; }
+  for (const s of shots) {
+    s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt; wrapX(s, 4); wrapY(s, 4); if (s.life <= 0) { s.dead = true; continue; }
+    for (const b of ice) { const rr = b.r * .93 + 3 * S; if (Math.abs(b.x - s.x) < rr && Math.abs(b.y - s.y) < rr && Lab.dist(b.x, b.y, s.x, s.y) < rr) { s.dead = true; hitIce(b, s); break; } }
+    if (!s.dead) for (const r of rams) if (r.state === "dash" && Lab.dist(r.x, r.y, s.x, s.y) < 20 * S) { s.dead = true; r.hp--; r.flash = 1; Lab.sfx("knock", { pitch: .8 }); if (r.hp <= 0) { r.dead = true; const g = 150 * mult(); score += g; Lab.setScore(score); Lab.bumpScore(); fx.text(r.x, r.y, "+" + g, { color: "#ffd98a", size: 18 * S }); fx.burst(r.x, r.y, { n: 20, colors: ["#3d5a80", "#fff", "#98c1d9"], speed: 260 * S, size: 4 * S, life: .7, gravity: 0, drag: 2 }); Lab.sfx("splash"); Lab.shake(6, .2); for (let i = 0; i < 3; i++) gems.push({ x: r.x, y: r.y, vx: Lab.rand(-70, 70) * S, vy: Lab.rand(-70, 70) * S, t: 0 }); } break; }
+  }
+  if (shots.some(s => s.dead)) shots = shots.filter(s => !s.dead);
+  // ice
+  for (const b of ice) {
+    b.x += b.vx * dt; b.y += b.vy * dt; b.rot += b.vr * dt; wrapX(b, b.r); wrapY(b, b.r); b.flash = Math.max(0, b.flash - dt * 6); b.wob = Math.max(0, b.wob - dt * 3);
+    const v = Math.hypot(b.vx, b.vy), vmax = (150 - b.tier * 30) * S; if (v > vmax) { const k = Math.exp(-1.5 * dt); b.vx *= k; b.vy *= k; }
+    if (alive && ship.inv <= 0 && Lab.dist(b.x, b.y, ship.x, ship.y) < b.r * .86 + 9 * S) wreck();
+  }
+  // the Tusker: shows its line, then charges along it
+  if (wave >= 3 && alive && ice.length) { ramT -= dt; if (ramT <= 0 && rams.length < (wave >= 7 ? 2 : 1)) { ramT = Math.max(5, 13 - wave * .7) * Lab.rand(.8, 1.3); const horiz = Lab.chance(.65), dir = Lab.chance(.5) ? 1 : -1;
+    rams.push(horiz ? { x: dir > 0 ? -30 * S : Lab.W + 30 * S, y: Lab.clamp(ship.y + Lab.rand(-30, 30) * S, top + 50 * S, Lab.H - 30 * S), dx: dir, dy: 0, state: "warn", t: 0, hp: 3, flash: 0 } : { x: Lab.clamp(ship.x + Lab.rand(-30, 30) * S, 30 * S, Lab.W - 30 * S), y: dir > 0 ? top - 30 * S : Lab.H + 30 * S, dx: 0, dy: dir, state: "warn", t: 0, hp: 3, flash: 0 });
+    Lab.sfx("warn", { pitch: .8 }); } }
+  for (const r of rams) {
+    r.t += dt; r.flash = Math.max(0, r.flash - dt * 6);
+    if (r.state === "warn") { if (r.t > 1.25) { r.state = "dash"; r.t = 0; Lab.sfx("whoosh", { pitch: .7 }); } continue; }
+    const v = Math.min(480, 360 + wave * 12) * S; r.x += r.dx * v * dt; r.y += r.dy * v * dt;
+    if (Lab.chance(dt * 40) && wake.length < 56) wake.push({ x: r.x - r.dx * 18 * S, y: r.y - r.dy * 18 * S, t: 0, r: 5 * S });
+    if (r.x < -60 * S || r.x > Lab.W + 60 * S || r.y < top - 60 * S || r.y > Lab.H + 60 * S) r.dead = true;
+    if (alive && ship.inv <= 0 && Lab.dist(r.x, r.y, ship.x, ship.y) < 24 * S) wreck();
+  }
+  if (rams.some(r => r.dead)) rams = rams.filter(r => !r.dead);
+  // sunstones
+  for (const g of gems) {
+    g.t += dt; const d = Lab.dist(g.x, g.y, ship.x, ship.y);
+    if (alive && d < 74 * S && d > 1) { const pull = 300 * S * dt; g.x += (ship.x - g.x) / d * pull; g.y += (ship.y - g.y) / d * pull; } else { g.x += g.vx * dt; g.y += g.vy * dt; const k = Math.exp(-1.6 * dt); g.vx *= k; g.vy *= k; }
+    wrapX(g, 8); wrapY(g, 8);
+    if (alive && d < 25 * S) { g.dead = true; grab(g); } else if (g.t > 5.5) { g.dead = true; fx.puff(g.x, g.y, { n: 3, color: "rgba(255,194,51,.4)", size: 4 * S }); }
+  }
+  if (gems.some(g => g.dead)) gems = gems.filter(g => !g.dead);
+  if (chain > 0) { chainT -= dt; if (chainT <= 0) { chain = Math.max(0, (mult() - 2) * 4); chainT = 7; if (chain >= 0) { fx.text(ship.x, ship.y - 34 * S, chain ? "melting…  ×" + mult() : "multiplier melted", { color: "#9fd8e4", size: 13 * Math.max(.85, S), life: .9 }); Lab.sfx("tick", { pitch: .5 }); } } }
+  Lab.music.intensity(Lab.clamp(.25 + ice.length * .035 + rams.length * .2 + (lives === 1 ? .15 : 0), 0, 1));
+  render(t, thr);
+}
+
+/* ---------------------------------------------------------------- drawing */
+function sea() {
+  return Lab.sprite("sea:" + Lab.W + "x" + Lab.H, Lab.W, Lab.H, (g, w, h) => {
+    draw.vgrad(g, 0, 0, w, h, ["#135264", "#0d3b4b", "#092c3a"]);
+    const rnd = Lab.rng(21); g.lineCap = "round";
+    for (let i = 0; i < 22; i++) { const y = rnd() * h, x0 = rnd() * w, len = (60 + rnd() * 140) * S, amp = (3 + rnd() * 5) * S; g.strokeStyle = `rgba(190,240,250,${.035 + rnd() * .05})`; g.lineWidth = (1.5 + rnd() * 2.5) * S; g.beginPath(); for (let x = 0; x <= len; x += 8) g[x ? "lineTo" : "moveTo"](x0 + x - len / 2, y + Math.sin(x * .05 + i) * amp); g.stroke(); }
+    for (let i = 0; i < 9; i++) draw.glow(g, rnd() * w, rnd() * h, (60 + rnd() * 90) * S, i % 2 ? "#1c7084" : "#06202b", .22);
   });
 }
-start();
+function icePath(c, b, k) { const n = b.shape.length; c.beginPath(); for (let i = 0; i < n; i++) { const a = b.rot + i / n * TAU, r = b.r * b.shape[i] * k; c[i ? "lineTo" : "moveTo"](b.x + Math.cos(a) * r, b.y + Math.sin(a) * r); } c.closePath(); }
+function gemSprite() {
+  const sz = 34 * S;
+  return Lab.sprite("gem:" + Math.round(S * 100), sz, sz, g => { const c = sz / 2, r = 8 * S; draw.glow(g, c, c, sz / 2, "#ffc233", .55);
+    g.fillStyle = "#ffc233"; g.beginPath(); g.moveTo(c, c - r * 1.15); g.lineTo(c + r, c); g.lineTo(c, c + r * 1.15); g.lineTo(c - r, c); g.closePath(); g.fill();
+    g.fillStyle = "#fff2c2"; g.beginPath(); g.moveTo(c, c - r * 1.15); g.lineTo(c + r, c); g.lineTo(c, c - r * .1); g.lineTo(c - r, c); g.closePath(); g.fill();
+    g.strokeStyle = "rgba(120,70,0,.55)"; g.lineWidth = 1.2; g.beginPath(); g.moveTo(c, c - r * 1.15); g.lineTo(c + r, c); g.lineTo(c, c + r * 1.15); g.lineTo(c - r, c); g.closePath(); g.stroke(); });
+}
+function tugSprite() {
+  const sz = 48 * S;
+  return Lab.sprite("tug:" + Math.round(S * 100), sz, sz, g => { const s = S * 1.12; g.translate(sz / 2, sz / 2); g.scale(s, s);
+    const hull = () => { g.beginPath(); g.moveTo(17, 0); g.quadraticCurveTo(8, -10, -11, -9); g.quadraticCurveTo(-15, -8, -15, 0); g.quadraticCurveTo(-15, 8, -11, 9); g.quadraticCurveTo(8, 10, 17, 0); g.closePath(); };
+    g.save(); g.translate(1.5, 2.5); hull(); g.fillStyle = "rgba(3,20,28,.35)"; g.fill(); g.restore();
+    hull(); g.fillStyle = "#ff8a4c"; g.fill(); g.strokeStyle = "#7a2e10"; g.lineWidth = 1.4; g.stroke();
+    g.save(); g.scale(.74, .68); hull(); g.fillStyle = "#ffd3ad"; g.fill(); g.restore();
+    draw.rect(g, -9, -5, 11, 10, 2.5, "#fff7ea", "#7a2e10", 1.1); draw.rect(g, -7, -3.2, 3.2, 6.4, 1, "#3d7f95");
+    draw.circle(g, -11, 0, 2.3, "#3b3b46"); draw.circle(g, 9.5, 0, 1.8, "#ffd98a", "#7a2e10", .9); });
+}
+function render(t, thr) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, bg = sea();
+  c.drawImage(bg, 0, 0, bg.w, bg.h);
+  c.strokeStyle = "#d8f7fc"; c.lineCap = "round"; c.lineWidth = 1.6 * S;
+  for (const g of glints) { const a = Math.sin(t * g.v + g.p); if (a < .2) continue; c.globalAlpha = (a - .2) * .3; const x = g.x * W, y = top + g.y * (H - top); c.beginPath(); c.moveTo(x - g.w * S, y); c.quadraticCurveTo(x, y - 3 * S, x + g.w * S, y); c.stroke(); } c.globalAlpha = 1;
+  // foam wake
+  c.fillStyle = "#e6fbff"; for (const w of wake) { c.globalAlpha = (1 - w.t) * .28; c.beginPath(); c.arc(w.x, w.y, w.r * (1 + w.t * 2.2), 0, TAU); c.fill(); } c.globalAlpha = 1;
+  // Tusker warning lines
+  for (const r of rams) if (r.state === "warn") { const a = .35 + .4 * Math.abs(Math.sin(r.t * 12)); c.strokeStyle = `rgba(255,110,90,${a})`; c.lineWidth = 3 * S; c.setLineDash([10 * S, 10 * S]); c.lineDashOffset = -r.t * 120 * S; c.beginPath(); if (r.dx) { c.moveTo(0, r.y); c.lineTo(W, r.y); } else { c.moveTo(r.x, top); c.lineTo(r.x, H); } c.stroke(); c.setLineDash([]);
+    const ex = r.dx ? (r.dx > 0 ? 18 * S : W - 18 * S) : r.x, ey = r.dy ? (r.dy > 0 ? Lab.play.y + 20 * S : H - 20 * S) : r.y; draw.circle(c, ex, ey, 12 * S, `rgba(255,110,90,${a + .2})`); draw.text(c, "!", ex, ey + S, { size: 17 * S, color: "#fff" }); }
+  // ice: pale underwater skirt, then the faceted top
+  c.fillStyle = "rgba(140,220,235,.2)"; for (const b of ice) { icePath(c, b, 1.24); c.fill(); }
+  for (const b of ice) {
+    const k = 1 + b.wob * .12 * Math.sin(b.wob * 12);
+    icePath(c, b, k); c.fillStyle = "#cfeef5"; c.fill(); c.strokeStyle = "rgba(255,255,255,.9)"; c.lineWidth = 1.6 * S; c.lineJoin = "round"; c.stroke();
+    c.save(); c.translate(-b.r * .1, -b.r * .12); icePath(c, b, .7 * k); c.fillStyle = "#ffffff"; c.fill(); c.restore();
+    c.strokeStyle = "rgba(90,170,190,.5)"; c.lineWidth = 1.2 * S; const n = b.shape.length, lost = TIER[b.tier].hp - b.hp;
+    c.beginPath(); for (let i = 0; i < n; i += 3) { const a = b.rot + i / n * TAU; c.moveTo(b.x + Math.cos(a) * b.r * .68, b.y + Math.sin(a) * b.r * .68); c.lineTo(b.x + Math.cos(a) * b.r * b.shape[i] * .98, b.y + Math.sin(a) * b.r * b.shape[i] * .98); } c.stroke();
+    if (lost > 0) { c.strokeStyle = "rgba(30,90,110,.8)"; c.lineWidth = 1.8 * S; c.beginPath(); for (let j = 0; j < lost; j++) { const a = b.rot + 1 + j * 2.4; c.moveTo(b.x + Math.cos(a) * b.r * .85, b.y + Math.sin(a) * b.r * .85); c.lineTo(b.x + Math.cos(a + .5) * b.r * .3, b.y + Math.sin(a + .5) * b.r * .3); c.lineTo(b.x + Math.cos(a + 2.6) * b.r * .6, b.y + Math.sin(a + 2.6) * b.r * .6); } c.stroke(); }
+    if (b.flash > 0) { c.globalAlpha = b.flash * .6; icePath(c, b, 1.02); c.fillStyle = "#fff"; c.fill(); c.globalAlpha = 1; }
+  }
+  // sunstones
+  const gs = gemSprite(); for (const g of gems) { if (g.t > 4 && Math.floor(g.t * 9) % 2) continue; const k = 1 + Math.sin(g.t * 7) * .1 - Math.max(0, g.t - 4.5) * .5; c.drawImage(gs, g.x - gs.w * k / 2, g.y - gs.h * k / 2, gs.w * k, gs.h * k); }
+  // Tuskers
+  for (const r of rams) if (r.state === "dash") { c.save(); c.translate(r.x, r.y); c.rotate(Math.atan2(r.dy, r.dx)); c.scale(S, S);
+    c.fillStyle = "rgba(3,20,28,.3)"; c.beginPath(); c.ellipse(1, 3, 20, 9, 0, 0, TAU); c.fill(); c.fillStyle = r.flash > 0 ? "#fff" : "#3d5a80"; c.beginPath(); c.ellipse(0, 0, 20, 8.5, 0, 0, TAU); c.fill();
+    c.fillStyle = "#98c1d9"; c.beginPath(); c.ellipse(2, 0, 12, 4, 0, 0, TAU); c.fill(); c.fillStyle = "#29415e"; c.beginPath(); c.moveTo(-18, 0); c.lineTo(-27, -8 + Math.sin(r.t * 30) * 3); c.lineTo(-27, 8 + Math.sin(r.t * 30) * 3); c.fill();
+    c.strokeStyle = "#fffbe8"; c.lineWidth = 2.6; c.lineCap = "round"; c.beginPath(); c.moveTo(18, 0); c.lineTo(36, 0); c.stroke(); c.restore(); }
+  // flares
+  c.lineCap = "round"; c.strokeStyle = "rgba(255,217,138,.45)"; c.lineWidth = 5 * S; c.beginPath(); for (const s of shots) { c.moveTo(s.x, s.y); c.lineTo(s.x - s.vx * .022, s.y - s.vy * .022); } c.stroke();
+  c.strokeStyle = "#fffbe8"; c.lineWidth = 2.4 * S; c.beginPath(); for (const s of shots) { c.moveTo(s.x, s.y); c.lineTo(s.x - s.vx * .012, s.y - s.vy * .012); } c.stroke();
+  // tug
+  if (alive) {
+    const sp = tugSprite(), blink = ship.inv > 0 && ship.inv < 100 && Math.floor(ship.inv * 11) % 2;
+    c.save(); c.translate(ship.x - Math.cos(ship.a) * ship.recoil * 2 * S, ship.y - Math.sin(ship.a) * ship.recoil * 2 * S); c.rotate(ship.a); c.scale(1 + ship.thr * .07, 1 - ship.thr * .05); if (blink) c.globalAlpha = .4;
+    c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore();
+    if (ship.inv > 0 && ship.inv < 100) { c.strokeStyle = `rgba(190,243,250,${.35 + .3 * Math.sin(t * 14)})`; c.lineWidth = 2 * S; c.beginPath(); c.arc(ship.x, ship.y, 22 * S, 0, TAU); c.stroke(); }
+  }
+  // touch stick
+  if (stick.on && alive) { const d = Lab.dist(stick.x, stick.y, stick.ax, stick.ay), go = d > 22 * S;
+    draw.circle(c, stick.ax, stick.ay, 62 * S, "rgba(255,255,255,.05)", "rgba(255,255,255,.22)", 2 * S); draw.circle(c, stick.ax, stick.ay, 22 * S, null, "rgba(255,255,255,.28)", 1.5 * S);
+    draw.circle(c, stick.x, stick.y, 17 * S, go ? "rgba(255,138,76,.55)" : "rgba(255,255,255,.3)", "rgba(255,255,255,.7)", 2 * S); }
+  // status strip
+  const ts = Math.max(S, .82), sy = Lab.play.y + 14 * ts;
+  draw.vgrad(c, 0, 0, W, Lab.play.y + 30 * ts, ["rgba(6,32,43,.7)", "rgba(6,32,43,.45)", "rgba(6,32,43,0)"]);
+  for (let i = 0; i < lives; i++) { c.save(); c.translate(20 * ts + i * 22 * ts, sy); c.rotate(-Math.PI / 2); c.fillStyle = "#ff8a4c"; c.beginPath(); c.moveTo(9 * ts, 0); c.quadraticCurveTo(3 * ts, -6 * ts, -7 * ts, -5 * ts); c.lineTo(-7 * ts, 5 * ts); c.quadraticCurveTo(3 * ts, 6 * ts, 9 * ts, 0); c.fill(); c.restore(); }
+  draw.text(c, "WAVE " + wave, W - 14 * ts, sy, { size: 13 * ts, color: "#bfeaf2", align: "right", weight: 700 });
+  const m = mult(); draw.text(c, "×" + m, W / 2 - 34 * ts, sy, { size: (15 + m * 1.4) * ts, color: m > 1 ? "#ffc233" : "rgba(191,234,242,.6)", weight: 700 });
+  for (let i = 0; i < 8; i++) draw.circle(c, W / 2 - 12 * ts + i * 8 * ts, sy - 3 * ts, 2.6 * ts, i < burst ? "#ffc233" : "rgba(255,255,255,.18)");
+  if (chain > 0) { draw.rect(c, W / 2 - 15 * ts, sy + 5 * ts, 62 * ts, 3 * ts, 2, "rgba(255,255,255,.14)"); draw.rect(c, W / 2 - 15 * ts, sy + 5 * ts, 62 * ts * Lab.clamp(chainT / 7, 0, 1), 3 * ts, 2, chainT < 2 ? "#ff8a4c" : "#7fe3f0"); }
+  if (hintT < 7 && wave === 1 && alive && !stick.on) { c.globalAlpha = Math.min(1, 7 - hintT) * (.6 + .3 * Math.sin(t * 4)); draw.text(c, "drag a little to turn", W / 2, H - 92 * S, { size: 15 * Math.max(.85, S), color: "#eafcff", weight: 600 }); draw.text(c, "drag further to thrust", W / 2, H - 70 * S, { size: 15 * Math.max(.85, S), color: "#eafcff", weight: 600 }); c.globalAlpha = 1; }
+  draw.vignette(c, .3);
+}
+Lab.boot();
+})();
 </script></body></html>

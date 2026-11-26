@@ -225,6 +225,14 @@ window.LAB_GAMES = [
     "slug": "11-scribble-siege",
     "t": "Scribble Siege",
     "d": "The doodles in the margin are marching. Rub them out.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 12,
+    "slug": "12-cold-snap",
+    "t": "Cold Snap",
+    "d": "Break the drifting ice. Scoop the sunstones before they sink.",
     "v2": true
    },
    {
@@ -235,13 +243,6 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--13-suds-patrol.jpg"
-   },
-   {
-    "n": 14,
-    "slug": "14-bullet-hell",
-    "t": "Bullet Hell",
-    "d": "Survive dense bullet patterns.",
-    "thumb": "../thumbs/PhoneGameLab--14-bullet-hell.jpg"
    },
    {
     "n": 15,
@@ -286,11 +287,10 @@ window.LAB_GAMES = [
    },
    {
     "n": 23,
-    "slug": "23-doodle-jump",
+    "slug": "23-pogo-peak",
     "t": "Pogo Peak",
     "d": "Bounce a pogo chick from meadow to starlight.",
-    "v2": true,
-    "thumb": "../thumbs/PhoneGameLab--23-doodle-jump.jpg"
+    "v2": true
    }
   ]
  },
@@ -312,22 +312,10 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 12,
-    "slug": "12-cold-snap",
-    "t": "Asteroids",
-    "d": "Drag to steer toward your finger. Tap-and-hold to thrust. Double-tap to fire."
-   },
-   {
-    "n": 20,
-    "slug": "20-frostfoot",
-    "t": "Endless Runner",
-    "d": "Tap = jump • Swipe down = slide."
-   },
-   {
-    "n": 32,
-    "slug": "32-inkstride",
-    "t": "Color Path",
-    "d": "Tap to switch color. Only step on tiles matching your color."
+    "n": 14,
+    "slug": "14-sparkmoth",
+    "t": "Bullet Hell",
+    "d": "Drag your ship to dodge. Survive as long as possible."
    }
   ]
  },
@@ -439,6 +427,13 @@ window.LAB_GAMES = [
   "cat": "Runner & Movement",
   "items": [
    {
+    "n": 20,
+    "slug": "20-frostfoot",
+    "t": "Frostfoot",
+    "d": "Hop the ice. Slide the gates. Keep the scarf burning.",
+    "v2": true
+   },
+   {
     "n": 24,
     "slug": "24-helix-fall",
     "t": "Helix Fall",
@@ -469,14 +464,17 @@ window.LAB_GAMES = [
     "t": "Fizzwhiz",
     "d": "Ride a shaken soda bottle down the sundown boardwalk.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--27-fizzwhiz.jpg"
    },
    {
     "n": 28,
-    "slug": "28-cave-flyer",
-    "t": "Cave Flyer",
-    "d": "Navigate a narrowing cave tunnel.",
-    "thumb": "../thumbs/PhoneGameLab--28-cave-flyer.jpg"
+    "slug": "28-hollowlight",
+    "t": "Hollowlight",
+    "d": "Carry your glow through the dark.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--28-hollowlight.jpg"
    },
    {
     "n": 29,
@@ -502,7 +500,17 @@ window.LAB_GAMES = [
     "t": "Sinkstones",
     "d": "Remember the path. Cross before it sinks.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--31-sinkstones.jpg"
+   },
+   {
+    "n": 32,
+    "slug": "32-inkstride",
+    "t": "Inkstride",
+    "d": "Match the gate. Switch late. Stay in flow.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--32-inkstride.jpg"
    },
    {
     "n": 33,

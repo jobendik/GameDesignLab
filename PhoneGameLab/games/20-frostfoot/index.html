@@ -1,44 +1,332 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Frostfoot</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Endless Runner", instructions:"Tap = jump • Swipe down = slide.", restart:start});
-let p, obs, spawn, t, sp, dead, slide;
-function start(){
-  p={x:80,y:0,vy:0,h:50,w:30,onGround:true};
-  obs=[]; spawn=1.2; t=0; sp=320; dead=false; slide=0;
-  Lab.setScore(0);
-  Lab.input.onTap=[()=>{ if(p.onGround){ p.vy=-620; p.onGround=false; Lab.beep(600,.04);}}];
-  Lab.input.onSwipe=[(dx,dy)=>{ if(dy>40){ slide=0.55; }}];
-  Lab.loop(dt=>{
-    if(dead) return;
-    t+=dt; sp=320+t*8; spawn-=dt;
-    if(spawn<=0){
-      spawn=Lab.rand(0.7,1.4);
-      const hi=Math.random()<0.3;
-      obs.push({x:Lab.W+40, y: hi? Lab.H-130 : Lab.H-50, w:30, h: hi?30:Lab.rand(30,60)});
+(function(){ "use strict";
+/* FROSTFOOT — an endless dash across a frozen ridge with a long-eared snow sprite and its red scarf.
+ * Core idea kept: side-scrolling auto-runner, jump the obstacles, slide under the high ones.
+ * Controls: tap = jump (hold longer = higher, tap again in the air = flip jump), swipe down = slide / dive.
+ * Forgiveness: 90 ms coyote time, 130 ms jump buffer, inset hitboxes, minimum hop always clears a low spike.
+ * Depth: obstacle patterns are authored chunks (in seconds, so they stay fair as speed ramps) across four tiers;
+ * embers sit on the riskier lines and fill the scarf — 18 of them ignite BLAZE: five seconds of invincible, faster,
+ * obstacle-smashing running.  Milestone flags every 250 m, a flag at your best distance, four sky zones.          */
+Lab.init({
+  title: "Frostfoot", tagline: "Hop the ice. Slide the gates. Keep the scarf burning.", category: "Runner & Movement",
+  howto: ["Tap to jump — hold for height, tap again to flip", "Swipe down to slide under gates", "Collect embers to ignite a Blaze dash"],
+  theme: { bg: "#232a63", bg2: "#7b8fd9", accent: "#ff5d5d", accent2: "#ffb347" },
+  orient: "any", music: { style: "arcade", key: "A", bpm: 132, vol: .3 }, restart: start,
+  attract(dt, t) { if (!demo) { reset(); demo = true; } now = t; speed = 300; dist += speed * dt; p.runPh += dt * 13; scarfStep(dt); render(t, dt); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp;
+const GRAV = 2600, JUMP = 900, JUMP2 = 780, COYOTE = .09, BUFFER = .13, HW = 11, HSTAND = 44, HSLIDE = 22, BLAZE_NEED = 18, BLAZE_TIME = 5, TW = 640;
+const ZONES = [
+  { n: "DAWN", at: 0, sky: ["#6f7fd6", "#f2b6c6", "#ffe6c8"], far: "#b9bbe8", mid: "#8f9bd8", pine: "#4d5c9e", snow: "#fbfbff", shade: "#d6def6", deep: "#aab6e6", sun: "#fff3cf", sy: .62 },
+  { n: "MORNING", at: 300, sky: ["#3f9ade", "#9fd6f2", "#eaf8fc"], far: "#bcdcf0", mid: "#86bfe0", pine: "#2e6c8c", snow: "#ffffff", shade: "#d2eaf6", deep: "#9fcbe6", sun: "#ffffff", sy: .2 },
+  { n: "DUSK", at: 700, sky: ["#3a2e6a", "#c85c7b", "#ffb46e"], far: "#8b5e95", mid: "#5f4582", pine: "#33285b", snow: "#ffeae6", shade: "#e6bccb", deep: "#b98bb0", sun: "#ffd28e", sy: .7 },
+  { n: "AURORA", at: 1200, sky: ["#071130", "#11305b", "#1f6e78"], far: "#1e3c69", mid: "#162c55", pine: "#0b1838", snow: "#d3e8ff", shade: "#94b4e2", deep: "#5f7fba", sun: "#eaf5ff", sy: .22, night: true },
+];
+/* chunks: [kind, time(s) after chunk start, a, b].  kinds: s spike · b block · w wide ridge · g gate (slide or leap) · G wall gate (slide)
+ * · p pit (a = width in s) · e ember row (a = height, b = count) · E ember arc over a jump (a = peak height, b = count) */
+const CHUNKS = [
+  [ { len: .5, it: [["s", 0], ["E", -.12, 105, 3]] }, { len: .6, it: [["g", 0], ["e", -.1, 14, 3]] }, { len: 1.1, it: [["e", 0, 26, 5], ["s", .9]] }, { len: .4, it: [["e", 0, 26, 4]] } ],
+  [ { len: 1.1, it: [["s", 0], ["s", .78], ["E", -.12, 105, 3]] }, { len: .5, it: [["b", 0], ["E", -.1, 150, 3]] }, { len: .6, it: [["p", 0, .32], ["E", .02, 110, 4]] }, { len: 1.2, it: [["g", 0], ["e", -.08, 14, 3], ["s", .85]] }, { len: .6, it: [["w", 0], ["E", -.02, 120, 4]] } ],
+  [ { len: 1.6, it: [["s", 0], ["g", .64], ["e", .58, 14, 3], ["s", 1.3]] }, { len: 1.2, it: [["p", 0, .36], ["E", .04, 115, 4], ["s", .86]] }, { len: .7, it: [["G", 0], ["e", -.1, 14, 4]] }, { len: 1.3, it: [["b", 0], ["p", .78, .3], ["E", .8, 110, 3]] },
+    { len: 1.5, it: [["s", 0], ["s", .4], ["E", .0, 135, 4], ["g", 1.12]] }, { len: .8, it: [["w", 0], ["e", .02, 150, 1], ["e", .12, 200, 1], ["e", .22, 235, 1], ["e", .32, 200, 1]] } ],
+  [ { len: 1.5, it: [["g", 0], ["s", .52], ["g", 1.04], ["e", .98, 14, 3]] }, { len: 1.3, it: [["p", 0, .34], ["p", .74, .34], ["E", .04, 110, 3], ["E", .78, 110, 3]] }, { len: 1.2, it: [["b", 0], ["G", .64], ["e", .56, 14, 4]] },
+    { len: 1.5, it: [["p", 0, .5], ["E", .08, 150, 5], ["s", .98]] }, { len: 1.4, it: [["s", 0], ["s", .42], ["s", .84], ["E", -.1, 120, 7]] }, { len: 1.8, it: [["G", 0], ["b", .62], ["G", 1.24], ["e", 1.16, 14, 3]] } ],
+];
+let S, PX, gy, viewU, vmax;
+let p, obs, embers, flags, flakes, scarf, dist, speed, runT, score, bonus, emberN, meter, blaze, grace, smashes, nextX, tier, zone, zoneOld, zoneMix, dead, deadT, now, demo = false, held, kHeld, downHeld, pressJump, lastMile, bestDist, hintJump, hintSlide, lastChunk, sprayT, stepT, hookHeld = false;
+
+function layout() {
+  const P = Lab.play, port = Lab.H > Lab.W;
+  S = clamp(Math.min(Lab.W / 470, P.h / 330), .6, 1.6); PX = Math.round(Lab.W * (port ? .2 : .18)); gy = Math.round(P.y + P.h * (port ? .64 : .8));
+  viewU = Lab.W / S; vmax = Math.min(640, (viewU - PX / S) / .78);
+}
+Lab.onResize(() => { if (p) layout(); });
+
+function reset() {
+  layout();
+  p = { y: 0, vy: 0, on: true, coy: 0, buf: 0, air: 1, jumpT: 9, cut: true, slide: 0, dive: false, spin: 0, sx: 1, sy: 1, runPh: 0, ear: -.4, earV: 0, blink: 2, jumps: 0, flips: 0, slides: 0, peak: 0 };
+  obs = []; embers = []; flags = []; dist = 0; speed = 330; runT = 0; score = 0; bonus = 0; emberN = 0; meter = 0; blaze = 0; grace = 0; smashes = 0; nextX = 760; tier = 0;
+  zone = 0; zoneOld = 0; zoneMix = 1; dead = false; deadT = 0; held = false; kHeld = false; downHeld = false; pressJump = false; lastMile = 0; hintJump = true; hintSlide = true; hookHeld = false; lastChunk = null; sprayT = 0; stepT = 0;
+  bestDist = Lab.store.get("bestDist", 0);
+  if (bestDist > 60) flags.push({ x: bestDist * 40, label: "BEST", best: true });
+  flakes = Array.from({ length: 46 }, () => ({ x: Math.random(), y: Math.random(), z: Lab.rand(.5, 1.5), p: Lab.rand(0, TAU) }));
+  scarf = Array.from({ length: 7 }, (_, i) => ({ x: -8 - i * 7, y: -30 }));
+}
+function start() {
+  reset(); demo = false; Lab.setScore(0);
+  // authored opening: one low spike, then one gate, each with its verb floating above it
+  addItem("s", 760); addItem("e", 560, 26, 4); addItem("g", 1420); addItem("e", 1400, 14, 3); nextX = 2050;
+  Lab.input.swipeEarly = true;
+  Lab.input.onDown = [() => { held = true; pressJump = true; jumpPress(); }];
+  Lab.input.onUp = [() => { held = false; }];
+  Lab.input.onSwipe = [(dx, dy) => { if (dy > 22 && dy > Math.abs(dx) * 1.2) { if (pressJump && p.jumpT < .2 && !p.on && p.vy < 0) { p.vy = 500; } held = false; slide(); } }];
+  Lab.input.onKey = [k => { if (k === " " || k === "ArrowUp" || k === "w" || k === "W") { pressJump = false; jumpPress(); } else if (k === "ArrowDown" || k === "s" || k === "S") slide(); }];
+  Lab.expose({
+    get score() { return score; }, get dist() { return dist / 40; }, get speed() { return speed; }, get embers() { return emberN; }, get meter() { return meter; }, get blaze() { return blaze; }, get smashes() { return smashes; }, get dead() { return dead; }, get tier() { return tier; }, get zone() { return zone; },
+    get p() { return { y: p.y, vy: p.vy, on: p.on, slide: p.slide, air: p.air, jumps: p.jumps, flips: p.flips, slides: p.slides, peak: p.peak }; },
+    get next() { for (const o of obs) { const dx = o.x - dist - HW; if (o.x + o.w > dist - HW && !o.gone) return { k: o.k, dx, w: o.w, h: o.h }; } return null; },
+    jump: jumpPress, hold(v) { hookHeld = !!v; }, slide,
+    calm(sec) { obs = []; embers = []; nextX = dist + speed * sec; }, setMeter(n) { meter = n; if (meter >= BLAZE_NEED) ignite(); }, setRun(t) { runT = t; },
+    put(kind, ahead, a, b) { addItem(kind, dist + ahead, a, b); },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- level stream ---------- */
+function addItem(k, x, a, b) {
+  if (k === "s") obs.push({ k, x, w: 30, h: 34 }); else if (k === "b") obs.push({ k, x, w: 34, h: 80 }); else if (k === "w") obs.push({ k, x, w: 112, h: 30 });
+  else if (k === "g") obs.push({ k, x, w: 58, h: 0, seed: Lab.randInt(1, 99) }); else if (k === "G") obs.push({ k, x, w: 74, h: 0, seed: Lab.randInt(1, 99) });
+  else if (k === "p") obs.push({ k, x, w: a * speed, h: 0 });
+  else if (k === "e") for (let i = 0; i < b; i++) embers.push({ x: x + i * 34, y: -a, ph: i * .6 });
+  else if (k === "E") { const span = .62 * speed; for (let i = 0; i < b; i++) { const u = b === 1 ? .5 : i / (b - 1); embers.push({ x: x + u * span, y: -(36 + (a - 36) * 4 * u * (1 - u)), ph: i * .6 }); } }
+  obs.sort((m, n) => m.x - n.x);
+}
+function spawn() {
+  while (nextX < dist + viewU + 260) {
+    tier = runT < 12 ? 0 : runT < 30 ? 1 : runT < 58 ? 2 : 3;
+    const lo = runT < 20 ? 0 : runT < 45 ? Math.max(0, tier - 1) : Math.max(1, tier - 1), t = Lab.randInt(lo, tier);
+    let c; do { c = Lab.choose(CHUNKS[t]); } while (c === lastChunk && CHUNKS[t].length > 1); lastChunk = c;
+    for (const it of c.it) addItem(it[0], nextX + it[1] * speed, it[2], it[3]);
+    nextX += (c.len + lerp(1.05, .62, clamp(runT / 80, 0, 1)) + Lab.rand(0, .22)) * speed;
+  }
+  while (obs.length && obs[0].x + obs[0].w < dist - viewU * .4) obs.shift();
+  while (embers.length && embers[0].x < dist - 200) embers.shift();
+  const m = Math.floor(dist / 40 / 250) + 1; if (m > lastMile) { lastMile = m; flags.push({ x: m * 250 * 40, label: m * 250 + " m" }); }
+  while (flags.length && flags[0].x < dist - 300) flags.shift();
+}
+const pitAt = x => { for (const o of obs) if (o.k === "p" && x > o.x + 7 && x < o.x + o.w - 7) return o; return null; };
+
+/* ---------- player verbs ---------- */
+function jumpPress() {
+  if (dead || demo) return; hintJump = false;
+  if (p.on || p.coy > 0) doJump(); else if (p.air > 0) { p.air--; p.vy = -JUMP2; p.cut = true; p.spin = 1; p.dive = false; p.flips++; p.sx = .85; p.sy = 1.2; Lab.sfx("jump", { pitch: 1.45 }); Lab.sfx("swish", { pitch: 1.3 }); fx.ring(PX, gy + p.y * S - 20 * S, { r0: 6, r1: 30 * S, color: "#ffffff", width: 3, life: .3 }); }
+  else p.buf = BUFFER;
+}
+function doJump() {
+  p.vy = -JUMP; p.on = false; p.coy = 0; p.buf = 0; p.jumpT = 0; p.cut = false; p.slide = 0; p.dive = false; p.sx = .8; p.sy = 1.25; p.jumps++;
+  Lab.sfx("jump", { pitch: 1 + (speed - 330) / 900 }); Lab.buzz(6);
+  fx.burst(PX - 4 * S, gy, { n: 5, color: "rgba(255,255,255,.9)", speed: 90, angle: Math.PI * 1.15, spread: 1.2, life: .4, size: 4, gravity: 200, vx: -speed * S * .5 });
+}
+function slide() {
+  if (dead || demo) return; hintSlide = false; downHeld = true;
+  if (p.on) startSlide(); else { p.vy = Math.max(p.vy, 1250); p.dive = true; Lab.sfx("swish", { pitch: .8 }); }
+}
+function startSlide() { p.slide = .56; p.dive = false; p.slides++; p.sx = 1.3; p.sy = .7; Lab.sfx("slide", { pitch: .7 }); Lab.audio.noise({ dur: .4, vol: .09, bp: 2400, f2: 900, q: .8 }); }
+function ignite() {
+  meter = 0; blaze = BLAZE_TIME; Lab.banner("BLAZE!", { color: "#ffb347", ms: 900 }); Lab.sfx("powerup"); Lab.flash("#ffb347", .3, .35); Lab.shake(6, .3); Lab.buzz(30);
+  fx.burst(PX, gy + p.y * S - 22 * S, { n: 26, colors: ["#ffb347", "#ff5d5d", "#fff3cf"], speed: 320, life: .7, size: 5, shape: "spark", gravity: 100 });
+}
+function die(kind) {
+  if (dead) return; dead = true; deadT = 0; p.vy = kind === "fell" ? p.vy : -620; p.slide = 0; p.spin = 1;
+  Lab.sfx(kind === "fell" ? "whistle" : "hit", { pitch: kind === "fell" ? .6 : 1 }); Lab.sfx("hurt"); Lab.shake(13, .45); Lab.hitstop(.09); Lab.flash("#ffffff", .15, .5); Lab.buzz(60);
+  fx.burst(PX + 10 * S, gy + p.y * S - 20 * S, { n: 22, colors: ["#ffffff", "#bfe6ff", "#ff5d5d"], speed: 300, life: .8, size: 5, shape: "shard", gravity: 700 });
+  const m = Math.floor(dist / 40); if (m > bestDist) Lab.store.set("bestDist", m);
+  Lab.after(.95, () => Lab.gameover({ title: kind === "fell" ? "Into the crevasse" : "Wiped out", message: ZONES[zone].n.charAt(0) + ZONES[zone].n.slice(1).toLowerCase() + " ridge, " + m + " m from camp.", score, stats: [["Distance", m + " m"], ["Embers", emberN], ["Smashed", smashes]] }));
+}
+
+function stepRun(dt) {   // one ≤1/120 s slice of running: identical hop heights and hit tests at any frame rate
+  runT += dt;
+  const target = lerp(330, vmax, ease.outQuad(clamp(runT / 95, 0, 1))) * (blaze > 0 ? 1.22 : 1);
+  speed = Lab.damp(speed, target, 3, dt); dist += speed * dt;
+  // --- vertical motion: variable height, coyote, buffer
+  p.jumpT += dt; p.buf -= dt; p.coy -= dt;
+  const pit = blaze > 0 ? null : pitAt(dist);
+  if (p.on && pit) { p.on = false; p.coy = COYOTE; }
+  if (p.buf > 0 && (p.on || p.coy > 0)) doJump();
+  if (!p.on) {
+    if (!p.cut && p.vy < 0 && p.jumpT >= .08 && !(held || kHeld || hookHeld)) { p.vy *= .5; p.cut = true; }
+    p.vy += GRAV * (p.vy > 0 ? 1.15 : 1) * dt; p.y += p.vy * dt; p.peak = Math.min(p.peak, p.y);
+    if (p.y >= 0 && p.vy >= 0 && !pit) {
+      const v = p.vy; p.y = 0; p.vy = 0; p.on = true; p.air = 1; p.sx = 1 + Math.min(.35, v / 3200); p.sy = 1 - Math.min(.3, v / 3600);
+      Lab.sfx("land", { pitch: 1.2 }); fx.burst(PX, gy, { n: 5 + (p.dive ? 6 : 0), color: "rgba(255,255,255,.9)", speed: 110, angle: -Math.PI / 2, spread: 2.6, life: .4, size: 4, gravity: 300, vx: -speed * S * .4 });
+      if (p.dive) startSlide();
     }
-    if(!p.onGround){ p.vy+=1700*dt; p.y+=p.vy*dt; if(p.y>=0){ p.y=0; p.vy=0; p.onGround=true; }}
-    slide=Math.max(0,slide-dt);
-    const ph = slide>0?25:p.h;
-    for(const o of obs) o.x-=sp*dt;
-    obs=obs.filter(o=>o.x>-50);
-    const py=Lab.H-50-ph+p.y;
-    for(const o of obs){
-      if(p.x+p.w>o.x && p.x<o.x+o.w){
-        if(py+ph>o.y && py<o.y+o.h){
-          dead=true; Lab.gameover({title:"Crash",message:"Distance: "+Math.floor(t*sp/10)});
-          return;
-        }
-      }
+    if (p.y > 30) die("fell");
+  } else p.peak = 0;
+  if (p.slide > 0) { p.slide -= dt; if (downHeld && p.slide < .12) p.slide = .12; sprayT -= dt; if (sprayT <= 0) { sprayT = .03; fx.burst(PX + 14 * S, gy - 2, { n: 1, color: "#ffffff", speed: 120, angle: -2.2, spread: .8, life: .35, size: 3.5, gravity: 500, vx: -speed * S * .6 }); } }
+  else if (p.on) { stepT -= dt * speed / 330; if (stepT <= 0) { stepT = .17; Lab.sfx("tick", { pitch: .5 + Math.random() * .1 }); fx.burst(PX - 8 * S, gy, { n: 1, color: "rgba(255,255,255,.8)", speed: 40, angle: -2.4, spread: .6, life: .3, size: 3, gravity: 200, vx: -speed * S * .5 }); } }
+  // --- collisions (inset boxes)
+  const hh = p.slide > 0 ? HSLIDE : HSTAND, top = p.y - hh, bot = p.y, L = dist - HW, R = dist + HW;
+  for (const o of obs) {
+    if (o.x > R + 10) break; if (o.gone || o.k === "p" || o.x + o.w < L) continue;
+    let x0, x1, y0, y1;
+    if (o.k === "g") { x0 = o.x + 3; x1 = o.x + o.w - 3; y0 = -56; y1 = -30; } else if (o.k === "G") { x0 = o.x + 3; x1 = o.x + o.w - 3; y0 = -600; y1 = -30; }
+    else { x0 = o.x + 6; x1 = o.x + o.w - 6; y0 = -(o.h - 6); y1 = 0; }
+    if (R > x0 && L < x1 && bot > y0 && top < y1) {
+      if (blaze > 0 || grace > 0) { o.gone = true; smashes++; bonus += 50; smashFx(o); }
+      else { die("hit"); break; }
     }
-    Lab.setScore(Math.floor(t*sp/10));
-    const c=Lab.ctx; c.fillStyle="#0e1428"; c.fillRect(0,0,Lab.W,Lab.H);
-    c.fillStyle="#1c2546"; c.fillRect(0,Lab.H-50,Lab.W,50);
-    c.fillStyle="#5af"; c.fillRect(p.x, py, p.w, ph);
-    c.fillStyle="#ff5577"; for(const o of obs) c.fillRect(o.x,o.y,o.w,o.h);
-    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
-    c.fillText("Speed: "+sp.toFixed(0), Lab.W/2, 70);
+  }
+  for (const e of embers) if (!e.got && Math.abs(e.x - dist) < 26 && e.y > top - 16 && e.y < bot + 12) {
+    e.got = true; emberN++; const g = blaze > 0 ? 20 : 10; bonus += g; if (blaze <= 0) { meter++; if (meter >= BLAZE_NEED) ignite(); }
+    Lab.audio.combo((emberN % 8) + (blaze > 0 ? 4 : 0), { vol: .13, dur: .1 }); fx.burst(PX + 6 * S, gy + e.y * S, { n: 5, colors: ["#ffb347", "#fff3cf"], speed: 120, life: .35, size: 3, gravity: -100, vx: -speed * S * .3 });
+  }
+  if (blaze > 0) { blaze -= dt; if (blaze <= 0) { blaze = 0; grace = .9; Lab.sfx("drop", { pitch: .8 }); } else if (Math.random() < dt * 40) fx.burst(PX - 12 * S, gy + p.y * S - 26 * S, { n: 1, colors: ["#ffb347", "#ff5d5d"], speed: 60, life: .5, size: 4, gravity: -200, vx: -speed * S * .6 }); }
+  if (grace > 0) grace -= dt;
+}
+function frame(dt, t) {
+  now = t;
+  const k = Lab.input.keys; kHeld = !!(k[" "] || k.ArrowUp || k.w || k.W); if (!(k.ArrowDown || k.s || k.S) && !Lab.input.down) downHeld = false; if (!Lab.input.down) held = false;
+  if (!dead) {
+    const n = Math.max(1, Math.ceil(dt * 120)), h = dt / n; for (let i = 0; i < n && !dead; i++) stepRun(h);
+    spawn();
+    const z = dist / 40; let zi = 0; for (let i = 0; i < ZONES.length; i++) if (z >= ZONES[i].at) zi = i;
+    if (zi !== zone) { zoneOld = zone; zone = zi; zoneMix = 0; Lab.banner(ZONES[zi].n, { color: "#fff", ms: 1200 }); Lab.sfx("levelup", { pitch: .8 + zi * .1 }); }
+    for (const f of flags) if (!f.hit && f.x < dist) { f.hit = true; if (f.best) { fx.text(PX + 40 * S, gy - 120 * S, "NEW BEST DISTANCE", { color: "#ffb347", size: 17 }); Lab.sfx("star"); } else { Lab.sfx("chime", { pitch: 1 }); fx.text(PX + 30 * S, gy - 120 * S, f.label, { color: "#fff", size: 22 }); } }
+    const sc = Math.floor(dist / 40) + bonus; if (sc !== score) { score = sc; Lab.setScore(score); }
+    Lab.music.intensity(clamp(.35 + runT / 110 + (blaze > 0 ? .4 : 0), 0, 1));
+  } else {
+    deadT += dt; speed = Lab.damp(speed, 0, 4.5, dt); dist += speed * dt; p.vy += GRAV * dt; p.y += p.vy * dt; if (p.y > 0 && !pitAt(dist)) { p.y = 0; p.vy *= -.35; }
+  }
+  zoneMix = Math.min(1, zoneMix + dt / 2.2);
+  p.runPh += dt * speed / 26; p.sx = Lab.damp(p.sx, 1, 11, dt); p.sy = Lab.damp(p.sy, 1, 11, dt); if (p.spin > 0) p.spin = Math.max(0, p.spin - dt / (dead ? 1.2 : .38));
+  p.blink -= dt; if (p.blink < -.1) p.blink = Lab.rand(1.5, 4);
+  const earT = clamp(-.45 - p.vy * .0006 + (p.slide > 0 ? -.75 : 0) - (speed - 330) * .0006, -1.5, .5); p.earV += ((earT - p.ear) * 90 - p.earV * 11) * dt; p.ear += p.earV * dt;
+  scarfStep(dt);
+  render(t, dt);
+}
+function scarfStep(dt) {   // a little rope that trails from the neck
+  const nx = p.slide > 0 ? -2 : -7, ny = p.y - (p.slide > 0 ? 15 : 31) * p.sy, seg = blaze > 0 ? 9 : 7, wind = speed * .9 + 120;
+  scarf[0].x = nx; scarf[0].y = ny;
+  for (let i = 1; i < scarf.length; i++) {
+    const a = scarf[i], b = scarf[i - 1]; a.x -= wind * dt; a.y += (Math.sin(now * 13 + i * 1.1) * 60 + 50 - (blaze > 0 ? 90 : 0)) * dt;
+    const dx = a.x - b.x, dy = a.y - b.y, d = Math.hypot(dx, dy) || 1; a.x = b.x + dx / d * seg; a.y = b.y + dy / d * seg;
+  }
+}
+function smashFx(o) {
+  const x = PX + (o.x + o.w / 2 - dist) * S, y = gy - (o.k === "g" || o.k === "G" ? 44 : o.h / 2) * S;
+  fx.burst(x, y, { n: 14, colors: ["#bfe6ff", "#ffffff", "#5fb4e6"], speed: 380, life: .6, size: 5, shape: "shard", gravity: 800, vx: speed * S * .3 }); fx.text(x, y - 30 * S, "+50", { color: "#ffb347", size: 18 });
+  Lab.sfx("glass", { pitch: .8 }); Lab.sfx("crunch"); Lab.shake(5, .15); Lab.hitstop(.03);
+}
+
+/* ---------- drawing ---------- */
+function skySprite(zi) {
+  const Z = ZONES[zi], W = Lab.W, H = Lab.H;
+  return Lab.sprite("ff-sky:" + zi + ":" + W + "x" + H + ":" + gy, W, H, g => {
+    draw.vgrad(g, 0, 0, W, gy + 2, [[0, Z.sky[0]], [.6, Z.sky[1]], [1, Z.sky[2]]]);
+    const sx = W * .72, sy = Lab.play.y + (gy - Lab.play.y) * Z.sy, r = 30 * S;
+    draw.glow(g, sx, sy, r * 5, Z.sun, Z.night ? .25 : .55); draw.circle(g, sx, sy, r, Z.sun); if (Z.night) { draw.circle(g, sx + r * .3, sy - r * .2, r * .2, "rgba(170,190,220,.5)"); draw.circle(g, sx - r * .35, sy + r * .3, r * .14, "rgba(170,190,220,.45)"); const rnd = Lab.rng(9); g.fillStyle = "#fff"; for (let i = 0; i < 70; i++) { g.globalAlpha = .3 + rnd() * .6; const s = .7 + rnd() * 1.4; g.fillRect(rnd() * W, rnd() * gy * .8, s, s); } g.globalAlpha = 1; }
   });
 }
-start();
+function layerSprite(zi, li) {   // 0 far peaks · 1 hills with pines · 2 near pines
+  const Z = ZONES[zi], h = [190, 130, 110][li];
+  return Lab.sprite("ff-l" + li + ":" + zi + ":" + Math.round(S * 100), TW * S, h * S, g => {
+    g.scale(S, S); const rnd = Lab.rng(31 + li * 7), per = TAU / TW;
+    if (li === 0) {
+      const col = Z.far, pk = []; for (let i = 0; i < 6; i++) pk.push({ x: (i + .2 + rnd() * .6) * TW / 6, h: 90 + rnd() * 90, w: 80 + rnd() * 60 });
+      for (const off of [-TW, 0, TW]) for (const q of pk) { const x = q.x + off; g.fillStyle = col; g.beginPath(); g.moveTo(x - q.w, h); g.lineTo(x, h - q.h); g.lineTo(x + q.w, h); g.closePath(); g.fill();
+        g.fillStyle = Lab.color.mix(col, "#ffffff", .7); g.beginPath(); g.moveTo(x, h - q.h); g.lineTo(x - q.w * .26, h - q.h * .74); g.lineTo(x - q.w * .1, h - q.h * .8); g.lineTo(x, h - q.h * .68); g.lineTo(x + q.w * .12, h - q.h * .8); g.lineTo(x + q.w * .26, h - q.h * .74); g.closePath(); g.fill();
+        g.fillStyle = "rgba(0,0,30,.07)"; g.beginPath(); g.moveTo(x, h - q.h); g.lineTo(x + q.w, h); g.lineTo(x + q.w * .2, h); g.closePath(); g.fill(); }
+    } else {
+      const col = li === 1 ? Z.mid : Z.pine, base = li === 1 ? 62 : 86;
+      if (li === 1) { g.fillStyle = col; g.beginPath(); g.moveTo(0, h); for (let x = 0; x <= TW; x += 8) g.lineTo(x, base - 22 * Math.sin(x * per * 2 + 1) - 12 * Math.sin(x * per * 5)); g.lineTo(TW, h); g.closePath(); g.fill(); }
+      const n = li === 1 ? 9 : 7; for (let i = 0; i < n; i++) {
+        const x = (i + .15 + rnd() * .7) * TW / n, th = (li === 1 ? 34 : 70) * (.7 + rnd() * .6), by = li === 1 ? base - 22 * Math.sin(x * per * 2 + 1) - 12 * Math.sin(x * per * 5) + 4 : h;
+        for (const off of [-TW, 0, TW]) for (let k = 0; k < 3; k++) { const yy = by - th * (k * .28), w = th * (.36 - k * .08); g.fillStyle = li === 1 ? Z.pine : Z.pine; g.beginPath(); g.moveTo(x + off - w, yy); g.lineTo(x + off, yy - th * .5); g.lineTo(x + off + w, yy); g.closePath(); g.fill();
+          g.fillStyle = Lab.color.alpha(Z.snow, li === 1 ? .5 : .75); g.beginPath(); g.moveTo(x + off - w * .5, yy - th * .25); g.lineTo(x + off, yy - th * .5); g.lineTo(x + off + w * .35, yy - th * .3); g.lineTo(x + off, yy - th * .34); g.closePath(); g.fill(); }
+      }
+    }
+  });
+}
+function groundSprite(zi) {
+  const Z = ZONES[zi];
+  return Lab.sprite("ff-g:" + zi + ":" + Math.round(S * 100), TW * S, 60 * S, g => { g.scale(S, S); const rnd = Lab.rng(77); g.strokeStyle = Lab.color.alpha(Z.deep, .5); g.lineWidth = 2; g.lineCap = "round";
+    for (let i = 0; i < 16; i++) { const x = rnd() * TW, y = 12 + rnd() * 44, w = 14 + rnd() * 30; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + w / 2, y + 4, x + w, y); g.stroke(); }
+    g.fillStyle = "rgba(255,255,255,.9)"; for (let i = 0; i < 12; i++) { g.beginPath(); g.arc(rnd() * TW, 4 + rnd() * 50, .9 + rnd(), 0, TAU); g.fill(); } });
+}
+function tile(c, sp, par, y) { const w = Math.floor(sp.w), off = -((dist * par * S) % w); for (let x = off; x < Lab.W; x += w) c.drawImage(sp, Math.round(x), Math.round(y)); }
+function obSprite(o) {
+  const big = o.k === "G", w = (o.k === "g" || big ? o.w + 16 : o.w + 8), h = o.k === "g" ? 78 : big ? 250 : o.h + 10;
+  return Lab.sprite("ff-o:" + o.k + (o.seed ? o.seed % 3 : 0) + ":" + Math.round(S * 100), w * S, h * S, g => {
+    g.scale(S, S); const rnd = Lab.rng(5 + (o.seed || 0) % 3 + o.k.charCodeAt(0));
+    const crystal = (x, bw, ht) => { g.fillStyle = "#2f7fb5"; g.beginPath(); g.moveTo(x - bw / 2, h); g.lineTo(x - bw * .12, h - ht); g.lineTo(x + bw / 2, h); g.closePath(); g.fill(); g.fillStyle = "#8fdcf5"; g.beginPath(); g.moveTo(x - bw / 2, h); g.lineTo(x - bw * .12, h - ht); g.lineTo(x - bw * .05, h); g.closePath(); g.fill(); g.fillStyle = "rgba(255,255,255,.75)"; g.beginPath(); g.moveTo(x - bw * .12, h - ht); g.lineTo(x - bw * .3, h - ht * .45); g.lineTo(x - bw * .16, h - ht * .5); g.closePath(); g.fill(); g.strokeStyle = "#1b4f7a"; g.lineWidth = 1.6; g.lineJoin = "round"; g.beginPath(); g.moveTo(x - bw / 2, h); g.lineTo(x - bw * .12, h - ht); g.lineTo(x + bw / 2, h); g.stroke(); };
+    if (o.k === "s") { crystal(11, 16, 24); crystal(28, 15, 20); crystal(19, 20, 38); }
+    else if (o.k === "w") { for (let i = 0; i < 7; i++) crystal(12 + i * 16, 20, 20 + (i % 3) * 7 + (i === 3 ? 6 : 0)); }
+    else if (o.k === "b") { g.fillStyle = "#2f7fb5"; g.beginPath(); g.moveTo(6, h); g.lineTo(9, 16); g.lineTo(21, 5); g.lineTo(34, 16); g.lineTo(37, h); g.closePath(); g.fill(); g.fillStyle = "#8fdcf5"; g.beginPath(); g.moveTo(6, h); g.lineTo(9, 16); g.lineTo(21, 5); g.lineTo(19, h); g.closePath(); g.fill(); g.fillStyle = "rgba(255,255,255,.55)"; g.fillRect(11, 24, 3.5, 40);
+      g.strokeStyle = "#1b4f7a"; g.lineWidth = 1.8; g.lineJoin = "round"; g.beginPath(); g.moveTo(6, h); g.lineTo(9, 16); g.lineTo(21, 5); g.lineTo(34, 16); g.lineTo(37, h); g.stroke(); g.fillStyle = "#fff"; g.beginPath(); g.moveTo(7, 19); g.quadraticCurveTo(21, -2, 36, 19); g.quadraticCurveTo(28, 14, 21, 17); g.quadraticCurveTo(14, 14, 7, 19); g.fill(); }
+    else {   // gates: posts + a snowy log with icicles; the wall gate hangs a full ice curtain
+      const beamY = big ? 14 : h - 56, clear = h - 30, x0 = 8, x1 = w - 8;
+      g.fillStyle = "#5b3b2a"; g.fillRect(x0 - 4, beamY, 6, h - beamY); g.fillRect(x1 - 2, beamY, 6, h - beamY); g.fillStyle = "rgba(0,0,0,.2)"; g.fillRect(x0 - 1, beamY, 3, h - beamY); g.fillRect(x1 + 1, beamY, 3, h - beamY);
+      if (big) { g.fillStyle = "#3d8fc4"; g.beginPath(); g.moveTo(x0, beamY + 10); for (let x = x0, i = 0; x <= x1; x += 8, i++) g.lineTo(x, clear - (i % 2 ? 0 : 9 + rnd() * 16)); g.lineTo(x1, beamY + 10); g.closePath(); g.fill();
+        g.fillStyle = "rgba(170,230,250,.8)"; for (let x = x0 + 5; x < x1 - 4; x += 14) g.fillRect(x, beamY + 14, 4, clear - beamY - 44 - rnd() * 30); g.strokeStyle = "#1b4f7a"; g.lineWidth = 1.6; g.beginPath(); g.moveTo(x0, clear - 20); for (let x = x0, i = 0; x <= x1; x += 8, i++) g.lineTo(x, clear - (i % 2 ? 0 : 9)); g.stroke(); }
+      else { g.fillStyle = "#8fdcf5"; for (let x = x0 + 6; x < x1 - 2; x += 8) { const l = 8 + rnd() * 13; g.beginPath(); g.moveTo(x - 3, beamY + 22); g.lineTo(x, Math.min(clear, beamY + 22 + l)); g.lineTo(x + 3, beamY + 22); g.closePath(); g.fill(); } }
+      draw.rect(g, x0 - 8, beamY, w - 0, 24, 8, "#6d4631"); draw.rect(g, x0 - 8, beamY + 13, w, 11, 6, "rgba(0,0,0,.18)"); g.fillStyle = "#fff"; draw.rr(g, x0 - 9, beamY - 5, w + 2, 12, 6); g.fill();
+      g.fillStyle = "#ff5d5d"; g.beginPath(); g.moveTo(w / 2 - 7, beamY + 20); g.lineTo(w / 2 + 7, beamY + 20); g.lineTo(w / 2, beamY + 34); g.closePath(); g.fill();
+    }
+  });
+}
+function emberSprite() { return Lab.sprite("ff-em:" + Math.round(S * 100), 40 * S, 40 * S, g => { g.scale(S, S); draw.glow(g, 20, 20, 20, "#ffb347", .7); draw.circle(g, 20, 20, 8, "#ff8a3d"); draw.circle(g, 20, 20, 5.2, "#ffd27a"); draw.circle(g, 18.4, 18.2, 2, "#fff8e0"); }); }
+function drawSprite(c, sp, x, y) { c.drawImage(sp, x, y, sp.w, sp.h); }
+function drawRunner(c, t) {
+  const fire = blaze > 0, x = PX, y = gy + p.y * S, sl = p.slide > 0, air = !p.on;
+  if (grace > 0 && Math.sin(t * 40) > 0 && !fire) c.globalAlpha = .55;
+  if (p.y <= 0) draw.shadow(c, x, gy + 2, (20 - Math.min(10, -p.y * .05)) * S, 4 * S, .16);
+  c.save(); c.translate(x, y); c.scale(S, S);
+  // scarf tail (drawn behind the body)
+  c.lineCap = "round"; c.lineJoin = "round";
+  for (let pass = 0; pass < 2; pass++) { c.strokeStyle = pass ? (fire ? "#ffd27a" : "#ff9a8a") : (fire ? "#ff7a2d" : "#ff5d5d"); c.lineWidth = pass ? 2 : 7.5; c.beginPath(); c.moveTo(scarf[0].x, scarf[0].y - p.y); for (let i = 1; i < scarf.length; i++) c.lineTo(scarf[i].x, scarf[i].y - p.y); c.stroke(); }
+  c.scale(p.sx, p.sy);
+  const bodyY = sl ? -13 : -22, rot = dead ? (1 - p.spin) * -5 : p.spin > 0 ? -TAU * ease.inOutQuad(1 - p.spin) : sl ? -.25 : air ? clamp(p.vy * .00028, -.3, .35) : Math.sin(p.runPh * 2) * .04;
+  c.translate(0, bodyY); c.rotate(rot);
+  // feet
+  c.fillStyle = "#3b4a8f";
+  for (let i = 0; i < 2; i++) { const ph = p.runPh + i * Math.PI; let fxp, fyp; if (sl) { fxp = 13 + i * 7; fyp = 10 - i * 3; } else if (air) { fxp = -6 + i * 12 + p.vy * .004; fyp = 19 - i * 3; } else { fxp = Math.cos(ph) * 10; fyp = 21 - Math.max(0, Math.sin(ph)) * 8; } c.beginPath(); c.ellipse(fxp, fyp, 7, 4.2, sl ? -.3 : 0, 0, TAU); c.fill(); }
+  // ears (spring-lagged)
+  for (let i = 0; i < 2; i++) { c.save(); c.translate(-3 + i * 7, -14); c.rotate(p.ear + i * .22 + Math.sin(p.runPh * 2 + i) * .05); c.fillStyle = i ? "#f6f3ff" : "#dcd8f2"; c.beginPath(); c.ellipse(0, -13, 5, 14, 0, 0, TAU); c.fill(); c.fillStyle = "#ffb8c6"; c.beginPath(); c.ellipse(0, -13, 2.2, 9.5, 0, 0, TAU); c.fill(); c.restore(); }
+  // body
+  const gr = c.createRadialGradient(-5, -8, 3, 0, 0, 22); gr.addColorStop(0, "#ffffff"); gr.addColorStop(.7, fire ? "#ffe9c9" : "#efeaff"); gr.addColorStop(1, fire ? "#ffc58a" : "#cfc8ee");
+  c.fillStyle = gr; c.beginPath(); c.ellipse(0, 0, 18, 19.5, 0, 0, TAU); c.fill();
+  c.fillStyle = "rgba(255,255,255,.9)"; c.beginPath(); c.ellipse(-15, 8, 6, 5, 0, 0, TAU); c.fill();   // tail puff
+  // scarf wrap
+  c.strokeStyle = fire ? "#ff7a2d" : "#ff5d5d"; c.lineWidth = 6.5; c.beginPath(); c.arc(1, -1, 16.5, Math.PI * .98, Math.PI * 1.02 + 2.5, true); c.stroke();
+  // face
+  const ex = 8, ey = -5;
+  if (dead) { c.strokeStyle = "#2b2f5e"; c.lineWidth = 2; for (const dx of [0, 8]) { c.beginPath(); c.moveTo(ex + dx - 2.5, ey - 2.5); c.lineTo(ex + dx + 2.5, ey + 2.5); c.moveTo(ex + dx + 2.5, ey - 2.5); c.lineTo(ex + dx - 2.5, ey + 2.5); c.stroke(); } }
+  else if (p.blink < 0) { c.fillStyle = "#2b2f5e"; c.fillRect(ex - 2.5, ey, 5, 1.6); c.fillRect(ex + 5.5, ey, 5, 1.6); }
+  else { c.fillStyle = "#2b2f5e"; const eh = air && p.vy > 300 ? 4.3 : 3.5; c.beginPath(); c.ellipse(ex, ey, 2.5, eh, 0, 0, TAU); c.fill(); c.beginPath(); c.ellipse(ex + 8, ey, 2.3, eh, 0, 0, TAU); c.fill(); c.fillStyle = "#fff"; c.beginPath(); c.arc(ex + .8, ey - 1.3, 1, 0, TAU); c.arc(ex + 8.8, ey - 1.3, .9, 0, TAU); c.fill(); }
+  c.fillStyle = "rgba(255,130,150,.5)"; c.beginPath(); c.ellipse(ex - 2.5, ey + 6, 3.4, 2, 0, 0, TAU); c.fill();
+  c.fillStyle = "#2b2f5e"; c.beginPath(); c.ellipse(ex + 9.5, ey + 4.5, 1.6, 1.2, 0, 0, TAU); c.fill();
+  c.fillStyle = "#e9e4fb"; c.beginPath(); c.ellipse(sl ? 12 : air ? 4 : 2 + Math.cos(p.runPh) * 6, sl ? 8 : air ? -2 - p.vy * .004 : 9, 4.5, 3.6, 0, 0, TAU); c.fill();   // paw
+  c.restore(); c.globalAlpha = 1;
+  if (fire) { c.globalAlpha = .35 + .15 * Math.sin(t * 20); draw.glow(c, x, y - 22 * S, 60 * S, "#ffb347", .7); c.globalAlpha = 1; }
+}
+function render(t, dt) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, P = Lab.play, Z = ZONES[zone];
+  const layers = zi => { c.drawImage(skySprite(zi), 0, 0, W, H); const l0 = layerSprite(zi, 0), l1 = layerSprite(zi, 1), l2 = layerSprite(zi, 2); tile(c, l0, .06, gy - l0.h + 6 * S); tile(c, l1, .2, gy - l1.h + 10 * S); tile(c, l2, .45, gy - l2.h + 4 * S); };
+  if (zoneMix < 1) { layers(zoneOld); c.globalAlpha = ease.inOutQuad(zoneMix); layers(zone); c.globalAlpha = 1; } else layers(zone);
+  if (Z.night) { for (let b = 0; b < 3; b++) { c.strokeStyle = ["rgba(110,255,190,.16)", "rgba(150,140,255,.14)", "rgba(90,230,255,.12)"][b]; c.lineWidth = (26 - b * 5) * S; c.beginPath(); for (let x = -20; x <= W + 20; x += 24) { const y = P.y + (gy - P.y) * (.2 + b * .08) + Math.sin(x * .008 + t * .5 + b * 2) * 26 * S + Math.sin(x * .021 - t * .3) * 10 * S; x < 0 ? c.moveTo(x, y) : c.lineTo(x, y); } c.globalAlpha = zoneMix; c.stroke(); } c.globalAlpha = 1; }
+  // ground with crevasses cut out
+  const sx = wx => PX + (wx - dist) * S;
+  draw.vgrad(c, 0, gy, W, H - gy, [[0, Z.snow], [.12, Z.shade], [1, Z.deep]]); tile(c, groundSprite(zone), 1, gy + 4 * S);
+  c.fillStyle = "rgba(255,255,255,.95)"; c.fillRect(0, gy - 1, W, 3 * S);
+  for (const o of obs) if (o.k === "p") { const x0 = sx(o.x), w = o.w * S; if (x0 > W || x0 + w < 0) continue;
+    const g2 = c.createLinearGradient(0, gy, 0, H); g2.addColorStop(0, Lab.color.mix(Z.deep, "#0a1030", .45)); g2.addColorStop(1, "#060a22"); c.fillStyle = g2; c.beginPath(); c.moveTo(x0, gy - 2); c.lineTo(x0 + w, gy - 2); c.lineTo(x0 + w - 10 * S, H); c.lineTo(x0 + 12 * S, H); c.closePath(); c.fill();
+    c.fillStyle = Z.shade; c.beginPath(); c.moveTo(x0 - 2, gy - 2); c.lineTo(x0 + 7 * S, gy + 16 * S); c.lineTo(x0 - 2, gy + 30 * S); c.closePath(); c.fill(); c.beginPath(); c.moveTo(x0 + w + 2, gy - 2); c.lineTo(x0 + w - 6 * S, gy + 14 * S); c.lineTo(x0 + w + 2, gy + 26 * S); c.closePath(); c.fill();
+    if (blaze > 0) { c.strokeStyle = "rgba(255,179,71,.8)"; c.lineWidth = 4 * S; c.setLineDash([8 * S, 6 * S]); c.beginPath(); c.moveTo(x0, gy); c.lineTo(x0 + w, gy); c.stroke(); c.setLineDash([]); } }
+  // milestone flags
+  for (const f of flags) { const x = sx(f.x); if (x < -60 || x > W + 60) continue; c.fillStyle = "#5b3b2a"; c.fillRect(x - 1.5 * S, gy - 74 * S, 3 * S, 74 * S); const wv = Math.sin(t * 6 + f.x) * 3 * S; c.fillStyle = f.best ? "#ffb347" : "#ff5d5d"; c.beginPath(); c.moveTo(x, gy - 74 * S); c.lineTo(x + 46 * S, gy - 68 * S + wv); c.lineTo(x, gy - 52 * S); c.closePath(); c.fill(); draw.text(c, f.label, x + 16 * S, gy - 65 * S + wv * .3, { size: 9.5 * S, color: "#fff", weight: 700 }); }
+  // obstacles
+  for (const o of obs) { if (o.k === "p" || o.gone) continue; const x = sx(o.x); if (x > W + 40 || x + o.w * S < -60) continue; const sp = obSprite(o), gate = o.k === "g" || o.k === "G";
+    drawSprite(c, sp, x - (gate ? 8 : 4) * S, gy - sp.h + (gate ? 0 : 2 * S));
+    if (!demo && ((hintJump && o.k === "s") || (hintSlide && gate)) && runT < 9 && x > PX) { const bob = Math.sin(t * 6) * 4 * S, ty = gy - (gate ? 100 : 78) * S + bob; draw.text(c, gate ? "SWIPE DOWN" : "TAP", x + o.w * S / 2, ty, { size: 15 * S, color: "#fff", stroke: "rgba(35,42,99,.8)" }); c.fillStyle = "#fff"; c.beginPath(); const ax = x + o.w * S / 2, ay = ty + 14 * S; c.moveTo(ax - 6 * S, ay); c.lineTo(ax + 6 * S, ay); c.lineTo(ax, ay + 8 * S); c.closePath(); c.fill(); } }
+  const es = emberSprite(); for (const e of embers) { if (e.got) continue; const x = sx(e.x); if (x < -30 || x > W + 30) continue; const k = 1 + Math.sin(t * 7 + e.ph) * .1, w = es.w * k; c.drawImage(es, x - w / 2, gy + e.y * S + Math.sin(t * 4 + e.ph) * 2.5 * S - w / 2, w, w); }
+  drawRunner(c, t);
+  // snow in the air + speed streaks
+  c.fillStyle = "rgba(255,255,255,.85)"; for (const f of flakes) { f.x -= (speed * S * .0011 * f.z + .02) * dt; f.y += (.05 + .04 * f.z) * dt; if (f.x < -.02) f.x = 1.02; if (f.y > 1.02) f.y = -.02; const r = 1.3 * f.z * S; c.globalAlpha = .35 + .4 * (f.z - .5); c.beginPath(); c.arc(f.x * W + Math.sin(t * 2 + f.p) * 6, f.y * H, r, 0, TAU); c.fill(); } c.globalAlpha = 1;
+  const fast = clamp((speed - 430) / 220, 0, 1) + (blaze > 0 ? .6 : 0); if (fast > .05 && !Lab.reducedMotion) { c.strokeStyle = "rgba(255,255,255," + Math.min(.5, .32 * fast) + ")"; c.lineWidth = 2 * S; c.beginPath(); for (let i = 0; i < 7; i++) { const y = P.y + ((i * .137 + .09) % 1) * (gy - P.y), x = W - ((t * (900 + i * 130) + i * 211) % (W + 200)); c.moveTo(x, y); c.lineTo(x + 70 * S * fast, y); } c.stroke(); }
+  if (demo) return;
+  // HUD: scarf heat meter / blaze timer, distance
+  const u = clamp(S, .9, 1.25), y = P.y + 8, hh = 24 * u, mw = Math.min(150 * u, W * .4);
+  draw.rect(c, 10, y, mw, hh, hh / 2, "rgba(20,26,70,.45)", "rgba(255,255,255,.25)", 1);
+  const fr = blaze > 0 ? blaze / BLAZE_TIME : meter / BLAZE_NEED, warn = blaze > 0 && blaze < 1.2 && Math.sin(t * 22) > 0;
+  if (fr > 0) { c.save(); draw.rr(c, 13, y + 3, mw - 6, hh - 6, hh / 2); c.clip(); const g3 = c.createLinearGradient(13, 0, 13 + mw, 0); g3.addColorStop(0, "#ff5d5d"); g3.addColorStop(1, "#ffb347"); c.fillStyle = warn ? "#fff" : g3; c.fillRect(13, y + 3, (mw - 6) * fr, hh - 6); c.restore(); }
+  draw.text(c, blaze > 0 ? "BLAZE" : "SCARF HEAT", 10 + mw / 2, y + hh / 2 + .5, { size: 10.5 * u, color: "#fff", weight: 700, shadow: "rgba(0,0,40,.5)" });
+  draw.text(c, Math.floor(dist / 40) + " m", W - 14, y + hh / 2, { size: 15 * u, color: "#fff", align: "right", shadow: "rgba(0,0,40,.45)" });
+}
+Lab.boot();
+})();
 </script></body></html>

@@ -1,39 +1,207 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Inkstride</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Color Path", instructions:"Tap to switch color. Only step on tiles matching your color.", restart:start});
-let tiles, lane, t, sp, color, COLORS;
-function start(){
-  COLORS=["#ff5577","#5af","#3df58a","#ffd35a"];
-  color=0; lane=1;
-  tiles=[]; let y=Lab.H;
-  while(y>-200){ tiles.push({y, color:Lab.randInt(0,COLORS.length-1)}); y-=60; }
-  t=0; sp=240;
+(function(){ "use strict";
+/* INKSTRIDE — an ink blob sprints up a strip of paper; coloured gates come at it and it must be the gate's colour
+ * (and shape) when it gets there. Three big pads pick the colour directly. Identity: risograph print — cream paper,
+ * three spot inks with misregistered shadows, ink-dark outlines, funk bass. Each ink is also a shape, so nothing
+ * depends on colour alone.
+ * Depth: switching LATE (inside the dashed band) is a PERFECT worth double; combo multiplier ×1–×5; phrases of
+ * runs / alternations / stairs; two-ink gates; veiled gates that reveal late; tempo rubber-bands on a miss.   */
+Lab.init({
+  title: "Inkstride", tagline: "Match the gate. Switch late. Stay in flow.", category: "Runner & Movement",
+  howto: ["Tap a pad to become that ink", "Match each gate as you reach it", "Switch late for PERFECT ×2"],
+  theme: { bg: "#eadfc8", bg2: "#f8f0df", fg: "#2a2438", accent: "#ef4f6b", accent2: "#2f7fe0", muted: "#7c7285", light: true },
+  orient: "portrait", music: { style: "funk", key: "D", vol: .42 }, restart: start,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, PI = Math.PI;
+const INK = [{ c: "#ef4f6b", d: "#b62b48", l: "#ffc2cc" }, { c: "#f6b62e", d: "#c48507", l: "#ffe7a6" }, { c: "#2f7fe0", d: "#1b52a6", l: "#bcd8ff" }];
+const DARK = "#2a2438", PAPER = "#f4ead6", PW = .19, COY = .075;
+let S, TW, tx, runY, topY, padTop, padH, padW, padM, padG;
+let scroll, v, gap, T, color, prevColor, lastSwitchT, gates, nextPos, queue, lastCol, passed, heat, tier, score, combo, bestCombo, perfects, hearts, alive;
+let runner, trail, press, blobs, stepPh, coach;
+
+function start() {
+  layout();
+  scroll = 0; T = 0; color = 1; prevColor = 1; lastSwitchT = -9; gates = []; queue = []; lastCol = 1; passed = 0; heat = 0; tier = 1; score = 0; combo = 0; bestCombo = 0; perfects = 0; hearts = 3; alive = true;
+  runner = { sq: 0, pop: 0, hop: 0, blink: 2, hurt: 0 }; trail = [{ p: -9999, col: 1 }]; press = [0, 0, 0]; stepPh = 0; coach = 4;
+  blobs = Array.from({ length: 7 }, (_, i) => ({ x: Lab.rand(0, 1), y: Lab.rand(0, 1), r: Lab.rand(40, 110), col: i % 3 }));
+  tempo(); nextPos = v * 2.1;
   Lab.setScore(0);
-  Lab.input.onTap=[()=>{ color=(color+1)%COLORS.length; Lab.beep(700,.04);}];
-  Lab.loop(dt=>{
-    t+=dt; sp=240+t*8;
-    for(const tt of tiles) tt.y+=sp*dt;
-    while(tiles[0] && tiles[0].y>Lab.H){ tiles.shift();
-      const min=Math.min(...tiles.map(t=>t.y));
-      tiles.push({y:min-60, color:Lab.randInt(0,COLORS.length-1)});
-    }
-    // player at fixed y
-    const py = Lab.H-160;
-    for(const tt of tiles){
-      if(Math.abs(tt.y-py)<25 && !tt.checked){
-        tt.checked=true;
-        if(tt.color!==color){ Lab.gameover({title:"Wrong color!",message:"Distance: "+Math.floor(t*sp/20)}); return; }
-        else { Lab.beep(900,.04); Lab.setScore(Math.floor(t*10));}
-      }
-    }
-    const c=Lab.ctx; c.fillStyle="#0b0f1a"; c.fillRect(0,0,Lab.W,Lab.H);
-    for(const tt of tiles){ c.fillStyle=COLORS[tt.color]; c.fillRect(Lab.W*0.2, tt.y-25, Lab.W*0.6, 50);}
-    c.fillStyle=COLORS[color]; c.fillRect(Lab.W*0.5-22, py-30, 44, 60);
-    c.strokeStyle="#fff"; c.strokeRect(Lab.W*0.5-22, py-30, 44, 60);
-    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
-    c.fillText("Tap to change color", Lab.W/2, 70);
+  Lab.input.onDown = [x => select(Lab.clamp(Math.floor((x - padM + padG / 2) / (padW + padG)), 0, 2))];   // the whole screen is three columns
+  Lab.input.onKey = [k => { const i = { ArrowLeft: 0, a: 0, A: 0, 1: 0, ArrowDown: 1, ArrowUp: 1, s: 1, S: 1, w: 1, W: 1, 2: 1, ArrowRight: 2, d: 2, D: 2, 3: 2 }[k]; if (i != null) select(i); }];
+  Lab.expose({
+    get color() { return color; }, get score() { return score; }, get combo() { return combo; }, get hearts() { return hearts; }, get passed() { return passed; }, get perfects() { return perfects; },
+    get tier() { return tier; }, get speed() { return v / S; }, get gap() { return gap; }, get mult() { return mult(); },
+    get gates() { return gates.filter(g => g.state === "live").map(g => ({ eta: (g.pos - scroll) / v, cols: g.cols.slice(), veiled: g.veiled && !g.open })); },
+    padXY(i) { return [padM + i * (padW + padG) + padW / 2, padTop + padH / 2]; }, select,
   });
+  Lab.loop(frame);
 }
-start();
+function layout() {
+  const P = Lab.play; S = Math.min(Lab.W / 390, P.h / 760);
+  padM = 12 * S; padG = 8 * S; padH = 94 * S; padW = (Lab.W - 2 * padM - 2 * padG) / 3; padTop = Lab.H - Lab.safe.bottom - padH - 14 * S;
+  TW = Math.min(Lab.W * .56, 230 * S); tx = (Lab.W - TW) / 2; topY = P.y; runY = padTop - 118 * S;
+}
+Lab.onResize(() => { if (gates) layout(); });
+const mult = () => 1 + Math.min(4, Math.floor(combo / 8));
+function tempo() { const k = Lab.clamp(heat / 70, 0, 1); gap = Lab.lerp(1.05, .44, Math.pow(k, .8)) - Math.min(.07, Math.max(0, heat - 70) * .001); v = S * Lab.lerp(300, 620, k); }
+
+/* ------------------------------------------------------------------ gates come in phrases */
+function phrase() {
+  const A = (lastCol + Lab.randInt(1, 2)) % 3, B = (A + Lab.randInt(1, 2)) % 3, C = 3 - A - B, t = tier, out = [];
+  const kinds = passed < 5 ? ["alt"] : t < 2 ? ["run", "alt", "rand", "stair"] : ["run", "alt", "rand", "stair", "dual", "rand", "alt"];
+  const k = Lab.choose(kinds);
+  if (k === "run") for (let i = Lab.randInt(2, 3); i--;) out.push([A]);
+  else if (k === "alt") out.push([A], [B], [A], [B]);
+  else if (k === "stair") { out.push([A], [B], [C]); if (t >= 2) out.push([A], [B], [C]); }
+  else if (k === "dual") out.push([A, B], [C], [B, C], [A]);
+  else { let p = lastCol; for (let i = 0; i < 3; i++) { p = (p + Lab.randInt(1, 2)) % 3; out.push([p]); } }
+  const pv = t < 3 ? 0 : Math.min(.4, .13 * (t - 2));
+  out.forEach((cols, i) => queue.push({ cols, veiled: i > 0 && cols.length === 1 && Lab.chance(pv), breath: i === out.length - 1 }));
+  lastCol = out[out.length - 1][0];
+}
+function spawn() {
+  while (nextPos - scroll < runY - topY + 120) {
+    if (!queue.length) phrase(); const q = queue.shift();
+    gates.push({ pos: nextPos, cols: q.cols, veiled: q.veiled, open: 0, state: "live", t: 0, pend: 0, n: passed + gates.filter(g => g.state === "live").length });
+    nextPos += v * gap * (q.breath ? 1.45 : 1);
+  }
+}
+function select(i) {
+  if (!alive || Lab.paused) return;
+  press[i] = 1;
+  if (i === color) { Lab.sfx("tick", { pitch: .8 + i * .2 }); return; }
+  prevColor = color; color = i; lastSwitchT = T; trail.push({ p: scroll, col: i }); runner.pop = 1; runner.sq = .28;
+  Lab.sfx("tap", { pitch: .8 + i * .22 }); Lab.buzz(6);
+  fx.ring(Lab.W / 2, runY, { r0: 14 * S, r1: 44 * S, color: INK[i].c, width: 5, life: .28 });
+  fx.burst(Lab.W / 2, runY, { n: 7, color: INK[i].c, speed: 170 * S, life: .35, size: 3.4 * S, gravity: 300 });
+}
+function pass(g) {
+  g.state = "passed"; g.t = 0; passed++; heat++; combo++; bestCombo = Math.max(bestCombo, combo); coach = Math.max(0, coach - 1);
+  const perfect = T - lastSwitchT <= PW + g.pend && !g.cols.includes(prevColor), m = mult(), gain = 10 * m * (perfect ? 2 : 1);
+  score += gain; Lab.setScore(score); runner.hop = 1;
+  const x = Lab.W / 2, c = INK[color];
+  fx.burst(x, runY - 14 * S, { n: perfect ? 16 : 9, colors: [c.c, c.l, "#fff"], speed: (perfect ? 300 : 210) * S, spread: PI * 1.2, angle: -PI / 2, life: .5, size: 4 * S, gravity: 500, shape: perfect ? "star" : "circle" });
+  Lab.audio.tone({ f: Lab.audio.scaleFreq(color * 2 + (m - 1), 62), dur: .14, type: "triangle", vol: .2 }); if (perfect) { Lab.audio.tone({ f: Lab.audio.scaleFreq(color * 2 + (m - 1), 62) * 2, dur: .2, vol: .1, delay: .04 }); perfects++; Lab.buzz(10); }
+  fx.text(tx + TW + 34 * S, runY - 40 * S, perfect ? "PERFECT" : "+" + gain, { color: perfect ? DARK : c.d, size: (perfect ? 15 : 14) * Math.max(.85, S), outline: "rgba(255,250,240,.9)", life: .6 });
+  if (perfect) fx.text(tx + TW + 34 * S, runY - 20 * S, "+" + gain, { color: c.d, size: 14 * Math.max(.85, S), outline: "rgba(255,250,240,.9)", life: .6 });
+  if (combo % 8 === 0 && combo <= 32) { Lab.sfx("powerup", { pitch: .8 + m * .1 }); Lab.bumpScore(); fx.text(x, runY - 92 * S, "×" + mult(), { color: DARK, size: 34 * S, outline: "#fff", life: .9 }); }
+  if (combo % 25 === 0 && hearts < 3) { hearts++; Lab.sfx("unlock"); Lab.toast("combo " + combo + ": +1 heart", 1100); }
+  const nt = 1 + Math.floor(passed / 14); if (nt > tier) { tier = nt; Lab.banner("TEMPO " + tier, { color: INK[(tier + 1) % 3].c, ms: 900 }); Lab.sfx("levelup"); if (tier === 2) Lab.toast("two-ink gates: either works", 1500); if (tier === 3) Lab.toast("veiled gates reveal late", 1500); }
+}
+function miss(g) {
+  g.state = "missed"; g.t = 0; hearts--; heat = Math.max(0, heat - 8); runner.hurt = 1;
+  if (combo >= 8) fx.text(Lab.W / 2, runY - 92 * S, "combo lost", { color: DARK, size: 16 * S, outline: "#fff" }); combo = 0;
+  Lab.sfx("error"); Lab.sfx("hurt", { pitch: .9 }); Lab.shake(9, .28); Lab.flash("#2a2438", .16, .22); Lab.buzz(50); Lab.hitstop(.06);
+  fx.burst(Lab.W / 2, runY, { n: 16, color: "#8c8496", speed: 260 * S, life: .6, size: 4 * S, shape: "shard" });
+  if (hearts <= 0) { alive = false; Lab.gameover({ title: "Ink ran dry", score, stats: [["Gates", passed], ["Best combo", bestCombo], ["Perfects", perfects]] }); }
+}
+
+/* ------------------------------------------------------------------ frame */
+function frame(dt, t) {
+  T += dt; tempo(); scroll += v * dt; stepPh += dt * (6 + v / S * .012); spawn();
+  for (const g of gates) {
+    if (g.state === "live") {
+      const eta = (g.pos - scroll) / v;
+      if (g.veiled && !g.open && eta < Math.max(.42, gap * .85)) { g.open = .001; Lab.sfx("flip", { pitch: 1.2 }); }
+      if (eta <= 0) { if (g.cols.includes(color)) pass(g); else { g.pend += dt; if (g.pend > COY) miss(g); } }  // a hair of coyote time for late taps
+    } else g.t += dt;
+    if (g.open > 0 && g.open < 1) g.open = Math.min(1, g.open + dt * 7);
+  }
+  while (gates.length && gates[0].pos - scroll < -(Lab.H - runY) - 60) gates.shift();
+  while (trail.length > 1 && runY + (scroll - trail[1].p) > Lab.H + 40) trail.shift();
+  for (let i = 0; i < 3; i++) press[i] = Lab.damp(press[i], 0, 14, dt);
+  runner.sq = Lab.damp(runner.sq, 0, 13, dt); runner.pop = Math.max(0, runner.pop - dt * 5); runner.hop = Math.max(0, runner.hop - dt * 5); runner.hurt = Math.max(0, runner.hurt - dt * 2.2);
+  runner.blink -= dt; if (runner.blink < -.1) runner.blink = Lab.rand(1.2, 4);
+  Lab.music.intensity(.25 + Lab.clamp(heat / 70, 0, 1) * .5 + Math.min(.25, combo * .008));
+  render(t);
+}
+
+/* ------------------------------------------------------------------ rendering */
+function shape(c, i, x, y, r, fill, stroke, lw) {
+  c.beginPath();
+  if (i === 0) c.arc(x, y, r, 0, TAU);
+  else if (i === 1) { for (let k = 0; k < 3; k++) { const a = -PI / 2 + k * TAU / 3; c[k ? "lineTo" : "moveTo"](x + Math.cos(a) * r * 1.22, y + r * .16 + Math.sin(a) * r * 1.22); } c.closePath(); }
+  else draw.rr(c, x - r * .9, y - r * .9, r * 1.8, r * 1.8, r * .28);
+  c.lineJoin = "round"; if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) { c.strokeStyle = stroke; c.lineWidth = lw || 2; c.stroke(); }
+}
+function gateBar(c, g, y, x0, w, h) {
+  const n = g.cols.length, shown = !g.veiled || g.open > .5, k = g.veiled ? Math.abs(1 - g.open * 2) : 1;
+  c.save(); c.translate(0, y); c.scale(1, Math.max(.08, k));
+  draw.rect(c, x0 + 4 * S, -h / 2 + 5 * S, w, h, 7 * S, "rgba(42,36,56,.22)");
+  for (let i = 0; i < n; i++) {
+    const ink = INK[g.cols[i]], sx = x0 + w * i / n, sw = w / n;
+    c.save(); c.beginPath(); c.rect(sx, -h, sw, h * 2); c.clip();
+    draw.rect(c, x0, -h / 2, w, h, 7 * S, shown ? ink.c : "#cfc4ae");
+    if (shown) { c.fillStyle = ink.d; c.fillRect(x0, h / 2 - 5 * S, w, 5 * S); }
+    else { c.strokeStyle = "rgba(42,36,56,.2)"; c.lineWidth = 3 * S; for (let q = -2; q < 14; q++) { c.beginPath(); c.moveTo(x0 + q * 22 * S, h / 2); c.lineTo(x0 + q * 22 * S + h, -h / 2); c.stroke(); } }
+    c.restore();
+    const cnt = n > 1 ? 1 : 3; for (let q = 0; q < cnt; q++) { const ix = sx + sw * (q + .5) / cnt; if (shown) shape(c, g.cols[i], ix, -1.5 * S, h * .26, "#fffaf0", DARK, 1.6 * S); else draw.text(c, "?", ix, 0, { size: h * .62, color: "rgba(42,36,56,.55)" }); }
+  }
+  draw.rect(c, x0, -h / 2, w, h, 7 * S, null, DARK, 2.4 * S);
+  if (n > 1) draw.line(c, x0 + w / 2, -h / 2, x0 + w / 2, h / 2, DARK, 2.4 * S);
+  c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, P = Lab.play, cx = W / 2, cur = INK[color];
+  c.fillStyle = PAPER; c.fillRect(-40, -40, W + 80, H + 80);
+  c.globalCompositeOperation = "multiply"; // big spot-ink shapes drifting under the track
+  for (const b of blobs) { const y = ((b.y * (H + 300) + scroll * .12) % (H + 300)) - 150; c.globalAlpha = .13; shape(c, b.col, b.x * W, y, b.r * S, INK[b.col].c); }
+  c.globalAlpha = 1; c.globalCompositeOperation = "source-over";
+  // the paper strip, with ruler ticks that give the speed
+  draw.rect(c, tx + 5 * S, -20, TW, H + 40, 0, "rgba(42,36,56,.13)"); c.fillStyle = "#fffaf0"; c.fillRect(tx, -20, TW, H + 40);
+  c.fillStyle = "rgba(42,36,56,.3)"; const tk = 46 * S, o = scroll % tk;
+  for (let y = -tk + o; y < H; y += tk) { c.fillRect(tx + 5 * S, y, 9 * S, 2.5 * S); c.fillRect(tx + TW - 14 * S, y, 9 * S, 2.5 * S); }
+  c.strokeStyle = "rgba(42,36,56,.4)"; c.lineWidth = 2; c.strokeRect(tx, -20, TW, H + 40);
+  // the PERFECT band: switch while the gate is in here
+  const bandH = v * PW, by = runY - 24 * S - bandH; c.fillStyle = Lab.color.alpha(cur.c, .1); c.fillRect(tx, by, TW, bandH);
+  c.setLineDash([7 * S, 7 * S]); c.strokeStyle = "rgba(42,36,56,.38)"; c.lineWidth = 2; c.beginPath(); c.moveTo(tx, by); c.lineTo(tx + TW, by); c.stroke(); c.setLineDash([]);
+  draw.text(c, "×2", tx + TW - 16 * S, by + 11 * S, { size: 11 * S, color: "rgba(42,36,56,.5)" });
+  // ink trail: the colour the blob was, scrolling away behind it
+  for (let i = 0; i < trail.length; i++) {
+    const y0 = runY + (scroll - (i + 1 < trail.length ? trail[i + 1].p : scroll)), y1 = Math.min(H + 30, runY + (scroll - trail[i].p)), ink = INK[trail[i].col];
+    if (y1 <= y0) continue; c.fillStyle = Lab.color.alpha(ink.d, .35); c.fillRect(cx - 9 * S + 3 * S, y0, 18 * S, y1 - y0); c.fillStyle = ink.c; c.fillRect(cx - 9 * S, y0, 18 * S, y1 - y0);
+    if (i + 1 < trail.length) draw.circle(c, cx, y0, 14 * S, INK[trail[i + 1].col].c);
+  }
+  // gates
+  const gh = 30 * S, gx0 = tx - 9 * S, gw = TW + 18 * S;
+  for (const g of gates) {
+    const y = runY - 24 * S - (g.pos - scroll); if (y < topY - 40 || y > H + 40) continue;
+    if (g.state === "live") gateBar(c, g, y, gx0, gw, gh);
+    else if (g.state === "passed") { const u = Math.min(1, g.t / .28), e = Lab.ease.outCubic(u); c.globalAlpha = 1 - u; for (const sd of [-1, 1]) { c.save(); c.beginPath(); c.rect(sd < 0 ? -50 : cx, y - gh, W / 2 + 50, gh * 2); c.clip(); gateBar(c, g, y, gx0 + sd * e * 46 * S, gw, gh); c.restore(); } c.globalAlpha = 1; }
+    else { c.globalAlpha = .55; c.save(); c.translate(Math.sin(g.t * 50) * 5 * S * Math.max(0, 1 - g.t * 3), 0); draw.rect(c, gx0, y - gh / 2, gw, gh, 7 * S, "#b9b0a2", DARK, 2.4 * S); draw.line(c, cx - 14 * S, y - 9 * S, cx + 14 * S, y + 9 * S, DARK, 3 * S); draw.line(c, cx + 14 * S, y - 9 * S, cx - 14 * S, y + 9 * S, DARK, 3 * S); c.restore(); c.globalAlpha = 1; }
+  }
+  // runner: its body IS the shape of its ink
+  { const r = 21 * S, hopY = Lab.ease.pulse(runner.hop) * 8 * S, sc = 1 + Lab.ease.pulse(runner.pop) * .22, bob = Math.sin(stepPh * 2) * 1.5 * S, y = runY - hopY + bob;
+    draw.shadow(c, cx + 3 * S, runY + r * .95, r * (1 - hopY / (40 * S)), r * .28, .2);
+    for (const sd of [-1, 1]) { const ph = Math.sin(stepPh + (sd > 0 ? PI : 0)); c.fillStyle = DARK; c.beginPath(); c.ellipse(cx + sd * r * .5, runY + r * .9 + ph * 3.5 * S, 6 * S, 4.2 * S, 0, 0, TAU); c.fill(); }
+    c.save(); c.translate(cx, y); c.scale(sc * (1 + runner.sq * .4), sc * (1 - runner.sq * .45));
+    if (runner.hurt > 0 && Math.sin(t * 50) > 0) c.globalAlpha = .45;
+    shape(c, color, 3 * S, 3.5 * S, r, cur.d); shape(c, color, 0, 0, r, cur.c, DARK, 2.6 * S);
+    const ey = color === 1 ? r * .22 : -r * .08, ex = r * .34;
+    for (const sd of [-1, 1]) { if (runner.blink < 0) { draw.line(c, sd * ex - 4 * S, ey, sd * ex + 4 * S, ey, DARK, 2.2 * S); } else { draw.circle(c, sd * ex, ey, r * .22, "#fffaf0", DARK, 1.5 * S); draw.circle(c, sd * ex, ey - r * .07, r * .1, DARK); } }
+    c.restore(); c.globalAlpha = 1; }
+  c.fillStyle = PAPER; c.fillRect(-40, -40, W + 80, topY + 40); draw.line(c, tx - 9 * S, topY, tx + TW + 9 * S, topY, DARK, 2.4 * S); // header: gates feed in from under it
+  // margins: combo on the left, hearts + tempo on the right
+  const lm = tx / 2, m = mult();
+  if (combo > 1) { draw.text(c, String(combo), lm, runY - 44 * S, { size: Math.min(combo > 99 ? 32 : 40, 24 + combo * .3) * S, color: DARK }); draw.text(c, "COMBO", lm, runY - 18 * S, { size: 10 * S, color: "rgba(42,36,56,.6)" }); }
+  if (m > 1) { draw.circle(c, lm, runY + 22 * S, 19 * S, INK[(m + 1) % 3].c, DARK, 2.4 * S); draw.text(c, "×" + m, lm, runY + 22 * S, { size: 16 * S, color: "#fffaf0", stroke: DARK, strokeW: 3 * S }); }
+  for (let i = 0; i < 3; i++) { const on = i < hearts, hx = tx + TW + (W - tx - TW) / 2 + (i - 1) * 19 * S, hy = P.y + 22 * S; draw.heart(c, hx + 1.5 * S, hy + 2 * S, 7.5 * S, "rgba(42,36,56,.25)"); draw.heart(c, hx, hy, 7.5 * S, on ? INK[0].c : "#e3d9c6"); c.strokeStyle = DARK; c.lineWidth = 1.8 * S; c.stroke(); }
+  draw.text(c, "TEMPO " + tier, lm, P.y + 16 * S, { size: 11 * S, color: "rgba(42,36,56,.75)" });
+  { const w = tx - 24 * S, f = (passed % 14) / 14; draw.rect(c, lm - w / 2, P.y + 27 * S, w, 6 * S, 3 * S, "rgba(42,36,56,.15)"); draw.rect(c, lm - w / 2, P.y + 27 * S, Math.max(6 * S, w * f), 6 * S, 3 * S, INK[(tier + 1) % 3].c); }
+  // pads
+  const next = gates.find(g => g.state === "live");
+  for (let i = 0; i < 3; i++) {
+    const ink = INK[i], x = padM + i * (padW + padG), dn = (color === i ? 3 : 0) * S + press[i] * 5 * S, lip = 9 * S;
+    draw.rect(c, x, padTop + lip, padW, padH, 16 * S, ink.d, DARK, 2.6 * S);
+    draw.rect(c, x, padTop + dn, padW, padH, 16 * S, color === i ? ink.c : Lab.color.mix(ink.c, PAPER, .22), DARK, color === i ? 4 * S : 2.6 * S);
+    shape(c, i, x + padW / 2 + 2.5 * S, padTop + dn + padH / 2 + 2.5 * S, 20 * S, ink.d); shape(c, i, x + padW / 2, padTop + dn + padH / 2, 20 * S, "#fffaf0", DARK, 2.4 * S);
+    if (coach > 0 && next && next.cols.includes(i) && color !== i && !(next.veiled && !next.open)) { const pu = .5 + .5 * Math.sin(t * 10); draw.rect(c, x - 4 * S - pu * 3 * S, padTop + dn - 4 * S - pu * 3 * S, padW + 8 * S + pu * 6 * S, padH + 8 * S + pu * 6 * S, 19 * S, null, DARK, 3 * S); draw.text(c, "tap", x + padW / 2, padTop - 14 * S, { size: 14 * S, color: DARK }); }
+  }
+}
+Lab.boot();
+})();
 </script></body></html>

@@ -1233,23 +1233,26 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 11,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/12-cold-snap",
    "path": "PhoneGameLab/games/12-cold-snap/index.html",
    "collection": "PhoneGameLab",
-   "title": "Asteroids",
-   "desc": "Drag to steer toward your finger. Tap-and-hold to thrust. Double-tap to fire.",
+   "title": "Cold Snap",
+   "desc": "Break the drifting ice. Scoop the sunstones before they sink.",
    "genre": [
-    "Minigame"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 12,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/13-suds-patrol",
@@ -1272,21 +1275,20 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--13-suds-patrol.jpg"
   },
   {
-   "id": "PhoneGameLab/14-bullet-hell",
-   "path": "PhoneGameLab/games/14-bullet-hell/index.html",
+   "id": "PhoneGameLab/14-sparkmoth",
+   "path": "PhoneGameLab/games/14-sparkmoth/index.html",
    "collection": "PhoneGameLab",
    "title": "Bullet Hell",
-   "desc": "Survive dense bullet patterns.",
+   "desc": "Drag your ship to dodge. Survive as long as possible.",
    "genre": [
-    "Arcade & Action"
+    "Minigame"
    ],
    "controls": [
     "touch",
     "mouse"
    ],
    "n": 14,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--14-bullet-hell.jpg"
+   "v2": false
   },
   {
    "id": "PhoneGameLab/15-fruit-slice",
@@ -1385,17 +1387,18 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab/20-frostfoot",
    "path": "PhoneGameLab/games/20-frostfoot/index.html",
    "collection": "PhoneGameLab",
-   "title": "Endless Runner",
-   "desc": "Tap = jump • Swipe down = slide.",
+   "title": "Frostfoot",
+   "desc": "Hop the ice. Slide the gates. Keep the scarf burning.",
    "genre": [
-    "Minigame"
+    "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 20,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/21-paper-rapids",
@@ -1438,8 +1441,8 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--22-sundown-sprint.jpg"
   },
   {
-   "id": "PhoneGameLab/23-doodle-jump",
-   "path": "PhoneGameLab/games/23-doodle-jump/index.html",
+   "id": "PhoneGameLab/23-pogo-peak",
+   "path": "PhoneGameLab/games/23-pogo-peak/index.html",
    "collection": "PhoneGameLab",
    "title": "Pogo Peak",
    "desc": "Bounce a pogo chick from meadow to starlight.",
@@ -1452,8 +1455,7 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 23,
-   "v2": true,
-   "thumb": "thumbs/PhoneGameLab--23-doodle-jump.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/24-helix-fall",
@@ -1529,24 +1531,28 @@ window.GDL_CATALOG = {
    "n": 27,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--27-fizzwhiz.jpg"
   },
   {
-   "id": "PhoneGameLab/28-cave-flyer",
-   "path": "PhoneGameLab/games/28-cave-flyer/index.html",
+   "id": "PhoneGameLab/28-hollowlight",
+   "path": "PhoneGameLab/games/28-hollowlight/index.html",
    "collection": "PhoneGameLab",
-   "title": "Cave Flyer",
-   "desc": "Navigate a narrowing cave tunnel.",
+   "title": "Hollowlight",
+   "desc": "Carry your glow through the dark.",
    "genre": [
     "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 28,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--28-cave-flyer.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--28-hollowlight.jpg"
   },
   {
    "id": "PhoneGameLab/29-tiltwood",
@@ -1605,23 +1611,28 @@ window.GDL_CATALOG = {
    "n": 31,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--31-sinkstones.jpg"
   },
   {
    "id": "PhoneGameLab/32-inkstride",
    "path": "PhoneGameLab/games/32-inkstride/index.html",
    "collection": "PhoneGameLab",
-   "title": "Color Path",
-   "desc": "Tap to switch color. Only step on tiles matching your color.",
+   "title": "Inkstride",
+   "desc": "Match the gate. Switch late. Stay in flow.",
    "genre": [
-    "Minigame"
+    "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 32,
-   "v2": false
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--32-inkstride.jpg"
   },
   {
    "id": "PhoneGameLab/33-shape-gate",

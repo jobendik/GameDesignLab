@@ -110,7 +110,7 @@
   const audioPrefs = LS.get('gdl:audio', { sfx: true, music: true });
   if (params.has('mute')) { audioPrefs.sfx = false; audioPrefs.music = false; }
   let ac = null, master = null, sfxBus = null, musicBus = null, noiseBuf = null, unlocked = false;
-  const lastPlayed = {};
+  const lastPlayed = {}; let volMul = 1;
   function ensureAudio() {
     if (ac) return ac;
     try {
@@ -135,7 +135,7 @@
   }
   function tone(o) {
     if (!ac || !unlocked || !audioPrefs.sfx && !o.music) return;
-    const t0 = ac.currentTime + (o.delay || 0), dur = o.dur || .1, vol = (o.vol == null ? .2 : o.vol);
+    const t0 = ac.currentTime + (o.delay || 0), dur = o.dur || .1, vol = (o.vol == null ? .2 : o.vol) * volMul;
     const osc = ac.createOscillator(), g = ac.createGain();
     osc.type = o.type || 'sine';
     osc.frequency.setValueAtTime(Math.max(20, o.f || 440), t0);
@@ -153,7 +153,7 @@
   }
   function noise(o) {
     if (!ac || !unlocked || !audioPrefs.sfx && !o.music) return;
-    const t0 = ac.currentTime + (o.delay || 0), dur = o.dur || .1, vol = (o.vol == null ? .2 : o.vol);
+    const t0 = ac.currentTime + (o.delay || 0), dur = o.dur || .1, vol = (o.vol == null ? .2 : o.vol) * volMul;
     const src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
     const g = ac.createGain(), f = ac.createBiquadFilter();
     f.type = o.hp ? 'highpass' : o.bp ? 'bandpass' : 'lowpass';
@@ -218,13 +218,15 @@
     snap: p => { noise({ dur: .02, vol: .26, hp: 2000 }); tone({ f: 1800 * p, f2: 600, dur: .03, vol: .14 }); },
     chime: p => [0, 7, 12, 19].forEach((s, i) => tone({ f: 880 * p * Math.pow(2, s / 12), dur: .5, vol: .07, delay: i * .03 })),
   };
-  /* Lab.sfx(name, {pitch, vary}) — plays a preset; identical sounds are rate-limited so bursts never clip. */
+  /* Lab.sfx(name, {pitch, vol, vary}) — plays a preset (vol is a 0..1.5 multiplier); identical sounds are rate-limited so bursts never clip. */
   Lab.sfx = function (name, o) {
     if (!unlocked || !audioPrefs.sfx || !ac) return;
     const fn = SFX[name]; if (!fn) return;
     const now = ac.currentTime; if (lastPlayed[name] && now - lastPlayed[name] < .028) return; lastPlayed[name] = now;
     const vary = o && o.vary != null ? o.vary : .04;
+    volMul = o && o.vol != null ? o.vol : 1;
     try { fn(((o && o.pitch) || 1) * (1 + (Math.random() * 2 - 1) * vary)); } catch (e) { }
+    volMul = 1;
   };
   Lab.sfxList = Object.keys(SFX);
   const audio = Lab.audio = {
@@ -239,6 +241,24 @@
     get ctx() { return ac; },
     get unlocked() { return unlocked; },
   };
+  /* Sustained sound for continuous things (rolling, wind, engine, charge):
+   *   const h = Lab.audio.loop({noise:true, bp:600, q:1.2, vol:0})  or  ({type:'sawtooth', f:90, lp:800, vol:0})
+   *   h.set({vol:.2, f:900}) every frame as state changes (smoothly ramped);  h.stop()  — loops also stop on restart / game over and mute while paused. */
+  const loops = [];
+  audio.loop = function (o) {
+    o = o || {}; const h = { vol: o.vol || 0, dead: !ac || !unlocked, set() { }, stop() { } };
+    if (h.dead) { h.set = function (v) { if (!h.dead || !ac || !unlocked) return; const n = audio.loop(Object.assign({}, o, v)); Object.assign(h, n); }; return h; }
+    const g = ac.createGain(); g.gain.value = 0; const f = ac.createBiquadFilter(); let src;
+    f.type = o.hp ? 'highpass' : o.bp ? 'bandpass' : 'lowpass'; f.frequency.value = o.hp || o.bp || o.lp || 2400; f.Q.value = o.q || .8;
+    if (o.noise) { src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true; } else { src = ac.createOscillator(); src.type = o.type || 'sine'; src.frequency.value = o.f || 220; }
+    src.connect(f); f.connect(g); g.connect(sfxBus); src.start();
+    h.dead = false; h._g = g;
+    h.set = function (v) { if (h.dead) return; const t = ac.currentTime; if (v.vol != null) { h.vol = v.vol; g.gain.setTargetAtTime(paused ? 0 : Math.max(0, v.vol), t, .04); } if (v.f != null) { if (o.noise) f.frequency.setTargetAtTime(Math.max(30, v.f), t, .04); else src.frequency.setTargetAtTime(Math.max(20, v.f), t, .04); } if (v.cutoff != null) f.frequency.setTargetAtTime(Math.max(30, v.cutoff), t, .04); };
+    h.stop = function (fade) { if (h.dead) return; h.dead = true; const t = ac.currentTime; g.gain.setTargetAtTime(0, t, (fade || .08) / 3); try { src.stop(t + (fade || .08) + .1); } catch (e) { } const i = loops.indexOf(h); if (i >= 0) loops.splice(i, 1); };
+    loops.push(h); h.set({ vol: h.vol }); return h;
+  };
+  function stopLoops() { while (loops.length) loops[0].stop(.05); }
+  function muteLoops(m) { if (!ac) return; for (const h of loops) h._g.gain.setTargetAtTime(m ? 0 : h.vol, ac.currentTime, .04); }
   // v1 compat
   Lab.beep = function (freq = 440, dur = 0.06, type = 'square', gain = 0.05) { tone({ f: freq, dur: Math.max(.03, dur), type, vol: Math.min(.3, gain * 2.2), lp: type === 'square' || type === 'sawtooth' ? 3800 : 0 }); };
   Lab.buzz = function (p) { try { if (!reduced && navigator.vibrate) navigator.vibrate(p || 10); } catch (e) { } };
@@ -259,6 +279,9 @@
   };
   const music = Lab.music = {
     cfg: null, pending: null, timer: 0, step: 0, next: 0, vol: .5, level: .6, riff: null, _duck: 1,
+    /* music.onBeat = (beatIndex, isDownbeat) => {…} fires on every quarter note in sync with the audio (cleared on restart);
+       music.beatDur = seconds per beat — use both to lock spawns / pulses to the tune */
+    onBeat: null, get beatDur() { return 60 / (music.bpm || 100); },
     styles: Object.keys(STYLES),
     /* Lab.music.play({style:'bounce', key:'C', bpm:112, seed:3, vol:.5}) */
     play(cfg) {
@@ -330,6 +353,7 @@
           if (d === 'chip') { if (i16 % 8 === 0) mt({ f: 180, f2: 50, dur: .08, type: 'square', vol: .1 }); if (i16 % 8 === 4) mn({ dur: .06, vol: .08, hp: 2500 }); if (i16 % 2 === 0 && lv > .6) mn({ dur: .015, vol: .03, hp: 8000 }); }
           if (d === 'march') { if (i16 === 0 || i16 === 8) kick(); if ([4, 10, 12, 14, 15].includes(i16)) snare(i16 >= 14 ? .05 : .09); }
         }
+        if (music.onBeat && i16 % 4 === 0) { const b = Math.floor(s / 4), fn = music.onBeat; setTimeout(() => { if (!paused && music.onBeat === fn) try { fn(b, b % 4 === 0); } catch (e) { console.error(e); } }, dl * 1000); }
         music.step++; music.next += spb;
       }
     },
@@ -545,6 +569,12 @@
   /* Lab.on('tap'|'down'|'up'|'move'|'swipe'|'key', fn) — like input.onTap but auto-removed on restart */
   Lab.on = function (type, fn) { autoHandlers.push({ type, fn }); };
 
+  /* Lab.setTheme({bg,bg2,fg,accent,accent2,muted,light}) — retint the HUD/cards at runtime (e.g. day → night) */
+  Lab.setTheme = function (th) {
+    const root = doc.documentElement.style;
+    for (const k of ['bg', 'bg2', 'fg', 'accent', 'accent2', 'muted']) if (th[k]) root.setProperty('--' + k, th[k]);
+    if (th.light != null) doc.body.classList.toggle('lab-light', !!th.light);
+  };
   function injectShell() {
     if (!doc.querySelector('meta[name=viewport]')) { const m = doc.createElement('meta'); m.name = 'viewport'; m.content = 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover'; doc.head.appendChild(m); }
     doc.title = opts.title + ' — Phone Game Lab';
@@ -718,14 +748,14 @@
     Lab.sfx('tap'); beginRun();
   }
   function clearRun() {
-    runId++; snap = null;
+    runId++; snap = null; stopLoops();
     timers.length = 0; tweens.length = 0; autoHandlers.length = 0; parts.length = 0; conf.length = 0;
     timeScale = 1; slowT = 0; hitstopT = 0; shakeMag = 0; flashA = 0;
     over = false; overlayReady = false; scoreSubmitted = false; paused = false;
     input.down = false; input.justDown = input.justUp = false; pressedKeys = {};
     stage.querySelectorAll('.lab-overlay:not(.lab-splash)').forEach(e => e.remove());
     stage.classList.remove('lab-paused');
-    music.duck(1);
+    music.duck(1); music.onBeat = null;
   }
   function beginRun() {
     clearRun(); mainLoop = null; running = false;
@@ -799,7 +829,7 @@
   /* Lab.gameover({title, message, score, stats:[['Level',3],['Combo','x12']], win, neutral, lower, button, delay, sound}) */
   Lab.gameover = function (o) {
     if (over) return;
-    o = o || {}; over = true; running = false; snap = null;
+    o = o || {}; over = true; running = false; snap = null; stopLoops();
     const explicit = typeof o.score === 'number';
     let score = o.score;
     if (!explicit) { const m = /score\D{0,4}(-?\d+)/i.exec(o.message || ''); if (m) score = +m[1]; } // v1 games: "Score: 12"
@@ -843,7 +873,7 @@
   };
 
   Lab.pause = function () {
-    if (paused || over || splashUp) return; paused = true; music.duck(.25); stage.classList.add('lab-paused');
+    if (paused || over || splashUp) return; paused = true; muteLoops(true); music.duck(.25); stage.classList.add('lab-paused');
     const el = doc.createElement('div'); el.className = 'lab-overlay lab-pausecard';
     const how = (opts.howto || (opts.instructions ? [opts.instructions] : [])).map(h => `<li>${h}</li>`).join('');
     el.innerHTML = `<div class="lab-card">
@@ -867,7 +897,7 @@
     stage.appendChild(el);
   };
   Lab.resume = function () {
-    if (!paused) return; paused = false; stage.classList.remove('lab-paused'); music.duck(over ? .35 : 1);
+    if (!paused) return; paused = false; muteLoops(false); stage.classList.remove('lab-paused'); music.duck(over ? .35 : 1);
     stage.querySelectorAll('.lab-pausecard').forEach(e => e.remove()); lastTs = performance.now(); input.down = false;
   };
 

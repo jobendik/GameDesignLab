@@ -1,0 +1,229 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Hollowlight</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* HOLLOWLIGHT — a glow-moth carries its light down a narrowing cave.  Hold to rise, release to sink, with soft inertia.
+ * The cave is DARK: you see what your glow reaches, and every press sends out an echo of light that sweeps the tunnel
+ * ahead for a moment (its pitch tells you how tight the passage is).  One resource — GLOW: it is your sight radius and
+ * your health. It fades slowly, a wall knocks a third of it out of you, drifting motes restore it, and big blooms hug
+ * the walls where grabbing them is a risk. Stay radiant (glow > 85 %) and distance counts double.
+ * Identity: quiet, moody, bioluminescent; warm gold moth against cold rock; sparse spooky music, echoing pings.     */
+Lab.init({
+  title: "Hollowlight", tagline: "Carry your glow through the dark.", category: "Runner & Movement",
+  howto: ["Hold to rise, release to sink", "Each press sends an echo of light down the tunnel", "Motes restore your glow — walls knock it out"],
+  theme: { bg: "#070812", bg2: "#1a2440", accent: "#ffd978", accent2: "#7fe6c8" },
+  orient: "any", music: { style: "spooky", key: "E", bpm: 76, vol: .42 }, restart: start, attract: (dt, t) => { if (!M) setup(); dist += 40 * dt; ensure(); M.y = (caveAt(dist).top + caveAt(dist).bot) / 2; ambient(dt); render(t); },
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, mix = Lab.color.mix, clamp = Lab.clamp;
+const STEP = 12, R = 10, ZLEN = 300;
+const ZONES = [
+  { n: "Mossy Hollow", rock: "#24383a", edge: "#6fd0a0", a: "#14283a", b: "#0a1220", glow: "#9dffb0" },
+  { n: "Crystal Vein", rock: "#2a2850", edge: "#9aa2ff", a: "#18163c", b: "#0b0a22", glow: "#b8c4ff" },
+  { n: "Ember Narrows", rock: "#40262f", edge: "#ff9a6a", a: "#2a141e", b: "#120810", glow: "#ffc08a" },
+  { n: "The Deep Dark", rock: "#1b1c2e", edge: "#7fe6ff", a: "#0b0c1a", b: "#050508", glow: "#9ff0ff" },
+];
+let S, Hu, top0, jx;                               // 1u = S px; cave y in u inside a band of height Hu
+let M, tops, bots, i0, gi, G, motes, spikes, rings, dust, trail, dist, speed, light, started, alive, score, pts, moteN, bumps, pings,
+  depth, zoneF, held, testHold, pingCd, chain, chainT, warnT, flutT, deathT, seed, mask, mctx, trailT;
+
+function layout() {
+  const old = Hu;
+  S = Math.min(Lab.W / 420, Lab.play.h / 460, 1.3); Hu = Math.min(600, Lab.play.h / S); top0 = Lab.play.y + (Lab.play.h - Hu * S) * .35; jx = clamp(Lab.W * .24, 70 * S, 240 * S);
+  if (M && old && Math.abs(old - Hu) > .5) { const k = Hu / old; M.y *= k; G.c *= k; G.ct *= k; for (let i = 0; i < tops.length; i++) { tops[i] *= k; bots[i] *= k; } for (const m of motes) m.y *= k; for (const s of spikes) s.y *= k; }
+}
+Lab.onResize(layout);
+const X = wx => jx + (wx - dist) * S, Y = u => top0 + u * S;
+const hash = n => { n = Math.imul((n | 0) ^ seed, 0x45d9f3b); n ^= n >>> 15; n = Math.imul(n, 0x2c1b3c6d); n ^= n >>> 13; return (n >>> 0) / 4294967296; };
+const noise = i => { const a = Math.floor(i / 4), f = i / 4 - a, e = f * f * (3 - 2 * f); return (hash(a) * (1 - e) + hash(a + 1) * e) * 2 - 1; };
+
+function setup() {
+  Hu = 0; M = null; layout(); seed = (Math.random() * 1e9) | 0;
+  M = { y: Hu / 2, vy: 0, tilt: 0, inv: 0, flap: 0, hurt: 0 };
+  tops = []; bots = []; i0 = -Math.ceil(jx / S / STEP) - 4; gi = i0; motes = []; spikes = []; rings = []; trail = [];
+  G = { c: Hu / 2, cv: 0, ct: Hu / 2, left: 0, sp: null, spIn: 30, moteIn: 4, bloomIn: 60 };
+  dist = 0; speed = 170; light = 1; started = false; alive = true; score = 0; pts = 0; moteN = 0; bumps = 0; pings = 0; depth = 0; zoneF = 0;
+  held = false; testHold = false; pingCd = 0; chain = 0; chainT = 0; warnT = 0; flutT = 0; deathT = 0; trailT = 0;
+  dust = Array.from({ length: 22 }, () => ({ x: Math.random(), y: Math.random(), p: Lab.rand(0, TAU), s: Lab.rand(.6, 1.6) }));
+  ensure();
+}
+function start() {
+  setup(); Lab.setScore(0);
+  Lab.input.onDown = [() => press()];
+  Lab.input.onKey = [k => { if (k === " " || k === "ArrowUp" || k === "w" || k === "W") press(); }];
+  Lab.expose({
+    get y() { return M.y; }, get vy() { return M.vy; }, get light() { return light; }, get metres() { return Math.floor(dist / 30); }, get score() { return score; },
+    get motes() { return moteN; }, get alive() { return alive; }, get started() { return started; }, get depth() { return depth; }, get height() { return Hu; },
+    get bumps() { return bumps; }, get pings() { return pings; }, get inv() { return M.inv > 0; },
+    ahead(dx) { return caveAt(dist + (dx || 0)); }, setHold(v) { testHold = !!v; }, press, setLight(v) { light = v; }, warp(m) { dist = m * 30; ensure(); const c = caveAt(dist); M.y = (c.top + c.bot) / 2; M.vy = 0; },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------------------------------------------------------------- cave generator (one column every 12u) */
+function genCol() {
+  const i = gi++, d = i * STEP, tr = Math.floor(Math.max(0, d) / 30 / ZLEN);
+  const wid = Math.max(128, Hu * Lab.lerp(.68, .3, clamp((d - 500) / 24000, 0, 1))) * (1 + .07 * Math.sin(i * .11));
+  if (d > 520) {
+    if (--G.left <= 0) { G.left = Lab.randInt(22, 48); const m = wid / 2 + 26; G.ct = Lab.rand(m, Math.max(m, Hu - m)); }
+    G.cv = clamp(G.cv + (G.ct - G.c) * .012 - G.cv * .14, -8, 8); G.c += G.cv;
+  }
+  const m = wid / 2 + 14; G.c = clamp(G.c, m, Math.max(m, Hu - m));
+  let t = G.c - wid / 2 + noise(i) * 9, b = G.c + wid / 2 - noise(i + 999) * 9;
+  if (G.sp) {                                       // stalactite / stalagmite: a telegraphed tooth into the tunnel
+    const k = i - G.sp.i0, n = G.sp.n, add = G.sp.h * Math.max(0, 1 - Math.abs(k - n / 2) / (n / 2));
+    if (G.sp.top) t += add; else b -= add;
+    if (k === n / 2) spikes.push({ wx: d, y: G.sp.top ? t : b, top: G.sp.top });
+    if (k >= n) G.sp = null;
+  } else if (d > 900 && --G.spIn <= 0) { G.spIn = Lab.randInt(Math.max(16, 40 - tr * 4), Math.max(26, 64 - tr * 5)); G.sp = { i0: i + 1, n: 6, h: Math.min(wid - 104, wid * Lab.rand(.2, .38)), top: Lab.chance(.5) }; }
+  tops.push(t); bots.push(b);
+  if (d > 300 && --G.moteIn <= 0) { G.moteIn = Lab.randInt(9, 14); motes.push({ wx: d, y: (t + b) / 2 + Math.sin(i * .085) * (b - t) * .2, big: false, taken: false, ph: i }); }
+  if (d > 1500 && !G.sp && --G.bloomIn <= 0) { G.bloomIn = Lab.randInt(70, 110); motes.push({ wx: d, y: Lab.chance(.5) ? t + 30 : b - 30, big: true, taken: false, ph: i }); }
+}
+function ensure() {
+  const need = Math.ceil((dist + (Lab.W - jx) / S) / STEP) + 3; while (gi < need) genCol();
+  const keep = Math.floor((dist - jx / S) / STEP) - 3; while (i0 < keep) { tops.shift(); bots.shift(); i0++; }
+}
+function caveAt(wx) { const f = wx / STEP - i0, k = clamp(Math.floor(f), 0, tops.length - 2), u = clamp(f - k, 0, 1); return { top: tops[k] + (tops[k + 1] - tops[k]) * u, bot: bots[k] + (bots[k + 1] - bots[k]) * u }; }
+
+/* ---------------------------------------------------------------- actions */
+function press() {
+  if (!alive || Lab.paused || !M) return;
+  started = true; M.flap = 1;
+  if (pingCd > 0) return;
+  pingCd = .28; pings++; rings.push({ r: 14, wx: dist, y: M.y });
+  // the echo's pitch reports how tight the tunnel is a little way ahead (higher = narrower)
+  const a = caveAt(dist + 200), f = Lab.map(a.bot - a.top, 120, 400, 1320, 620);
+  Lab.audio.tone({ f, dur: .16, vol: .09 }); Lab.audio.tone({ f, dur: .2, vol: .04, delay: .17 }); Lab.audio.tone({ f: f * .995, dur: .26, vol: .018, delay: .36 });
+}
+function bump(fromTop, c) {
+  M.y = fromTop ? c.top + R + 1 : c.bot - R - 1; M.vy = fromTop ? 250 : -250;
+  if (M.inv > 0) return;
+  bumps++; light -= .3; M.inv = 1.1; M.hurt = 1;
+  Lab.sfx("thud", { pitch: 1.2 }); Lab.sfx("glass", { pitch: .55 }); Lab.shake(8, .25); Lab.hitstop(.05); Lab.buzz(40);
+  fx.burst(X(dist), Y(M.y), { n: 16, colors: ["#ffe9a0", "#fff", "#ffc85a"], speed: 240, life: .8, size: 3.5 * S, gravity: 120, glow: 6 });
+  fx.text(X(dist), Y(M.y) - 34 * S, "glow lost", { size: 14 * S, color: "#ffb0a0" });
+  if (light <= 0) die("The dark took you");
+}
+function die(title) {
+  if (!alive) return; alive = false; light = Math.max(light, 0);
+  Lab.audio.tone({ f: 520, f2: 70, dur: 1.1, type: "triangle", vol: .16 }); Lab.sfx("hurt", { pitch: .7 }); Lab.buzz(70);
+  Lab.after(1.15, () => Lab.gameover({ title, score, stats: [["Distance", Math.floor(dist / 30) + " m"], ["Motes", moteN], ["Reached", ZONES[Math.min(depth, 3)].n]] }));
+}
+function take(m) {
+  m.taken = true; moteN++; chain = chainT > 0 ? chain + 1 : 0; chainT = 1.3;
+  const gain = m.big ? 25 : 5; pts += gain; light = Math.min(1, light + (m.big ? .2 : .035));
+  if (m.big) { Lab.sfx("chime", { pitch: .8 }); Lab.sfx("gem", { pitch: .7 }); fx.ring(X(m.wx), Y(m.y), { r0: 8, r1: 70 * S, color: "#fff3c0", width: 4 }); Lab.buzz(14); }
+  else Lab.audio.tone({ f: Lab.audio.scaleFreq(chain % 10, 67), dur: .3, vol: .1 });
+  fx.burst(X(m.wx), Y(m.y), { n: m.big ? 14 : 5, colors: ["#fff3c0", "#ffd978", "#bfffe6"], speed: m.big ? 200 : 110, life: .6, size: 3 * S, gravity: -30, glow: 6 });
+  fx.text(X(m.wx), Y(m.y) - 20 * S, "+" + gain, { size: (m.big ? 19 : 13) * S, color: "#fff3c0" });
+}
+
+function ambient(dt) {
+  M.flap = Lab.damp(M.flap, 0, 5, dt); M.hurt = Lab.damp(M.hurt, 0, 4, dt); zoneF = Lab.damp(zoneF, depth, 1.1, dt);
+  for (const r of rings) r.r += 640 * dt; rings = rings.filter(r => r.r < 600);
+  trailT -= dt; if (trailT <= 0) { trailT = .045; trail.push({ wx: dist - 8, y: M.y, a: 1 }); if (trail.length > 14) trail.shift(); }
+  for (const p of trail) p.a -= dt * 1.7;
+}
+function frame(dt, t) {
+  held = testHold || Lab.input.down || !!(Lab.input.keys[" "] || Lab.input.keys.ArrowUp || Lab.input.keys.KeyW);
+  if (alive && !started) { const c = caveAt(dist); M.y = (c.top + c.bot) / 2 + Math.sin(t * 2.2) * 8; }
+  if (alive && started) {
+    pingCd -= dt; if (M.inv > 0) M.inv -= dt; if (chainT > 0) chainT -= dt;
+    speed = Math.min(300, 170 + dist / 30 * .16); const mv = speed * dt; dist += mv; ensure();
+    M.vy += (held ? -1150 : 820) * dt; M.vy *= Math.exp(-1.6 * dt); M.vy = clamp(M.vy, -390, 390); M.y += M.vy * dt;
+    M.tilt = Lab.damp(M.tilt, clamp(M.vy / 520, -.5, .5), 10, dt);
+    if (held && dt > 1e-4) { flutT -= dt; if (flutT <= 0) { flutT = .085; Lab.audio.noise({ dur: .03, vol: .018, bp: 900, q: 2 }); } }
+    for (const dx of [0, -7, 7]) { const c = caveAt(dist + dx); if (M.y - R * .85 < c.top) { bump(true, c); break; } if (M.y + R * .85 > c.bot) { bump(false, c); break; } }
+    for (const m of motes) if (!m.taken && Math.abs(m.wx - dist) < 40 && Math.hypot(m.wx - dist, m.y - M.y) < (m.big ? 30 : 26)) take(m);
+    const left = dist - jx / S - 40; motes = motes.filter(m => !m.taken && m.wx > left); spikes = spikes.filter(s => s.wx > left);
+    const radiant = light > .85;
+    pts += mv / 30 * (radiant ? 2 : 1); light -= (.02 + Math.min(depth, 6) * .004) * dt;
+    const sc = Math.floor(pts); if (sc !== score) { score = sc; Lab.setScore(score); }
+    const dp = Math.floor(dist / 30 / ZLEN);
+    if (dp > depth) { depth = dp; const z = ZONES[depth % 4]; Lab.banner(depth * ZLEN + " m", { color: z.glow, ms: 1200 }); Lab.sfx("levelup", { pitch: .7 }); fx.text(Lab.W / 2, Lab.play.y + Lab.play.h * .5, z.n + " — the walls close in", { size: 15 * S, life: 1.6, color: z.glow }); }
+    if (light < .28 && alive) { warnT -= dt; if (warnT <= 0) { Lab.sfx("heartbeat", { pitch: 1 + (.28 - light) * 2 }); warnT = .45 + light; } }
+    if (light <= 0 && alive) die("Your glow faded");
+    Lab.music.intensity(.2 + Math.min(depth, 5) * .1 + (light < .3 ? .3 : 0));
+  } else if (!alive) { deathT += dt; M.vy = Lab.damp(M.vy, 60, 2, dt); const c = caveAt(dist); M.y = Math.min(c.bot - R, M.y + M.vy * dt); }
+  ambient(dt); render(t);
+}
+
+/* ---------------------------------------------------------------- art */
+function glowSp(col) { return Lab.sprite("glow" + col, 64, 64, g => { const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32), [r, gg, b] = Lab.color.parse(col); gr.addColorStop(0, `rgba(${r},${gg},${b},.9)`); gr.addColorStop(.35, `rgba(${r},${gg},${b},.35)`); gr.addColorStop(1, `rgba(${r},${gg},${b},0)`); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); }); }
+function farSp() {
+  const w = Math.ceil(700 * S), h = Math.ceil(Hu * S);
+  return Lab.sprite("far:" + w + "x" + h, w, h, g => { const r = Lab.rng(17); g.fillStyle = "rgba(255,255,255,.04)"; for (let i = 0; i < 14; i++) { const x = r() * w, bw = (18 + r() * 40) * S, bh = h * (.12 + r() * .3), up = i % 2; g.beginPath(); g.moveTo(x - bw, up ? 0 : h); g.quadraticCurveTo(x, up ? bh * .8 : h - bh * .8, x, up ? bh : h - bh); g.quadraticCurveTo(x, up ? bh * .8 : h - bh * .8, x + bw, up ? 0 : h); g.fill(); } });
+}
+function drawMoth(c, t) {
+  const u = S * 1.3, x = X(dist), y = Y(M.y), fl = Math.sin(t * (held && alive ? 34 : 11)) * (held && alive ? 1 : .6);
+  if (M.inv > 0 && alive && Math.sin(t * 38) > 0) c.globalAlpha = .45;
+  c.save(); c.translate(x, y); c.rotate(M.tilt);
+  for (const back of [1, 0]) {                       // two wing pairs, the far pair dimmer
+    c.save(); c.scale(1, back ? -.9 : 1); c.rotate(-.5 - fl * .55 * (back ? .8 : 1)); c.fillStyle = back ? "rgba(255,225,150,.6)" : "rgba(255,246,216,.95)";
+    c.beginPath(); c.ellipse(-3 * u, -11 * u, 8 * u, 13 * u, .3, 0, TAU); c.fill(); c.fillStyle = back ? "rgba(255,190,90,.5)" : "rgba(255,200,100,.9)"; c.beginPath(); c.ellipse(-4 * u, -18 * u, 4 * u, 4.5 * u, .3, 0, TAU); c.fill();
+    c.beginPath(); c.ellipse(-8 * u, -3 * u, 5 * u, 7 * u, .9, 0, TAU); c.fillStyle = back ? "rgba(255,225,150,.5)" : "rgba(255,240,200,.9)"; c.fill(); c.restore();
+  }
+  c.fillStyle = "#ffe2a0"; c.beginPath(); c.ellipse(-2 * u, 0, 10 * u, 6 * u, 0, 0, TAU); c.fill();
+  c.strokeStyle = "rgba(190,130,60,.55)"; c.lineWidth = 1.4 * u; for (const sx of [-7, -3]) { c.beginPath(); c.moveTo(sx * u, -4.6 * u); c.lineTo(sx * u, 4.6 * u); c.stroke(); }
+  draw.circle(c, 8 * u, -1 * u, 5.6 * u, "#fff0c4");
+  c.strokeStyle = "#ffe2a0"; c.lineWidth = 1.3 * u; c.lineCap = "round"; for (const s of [-1, 1]) { c.beginPath(); c.moveTo(9 * u, -5 * u); c.quadraticCurveTo(13 * u, (-11 - s * 2) * u, (17 + s) * u, (-10 + s * 2 + Math.sin(t * 6 + s) * 1) * u); c.stroke(); }
+  if (!alive || M.hurt > .5) { c.strokeStyle = "#3a2a20"; c.lineWidth = 1.5 * u; c.beginPath(); c.moveTo(8 * u, -3 * u); c.lineTo(12 * u, 0); c.moveTo(12 * u, -3 * u); c.lineTo(8 * u, 0); c.stroke(); }
+  else { draw.circle(c, 10 * u, -1.5 * u, 2.3 * u, "#3a2a20"); draw.circle(c, 10.8 * u, -2.3 * u, .8 * u, "#fff"); }
+  c.restore(); c.globalAlpha = 1;
+}
+function edgePath(c, arr, n) { c.beginPath(); for (let k = 0; k < n; k++) { const x = X((i0 + k) * STEP), y = Y(arr[k]); k ? c.lineTo(x, y) : c.moveTo(x, y); } }
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, n = tops.length;
+  const zf = ((zoneF % 4) + 4) % 4, zi = Math.floor(zf), zn = (zi + 1) % 4, zb = zf - zi, A = ZONES[zi], B = ZONES[zn];
+  const rock = mix(A.rock, B.rock, zb), edge = mix(A.edge, B.edge, zb), glowC = zb > .5 ? B.glow : A.glow;
+  draw.bg(c, mix(A.a, B.a, zb), mix(A.b, B.b, zb));
+  const far = farSp(), fo = -((dist * .3 * S) % far.w); for (let x = fo; x < W; x += far.w) c.drawImage(far, x, top0, far.w, far.h);
+  c.fillStyle = "rgba(255,255,255,.35)"; for (const d of dust) { const dx = ((d.x * W - dist * .6 * S * d.s) % W + W) % W, dy = top0 + ((d.y + Math.sin(t * .4 + d.p) * .03) * Hu * S); c.fillRect(dx, dy, 1.6 * d.s, 1.6 * d.s); }
+  // rock: fill, strata that follow the contour, lit rim
+  const xL = X(i0 * STEP), xR = X((i0 + n - 1) * STEP);
+  for (const [arr, yOut, sgn] of [[tops, -20, -1], [bots, H + 20, 1]]) {
+    edgePath(c, arr, n); c.lineTo(xR, yOut); c.lineTo(xL, yOut); c.closePath(); c.fillStyle = rock; c.fill();
+    c.save(); c.lineJoin = "round"; c.strokeStyle = "rgba(0,0,0,.22)"; c.lineWidth = 3 * S;
+    for (const off of [16, 36, 62]) { c.translate(0, sgn * (off === 16 ? 16 : off === 36 ? 20 : 26) * S); edgePath(c, arr, n); c.stroke(); }
+    c.restore();
+    edgePath(c, arr, n); c.lineJoin = "round"; c.strokeStyle = Lab.color.alpha(edge, .16); c.lineWidth = 13 * S; c.stroke(); c.strokeStyle = edge; c.lineWidth = 2.6 * S; c.stroke();
+  }
+  // darkness: a half-resolution mask with holes for the moth's glow and for each travelling echo
+  const mw = Math.ceil(W / 2), mh = Math.ceil(H / 2);
+  if (!mask || mask.width !== mw || mask.height !== mh) { mask = document.createElement("canvas"); mask.width = mw; mask.height = mh; mctx = mask.getContext("2d"); }
+  const deep = clamp(dist / 30 / 900, 0, 1), dying = alive ? 1 : clamp(1 - deathT / .9, 0, 1), L = clamp(light, 0, 1) * dying;
+  const mx = X(dist) / 2, my = Y(M.y) / 2, rl = (95 + 255 * L) * S / 2 * (1 + Math.sin(t * 3) * .015);
+  mctx.globalCompositeOperation = "source-over"; mctx.clearRect(0, 0, mw, mh); mctx.fillStyle = `rgba(3,3,10,${Lab.lerp(.74, .95, deep) + (1 - dying) * .05})`; mctx.fillRect(0, 0, mw, mh);
+  mctx.globalCompositeOperation = "destination-out";
+  if (rl > 2) { const gr = mctx.createRadialGradient(mx, my, 0, mx, my, rl); gr.addColorStop(0, "rgba(0,0,0,1)"); gr.addColorStop(.5, "rgba(0,0,0,.9)"); gr.addColorStop(1, "rgba(0,0,0,0)"); mctx.fillStyle = gr; mctx.fillRect(mx - rl, my - rl, rl * 2, rl * 2); }
+  for (const r of rings) { const u = r.r / 600; mctx.strokeStyle = `rgba(0,0,0,${(1 - u) * .85})`; mctx.lineWidth = 46 * S; mctx.beginPath(); mctx.arc(X(r.wx) / 2, Y(r.y) / 2, r.r * S / 2, 0, TAU); mctx.stroke(); }
+  c.drawImage(mask, 0, 0, W, H);
+  // things that shine through the dark
+  c.globalCompositeOperation = "lighter";
+  const gs = glowSp(glowC), gg = glowSp("#ffd978");
+  for (let k = 0; k < n; k++) { const i = i0 + k, x = X(i * STEP); if (x < -10 || x > W + 10) continue; const tw = .35 + .25 * Math.sin(t * 2 + i); if (hash(i * 3 + 1) < .13) { c.globalAlpha = tw; c.drawImage(gs, x - 7 * S, Y(tops[k]) - 7 * S, 14 * S, 14 * S); } if (hash(i * 3 + 2) < .13) { c.globalAlpha = tw; c.drawImage(gs, x - 7 * S, Y(bots[k]) - 7 * S, 14 * S, 14 * S); } }
+  for (const s of spikes) { c.globalAlpha = .75 + .2 * Math.sin(t * 5 + s.wx); c.drawImage(gs, X(s.wx) - 17 * S, Y(s.y) - 17 * S, 34 * S, 34 * S); }
+  for (const p of trail) if (p.a > 0) { c.globalAlpha = p.a * .35 * L; c.drawImage(gg, X(p.wx) - 8 * S, Y(p.y) - 8 * S, 16 * S, 16 * S); }
+  for (const m of motes) { const x = X(m.wx), y = Y(m.y) + Math.sin(t * 2.4 + m.ph) * 4 * S, r = (m.big ? 30 : 15) * S * (1 + .12 * Math.sin(t * 4 + m.ph)); c.globalAlpha = 1; c.drawImage(m.big ? glowSp("#fff3c0") : gg, x - r, y - r, r * 2, r * 2); if (m.big) for (let k = 0; k < 5; k++) { const a = t * .8 + k * TAU / 5; c.drawImage(gg, x + Math.cos(a) * 13 * S - 5 * S, y + Math.sin(a) * 13 * S - 5 * S, 10 * S, 10 * S); } }
+  c.globalAlpha = (.22 + .2 * L) * dying; const ar = (40 + 44 * L) * S; c.drawImage(gg, X(dist) - ar, Y(M.y) - ar, ar * 2, ar * 2);
+  c.globalCompositeOperation = "source-over"; c.globalAlpha = 1;
+  for (const r of rings) { const u = r.r / 600; c.strokeStyle = `rgba(255,233,160,${(1 - u) * .5})`; c.lineWidth = 2 * S; c.beginPath(); c.arc(X(r.wx), Y(r.y), r.r * S, 0, TAU); c.stroke(); }
+  for (const m of motes) draw.circle(c, X(m.wx), Y(m.y) + Math.sin(t * 2.4 + m.ph) * 4 * S, (m.big ? 5 : 2.6) * S, "#fffbe6");
+  if (!alive) c.globalAlpha = Math.max(.25, dying); drawMoth(c, t);
+  draw.vignette(c, .3);
+  if (light < .28 && alive && started) { c.fillStyle = `rgba(120,10,30,${(.28 - light) * .5 * (.6 + .4 * Math.sin(t * 9))})`; c.fillRect(0, 0, W, H); }
+  hud(c, t);
+}
+function hud(c, t) {
+  const W = Lab.W, U = Math.max(S, .86), x = 12, y = Lab.play.y + 8 * U, bw = 120 * U, bh = 20 * U, L = clamp(light, 0, 1), low = L < .28, rad = L > .85;
+  draw.rect(c, x, y, bw, bh, bh / 2, "rgba(8,8,20,.6)", low && Math.sin(t * 14) > 0 ? "#ff7a7a" : "rgba(255,255,255,.28)", 1.5);
+  if (L > 0) draw.rect(c, x + 2, y + 2, Math.max(bh - 4, (bw - 4) * L), bh - 4, bh / 2, low ? "#ff8a6a" : rad ? "#fff3c0" : "#ffd978");
+  draw.text(c, rad ? "RADIANT ×2" : "GLOW", x + bw / 2, y + bh / 2 + .5, { size: 10 * U, color: rad ? "#5a3c08" : "#fff", stroke: rad ? null : "rgba(8,8,20,.6)", strokeW: 2.5 });
+  const rw = 78 * U; draw.rect(c, W - 12 - rw, y, rw, bh, bh / 2, "rgba(8,8,20,.6)"); draw.text(c, Math.floor(dist / 30) + " m", W - 12 - rw / 2, y + bh / 2 + .5, { size: 11.5 * U });
+  if (!started && alive) { const cy = Y(M.y) + 64 * S; draw.text(c, "hold to rise · release to sink", W / 2, cy, { size: 17 * U, color: "#fff3c0", stroke: "rgba(5,5,12,.7)", maxWidth: W - 24 }); draw.text(c, "every press sends out an echo of light", W / 2, cy + 24 * U, { size: 12.5 * U, color: "rgba(255,243,192,.8)", stroke: "rgba(5,5,12,.6)", maxWidth: W - 24 }); }
+}
+Lab.boot();
+})();
+</script></body></html>
