@@ -1,39 +1,321 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>One Breath</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Sniper Timing", instructions:"One bullet per round. Tap when the cross is over the target.", restart:start});
-let cross, target, t, fired, score, rounds, missed;
-function round(){
-  fired=false;
-  cross={x:Lab.W/2, dir:1, sp: 220+score*40};
-  target={x:Lab.rand(80,Lab.W-80), w: Math.max(40, 120-score*5)};
+(function(){ "use strict";
+/* ONE BREATH — ring far-off gongs across a misty valley through a swaying spyglass sight.
+ * Core idea kept from the prototype: a marker sweeps across a target and you time one shot.
+ * Now the marker is your own unsteady aim tracing a figure-eight over the gong. HOLD to hold your breath (the sway
+ * slows and tightens, your heartbeat starts to thump and kick, the breath gauge drains), RELEASE to fire.
+ * Depth: breath is a resource (run out and you gasp — aim goes wild), a shot clock forces the decision, dead-centre
+ * hits triple the score and three in a row restore a life, swinging gongs, drifting mist, and chain rounds where two or
+ * three gongs must be rung on what breath you have left.
+ * Identity: moonlit teal valley seen through a brass scope; real gong synthesis whose purity follows your accuracy. */
+Lab.init({
+  title: "One Breath", tagline: "Hold your breath. Ring the far gong.", category: "Skill & Rhythm",
+  howto: ["HOLD to hold your breath — the sight steadies", "RELEASE to fire as the cross sweeps the gong", "Dead centre scores triple; three misses end it"],
+  theme: { bg: "#070d18", bg2: "#12303f", accent: "#e8a93c", accent2: "#d9603f" },
+  orient: "any", music: { style: "tense", key: "D", bpm: 84, vol: .3 }, restart: start,
+  attract(dt, t) { if (!demo) { reset(); demo = true; phase = "aim"; } now = t; sway(dt); render(t, dt); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp;
+const U = 170;   // the scope radius in world units; everything inside the scope is authored in these units
+const PAL = [
+  { sky: ["#0a1528", "#15405a", "#4b8f95"], far: "#1c4c5e", mid: "#113140", near: "#081a26", mist: "190,228,226" },
+  { sky: ["#161033", "#4a2f66", "#b7708e"], far: "#40305f", mid: "#281b42", near: "#140e25", mist: "236,200,222" },
+  { sky: ["#241d40", "#9a4f68", "#f0a460"], far: "#6a4160", mid: "#41273f", near: "#1e1325", mist: "255,222,190" },
+  { sky: ["#07191a", "#1c574e", "#86c49f"], far: "#1e4f48", mid: "#11332f", near: "#071917", mist: "200,240,214" },
+];
+let Sx, R, cx, cy, panel, wide;
+let score, lives, level, cleared, rung, bulls, bullStreak, bestStreak, shots;
+let round, V, phase, phaseT, phi, amp, rate, breath, holding, armed, armedKb, restT, gaspT, kick, rec, beatT, beatPulse, aim, err, result, black, now, tickT, demo = false, stars, hinted, pal;
+fx.auto = false;   // particles live in the scope's world space; drawn manually inside the lens
+
+function layout() {
+  const P = Lab.play; wide = Lab.W > Lab.H * 1.15;
+  R = Math.floor(wide ? Math.min(Lab.W * .3, (P.h - 56) / 2) : Math.min(Lab.W * .43, (P.h - 190) / 2));
+  Sx = R / U; cx = Lab.W / 2; cy = wide ? P.y + P.h / 2 + 2 : P.y + Math.max(R + 64, P.h * .42);
+  panel = wide ? { x: (cx - R - 26 * Sx) / 2, y: cy, w: cx - R - 50 * Sx } : { x: cx, y: Math.min(cy + R + 78 + (P.y + P.h - cy - R - 78) * .3, Lab.H - 70), w: Lab.W - 40 };
 }
-function start(){
-  score=0; rounds=10; missed=0; round();
-  Lab.setScore("0/0");
-  Lab.input.onTap=[()=>{
-    if(fired) return;
-    fired=true;
-    const hit = Math.abs(cross.x-target.x)<target.w/2;
-    if(hit){ score++; Lab.toast("Hit!"); Lab.beep(900,.06);} else { missed++; Lab.toast("Miss"); Lab.beep(180,.1,'sawtooth');}
-    Lab.setScore(score+"/"+(score+missed));
-    setTimeout(()=>{ if(score+missed>=rounds){ Lab.gameover({title:"Done",message:"Hits: "+score+"/"+rounds}); } else round(); }, 800);
-  }];
-  Lab.loop(dt=>{
-    if(!fired){ cross.x+=cross.dir*cross.sp*dt; if(cross.x<10){cross.dir=1;} else if(cross.x>Lab.W-10){cross.dir=-1;} }
-    const c=Lab.ctx; c.fillStyle="#152418"; c.fillRect(0,0,Lab.W,Lab.H);
-    const ty=Lab.H/2;
-    c.fillStyle="#aa3322"; c.fillRect(target.x-target.w/2, ty-30, target.w, 60);
-    c.fillStyle="#fff"; c.font="14px sans-serif"; c.textAlign="center";
-    c.fillText("Target", target.x, ty);
-    // bar
-    c.fillStyle="#222"; c.fillRect(20, Lab.H-80, Lab.W-40, 30);
-    c.fillStyle="#5af"; c.fillRect(cross.x-3, Lab.H-90, 6, 50);
-    if(fired){
-      c.strokeStyle="#ffd35a"; c.lineWidth=2; c.beginPath(); c.moveTo(cross.x,Lab.H-90); c.lineTo(cross.x,ty); c.stroke();
+Lab.onResize(() => { if (round) layout(); });
+
+function reset() {
+  layout();
+  score = 0; lives = 3; level = 1; cleared = 0; rung = 0; bulls = 0; bullStreak = 0; bestStreak = 0; shots = 0;
+  V = { x: 0, y: 0 }; phi = Lab.rand(0, TAU); amp = 1; rate = 1; breath = 1; holding = false; armed = false; armedKb = false; restT = 1; gaspT = 0;
+  kick = { x: 0, y: 0 }; rec = { x: 0, y: 0 }; beatT = .5; beatPulse = 0; aim = { x: 0, y: 0 }; err = 99; result = null; black = { a: 0 }; now = 0; tickT = 0; hinted = 0;
+  stars = Array.from({ length: 60 }, () => ({ x: Math.random(), y: Math.random() * .7, s: Lab.rand(.6, 1.7), p: Lab.rand(0, TAU) }));
+  fx.clear(); mkRound(true);
+}
+function start() {
+  reset(); demo = false; Lab.setScore(0);
+  Lab.input.onDown = [() => press(false)];
+  Lab.input.onUp = [() => { if (armed && !armedKb) release(); }];
+  Lab.input.onKey = [k => { if (k === " " || k === "Enter") press(true); }];
+  Lab.expose({
+    get score() { return score; }, get lives() { return lives; }, get level() { return level; }, get phase() { return phase; }, get err() { return err; }, get breath() { return breath; },
+    get r() { return cur().rU; }, get holding() { return holding; }, get clock() { return round.clock; }, get rung() { return rung; }, get bulls() { return bulls; }, get chain() { return round.gongs.length; }, get link() { return round.idx; },
+    press, release, setCleared(n) { cleared = n; level = 1 + Math.floor(n / 3); }, next() { mkRound(false); },
+  });
+  Lab.loop(frame);
+}
+const cur = () => round.gongs[round.idx];
+function mkRound(first) {
+  const L = level, slot = cleared % 3, chain = L >= 2 && slot === 2 ? Math.min(3, 1 + Math.floor(L / 2)) : 1, rU = Math.max(13, 44 - 4.2 * (L - 1)), dir = Lab.chance(.5) ? 1 : -1;
+  pal = PAL[(L - 1) % PAL.length];
+  round = {
+    seed: Lab.randInt(1, 9999), idx: 0, A: Math.min(96, 70 + 3 * (L - 1)), om: Math.min(3.8, 2.3 + .16 * (L - 1)), rot: first ? 0 : Lab.choose([0, 0, .5, -.5, Math.PI / 2]),
+    clockMax: Math.max(5, 9.5 - .5 * (L - 1)), clock: 0, mist: [], gongs: [],
+  };
+  round.clock = round.clockMax;
+  for (let k = 0; k < chain; k++) {
+    const sw = L >= 3 && (chain > 1 ? k > 0 : Lab.chance(.55));
+    round.gongs.push({ x: k * dir * Lab.rand(230, 290), y: k ? Lab.rand(-46, 46) : 0, rU: rU * (chain > 1 ? 1.08 : 1), swA: sw ? Math.min(.85, .3 + .11 * (L - 3)) : 0, swW: Lab.rand(2.1, 2.8), ph: Lab.rand(0, TAU), ring: 0, ringT: 9, dents: [], hit: false, seed: Lab.randInt(1, 999) });
+  }
+  if (L >= 4 && Lab.chance(.45) || (L >= 4 && slot === 1)) for (let i = 0; i < 3; i++) round.mist.push({ x: Lab.rand(-420, 420), y: Lab.rand(-30, 30), rx: Lab.rand(90, 150), ry: Lab.rand(34, 54), v: Lab.rand(26, 48) * (i % 2 ? -1 : 1) });
+  const g = round.gongs[0], from = Lab.chance(.5) ? -1 : 1;
+  V.x = g.x + from * 300; V.y = g.y + Lab.rand(-40, 40);
+  Lab.tween(V, { x: g.x, y: g.y }, first ? .01 : .6, { ease: "outCubic" });
+  phase = "intro"; phaseT = 0; holding = false; armed = false; result = result && result.keep ? result : null;
+  if (!first) { black.a = 1; Lab.tween(black, { a: 0 }, .3); Lab.sfx("whoosh", { pitch: .7 }); }
+  if (chain > 1 && !demo) Lab.toast("Chain of " + chain + " — one life, keep ringing", 1500);
+}
+function gongPos(g) {
+  const th = g.swA ? Math.sin(now * g.swW + g.ph) * g.swA : 0, Lp = g.rU + 20;
+  return { x: g.x + Math.sin(th) * Lp, y: g.y - Lp + Math.cos(th) * Lp, th, Lp };
+}
+function press(kb) {
+  if (demo || phase !== "aim" || armed) return;
+  armed = true; armedKb = !!kb;
+  if (breath > .22 && gaspT <= 0) { holding = true; Lab.audio.noise({ dur: .28, vol: .07, bp: 500, f2: 1500, q: 1.2, a: .1 }); beatT = Math.min(beatT, .25); }
+  else Lab.sfx("tick", { pitch: .6 });
+}
+function release() {
+  if (!armed) return; armed = false; const was = holding; holding = false;
+  if (phase === "aim") fire(was);
+}
+function fire() {
+  const g = cur(), p = gongPos(g), dx = aim.x - p.x, dy = aim.y - p.y, d = Math.hypot(dx, dy), pt = { x: aim.x, y: aim.y };
+  shots++; phase = "shot"; phaseT = 0; restT = 0;
+  Lab.tween(rec, { y: -40, x: Lab.rand(-10, 10) }, .05, { ease: "outQuad", onDone() { Lab.tween(rec, { x: 0, y: 0 }, .55, { ease: "outBack" }); } });
+  Lab.shake(7, .2); Lab.flash("#fff1d0", .1, .28); Lab.buzz(20);
+  Lab.audio.noise({ dur: .09, vol: .5, hp: 1800 }); Lab.audio.tone({ f: 160, f2: 50, dur: .16, vol: .5 }); Lab.audio.noise({ dur: .9, vol: .1, lp: 900, f2: 200, delay: .08, a: .05 });
+  Lab.after(.12, () => impact(g, p, pt, dx, dy, d));
+}
+function gongSound(g, grade) {
+  const f = 66 + 2700 / g.rU, k = grade === 3 ? 1 : grade === 2 ? .75 : .4, T = Lab.audio.tone;
+  T({ f, dur: 2.4 * k, vol: .42, a: .004 }); T({ f: f * 2.02, dur: 1.8 * k, vol: .2 }); T({ f: f * 2.76, dur: 1.3 * k, vol: .12 }); T({ f: f * 4.1, dur: .8 * k, vol: .07 });
+  Lab.audio.noise({ dur: .05, vol: .2, bp: 1200, q: .8 });
+  if (grade === 3) { T({ f: f * 5.43, dur: 1.6, vol: .05 }); T({ f: f * 8.1, dur: 1.1, vol: .03, delay: .03 }); Lab.sfx("chime", { pitch: .75 }); }
+  if (grade === 1) { T({ f: f * 1.47, dur: .5, vol: .16, type: "triangle" }); Lab.sfx("knock", { pitch: .8 }); }
+}
+function impact(g, p, pt, dx, dy, d) {
+  const rr = g.rU;
+  if (d <= rr * 1.04) {
+    const grade = d <= rr * .3 ? 3 : d <= rr * .66 ? 2 : 1, link = round.idx + 1, tb = Math.round(round.clock * 10);
+    g.hit = true; g.ring = grade === 3 ? 1 : .6; g.ringT = 0; g.dents.push({ x: dx, y: dy }); rung++;
+    if (grade === 3) { bulls++; bullStreak++; bestStreak = Math.max(bestStreak, bullStreak); } else bullStreak = 0;
+    let pts = 100 * grade * link + tb; if (bullStreak >= 2) pts += 100 * (bullStreak - 1);
+    score += pts; Lab.setScore(score); Lab.bumpScore();
+    gongSound(g, grade); Lab.hitstop(grade === 3 ? .1 : .05); Lab.shake(grade === 3 ? 9 : 4, .3); Lab.buzz(grade === 3 ? 40 : 18);
+    if (grade === 3) { Lab.slowmo(.35, .5); Lab.flash("#ffd98a", .25, .3); }
+    fx.sparks(pt.x, pt.y, -Math.PI / 2, { n: 8 + grade * 5, colors: ["#ffe6a8", "#ffb648", "#fff"], speed: 150 + grade * 40, spread: TAU, life: .5, gravity: 240, size: 2.2 });
+    for (let i = 0; i < grade; i++) fx.ring(p.x, p.y, { r0: rr * .5, r1: rr * (1.8 + i * .9), color: i ? "rgba(255,214,140,.7)" : "#ffe6a8", width: 3 - i * .6, life: .5 + i * .22 });
+    let sub = "+" + pts; if (bullStreak >= 2) sub += "   ·   streak " + bullStreak;
+    if (bullStreak > 0 && bullStreak % 3 === 0 && lives < 3) { lives++; sub += "   ·   +1 life"; Lab.sfx("powerup", { pitch: .8 }); }
+    result = { title: grade === 3 ? "DEAD CENTRE" : grade === 2 ? "CLEAN HIT" : "CLIPPED IT", sub, color: grade === 3 ? "#ffd98a" : grade === 2 ? "#f3ecd2" : "#c9b98f", t: 0 };
+    if (round.idx < round.gongs.length - 1) {
+      round.idx++; const n = cur(); phase = "pan"; phaseT = 0; round.clock = Math.min(round.clockMax, round.clock + 3);
+      Lab.tween(V, { x: n.x, y: n.y }, .55, { ease: "inOutCubic", delay: .25 }); Lab.after(.3, () => Lab.sfx("whoosh", { pitch: .9 }));
+    } else {
+      cleared++; phase = "result"; phaseT = 0;
+      const nl = 1 + Math.floor(cleared / 3);
+      if (nl > level) { level = nl; Lab.after(.75, () => { Lab.banner("LEVEL " + level, { color: "#ffd98a", ms: 1000 }); Lab.sfx("levelup", { pitch: .7 }); }); round.lvlUp = true; }
     }
-    c.fillStyle="#7e89b3"; c.fillText("Round "+(score+missed+1)+"/"+rounds, Lab.W/2, 70);
+  } else {
+    fx.puff(pt.x, pt.y, { n: 8, color: "rgba(" + pal.mist + ",.7)", speed: 50, size: 5 }); fx.sparks(pt.x, pt.y, -Math.PI / 2, { n: 4, color: "#cfd8dc", speed: 120, spread: 2.4, life: .3, size: 1.6 });
+    Lab.audio.tone({ f: 1900, f2: 520, dur: .28, vol: .1 });
+    result = { title: d < rr * 1.6 ? "JUST WIDE" : "MISSED", sub: "the echo fades…", color: "#ff8f7a", t: 0 };
+    loseLife();
+  }
+}
+function loseLife() {
+  lives--; bullStreak = 0; phase = "result"; phaseT = 0; holding = false; armed = false;
+  Lab.sfx("hurt", { pitch: .7 }); Lab.shake(5, .25);
+  if (lives <= 0) { phase = "dead"; Lab.after(1.0, end); }
+}
+function end() {
+  fx.clear();
+  Lab.gameover({ title: "The valley falls silent", message: rung ? "You rang " + rung + " gong" + (rung === 1 ? "" : "s") + " across the mist." : "Hold, wait for the cross, then let go.", score, stats: [["Gongs rung", rung], ["Dead centres", bulls], ["Level", level]] });
+}
+
+function sway(dt) {
+  const tA = gaspT > 0 ? 1.75 : holding ? .58 : 1;
+  amp = Lab.damp(amp, tA, holding ? 3.4 : 5, dt); rate = Lab.damp(rate, gaspT > 0 ? 1.5 : holding ? .5 : 1, 6, dt);
+  phi += dt * round.om * rate;
+  const A = round.A * amp, x0 = A * Math.sin(phi) + A * .1 * Math.sin(1.31 * phi + 1.7), y0 = A * .55 * Math.sin(2 * phi) + A * .1 * Math.sin(.83 * phi + .4) + (holding ? 0 : Math.sin(now * 1.9) * 5);
+  const cr = Math.cos(round.rot), sr = Math.sin(round.rot);
+  beatT -= dt; beatPulse = Math.max(0, beatPulse - dt * 4);
+  if (beatT <= 0) {
+    const stress = holding ? 1 - breath : 0; beatT = lerp(.95, .38, stress);
+    if (holding) { const a = Lab.rand(0, TAU), m = 2.2 + stress * 4.5 + level * .25; kick.x += Math.cos(a) * m; kick.y += Math.sin(a) * m; beatPulse = 1; Lab.sfx("heartbeat", { pitch: 1 + stress * .5 }); Lab.buzz(6); }
+  }
+  kick.x = Lab.damp(kick.x, 0, 7, dt); kick.y = Lab.damp(kick.y, 0, 7, dt);
+  aim.x = V.x + x0 * cr - y0 * sr + kick.x + rec.x; aim.y = V.y + x0 * sr + y0 * cr + kick.y + rec.y;
+  const p = gongPos(cur()); err = Math.hypot(aim.x - p.x, aim.y - p.y);
+}
+function frame(dt, t) {
+  now = t; phaseT += dt; if (result) result.t += dt;
+  const kh = !!(Lab.input.keys[" "] || Lab.input.keys.Enter);
+  if (armed && armedKb && !kh) release();
+  if (armed && !armedKb && !Lab.input.down) { armed = false; holding = false; }   // pointer lost while paused: stand down, don't fire
+  if (gaspT > 0) gaspT -= dt;
+  if (holding) {
+    breath -= dt / 3.1; restT = 0;
+    if (breath <= 0) { breath = 0; holding = false; armed = false; gaspT = 1.3; Lab.audio.noise({ dur: .45, vol: .16, bp: 1500, f2: 420, q: 1, a: .03 }); Lab.shake(3, .3); result = { title: "GASP!", sub: "out of breath — settle and try again", color: "#9fe5da", t: 0 }; }
+  } else { restT += dt; if (restT > .3) breath = Math.min(1, breath + dt / 2.1); }
+  for (const g of round.gongs) g.ringT += dt;
+  for (const m of round.mist) { m.x += m.v * dt; if (m.x > 480) m.x = -480; if (m.x < -480) m.x = 480; }
+  sway(dt);
+  if (phase === "intro" && phaseT > (cleared || shots ? .62 : .3)) { phase = "aim"; phaseT = 0; }
+  else if (phase === "pan" && phaseT > .82) { phase = "aim"; phaseT = 0; }
+  else if (phase === "aim") {
+    round.clock -= dt;
+    if (round.clock < 3) { tickT -= dt; if (tickT <= 0) { tickT = round.clock < 1.2 ? .22 : .5; Lab.sfx("tick", { pitch: 1 + (3 - round.clock) * .25 }); } }
+    if (round.clock <= 0) { round.clock = 0; result = { title: "TOO SLOW", sub: "the mist swallows it", color: "#ff8f7a", t: 0 }; Lab.sfx("whoosh", { pitch: .5 }); loseLife(); }
+  }
+  else if (phase === "result" && phaseT > (round.lvlUp ? 1.75 : 1.15)) { if (black.a === 0) Lab.tween(black, { a: 1 }, .18, { onDone() { mkRound(false); } }); black.a = Math.max(black.a, .001); }
+  Lab.music.intensity(clamp(.3 + (holding ? .35 : 0) + (phase === "aim" && round.clock < 3 ? .3 : 0) + level * .03, 0, 1));
+  render(t, dt);
+}
+
+/* ---------- drawing ---------- */
+function ridge(c, par, base, ampl, seed, col, edge) {   // drawn in scope units, centred on the lens
+  const ox = aim.x * par, oy = aim.y * par; c.fillStyle = col; c.beginPath(); c.moveTo(-U - 4, U + 4);
+  for (let x = -U - 4; x <= U + 4; x += 6) { const w = x + ox + seed * 37; c.lineTo(x, base - oy - ampl * (.55 * Math.sin(w * .011 + seed) + .3 * Math.sin(w * .027 + seed * 2.1) + .15 * Math.abs(Math.sin(w * .06 + seed)))); }
+  c.lineTo(U + 4, U + 4); c.closePath(); c.fill();
+  if (edge) { c.strokeStyle = edge; c.lineWidth = 1.2; c.stroke(); }
+}
+function gongSprite(rU) {
+  const r = rU * Sx, pad = 4, sz = r * 2 + pad * 2;
+  return Lab.sprite("ob-gong:" + Math.round(r * 10), sz, sz, g => {
+    const m = sz / 2, gr = g.createRadialGradient(m - r * .3, m - r * .35, r * .05, m, m, r);
+    gr.addColorStop(0, "#ffe9a6"); gr.addColorStop(.35, "#e8a93c"); gr.addColorStop(.8, "#b0702a"); gr.addColorStop(1, "#6b3f1c");
+    g.fillStyle = gr; g.beginPath(); g.arc(m, m, r, 0, TAU); g.fill();
+    g.strokeStyle = "rgba(60,30,10,.45)"; g.lineWidth = Math.max(1, r * .035);
+    for (const f of [.9, .66]) { g.beginPath(); g.arc(m, m, r * f, 0, TAU); g.stroke(); }
+    g.strokeStyle = "rgba(255,240,190,.35)"; g.lineWidth = Math.max(.8, r * .025); g.beginPath(); g.arc(m, m, r * .78, Math.PI * 1.05, Math.PI * 1.6); g.stroke();
+    const b = g.createRadialGradient(m - r * .08, m - r * .1, 0, m, m, r * .3); b.addColorStop(0, "#fff6cf"); b.addColorStop(.6, "#f0b84a"); b.addColorStop(1, "#99591f");
+    g.fillStyle = b; g.beginPath(); g.arc(m, m, r * .3, 0, TAU); g.fill(); g.strokeStyle = "rgba(60,30,10,.6)"; g.lineWidth = Math.max(1, r * .04); g.stroke();
   });
 }
-start();
+function mistSprite() { return Lab.sprite("ob-mist", 256, 128, (g, w, h) => { const gr = g.createRadialGradient(w / 2, h / 2, 4, w / 2, h / 2, w / 2); gr.addColorStop(0, "rgba(255,255,255,.95)"); gr.addColorStop(.5, "rgba(255,255,255,.6)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.scale(1, .5); g.fillStyle = gr; g.fillRect(0, 0, w, h * 2); }); }
+function drawSite(c, g) {
+  const p = gongPos(g), rr = g.rU, top = g.y + rr + 30, rnd = Lab.rng(g.seed), beamY = g.y - p.Lp, hw = rr + 20;
+  c.fillStyle = pal.near; c.beginPath(); c.moveTo(g.x - hw - 38, top);   // rock spire
+  let x = g.x - hw - 38, y = top; while (y < g.y + 420) { y += 26 + rnd() * 30; x -= rnd() * 26 - 6; c.lineTo(x, y); }
+  c.lineTo(g.x + hw + 80, y); x = g.x + hw + 80; while (y > top + 30) { y -= 26 + rnd() * 30; x -= rnd() * 22 - 4; c.lineTo(Math.max(x, g.x + hw + 30), Math.max(y, top)); }
+  c.lineTo(g.x + hw + 34, top); c.closePath(); c.fill();
+  c.strokeStyle = "rgba(" + pal.mist + ",.28)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(g.x - hw - 38, top); c.lineTo(g.x + hw + 34, top); c.stroke();
+  for (const s of [-1, 1]) { const px = g.x + s * (hw + 22 + rnd() * 8), ph = 20 + rnd() * 18; c.fillStyle = pal.near; c.beginPath(); c.moveTo(px - 9, top); c.lineTo(px, top - ph); c.lineTo(px + 9, top); c.fill(); }
+  c.strokeStyle = "#3b2416"; c.lineCap = "round"; c.lineWidth = 6; c.beginPath(); c.moveTo(g.x - hw, top); c.lineTo(g.x - hw + 4, beamY - 6); c.moveTo(g.x + hw, top); c.lineTo(g.x + hw - 4, beamY - 6); c.stroke();   // frame
+  c.lineWidth = 7; c.beginPath(); c.moveTo(g.x - hw - 14, beamY - 2); c.quadraticCurveTo(g.x, beamY - 9, g.x + hw + 14, beamY - 2); c.stroke();
+  c.strokeStyle = "#5a3a22"; c.lineWidth = 2; c.beginPath(); c.moveTo(g.x - hw - 12, beamY - 5); c.quadraticCurveTo(g.x, beamY - 12, g.x + hw + 12, beamY - 5); c.stroke();
+  c.strokeStyle = "rgba(230,210,170,.7)"; c.lineWidth = 1.3; c.beginPath(); c.moveTo(g.x - rr * .35, beamY); c.lineTo(p.x - rr * .45, p.y - rr * .86); c.moveTo(g.x + rr * .35, beamY); c.lineTo(p.x + rr * .45, p.y - rr * .86); c.stroke();
+  const vib = g.ring * Math.exp(-g.ringT * 2.2), sp = gongSprite(rr), w = sp.w / Sx;
+  if (vib > .02) { c.globalAlpha = vib * .5; draw.circle(c, p.x, p.y, rr * (1.12 + .08 * Math.sin(g.ringT * 50)), null, "#ffe6a8", 2); c.globalAlpha = 1; }
+  c.save(); c.translate(p.x + Math.sin(g.ringT * 70) * vib * 1.6, p.y); c.rotate(p.th * .6); c.scale(1 + Math.sin(g.ringT * 46) * vib * .035, 1 - Math.sin(g.ringT * 46) * vib * .035);
+  c.drawImage(sp, -w / 2, -w / 2, w, w);
+  for (const d of g.dents) { draw.circle(c, d.x, d.y, Math.max(1.6, rr * .07), "rgba(40,20,8,.75)"); draw.circle(c, d.x - .5, d.y - .5, Math.max(.8, rr * .03), "rgba(255,240,200,.6)"); }
+  c.restore();
+  draw.glow(c, p.x, p.y, rr * 2.2, "#ffb648", .1 + vib * .25);
+}
+function scopeFrame() {
+  const pad = 30 * Sx, sz = (R + pad) * 2;
+  return Lab.sprite("ob-scope:" + R, sz, sz, g => {
+    const m = sz / 2, v = g.createRadialGradient(m, m, R * .62, m, m, R); v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(.8, "rgba(0,6,12,.5)"); v.addColorStop(1, "rgba(0,4,8,.96)");
+    g.fillStyle = v; g.beginPath(); g.arc(m, m, R + 1, 0, TAU); g.fill();
+    const lg = g.createLinearGradient(0, m - R, 0, m + R); lg.addColorStop(0, "#d2a85a"); lg.addColorStop(.5, "#7d5a2c"); lg.addColorStop(1, "#3d2a14");
+    g.strokeStyle = lg; g.lineWidth = 9 * Sx; g.beginPath(); g.arc(m, m, R + 4 * Sx, 0, TAU); g.stroke();
+    g.strokeStyle = "rgba(255,236,190,.5)"; g.lineWidth = 1.2; g.beginPath(); g.arc(m, m, R + 8 * Sx, Math.PI * 1.1, Math.PI * 1.9); g.stroke();
+    g.strokeStyle = "rgba(0,0,0,.6)"; g.lineWidth = 2; g.beginPath(); g.arc(m, m, R - .5, 0, TAU); g.stroke();
+    g.strokeStyle = "rgba(40,24,8,.8)"; g.lineWidth = 1.6 * Sx; for (let i = 0; i < 24; i++) { const a = i * TAU / 24; g.beginPath(); g.moveTo(m + Math.cos(a) * (R + 1.5 * Sx), m + Math.sin(a) * (R + 1.5 * Sx)); g.lineTo(m + Math.cos(a) * (R + 6.5 * Sx), m + Math.sin(a) * (R + 6.5 * Sx)); g.stroke(); }
+    g.fillStyle = "rgba(255,255,255,.05)"; g.beginPath(); g.ellipse(m - R * .35, m - R * .45, R * .42, R * .2, -.6, 0, TAU); g.fill();   // glass glint
+  });
+}
+function backdrop() {
+  const W = Lab.W, H = Lab.H;
+  return Lab.sprite("ob-bg:" + W + "x" + H + ":" + PAL.indexOf(pal), W, H, g => {
+    draw.vgrad(g, 0, 0, W, H, [[0, "#04080f"], [.5, Lab.color.mix(pal.sky[0], "#000", .35)], [1, Lab.color.mix(pal.sky[1], "#000", .55)]]);
+    const rnd = Lab.rng(5);
+    for (let L = 0; L < 3; L++) {
+      const base = H * (.62 + L * .12), a = H * (.07 - L * .012); g.fillStyle = Lab.color.mix([pal.far, pal.mid, pal.near][L], "#000", .5 + L * .08); g.beginPath(); g.moveTo(0, H);
+      const s = rnd() * 9; for (let x = 0; x <= W; x += 8) g.lineTo(x, base - a * (.6 * Math.sin(x * .008 + s) + .4 * Math.sin(x * .021 + s * 2) + .25 * Math.abs(Math.sin(x * .05 + s))));
+      g.lineTo(W, H); g.closePath(); g.fill();
+      g.fillStyle = "rgba(" + pal.mist + ",.035)"; g.fillRect(0, base + a * .2, W, H * .05);
+    }
+    draw.vignette(g, .5);
+  });
+}
+function arcGauge(c, a0, a1, frac, col, label, value, pulse) {
+  const rr = R + 17 * Sx, lw = 7 * Sx; c.lineCap = "round"; c.lineWidth = lw; c.strokeStyle = "rgba(255,255,255,.1)"; c.beginPath(); c.arc(cx, cy, rr, a0, a1, a1 < a0); c.stroke();
+  if (frac > .004) { c.strokeStyle = col; c.lineWidth = lw * (1 + pulse * .35); c.beginPath(); c.arc(cx, cy, rr, a0, lerp(a0, a1, frac), a1 < a0); c.stroke(); }
+  const am = (a0 + a1) / 2, ly = cy + Math.sin(am) * (rr + 16 * Sx + 4); draw.text(c, label + (value ? "  " + value : ""), cx, ly, { size: Math.max(10, 10.5 * Sx), color: col, weight: 800 });
+}
+function render(t, dt) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, P = Lab.play, g0 = cur();
+  c.drawImage(backdrop(), 0, 0, W, H);
+  for (const s of stars) { c.globalAlpha = .25 + .5 * Math.abs(Math.sin(t * .7 + s.p)); c.fillStyle = "#dfeaf0"; c.fillRect(s.x * W, s.y * H * .8, s.s, s.s); } c.globalAlpha = 1;
+  // ---- the magnified world inside the lens
+  c.save(); c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.clip(); c.translate(cx, cy); c.scale(Sx, Sx);
+  draw.vgrad(c, -U, -U, U * 2, U * 2, [[0, pal.sky[0]], [.6, pal.sky[1]], [1, pal.sky[2]]]);
+  const mx = 62 - aim.x * .08 - V.x * .0, my = -86 - aim.y * .08;
+  draw.glow(c, mx, my, 120, "#f3ecd2", .28); draw.circle(c, mx, my, 30, "#f3ecd2"); draw.circle(c, mx + 9, my - 6, 6, "rgba(190,180,150,.35)"); draw.circle(c, mx - 10, my + 9, 4, "rgba(190,180,150,.3)");
+  ridge(c, .3, 30, 52, round.seed % 97, pal.far, "rgba(" + pal.mist + ",.2)");
+  c.fillStyle = "rgba(" + pal.mist + ",.12)"; c.fillRect(-U, 34 - aim.y * .3, U * 2, 60);
+  ridge(c, .55, 78, 44, round.seed % 53 + 3, pal.mid, "rgba(" + pal.mist + ",.12)");
+  c.fillStyle = "rgba(" + pal.mist + ",.1)"; c.fillRect(-U, 84 - aim.y * .55, U * 2, 90);
+  c.save(); c.translate(-aim.x, -aim.y);
+  for (const g of round.gongs) if (Math.abs(g.x - aim.x) < U + 150) drawSite(c, g);
+  const ms = mistSprite(); for (const m of round.mist) { c.globalAlpha = .82; c.drawImage(ms, g0.x + m.x - m.rx, g0.y + m.y - m.ry, m.rx * 2, m.ry * 2); } c.globalAlpha = 1;
+  fx.draw(c);
+  c.restore();
+  // out-of-focus foreground pine boughs for depth
+  c.fillStyle = "rgba(2,8,12,.9)"; for (const s of [-1, 1]) { const bx = s * (U * .92) - aim.x * 1.7 * .12, by = U * .78 - aim.y * 1.7 * .12; c.beginPath(); c.moveTo(bx - s * 10, U + 10); c.quadraticCurveTo(bx - s * 70, by - 30, bx - s * 130, by + 26); c.quadraticCurveTo(bx - s * 60, by + 20, bx - s * 30, U + 10); c.fill(); }
+  if (black.a > 0) { c.fillStyle = "rgba(3,7,12," + black.a + ")"; c.fillRect(-U, -U, U * 2, U * 2); }
+  c.restore();
+  // ---- reticle (fixed to the lens)
+  const on = phase === "aim" && err <= g0.rU, dead = phase === "aim" && err <= g0.rU * .3, col = dead ? "#ffe08a" : on ? "#ffd9a0" : "rgba(238,244,240,.88)", gap = 9 * Sx;
+  c.strokeStyle = "rgba(0,0,0,.45)"; c.lineWidth = 3; c.beginPath(); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { c.moveTo(cx + dx * gap, cy + dy * gap); c.lineTo(cx + dx * (R - 6), cy + dy * (R - 6)); } c.stroke();
+  c.strokeStyle = col; c.lineWidth = 1.3; c.stroke();
+  c.lineWidth = 3.2; c.beginPath(); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1]]) { c.moveTo(cx + dx * R * .55, cy + dy * R * .55); c.lineTo(cx + dx * (R - 6), cy + dy * (R - 6)); } c.stroke();
+  c.lineWidth = 1.2; c.beginPath(); for (let i = 1; i <= 3; i++) for (const s of [-1, 1]) { c.moveTo(cx + s * i * R * .14, cy - 3 * Sx); c.lineTo(cx + s * i * R * .14, cy + 3 * Sx); c.moveTo(cx - 3 * Sx, cy + s * i * R * .14); c.lineTo(cx + 3 * Sx, cy + s * i * R * .14); } c.stroke();
+  draw.circle(c, cx, cy, (dead ? 3.2 : 2.2) * Sx, dead ? "#ffe08a" : "#ff7a4a"); if (on) draw.circle(c, cx, cy, gap * (dead ? .8 : 1), null, col, 1.6);
+  const sf = scopeFrame(); c.drawImage(sf, cx - sf.w / 2, cy - sf.h / 2, sf.w, sf.h);
+  if (holding || beatPulse > 0) { c.globalAlpha = (holding ? .16 + (1 - breath) * .2 : 0) + beatPulse * .22; c.strokeStyle = "#ff5a4a"; c.lineWidth = 6 * Sx; c.beginPath(); c.arc(cx, cy, R - 4 * Sx, 0, TAU); c.stroke(); c.globalAlpha = 1; }
+  if (demo) return;
+  // ---- gauges on the rim: time over the top, breath underneath
+  const ck = clamp(round.clock / round.clockMax, 0, 1), low = round.clock < 3 && phase === "aim";
+  arcGauge(c, -Math.PI * .82, -Math.PI * .18, ck, low ? (Math.sin(t * 16) > 0 ? "#ff6b5a" : "#ffb09a") : "#f3ecd2", "TIME", round.clock.toFixed(1), low ? .5 : 0);
+  arcGauge(c, Math.PI * .82, Math.PI * .18, breath, gaspT > 0 ? "#ff6b5a" : breath < .3 ? "#ffb648" : "#7fe3d6", gaspT > 0 ? "GASPING" : holding ? "HOLDING" : "BREATH", "", holding ? beatPulse : 0);
+  // ---- lives, level, chain
+  const u = clamp(Sx, .9, 1.3), ly = P.y + 20 * u;
+  for (let i = 0; i < 3; i++) { const x = 20 * u + i * 26 * u; if (i < lives) { draw.circle(c, x, ly, 9 * u, "#e8a93c", "#7d5a2c", 1.5); draw.circle(c, x, ly, 3.2 * u, "#fff0c0"); } else draw.circle(c, x, ly, 9 * u, "rgba(255,255,255,.06)", "rgba(255,255,255,.22)", 1.5); }
+  draw.text(c, "LEVEL " + level, W - 14, ly - 5 * u, { size: 12 * u, color: "#f3ecd2", align: "right", weight: 800 });
+  for (let i = 0; i < 3; i++) draw.circle(c, W - 20 * u - (2 - i) * 13 * u, ly + 11 * u, 4 * u, i < cleared % 3 ? "#e8a93c" : "rgba(255,255,255,.16)", i === 2 && level >= 2 ? "#e8a93c" : null, 1.2);
+  if (round.gongs.length > 1) { const n = round.gongs.length, y = wide ? cy + R + 20 * Sx > H - 8 ? cy : panel.y - 64 * u : cy - R - 46 * Sx; const x0 = (wide ? panel.x : cx) - (n - 1) * 11 * u; draw.text(c, "CHAIN", wide ? panel.x : cx - (n - 1) * 11 * u - 34 * u, wide ? y - 18 * u : y, { size: 10.5 * u, color: "#e8a93c", weight: 800 }); for (let i = 0; i < n; i++) draw.circle(c, x0 + i * 22 * u, y, 7 * u, i < round.idx || (i === round.idx && round.gongs[i].hit) ? "#e8a93c" : "rgba(255,255,255,.08)", "#e8a93c", 1.5); }
+  // ---- message panel: result or coaching
+  if (result && result.t < 1.5) {
+    const k = result.t < .16 ? ease.outBack(result.t / .16) : 1, a = clamp((1.5 - result.t) * 4, 0, 1); c.globalAlpha = a;
+    draw.text(c, result.title, panel.x, panel.y - 12 * u, { size: (wide ? 22 : 30) * u * k, color: result.color, shadow: "rgba(0,0,0,.6)", maxWidth: panel.w });
+    draw.text(c, result.sub, panel.x, panel.y + 18 * u, { size: 14 * u, color: "rgba(243,236,210,.85)", weight: 700, maxWidth: panel.w }); c.globalAlpha = 1;
+  } else if (rung < 3 && phase === "aim") {
+    const txt = holding ? "RELEASE to fire" : gaspT > 0 ? "catch your breath…" : "HOLD to steady the sight", pulse = .7 + .3 * Math.sin(t * 5);
+    c.globalAlpha = pulse; draw.text(c, txt, panel.x, panel.y, { size: (wide ? 15 : 19) * u, color: holding ? "#ffd98a" : "#cfe6e2", shadow: "rgba(0,0,0,.6)", maxWidth: panel.w }); c.globalAlpha = 1;
+    if (!holding && gaspT <= 0) draw.text(c, "release when the cross is on the gong", panel.x, panel.y + 24 * u, { size: 12 * u, color: "rgba(207,230,226,.6)", weight: 700, maxWidth: panel.w });
+  }
+}
+Lab.boot();
+})();
 </script></body></html>
