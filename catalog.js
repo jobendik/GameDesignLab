@@ -1028,17 +1028,18 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab/02-whack-a-mole",
    "path": "PhoneGameLab/games/02-whack-a-mole/index.html",
    "collection": "PhoneGameLab",
-   "title": "Whack-a-Mole",
-   "desc": "Whack moles that pop up — avoid the bombs.",
+   "title": "Crab Bop",
+   "desc": "Bop the crabs. Mind the urchins.",
    "genre": [
     "Reflex & Taps"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 2,
-   "v2": false,
+   "v2": true,
    "thumb": "thumbs/PhoneGameLab--02-whack-a-mole.jpg"
   },
   {
@@ -1168,17 +1169,18 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab/10-bramble-drop",
    "path": "PhoneGameLab/games/10-bramble-drop/index.html",
    "collection": "PhoneGameLab",
-   "title": "Bubble Shooter",
-   "desc": "Aim & tap to shoot. Match 3+ same-color.",
+   "title": "Bramble Drop",
+   "desc": "Pick the bramble clean before it reaches the hedge.",
    "genre": [
-    "Minigame"
+    "Puzzle & Match"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 10,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/11-scribble-siege",
@@ -1303,17 +1305,18 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab/18-one-breath",
    "path": "PhoneGameLab/games/18-one-breath/index.html",
    "collection": "PhoneGameLab",
-   "title": "Sniper Timing",
-   "desc": "One bullet per round. Tap when the cross is over the target.",
+   "title": "One Breath",
+   "desc": "Hold your breath. Ring the far gong.",
    "genre": [
-    "Minigame"
+    "Skill & Rhythm"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 18,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/19-tin-topple",
@@ -1438,17 +1441,18 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab/26-jelly-drift",
    "path": "PhoneGameLab/games/26-jelly-drift/index.html",
    "collection": "PhoneGameLab",
-   "title": "Flappy Tap",
-   "desc": "Tap to flap. Pass through pipe gaps.",
+   "title": "Jelly Drift",
+   "desc": "Pulse up, drift down, thread the reef.",
    "genre": [
-    "Minigame"
+    "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 26,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/27-jetpack",

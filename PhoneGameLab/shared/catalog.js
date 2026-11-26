@@ -14,8 +14,9 @@ window.LAB_GAMES = [
    {
     "n": 2,
     "slug": "02-whack-a-mole",
-    "t": "Whack-a-Mole",
-    "d": "Whack moles that pop up — avoid the bombs.",
+    "t": "Crab Bop",
+    "d": "Bop the crabs. Mind the urchins.",
+    "v2": true,
     "thumb": "../thumbs/PhoneGameLab--02-whack-a-mole.jpg"
    },
    {
@@ -120,14 +121,20 @@ window.LAB_GAMES = [
   ]
  },
  {
-  "cat": "Minigame",
+  "cat": "Puzzle & Match",
   "items": [
    {
     "n": 10,
     "slug": "10-bramble-drop",
-    "t": "Bubble Shooter",
-    "d": "Aim & tap to shoot. Match 3+ same-color."
-   },
+    "t": "Bramble Drop",
+    "d": "Pick the bramble clean before it reaches the hedge.",
+    "v2": true
+   }
+  ]
+ },
+ {
+  "cat": "Minigame",
+  "items": [
    {
     "n": 11,
     "slug": "11-scribble-siege",
@@ -141,12 +148,6 @@ window.LAB_GAMES = [
     "d": "Drag to steer toward your finger. Tap-and-hold to thrust. Double-tap to fire."
    },
    {
-    "n": 18,
-    "slug": "18-one-breath",
-    "t": "Sniper Timing",
-    "d": "One bullet per round. Tap when the cross is over the target."
-   },
-   {
     "n": 19,
     "slug": "19-tin-topple",
     "t": "Cannon",
@@ -157,12 +158,6 @@ window.LAB_GAMES = [
     "slug": "20-frostfoot",
     "t": "Endless Runner",
     "d": "Tap = jump • Swipe down = slide."
-   },
-   {
-    "n": 26,
-    "slug": "26-jelly-drift",
-    "t": "Flappy Tap",
-    "d": "Tap to flap. Pass through pipe gaps."
    },
    {
     "n": 30,
@@ -181,6 +176,46 @@ window.LAB_GAMES = [
     "slug": "32-inkstride",
     "t": "Color Path",
     "d": "Tap to switch color. Only step on tiles matching your color."
+   }
+  ]
+ },
+ {
+  "cat": "Skill & Rhythm",
+  "items": [
+   {
+    "n": 18,
+    "slug": "18-one-breath",
+    "t": "One Breath",
+    "d": "Hold your breath. Ring the far gong.",
+    "v2": true
+   },
+   {
+    "n": 67,
+    "slug": "67-cooking-serve",
+    "t": "Cook & Serve",
+    "d": "Drag the right ingredients to each order.",
+    "thumb": "../thumbs/PhoneGameLab--67-cooking-serve.jpg"
+   },
+   {
+    "n": 68,
+    "slug": "68-sort-baskets",
+    "t": "Sort Baskets",
+    "d": "Fling falling items into the right basket.",
+    "thumb": "../thumbs/PhoneGameLab--68-sort-baskets.jpg"
+   },
+   {
+    "n": 69,
+    "slug": "69-piano-tiles",
+    "t": "Piano Tiles",
+    "d": "Tap the black tiles — never miss one.",
+    "thumb": "../thumbs/PhoneGameLab--69-piano-tiles.jpg"
+   },
+   {
+    "n": 70,
+    "slug": "70-rhythm-lane",
+    "t": "Rhythm Lane",
+    "d": "Hit notes in their lanes in time with the beat.",
+    "thumb": "../thumbs/PhoneGameLab--70-rhythm-lane.jpg"
    }
   ]
  },
@@ -215,6 +250,13 @@ window.LAB_GAMES = [
     "d": "Hop the zig-zag crags before you run out of puff.",
     "v2": true,
     "score": 7
+   },
+   {
+    "n": 26,
+    "slug": "26-jelly-drift",
+    "t": "Jelly Drift",
+    "d": "Pulse up, drift down, thread the reef.",
+    "v2": true
    },
    {
     "n": 27,
@@ -496,39 +538,6 @@ window.LAB_GAMES = [
     "t": "Merge Idle",
     "d": "Merge generators for compounding income.",
     "thumb": "../thumbs/PhoneGameLab--66-merge-idle.jpg"
-   }
-  ]
- },
- {
-  "cat": "Skill & Rhythm",
-  "items": [
-   {
-    "n": 67,
-    "slug": "67-cooking-serve",
-    "t": "Cook & Serve",
-    "d": "Drag the right ingredients to each order.",
-    "thumb": "../thumbs/PhoneGameLab--67-cooking-serve.jpg"
-   },
-   {
-    "n": 68,
-    "slug": "68-sort-baskets",
-    "t": "Sort Baskets",
-    "d": "Fling falling items into the right basket.",
-    "thumb": "../thumbs/PhoneGameLab--68-sort-baskets.jpg"
-   },
-   {
-    "n": 69,
-    "slug": "69-piano-tiles",
-    "t": "Piano Tiles",
-    "d": "Tap the black tiles — never miss one.",
-    "thumb": "../thumbs/PhoneGameLab--69-piano-tiles.jpg"
-   },
-   {
-    "n": 70,
-    "slug": "70-rhythm-lane",
-    "t": "Rhythm Lane",
-    "d": "Hit notes in their lanes in time with the beat.",
-    "thumb": "../thumbs/PhoneGameLab--70-rhythm-lane.jpg"
    }
   ]
  }
