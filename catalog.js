@@ -1035,7 +1035,8 @@ window.GDL_CATALOG = {
    "n": 1,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--01-splodge.jpg"
   },
   {
    "id": "PhoneGameLab/02-crab-bop",
@@ -1054,7 +1055,8 @@ window.GDL_CATALOG = {
    "n": 2,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--02-crab-bop.jpg"
   },
   {
    "id": "PhoneGameLab/03-flinch",
@@ -1073,7 +1075,8 @@ window.GDL_CATALOG = {
    "n": 3,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--03-flinch.jpg"
   },
   {
    "id": "PhoneGameLab/04-corkslinger",
@@ -1109,7 +1112,8 @@ window.GDL_CATALOG = {
    "n": 5,
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--05-misfired.jpg"
   },
   {
    "id": "PhoneGameLab/06-odd-mood",
@@ -1128,7 +1132,8 @@ window.GDL_CATALOG = {
    "n": 6,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--06-odd-mood.jpg"
   },
   {
    "id": "PhoneGameLab/07-beetle-box",
@@ -1147,7 +1152,8 @@ window.GDL_CATALOG = {
    "n": 7,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--07-beetle-box.jpg"
   },
   {
    "id": "PhoneGameLab/08-swindle",
@@ -1166,7 +1172,8 @@ window.GDL_CATALOG = {
    "n": 8,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--08-swindle.jpg"
   },
   {
    "id": "PhoneGameLab/09-tea-break",
@@ -1185,7 +1192,8 @@ window.GDL_CATALOG = {
    "n": 9,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--09-tea-break.jpg"
   },
   {
    "id": "PhoneGameLab/10-bramble-drop",
@@ -1204,7 +1212,8 @@ window.GDL_CATALOG = {
    "n": 10,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--10-bramble-drop.jpg"
   },
   {
    "id": "PhoneGameLab/11-scribble-siege",
@@ -1256,7 +1265,8 @@ window.GDL_CATALOG = {
    "n": 13,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--13-suds-patrol.jpg"
   },
   {
    "id": "PhoneGameLab/14-bullet-hell",
@@ -1326,7 +1336,8 @@ window.GDL_CATALOG = {
    "n": 17,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--17-windfletch.jpg"
   },
   {
    "id": "PhoneGameLab/18-one-breath",
@@ -1345,7 +1356,8 @@ window.GDL_CATALOG = {
    "n": 18,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--18-one-breath.jpg"
   },
   {
    "id": "PhoneGameLab/19-tin-topple",
@@ -1397,7 +1409,8 @@ window.GDL_CATALOG = {
    "n": 21,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--21-paper-rapids.jpg"
   },
   {
    "id": "PhoneGameLab/22-sundown-sprint",
@@ -1416,7 +1429,8 @@ window.GDL_CATALOG = {
    "n": 22,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--22-sundown-sprint.jpg"
   },
   {
    "id": "PhoneGameLab/23-doodle-jump",
@@ -1470,7 +1484,8 @@ window.GDL_CATALOG = {
    "n": 25,
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--25-goat-up.jpg"
   },
   {
    "id": "PhoneGameLab/26-jelly-drift",
@@ -1489,7 +1504,8 @@ window.GDL_CATALOG = {
    "n": 26,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--26-jelly-drift.jpg"
   },
   {
    "id": "PhoneGameLab/27-fizzwhiz",
@@ -1542,7 +1558,8 @@ window.GDL_CATALOG = {
    "n": 29,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--29-tiltwood.jpg"
   },
   {
    "id": "PhoneGameLab/30-wobblewire",
@@ -1561,7 +1578,8 @@ window.GDL_CATALOG = {
    "n": 30,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--30-wobblewire.jpg"
   },
   {
    "id": "PhoneGameLab/31-sinkstones",

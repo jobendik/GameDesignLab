@@ -9,7 +9,8 @@ window.LAB_GAMES = [
     "t": "Splodge",
     "d": "Pop the paint before the clock runs dry.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--01-splodge.jpg"
    },
    {
     "n": 2,
@@ -17,7 +18,8 @@ window.LAB_GAMES = [
     "t": "Crab Bop",
     "d": "Bop the crabs. Mind the urchins.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--02-crab-bop.jpg"
    },
    {
     "n": 3,
@@ -25,7 +27,8 @@ window.LAB_GAMES = [
     "t": "Flinch",
     "d": "Eight green lights. Don't jump the gun.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--03-flinch.jpg"
    },
    {
     "n": 4,
@@ -40,7 +43,8 @@ window.LAB_GAMES = [
     "t": "Misfired",
     "d": "One tile left the kiln a shade off. Spot it.",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab--05-misfired.jpg"
    },
    {
     "n": 6,
@@ -48,7 +52,8 @@ window.LAB_GAMES = [
     "t": "Odd Mood",
     "d": "Everyone feels the same. Except one. Find them.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--06-odd-mood.jpg"
    },
    {
     "n": 8,
@@ -56,7 +61,8 @@ window.LAB_GAMES = [
     "t": "Swindle",
     "d": "Eyes on the pearl. The cups cheat.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--08-swindle.jpg"
    }
   ]
  },
@@ -69,7 +75,8 @@ window.LAB_GAMES = [
     "t": "Beetle Box",
     "d": "Pin the pairs. Only forgetting costs you.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--07-beetle-box.jpg"
    },
    {
     "n": 43,
@@ -208,7 +215,8 @@ window.LAB_GAMES = [
     "t": "Tea Break",
     "d": "Bash through the biscuit tin, one rally at a time.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--09-tea-break.jpg"
    },
    {
     "n": 11,
@@ -223,7 +231,8 @@ window.LAB_GAMES = [
     "t": "Suds Patrol",
     "d": "One bar of soap. One very dirty floor.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--13-suds-patrol.jpg"
    },
    {
     "n": 14,
@@ -252,7 +261,8 @@ window.LAB_GAMES = [
     "t": "Windfletch",
     "d": "Read the wind. Split the gold.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--17-windfletch.jpg"
    },
    {
     "n": 21,
@@ -260,7 +270,8 @@ window.LAB_GAMES = [
     "t": "Paper Rapids",
     "d": "A paper boat, three channels, and a taste for close shaves.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--21-paper-rapids.jpg"
    },
    {
     "n": 22,
@@ -268,7 +279,8 @@ window.LAB_GAMES = [
     "t": "Sundown Sprint",
     "d": "Floor it down the desert highway. Skim traffic to buy time.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--22-sundown-sprint.jpg"
    },
    {
     "n": 23,
@@ -289,7 +301,8 @@ window.LAB_GAMES = [
     "t": "Bramble Drop",
     "d": "Pick the bramble clean before it reaches the hedge.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--10-bramble-drop.jpg"
    }
   ]
  },
@@ -325,7 +338,8 @@ window.LAB_GAMES = [
     "t": "One Breath",
     "d": "Hold your breath. Ring the far gong.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--18-one-breath.jpg"
    },
    {
     "n": 67,
@@ -434,7 +448,8 @@ window.LAB_GAMES = [
     "t": "Goat Up",
     "d": "Hop the zig-zag crags before you run out of puff.",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab--25-goat-up.jpg"
    },
    {
     "n": 26,
@@ -442,7 +457,8 @@ window.LAB_GAMES = [
     "t": "Jelly Drift",
     "d": "Pulse up, drift down, thread the reef.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--26-jelly-drift.jpg"
    },
    {
     "n": 27,
@@ -464,7 +480,8 @@ window.LAB_GAMES = [
     "t": "Tiltwood",
     "d": "Tip the board. Roll the marble home.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--29-tiltwood.jpg"
    },
    {
     "n": 30,
@@ -472,7 +489,8 @@ window.LAB_GAMES = [
     "t": "Wobblewire",
     "d": "Lean left, lean right. Don't look down.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--30-wobblewire.jpg"
    },
    {
     "n": 31,
