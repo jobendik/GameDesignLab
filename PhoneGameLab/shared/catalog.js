@@ -233,7 +233,8 @@ window.LAB_GAMES = [
     "slug": "12-cold-snap",
     "t": "Cold Snap",
     "d": "Break the drifting ice. Scoop the sunstones before they sink.",
-    "v2": true
+    "v2": true,
+    "score": 8
    },
    {
     "n": 13,
@@ -243,6 +244,13 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--13-suds-patrol.jpg"
+   },
+   {
+    "n": 14,
+    "slug": "14-sparkmoth",
+    "t": "Sparkmoth",
+    "d": "Weave through the fireworks. Skim the sparks.",
+    "v2": true
    },
    {
     "n": 15,
@@ -290,7 +298,8 @@ window.LAB_GAMES = [
     "slug": "23-pogo-peak",
     "t": "Pogo Peak",
     "d": "Bounce a pogo chick from meadow to starlight.",
-    "v2": true
+    "v2": true,
+    "score": 8
    }
   ]
  },
@@ -305,17 +314,6 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--10-bramble-drop.jpg"
-   }
-  ]
- },
- {
-  "cat": "Minigame",
-  "items": [
-   {
-    "n": 14,
-    "slug": "14-sparkmoth",
-    "t": "Bullet Hell",
-    "d": "Drag your ship to dodge. Survive as long as possible."
    }
   ]
  },
@@ -370,7 +368,8 @@ window.LAB_GAMES = [
     "t": "Tin Topple",
     "d": "Topple the block forts. Bonk every tin bot.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--19-tin-topple.jpg"
    },
    {
     "n": 35,
@@ -431,7 +430,9 @@ window.LAB_GAMES = [
     "slug": "20-frostfoot",
     "t": "Frostfoot",
     "d": "Hop the ice. Slide the gates. Keep the scarf burning.",
-    "v2": true
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--20-frostfoot.jpg"
    },
    {
     "n": 24,

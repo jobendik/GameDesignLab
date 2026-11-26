@@ -38,7 +38,7 @@ function expect(cond, msg) { if (!cond) throw new Error('expect failed: ' + msg)
         await page.waitForTimeout(300);
         await Promise.race([
           spec.run({ page, expect, url, wait: ms => page.waitForTimeout(ms), state: () => page.evaluate(() => window.__lab && window.__lab.state), game: (fn, arg) => page.evaluate(([f, a]) => (new Function('g', 'a', 'return (' + f + ')(g,a)'))(window.__lab && window.__lab.game, a), [fn.toString(), arg]) }),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('test timeout (90s)')), spec.timeout || 90000)),
+          new Promise((_, rej) => setTimeout(() => rej(new Error(`test timeout (${(spec.timeout || 90000) / 1000}s)`)), spec.timeout || 90000)),
         ]);
         if (errs.length) throw new Error(errs.slice(0, 4).join(' | '));
         console.log(`[ ok ] ${rel}  (${((Date.now() - started) / 1000).toFixed(1)}s)`);

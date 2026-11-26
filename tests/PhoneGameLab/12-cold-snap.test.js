@@ -53,9 +53,9 @@ module.exports = {
     await page.mouse.up();
     // sunstones: scooped by proximity, they build the chain
     const sc = await game(g => g.score), st = await game(g => g.stones);
-    await game(g => { g.clearIce(); g.stop(); const s = g.ship, f = g.field, dx = s.x < f.W / 2 ? 1 : -1, dy = s.y < (f.top + f.H) / 2 ? 1 : -1; g.spawnGem(s.x + dx * 40, s.y); g.spawnGem(s.x + dx * 20, s.y + dy * 35); }); // placed toward mid-sea so they cannot wrap away await wait(700);
+    await game(g => { g.clearIce(); g.stop(); const s = g.ship, f = g.field, dx = s.x < f.W / 2 ? 1 : -1, dy = s.y < (f.top + f.H) / 2 ? 1 : -1; g.spawnGem(s.x + dx * 40, s.y); g.spawnGem(s.x + dx * 20, s.y + dy * 35); }); await wait(700); // (placed toward mid-sea so they cannot wrap away)
     const gm = await game(g => ({ stones: g.stones, chain: g.chain, score: g.score }));
-    expect(gm.stones >= st + 2 && gm.chain >= 2 && gm.score > sc, 'nearby sunstones are pulled in, scored and chained ' + JSON.stringify([gm, st, sc, await game(g => [g.gems.length, g.lives, g.wave, g.ice.length]), await state()]));
+    expect(gm.stones >= st + 2 && gm.chain >= 2 && gm.score > sc, 'nearby sunstones are pulled in, scored and chained');
     expect((await state()).score === (await game(g => g.score)), 'HUD score matches');
     // lose: last life, a floe drifts into the tug
     await game(g => { g.setLives(1); g.calm(false); const s = g.ship, dx = s.x < g.field.W / 2 ? 1 : -1; g.spawnIce(1, s.x + dx * 90, s.y, -dx * 120, 0); });

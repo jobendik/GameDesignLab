@@ -1252,7 +1252,9 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 12,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/13-suds-patrol",
@@ -1278,17 +1280,18 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab/14-sparkmoth",
    "path": "PhoneGameLab/games/14-sparkmoth/index.html",
    "collection": "PhoneGameLab",
-   "title": "Bullet Hell",
-   "desc": "Drag your ship to dodge. Survive as long as possible.",
+   "title": "Sparkmoth",
+   "desc": "Weave through the fireworks. Skim the sparks.",
    "genre": [
-    "Minigame"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 14,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/15-fruit-slice",
@@ -1381,7 +1384,8 @@ window.GDL_CATALOG = {
    "n": 19,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--19-tin-topple.jpg"
   },
   {
    "id": "PhoneGameLab/20-frostfoot",
@@ -1398,7 +1402,10 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 20,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--20-frostfoot.jpg"
   },
   {
    "id": "PhoneGameLab/21-paper-rapids",
@@ -1455,7 +1462,9 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 23,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/24-helix-fall",

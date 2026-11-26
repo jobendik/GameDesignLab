@@ -37,7 +37,7 @@ const CHUNKS = [
     { len: 1.5, it: [["p", 0, .5], ["E", .08, 150, 5], ["s", .98]] }, { len: 1.4, it: [["s", 0], ["s", .42], ["s", .84], ["E", -.1, 120, 7]] }, { len: 1.8, it: [["G", 0], ["b", .62], ["G", 1.24], ["e", 1.16, 14, 3]] } ],
 ];
 let S, PX, gy, viewU, vmax;
-let p, obs, embers, flags, flakes, scarf, dist, speed, runT, score, bonus, emberN, meter, blaze, grace, smashes, nextX, tier, zone, zoneOld, zoneMix, dead, deadT, now, demo = false, held, kHeld, downHeld, pressJump, lastMile, bestDist, hintJump, hintSlide, lastChunk, sprayT, stepT, hookHeld = false;
+let p, obs, embers, flags, flakes, scarf, dist, speed, runT, score, bonus, emberN, meter, blaze, grace, smashes, nextX, tier, zone, zoneOld, zoneMix, dead, deadT, now, demo = false, held, kHeld, downHeld, pressJump, lastMile, bestDist, hintJump, hintSlide, lastChunk, sprayT, stepT, hookHeld = false, hintHold = true;
 
 function layout() {
   const P = Lab.play, port = Lab.H > Lab.W;
@@ -50,7 +50,7 @@ function reset() {
   layout();
   p = { y: 0, vy: 0, on: true, coy: 0, buf: 0, air: 1, jumpT: 9, cut: true, slide: 0, dive: false, spin: 0, sx: 1, sy: 1, runPh: 0, ear: -.4, earV: 0, blink: 2, jumps: 0, flips: 0, slides: 0, peak: 0 };
   obs = []; embers = []; flags = []; dist = 0; speed = 330; runT = 0; score = 0; bonus = 0; emberN = 0; meter = 0; blaze = 0; grace = 0; smashes = 0; nextX = 760; tier = 0;
-  zone = 0; zoneOld = 0; zoneMix = 1; dead = false; deadT = 0; held = false; kHeld = false; downHeld = false; pressJump = false; lastMile = 0; hintJump = true; hintSlide = true; hookHeld = false; lastChunk = null; sprayT = 0; stepT = 0;
+  zone = 0; zoneOld = 0; zoneMix = 1; dead = false; deadT = 0; held = false; kHeld = false; downHeld = false; pressJump = false; lastMile = 0; hintJump = true; hintSlide = true; hintHold = true; hookHeld = false; lastChunk = null; sprayT = 0; stepT = 0;
   bestDist = Lab.store.get("bestDist", 0);
   if (bestDist > 60) flags.push({ x: bestDist * 40, label: "BEST", best: true });
   flakes = Array.from({ length: 46 }, () => ({ x: Math.random(), y: Math.random(), z: Lab.rand(.5, 1.5), p: Lab.rand(0, TAU) }));
@@ -139,7 +139,7 @@ function stepRun(dt) {   // one ≤1/120 s slice of running: identical hop heigh
   if (p.buf > 0 && (p.on || p.coy > 0)) doJump();
   if (!p.on) {
     if (!p.cut && p.vy < 0 && p.jumpT >= .08 && !(held || kHeld || hookHeld)) { p.vy *= .5; p.cut = true; }
-    p.vy += GRAV * (p.vy > 0 ? 1.15 : 1) * dt; p.y += p.vy * dt; p.peak = Math.min(p.peak, p.y);
+    p.vy += GRAV * (p.vy > 0 ? 1.15 : 1) * dt; p.y += p.vy * dt; p.peak = Math.min(p.peak, p.y); if (p.peak < -128 && p.air > 0) hintHold = false;
     if (p.y >= 0 && p.vy >= 0 && !pit) {
       const v = p.vy; p.y = 0; p.vy = 0; p.on = true; p.air = 1; p.sx = 1 + Math.min(.35, v / 3200); p.sy = 1 - Math.min(.3, v / 3600);
       Lab.sfx("land", { pitch: 1.2 }); fx.burst(PX, gy, { n: 5 + (p.dive ? 6 : 0), color: "rgba(255,255,255,.9)", speed: 110, angle: -Math.PI / 2, spread: 2.6, life: .4, size: 4, gravity: 300, vx: -speed * S * .4 });
@@ -312,7 +312,7 @@ function render(t, dt) {
   // obstacles
   for (const o of obs) { if (o.k === "p" || o.gone) continue; const x = sx(o.x); if (x > W + 40 || x + o.w * S < -60) continue; const sp = obSprite(o), gate = o.k === "g" || o.k === "G";
     drawSprite(c, sp, x - (gate ? 8 : 4) * S, gy - sp.h + (gate ? 0 : 2 * S));
-    if (!demo && ((hintJump && o.k === "s") || (hintSlide && gate)) && runT < 9 && x > PX) { const bob = Math.sin(t * 6) * 4 * S, ty = gy - (gate ? 100 : 78) * S + bob; draw.text(c, gate ? "SWIPE DOWN" : "TAP", x + o.w * S / 2, ty, { size: 15 * S, color: "#fff", stroke: "rgba(35,42,99,.8)" }); c.fillStyle = "#fff"; c.beginPath(); const ax = x + o.w * S / 2, ay = ty + 14 * S; c.moveTo(ax - 6 * S, ay); c.lineTo(ax + 6 * S, ay); c.lineTo(ax, ay + 8 * S); c.closePath(); c.fill(); } }
+    if (!demo && x > PX && (gate ? hintSlide && runT < 12 : o.k === "s" ? hintJump && runT < 9 : hintHold && runT < 45)) { const bob = Math.sin(t * 6) * 4 * S, ty = gy - (gate ? 100 : o.k === "s" ? 78 : 122) * S + bob; draw.text(c, gate ? "SWIPE DOWN" : o.k === "s" ? "TAP" : "HOLD", x + o.w * S / 2, ty, { size: 15 * S, color: "#fff", stroke: "rgba(35,42,99,.8)" }); c.fillStyle = "#fff"; c.beginPath(); const ax = x + o.w * S / 2, ay = ty + 14 * S; c.moveTo(ax - 6 * S, ay); c.lineTo(ax + 6 * S, ay); c.lineTo(ax, ay + 8 * S); c.closePath(); c.fill(); } }
   const es = emberSprite(); for (const e of embers) { if (e.got) continue; const x = sx(e.x); if (x < -30 || x > W + 30) continue; const k = 1 + Math.sin(t * 7 + e.ph) * .1, w = es.w * k; c.drawImage(es, x - w / 2, gy + e.y * S + Math.sin(t * 4 + e.ph) * 2.5 * S - w / 2, w, w); }
   drawRunner(c, t);
   // snow in the air + speed streaks

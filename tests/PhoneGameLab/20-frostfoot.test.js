@@ -60,7 +60,7 @@ module.exports = {
     // 8) embers fill the scarf and score
     const s0 = await game(g => g.score), e0 = await game(g => g.embers);
     await game(g => g.put('e', 260, 26, 5));
-    expect(await until(g => g.embers === 5 + 0 * g.dist || g.dead, 3000) && await game(g => g.embers) === e0 + 5, 'running through embers collects them');
+    expect(await until(g => g.embers >= 5 || g.dead, 3000) && await game(g => g.embers) === e0 + 5, 'running through embers collects them');
     expect(await game(g => g.meter) >= 5 && await game(g => g.score) >= s0 + 50, 'embers heat the scarf and add 10 each');
 
     // 9) Blaze: a full scarf makes the runner smash through obstacles

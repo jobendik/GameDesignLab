@@ -42,7 +42,7 @@ Lab.boot();                           // splash → start().  (v1 games called s
 - Pause (button, Esc/P, tab hidden, window blur) is handled by the engine; nothing to do. `Lab.paused` is readable.
 - `Lab.setScore(n|string)` updates the HUD; `Lab.bumpScore()` pops it; `Lab.hint(text)` sets the line at the bottom
   (fades on the next touch; `Lab.hint(text,{sticky:true})` stays until replaced);
-  `Lab.toast(text, ms)`; `Lab.banner("LEVEL 3", {color, ms})`.
+  `Lab.toast(text, ms, {y})`; `Lab.banner("LEVEL 3", {color, ms, y})` (`y` = fraction of stage height, to keep them off your focal point).
 
 - `Lab.setTheme({fg,accent,…,light})` retints the HUD at runtime (the HUD score is DOM text: keep it readable when your sky changes).
 - Testing tip: scores that tick continuously are racy across separate reads — read game score and HUD state in one `page.evaluate`.
@@ -66,6 +66,8 @@ Test at 390×844 and 844×390 (and 1280×800 desktop).
 `Lab.shake(mag=8, dur=.25)` · `Lab.flash(color, dur, alpha)` · `Lab.hitstop(sec=.06)` · `Lab.slowmo(scale=.3, sec=.5)` · `Lab.timeScale` · `Lab.buzz(ms)` (haptic)
 - `Lab.fx.burst(x,y,{n,color|colors,speed,spread,angle,life,size,gravity,drag,shape:'circle|square|star|spark|ring|shard',glow})`
 - `Lab.fx.ring(x,y,{r0,r1,color,life,width})` · `Lab.fx.text(x,y,"+10",{color,size,life})` · `Lab.fx.sparks(x,y,angle,{…})` · `Lab.fx.puff(x,y,{…})`
+- Particles live in screen space. If you draw a transformed/scrolling world, either convert positions when spawning, or set
+  `Lab.fx.auto=false`, call `Lab.fx.draw(ctx)` inside your own transform, and `Lab.fx.clear()` right before `Lab.gameover`.
 - `Lab.fx.confetti()` (UI layer) · particles draw automatically after your frame (`Lab.fx.auto=false` + `Lab.fx.draw(ctx)` to layer manually).
 - `Lab.tween(obj,{x:10,scale:1},.3,{ease:'outBack',delay,onDone})` · `Lab.ease.` `linear inQuad outQuad inOutQuad inCubic outCubic inOutCubic outQuart inExpo outExpo inBack outBack inOutBack outElastic outBounce inSine outSine inOutSine (= sine) pulse (0→1→0)`
 - `Lab.damp(current,target,lambda,dt)` for frame-rate independent smoothing. All motion must be dt-based.

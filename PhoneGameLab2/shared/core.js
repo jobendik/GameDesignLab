@@ -901,13 +901,14 @@
     stage.querySelectorAll('.lab-pausecard').forEach(e => e.remove()); lastTs = performance.now(); input.down = false;
   };
 
-  Lab.toast = function (text, ms) {
-    const t = doc.createElement('div'); t.className = 'lab-toast'; t.textContent = text; t.style.animationDuration = ((ms || 900) / 1000) + 's';
+  /* Lab.toast(text, ms, {y:.2}) — y = vertical position as a fraction of the stage (default .38) */
+  Lab.toast = function (text, ms, o) {
+    const t = doc.createElement('div'); t.className = 'lab-toast'; t.textContent = text; t.style.animationDuration = ((ms || 900) / 1000) + 's'; if (o && o.y != null) t.style.top = (o.y * 100) + '%';
     (stage || doc.body).appendChild(t); setTimeout(() => t.remove(), ms || 900);
   };
   /* big centred banner: "LEVEL 3", "GO!", "PERFECT" */
   Lab.banner = function (text, o) {
-    o = o || {}; const t = doc.createElement('div'); t.className = 'lab-banner'; t.textContent = text; if (o.color) t.style.color = o.color;
+    o = o || {}; const t = doc.createElement('div'); t.className = 'lab-banner'; t.textContent = text; if (o.color) t.style.color = o.color; if (o.y != null) t.style.top = (o.y * 100) + '%';
     t.style.animationDuration = ((o.ms || 1100) / 1000) + 's'; (stage || doc.body).appendChild(t); setTimeout(() => t.remove(), o.ms || 1100);
   };
 
