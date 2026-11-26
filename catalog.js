@@ -301,6 +301,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--little-hero-adventure.jpg"
   },
   {
@@ -835,15 +837,18 @@ window.GDL_CATALOG = {
    "path": "games/star-trail-adventure.html",
    "collection": "arcade",
    "title": "Star Trail Adventure",
-   "desc": "3D pipe-connection puzzle.",
+   "desc": "Run, jump and air-dash a little star-lamp along three floating night-sky trails, gathering shards and hidden comets on the way to each beacon.",
    "genre": [
-    "Puzzle"
+    "Platformer",
+    "Adventure"
    ],
    "controls": [
     "touch",
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--star-trail-adventure.jpg"
   },
   {
@@ -1670,8 +1675,8 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--32-inkstride.jpg"
   },
   {
-   "id": "PhoneGameLab/33-shape-gate",
-   "path": "PhoneGameLab/games/33-shape-gate/index.html",
+   "id": "PhoneGameLab/33-snug",
+   "path": "PhoneGameLab/games/33-snug/index.html",
    "collection": "PhoneGameLab",
    "title": "Snug",
    "desc": "Become the shape. Slip through.",
@@ -1685,24 +1690,27 @@ window.GDL_CATALOG = {
    ],
    "n": 33,
    "v2": true,
-   "thumb": "thumbs/PhoneGameLab--33-shape-gate.jpg"
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/34-stack-runner",
-   "path": "PhoneGameLab/games/34-stack-runner/index.html",
+   "id": "PhoneGameLab/34-antiquity",
+   "path": "PhoneGameLab/games/34-antiquity/index.html",
    "collection": "PhoneGameLab",
-   "title": "Stack Runner",
-   "desc": "Collect blocks, lay them to cross gaps.",
+   "title": "Antiquity",
+   "desc": "Haul stone. Mind the wobble.",
    "genre": [
     "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 34,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--34-stack-runner.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/35-cake-tower",
@@ -1759,11 +1767,11 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--37-star-jar.jpg"
   },
   {
-   "id": "PhoneGameLab/38-plinko",
-   "path": "PhoneGameLab/games/38-plinko/index.html",
+   "id": "PhoneGameLab/38-tumblepeg",
+   "path": "PhoneGameLab/games/38-tumblepeg/index.html",
    "collection": "PhoneGameLab",
    "title": "Tumblepeg",
-   "desc": "Drop, thump and ping your way past the quota.",
+   "desc": "Drop, thump and ping past the quota.",
    "genre": [
     "Stack & Physics"
    ],
@@ -1774,41 +1782,46 @@ window.GDL_CATALOG = {
    ],
    "n": 38,
    "v2": true,
-   "thumb": "thumbs/PhoneGameLab--38-plinko.jpg"
+   "score": 7,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/39-basketball",
-   "path": "PhoneGameLab/games/39-basketball/index.html",
+   "id": "PhoneGameLab/39-blacktop-buzzer",
+   "path": "PhoneGameLab/games/39-blacktop-buzzer/index.html",
    "collection": "PhoneGameLab",
-   "title": "Basketball Flick",
-   "desc": "Flick to shoot, arc to the hoop.",
+   "title": "Blacktop Buzzer",
+   "desc": "Night hoops against the clock.",
    "genre": [
-    "Stack & Physics"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 39,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--39-basketball.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/40-pool",
-   "path": "PhoneGameLab/games/40-pool/index.html",
+   "id": "PhoneGameLab/40-brass-pocket",
+   "path": "PhoneGameLab/games/40-brass-pocket/index.html",
    "collection": "PhoneGameLab",
-   "title": "Pool",
-   "desc": "Drag-aim the cue, pot the balls.",
+   "title": "Brass Pocket",
+   "desc": "Pot them all before your shots run dry.",
    "genre": [
     "Stack & Physics"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 40,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--40-pool.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/41-goal-flick",
@@ -1828,38 +1841,39 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--41-goal-flick.jpg"
   },
   {
-   "id": "PhoneGameLab/42-bridge-build",
-   "path": "PhoneGameLab/games/42-bridge-build/index.html",
+   "id": "PhoneGameLab/42-bamboo-span",
+   "path": "PhoneGameLab/games/42-bamboo-span/index.html",
    "collection": "PhoneGameLab",
-   "title": "Bridge Build",
-   "desc": "Hold to extend a bridge over the gap.",
+   "title": "Bamboo Span",
+   "desc": "Grow a stalk, tip it over, roll across.",
    "genre": [
-    "Stack & Physics"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 42,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--42-bridge-build.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/43-2048",
-   "path": "PhoneGameLab/games/43-2048/index.html",
+   "id": "PhoneGameLab/43-plumpling",
+   "path": "PhoneGameLab/games/43-plumpling/index.html",
    "collection": "PhoneGameLab",
    "title": "2048",
-   "desc": "Swipe to merge equal tiles.",
+   "desc": "Swipe to slide tiles. Merge equal numbers to reach 2048.",
    "genre": [
-    "Puzzle & Logic"
+    "Minigame"
    ],
    "controls": [
     "touch",
     "mouse"
    ],
    "n": 43,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--43-2048.jpg"
+   "v2": false
   },
   {
    "id": "PhoneGameLab/44-match-3",

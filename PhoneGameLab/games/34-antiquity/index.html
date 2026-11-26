@@ -1,0 +1,314 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Antiquity</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* ANTIQUITY — a mason ant hauls sandstone blocks along a ruined desert causeway to the next shrine.
+ * Identity: sun-baked oblique top-down — orange dunes, terracotta walls with long indigo shadows, turquoise canals.
+ * Core: drag to steer across five lanes; blocks on the road stack on the ant's head. A wall costs its height in blocks
+ * (the ant builds steps and hops over), a canal costs one stepping stone per tile; too few blocks ends the run.
+ * Depth: the stack is a springy tower — swerve hard with a tall one and the top blocks slide off, so greed needs smooth
+ * hands. Every block still on your head at a shrine is delivered for 10 x level points, so tolls are a routing choice.
+ * Variety: basalt lintels that knock off everything above their clearance (L3+), back-to-back obstacles (L4+),
+ * full-width lintels (L5+), rising pace. The generator tracks a conservative block budget, so every row is payable.
+ * Units: world x in lanes (0..5), world y in tiles; one tile = CW px.                                            */
+Lab.init({
+  title: "Antiquity", tagline: "Haul stone. Mind the wobble.", category: "Runner & Movement",
+  howto: ["Drag to steer the ant", "Blocks pay for walls and canals", "Swerve gently — tall stacks topple"],
+  theme: { bg: "#d99a4e", bg2: "#f0c987", fg: "#3b2140", muted: "#7a5a4a", accent: "#c9583a", accent2: "#1fa79b", light: true },
+  orient: "portrait", music: { style: "drive", key: "D", bpm: 100, vol: .24 }, restart: start,
+  attract: (dt, t) => { if (!rows) { demo = true; reset(); } update(dt, t); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, C = Lab.color, clamp = Lab.clamp;
+const NC = 5, CAP = 12, OPEN = 99;
+const DUNE = "#e3a657", ROAD = "#e9c283", INK = "#3b2140", STONE = "#fffdf6", STONE2 = "#cdbfe6", WALL = "#cf5e3e", WALLT = "#ec8a5e", WATER = "#22ab9f", BAS = "#4d4274", BAST = "#7466a6", CREAM = "#fff4d8";
+let W, H, S, CW, RX0, AY, BW, BH, TD;
+let demo = false, carried, spent, rows, pickups, placed, loose, dist, v, ax, tx, vx, stack, lean, leanV, shedT, creakT, genY, genLv, level, bank, delivered, hauled, bestHaul, shed, alive, lockUntil, lockX, hop, gapHop, elev, popT, now, told, secA, secB, deadT, dragged;
+
+function layout() {
+  W = Lab.W; H = Lab.H; S = Math.min(W / 390, Lab.play.h / 700);
+  CW = Math.min((W - 96 * S) / NC, 62 * S); RX0 = (W - NC * CW) / 2; AY = Lab.play.y + Lab.play.h * .76;
+  BW = CW * .56; BH = CW * .25; TD = BW * .5; Lab.sprite.clear("ant");
+}
+Lab.onResize(() => { if (rows) layout(); });
+const sx = x => RX0 + x * CW, sy = y => AY - (y - dist) * CW;
+const speed = lv => Math.min(6.4, 3.3 + (lv - 1) * .3);
+
+function reset() {
+  layout();
+  carried = 0; spent = 0; rows = []; pickups = []; placed = []; loose = []; dist = 0; v = 0; ax = tx = NC / 2; vx = 0; stack = 2; lean = 0; leanV = 0; shedT = 0; creakT = 0;
+  genY = 5; genLv = 1; level = 1; bank = 0; delivered = 0; hauled = 0; bestHaul = 0; shed = 0; alive = true; lockUntil = -1; lockX = 0; hop = null; gapHop = null; elev = 0; popT = 0; now = 0; told = {}; secA = 0; secB = 1; deadT = 0; dragged = false;
+  genSection();
+}
+function start() {
+  demo = false; reset(); Lab.setScore(0); Lab.hint("");
+  Lab.input.onDown = [() => { dragged = true; }];
+  Lab.input.onMove = [(x, y, dx) => { if (Lab.input.down && alive) tx = clamp(tx + dx / CW * 1.25, .35, NC - .35); }];
+  Lab.input.onKey = [() => { dragged = true; }];
+  Lab.expose({
+    get score() { return bank + Math.floor(dist); }, get stack() { return stack; }, get level() { return level; }, get dist() { return dist; }, get alive() { return alive; }, get x() { return ax; }, get tx() { return tx; },
+    get delivered() { return delivered; }, get hauled() { return hauled; }, get shed() { return shed; }, get lean() { return lean; }, get CW() { return CW; }, get locked() { return dist < lockUntil; },
+    steerTo(x) { if (alive) tx = clamp(x, .35, NC - .35); }, get carried() { return carried; }, get spent() { return spent; }, setStack(n) { stack = clamp(n, 0, CAP); }, auto() { tx = aiTarget(); },
+    /* next unresolved obstacle row and the blocks lying before it */
+    next() { const r = rows.find(r => !r.done && r.type !== "shrine"); return r ? { type: r.type, y: r.y, away: r.y - dist, c: r.c.slice() } : null; },
+    ahead() { return pickups.filter(p => !p.taken && p.y > dist + .3).slice(0, 6).map(p => ({ col: p.col, away: p.y - dist, n: p.n })); },
+  });
+  Lab.loop((dt, t) => { update(dt, t); render(t); });
+}
+
+/* ---------- world generation: a section = block stretches + toll rows, closed by a shrine */
+function genSection() {
+  const lv = genLv++, nObs = Math.min(7, 2 + lv); let y = genY, budget = 2, lastType = "";
+  rows.push({ type: "mark", y: genY - 5, done: true, start: true });
+  for (let k = 0; k < nObs; k++) {
+    const stretch = Math.max(4.2, 6.6 - lv * .22 + Lab.rand(-.4, .9)), pat = lv === 1 && k === 0 ? 0 : Lab.randInt(0, 2), np = Lab.randInt(3, 5);
+    let col = lv === 1 && k === 0 ? 2 : Lab.randInt(0, NC - 1), got = 0;
+    for (let i = 0; i < np; i++) {
+      if (pat === 1 && i) col = clamp(col + Lab.choose([-1, 1]), 0, NC - 1); else if (pat === 2 && i) col = Lab.randInt(0, NC - 1);
+      const n = Lab.chance(.1 + lv * .03) ? (Lab.chance(.3) ? 3 : 2) : 1;
+      pickups.push({ col, y: y + 1 + i * (stretch - 2.2) / (np - 1), n, taken: false, bob: Lab.rand(0, TAU) }); got += n;
+    }
+    budget = Math.min(CAP - 2, budget + got * (pat === 2 ? .5 : .72)); y += stretch;
+    const pool = lv >= 3 ? ["wall", "gap", "beam"] : lv >= 2 || k > 0 ? ["wall", "gap"] : ["wall"];
+    let type = Lab.choose(pool); if (type === "beam" && lastType === "beam") type = "wall"; lastType = type;
+    const double = lv >= 4 && type !== "beam" && Lab.chance(.3) ? 2 : 1;
+    for (let d = 0; d < double; d++) {
+      if (d) { type = type === "wall" ? "gap" : "wall"; y += 2.6; }
+      if (type === "beam") {
+        const c = new Array(NC).fill(OPEN), full = lv >= 5 && Lab.chance(.4), a = Lab.randInt(0, 2), b = full ? NC : a + Lab.randInt(2, 3);
+        for (let i = full ? 0 : a; i < Math.min(NC, b); i++) c[i] = Lab.randInt(full ? 3 : 1, full ? 8 : 5);
+        if (full) budget = Math.min(budget, Math.max.apply(null, c));
+        rows.push({ type, y, c, done: false }); y += 1.4;
+      } else {
+        const maxC = type === "wall" ? 6 : 4, maxB = type === "wall" ? (lv < 2 ? 1 : lv < 4 ? 3 : 4) : (lv < 3 ? 1 : lv < 5 ? 2 : 3);
+        const base = Math.floor(budget) < 1 ? 0 : clamp(Math.round(budget * Lab.rand(.3, .65)), lv < 2 ? 0 : 1, Math.min(maxB, Math.floor(budget)));
+        const cheap = lv === 1 && k === 0 ? 2 : Lab.randInt(0, NC - 1), c = Array.from({ length: NC }, (_, i) => i === cheap ? base : Math.min(maxC, base + Lab.randInt(1, 3)));
+        if (lv < 3 && base > 0 && Lab.chance(.3)) c[(cheap + Lab.randInt(2, 3)) % NC] = 0;
+        budget -= base;
+        rows.push({ type, y, c, done: false, maxw: Math.max.apply(null, c) }); y += type === "wall" ? 1.6 : Math.max.apply(null, c) + 1;
+      }
+    }
+  }
+  y += 2.5; rows.push({ type: "shrine", y, lv, done: false }); genY = y + 4;
+}
+
+/* ---------- actions */
+function gain(p) {
+  p.taken = true; const room = CAP - stack, n = Math.min(room, p.n), over = p.n - n;
+  stack += n; carried += n; popT = 1;
+  if (demo) return;
+  hauled += p.n; const x = sx(p.col + .5), y = sy(p.y);
+  fx.burst(x, y, { n: 6, colors: [STONE, "#fff", STONE2], speed: 150, life: .35, size: 4, shape: "square", gravity: 200 });
+  Lab.sfx("pop", { pitch: .8 + stack * .06, vol: .8 }); Lab.buzz(5);
+  if (over > 0) { bank += over * 5; fx.text(x, y - 20, "+" + over * 5, { color: INK, size: 15, outline: CREAM }); Lab.sfx("coin", { vol: .5 }); if (!told.cap) { told.cap = 1; Lab.toast("Full load! Extra blocks pay 5", 1600, { y: .2 }); } }
+}
+function spill(n, dir, why) { // n blocks leave the top of the stack
+  for (let i = 0; i < n && stack > 0; i++) { stack--; const o = off(stack); loose.push({ x: sx(ax) + o, y: AY - elev - 14 * S - stack * BH, vx: dir * Lab.rand(120, 260) * S, vy: Lab.rand(-260, -120) * S, rot: 0, vr: Lab.rand(-9, 9), t: 0 }); }
+  if (!demo) { shed += n; Lab.sfx("knock", { pitch: .7 }); if (why === "beam") { Lab.sfx("crunch", { vol: .7 }); Lab.shake(5, .2); } Lab.buzz(12); }
+}
+function die(cause, r) {
+  if (demo) { reset(); return; }
+  alive = false; deadT = 0; v = 0;
+  const x = sx(ax), y = AY;
+  if (cause === "wall") { Lab.sfx("thud"); Lab.sfx("crunch"); Lab.shake(14, .4); Lab.hitstop(.08); spill(stack, Lab.choose([-1, 1])); fx.burst(x, y - 10, { n: 16, colors: [WALL, WALLT, STONE], speed: 300, life: .6, size: 6, shape: "shard" }); }
+  else { Lab.sfx("splash"); Lab.shake(8, .3); spill(stack, Lab.choose([-1, 1])); fx.ring(x, y - CW * .4, { r0: 6, r1: CW, color: "#c9fff5", width: 5, life: .6 }); fx.burst(x, y - CW * .4, { n: 22, colors: ["#c9fff5", "#7fe0d2", "#fff"], speed: 320, life: .7, size: 5, angle: -Math.PI / 2, spread: 1.6, gravity: 900 }); }
+  Lab.buzz(50);
+  Lab.after(.9, () => Lab.gameover({ title: cause === "wall" ? "Walled in" : "Into the canal", message: "That " + (cause === "wall" ? "wall" : "canal") + " needed " + r.c[r.used] + " block" + (r.c[r.used] === 1 ? "" : "s") + " — you carried " + r.had + ".", score: bank + Math.floor(dist), stats: [["Shrines reached", level - 1], ["Stones delivered", delivered], ["Best haul", bestHaul]] }));
+}
+function laneFor(r) { // generous: hugging a lane edge next to a payable lane counts as that lane
+  let col = clamp(Math.floor(ax), 0, NC - 1); const f = ax - col;
+  if (r.c[col] > stack) { if (f < .28 && col > 0 && r.c[col - 1] <= stack) col--; else if (f > .72 && col < NC - 1 && r.c[col + 1] <= stack) col++; }
+  return col;
+}
+function cross(r) {
+  r.done = true;
+  if (r.type === "shrine") {
+    if (demo) { level++; return; }
+    const n = stack, bonus = n * 10 * level; bank += bonus; delivered += n; bestHaul = Math.max(bestHaul, n);
+    const keep = Math.min(2, n); for (let i = 0; i < n - keep; i++) loose.push({ x: sx(ax) + off(n - 1 - i), y: AY - 14 * S - (n - 1 - i) * BH, vx: (i % 2 ? 1 : -1) * Lab.rand(200, 380) * S, vy: Lab.rand(-420, -260) * S, rot: 0, vr: Lab.rand(-6, 6), t: -i * .04, gold: true });
+    stack = keep; level++;
+    fx.text(sx(ax), AY - CW * 2.2, n ? n + " × " + 10 * (level - 1) + " = +" + bonus : "Empty-handed!", { color: INK, size: 22, outline: CREAM, life: 1.5 });
+    Lab.banner("LEVEL " + level, { color: INK, y: .2, ms: 1300 }); Lab.sfx("levelup"); if (n) Lab.sfx("coin"); Lab.bumpScore(); Lab.flash("#fff4d8", .25, .3);
+    if (level === 3 && !told.beam) { told.beam = 1; Lab.toast("Low lintels knock blocks off the top", 2200, { y: .28 }); }
+    return;
+  }
+  const col = r.type === "beam" ? clamp(Math.floor(ax), 0, NC - 1) : laneFor(r), need = r.c[col]; r.used = col; r.had = stack;
+  if (r.type === "beam") { if (stack > need) spill(stack - need, 0, "beam"); return; }
+  if (need === 0) return;
+  if (stack < need) return die(r.type, r);
+  stack -= need; spent += need; lockX = col + .5;
+  if (r.type === "wall") {
+    for (let i = 0; i < need; i++) { placed.push({ x: col + .5, y: r.y - .5, lift: i, at: 0 }); if (!demo) Lab.after(i * .045, () => Lab.sfx("knock", { pitch: .9 + i * .12, vol: .8 })); }
+    hop = { y0: r.y - .5, y1: r.y + .55, h: need }; lockUntil = r.y + .9;
+  } else {
+    for (let j = 0; j < need; j++) placed.push({ x: col + .5, y: r.y + j + .5, lift: 0, water: true, at: r.y + j - .25, said: false });
+    gapHop = { y: r.y, w: need }; lockUntil = r.y + need;
+  }
+  if (!demo) { fx.text(sx(col + .5), AY - CW * 1.6, "−" + need, { color: r.type === "wall" ? WALL : "#0d7d74", size: 20, outline: CREAM }); Lab.buzz(10); }
+}
+function aiTarget() { // demo pilot (also exposed to the test): head for the cheapest lane of the next toll, grazing blocks on the way
+  const r = rows.find(r => !r.done && r.type !== "shrine" && r.type !== "mark"), away = r ? r.y - dist : 99; let goal = ax;
+  if (r) { let best = 1e9; for (let c = 0; c < NC; c++) { const cost = (r.type === "beam" ? Math.max(0, stack - r.c[c]) : r.c[c] > stack ? 50 : r.c[c]) + Math.abs(c + .5 - ax) * .05; if (cost < best) { best = cost; goal = c + .5; } } }
+  if (away > 2.2 + Math.abs(goal - ax) * 1.1) { const p = pickups.find(p => !p.taken && p.y > dist + .2 && p.y < (r ? r.y : 1e9) && Math.abs(p.col + .5 - ax) < (p.y - dist) * .9 + .3); if (p) goal = p.col + .5; }
+  return goal;
+}
+const off = i => lean * CW * .045 * Math.pow(i, 1.2);
+
+function update(dt, t) {
+  now = t;
+  if (alive) { v = Lab.damp(v, speed(level), 2.5, dt); dist += v * dt; } else deadT += dt;
+  if (demo) tx = Lab.approach(tx, aiTarget(), 3.6 * dt);
+  const locked = dist < lockUntil, pax = ax;
+  if (locked) { tx = lockX; ax = Lab.damp(ax, lockX, 24, dt); }
+  else if (alive) { const k = Lab.input.axisX(); if (k && !demo) tx = clamp(tx + k * 5.2 * dt, .35, NC - .35); ax = Lab.damp(ax, tx, 16, dt); }
+  vx = dt > 1e-4 ? (ax - pax) / dt : vx;
+  // springy stack: lags behind the ant's sideways motion and sways back
+  leanV += ((-vx * .09 - lean) * 70 - leanV * 5) * dt; lean += leanV * dt; lean = clamp(lean, -2.2, 2.2);
+  const strain = Math.abs(lean) * stack / 9; shedT -= dt; creakT -= dt;
+  if (alive && strain > 1 && shedT <= 0 && stack > 0) { spill(1, lean > 0 ? 1 : -1); shedT = .13; leanV *= .7; if (!demo && !told.wob) { told.wob = 1; Lab.toast("Steer gently — tall stacks topple!", 1800, { y: .2 }); } }
+  else if (alive && strain > .62 && creakT <= 0 && !demo) { Lab.sfx("slide", { pitch: .5 + strain * .4, vol: .9 }); creakT = .16; }
+  // blocks on the road
+  for (const p of pickups) if (!p.taken && alive && Math.abs(p.y - dist) < .5 && Math.abs(p.col + .5 - ax) < .62) gain(p);
+  // toll rows
+  for (const r of rows) { if (r.done) continue; const trig = r.type === "wall" ? r.y - .5 : r.type === "gap" ? r.y - .05 : r.y; if (alive && dist >= trig) { cross(r); if (!alive) break; } else if (!demo && !told[r.type] && r.type !== "shrine" && r.y - dist < 6.5) { told[r.type] = 1; if (r.type !== "beam") Lab.toast(r.type === "wall" ? "Walls cost blocks — pick a cheap lane" : "Canals need one block per tile", 2400, { y: .2 }); } }
+  // hop over walls / skip across stones
+  let e = 0;
+  if (hop) { if (dist > hop.y1 + .35) hop = null; else e = hop.h * BH * (dist < hop.y1 ? ease.outCubic(clamp((dist - hop.y0) / .4, 0, 1)) : 1 - ease.inQuad(clamp((dist - hop.y1) / .35, 0, 1))) + Math.sin(clamp((dist - hop.y0) / .5, 0, 1) * Math.PI) * BH; }
+  if (gapHop) { if (dist > gapHop.y + gapHop.w) gapHop = null; else if (dist > gapHop.y) e = Math.abs(Math.sin((dist - gapHop.y) * Math.PI)) * BH * 1.1; }
+  elev = e;
+  for (const s of placed) if (s.water && !s.said && dist >= s.at) { s.said = true; if (!demo) { Lab.sfx("bubble", { pitch: .8 + Math.random() * .3 }); fx.ring(sx(s.x), sy(s.y), { r0: 4, r1: CW * .5, color: "#c9fff5", width: 3, life: .35 }); } }
+  for (const b of loose) { b.t += dt; if (b.t < 0) continue; b.vy += 1500 * S * dt; b.x += b.vx * dt; b.y += (b.vy + v * CW * .5) * dt; b.rot += b.vr * dt; }
+  loose = loose.filter(b => b.t < .9);
+  popT = Math.max(0, popT - dt * 5);
+  // housekeeping + generation
+  while (rows.length && rows[0].y < dist - 7) rows.shift();
+  while (pickups.length && pickups[0].y < dist - 4) pickups.shift();
+  while (placed.length && placed[0].y < dist - 5) placed.shift();
+  while (genY < dist + 20) genSection();
+  if (!demo) {
+    const sh = rows.find(r => r.type === "shrine" && !r.done), mk = rows.filter(r => r.start && r.y <= dist + .01).pop(); if (sh) { secB = sh.y; if (mk) secA = mk.y; }
+    Lab.setScore(bank + Math.floor(dist)); Lab.music.intensity(clamp(.2 + (level - 1) * .1 + stack / CAP * .3, 0, 1));
+  }
+}
+
+/* ---------- drawing */
+const hsh = r => { const s = Math.sin(r * 127.1 + 3.7) * 43758.5453; return s - Math.floor(s); };
+function groundSprite() {
+  const th = CW * 4;
+  return Lab.sprite("antg" + W + "x" + Math.round(CW * 10), W + 80, th, (g, w, h) => {
+    const rnd = Lab.rng(21), x0 = RX0 + 40, rw = NC * CW;
+    g.fillStyle = DUNE; g.fillRect(0, 0, w, h);
+    g.strokeStyle = "rgba(160,95,35,.22)"; g.lineWidth = 2; g.lineCap = "round";
+    for (let i = 0; i < 26; i++) { const x = rnd() * w, y = rnd() * h, l = 14 + rnd() * 26; for (const yy of [y, y - h, y + h]) { g.beginPath(); g.moveTo(x, yy); g.quadraticCurveTo(x + l / 2, yy - 5, x + l, yy); g.stroke(); } }
+    g.fillStyle = "rgba(90,45,70,.22)"; g.fillRect(x0 - 5, 0, rw + 10, h);
+    g.fillStyle = ROAD; g.fillRect(x0, 0, rw, h);
+    const rh = CW / 2;
+    for (let r = 0; r < 8; r++) for (let i = -1; i < NC; i++) { const x = x0 + i * CW + (r % 2) * CW / 2, t = rnd(); g.fillStyle = t < .33 ? "#ecc98d" : t < .66 ? "#e3b973" : "#e8c180"; const xa = Math.max(x0, x + 1.5), xb = Math.min(x0 + rw, x + CW - 1.5); if (xb > xa) { draw.rr(g, xa, r * rh + 1.5, xb - xa, rh - 3, 4); g.fill(); } }
+    g.fillStyle = "rgba(150,95,45,.3)"; for (let i = 0; i < 40; i++) g.fillRect(x0 + rnd() * rw, rnd() * h, 2, 2);
+  });
+}
+function blockSprite(k) {
+  return Lab.sprite("antb" + k + ":" + Math.round(BW * 10), BW + 2, BH + TD + 2, g => {
+    const f = k === 2 ? "#e9b949" : k ? "#bdaedb" : STONE2, t = k === 2 ? "#ffe58a" : k ? "#f6f0ff" : STONE;
+    draw.rect(g, 1, 1 + TD - 3, BW, BH + 3, 3, f); draw.rect(g, 1, 1, BW, TD, 3, t);
+    g.fillStyle = "rgba(255,255,255,.6)"; g.fillRect(4, 3, BW - 6, 2); g.fillStyle = "rgba(60,30,90,.25)"; g.fillRect(1, TD + BH - 2, BW, 3); g.fillRect(BW * .3, TD + 2, 1.5, BH - 4);
+  });
+}
+function drawBlock(c, x, by, k, sc) { const s = blockSprite(k); if (sc && sc !== 1) { c.save(); c.translate(x, by); c.scale(sc, sc); c.drawImage(s, -s.w / 2, -s.h + 1, s.w, s.h); c.restore(); } else c.drawImage(s, x - s.w / 2, by - s.h + 1, s.w, s.h); }
+function box(c, x0, x1, yf, yb, h, front, top, label, bad) { // extruded slab: ground footprint x0..x1, front line yf, back line yb, height h px
+  c.fillStyle = front; c.fillRect(x0, yf - h, x1 - x0, h); c.fillStyle = top; c.fillRect(x0, yb - h, x1 - x0, yf - yb);
+  c.fillStyle = "rgba(255,255,255,.18)"; c.fillRect(x0, yb - h, x1 - x0, 2); c.fillStyle = "rgba(40,10,40,.18)"; c.fillRect(x1 - 2, yf - h, 2, h);
+  if (label != null && h > 8) { draw.text(c, label, (x0 + x1) / 2, yf - h / 2 + 1, { size: clamp(h * .8, 11, 22 * S + 4), color: bad ? "#ffd9c9" : CREAM, shadow: "rgba(60,20,30,.5)" }); if (bad) { c.strokeStyle = "#ffd9c9"; c.lineWidth = 2; c.beginPath(); c.moveTo((x0 + x1) / 2 - 12 * S, yf - h / 2 + 5); c.lineTo((x0 + x1) / 2 + 12 * S, yf - h / 2 - 5); c.stroke(); } }
+}
+function drawFlat(c, r) {
+  const y = sy(r.y);
+  if (r.type === "gap") {
+    for (let i = -1; i <= NC; i++) {
+      const w = i < 0 ? r.maxw : i >= NC ? r.maxw : r.c[i]; if (!w) continue;
+      const x0 = i < 0 ? -40 : sx(i), x1 = i >= NC ? W + 40 : sx(i + 1), yt = sy(r.y + w);
+      c.fillStyle = WATER; c.fillRect(x0, yt, x1 - x0, y - yt); c.fillStyle = "#147e78"; c.fillRect(x0, yt, x1 - x0, 6 * S); c.fillStyle = "rgba(255,255,255,.5)"; c.fillRect(x0, y - 2, x1 - x0, 2);
+      if (i >= 0 && i < NC) {
+        const bad = !r.done && stack < w;
+        for (let j = 0; j < w; j++) { const cy = sy(r.y + j + .5), wob = Math.sin(now * 3 + j + i) * 2; c.strokeStyle = "rgba(255,255,255,.45)"; c.lineWidth = 2; c.beginPath(); c.moveTo(x0 + 8, cy + wob + 12 * S); c.lineTo(x0 + 20, cy + wob + 12 * S); c.moveTo(x1 - 24, cy - wob - 10 * S); c.lineTo(x1 - 10, cy - wob - 10 * S); c.stroke();
+          if (!r.done) { c.setLineDash([4, 4]); c.strokeStyle = bad ? "rgba(90,20,40,.75)" : "rgba(255,255,255,.8)"; draw.rr(c, (x0 + x1) / 2 - BW / 2, cy - TD / 2, BW, TD, 3); c.stroke(); c.setLineDash([]); } }
+        if (!r.done) draw.text(c, w, (x0 + x1) / 2, sy(r.y + w / 2), { size: 17 * S + 4, color: bad ? "#5a1428" : "#fff", stroke: bad ? "rgba(255,255,255,.6)" : "rgba(10,90,84,.7)", strokeW: 4 });
+      }
+    }
+  } else if (r.type === "shrine") {
+    const n = 10, tw = NC * CW / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < 2; j++) { c.fillStyle = (i + j) % 2 ? "#1fa79b" : CREAM; c.fillRect(sx(0) + i * tw, y - (j + 1) * tw, tw, tw); }
+    draw.text(c, "SHRINE · ×" + 10 * r.lv, W / 2, y - tw * 2 - 12 * S, { size: 13 * S + 3, color: INK, stroke: "rgba(255,244,216,.8)", strokeW: 4 });
+  } else if (r.type === "wall") { // long sun shadows
+    c.fillStyle = "rgba(70,30,90,.2)";
+    for (let i = 0; i < NC; i++) { const h = r.c[i] * BH; if (!h) continue; c.beginPath(); c.moveTo(sx(i), y); c.lineTo(sx(i + 1), y); c.lineTo(sx(i + 1) + h * .7, y + h * .45); c.lineTo(sx(i) + h * .7, y + h * .45); c.fill(); }
+  } else if (r.type === "beam") {
+    c.fillStyle = "rgba(70,30,90,.2)"; for (let i = 0; i < NC; i++) if (r.c[i] < OPEN) c.fillRect(sx(i) + 4, y - CW * .22, CW, CW * .3);
+  }
+}
+function drawRow(c, r) {
+  const yf = sy(r.y);
+  if (r.type === "wall") {
+    box(c, -40, sx(0), yf, sy(r.y + .5), 7 * BH, "#a8452d", "#c96a47"); box(c, sx(NC), W + 40, yf, sy(r.y + .5), 7 * BH, "#a8452d", "#c96a47");
+    for (let i = 0; i < NC; i++) { const h = r.c[i]; if (!h) { c.fillStyle = "rgba(120,60,40,.25)"; c.fillRect(sx(i), sy(r.y + .5), CW, CW * .5); continue; } const bad = !r.done && stack < h; box(c, sx(i), sx(i + 1), yf, sy(r.y + .5), h * BH, bad ? "#8f2f2a" : WALL, bad ? "#c25a48" : WALLT, r.done ? null : h, bad);
+      c.fillStyle = "rgba(60,15,20,.16)"; for (let k = 1; k < h; k++) c.fillRect(sx(i), yf - k * BH, CW, 1.5); }
+  } else if (r.type === "beam") {
+    for (let i = 0; i < NC; i++) {
+      if (r.c[i] >= OPEN) continue; const cl = r.c[i], lift = (cl + .25) * BH + 14 * S, bad = !r.done && stack > cl;
+      if (i === 0 || r.c[i - 1] >= OPEN) c.fillStyle = BAS, c.fillRect(sx(i) - 3, yf - lift, 6, lift); if (i === NC - 1 || r.c[i + 1] >= OPEN) c.fillStyle = BAS, c.fillRect(sx(i + 1) - 3, yf - lift, 6, lift);
+      c.save(); c.translate(0, -lift); box(c, sx(i) - 1, sx(i + 1) + 1, yf, yf - CW * .28, BH * 1.5, bad ? "#7a2f5a" : BAS, BAST, null); c.restore();
+      if (!r.done) draw.text(c, "max " + cl, sx(i + .5), yf - lift - BH * .72, { size: 11 * S + 3, color: bad ? "#ffc9c0" : CREAM });
+    }
+  }
+}
+function drawAnt(c, t) {
+  const x = sx(ax), y = AY - elev, run = dist * 7, k = S;
+  draw.shadow(c, x + 3, AY + 13 * k, 17 * k * (1 - elev / 300), 6 * k, .22);
+  if (stack) { c.fillStyle = "rgba(70,30,90,.16)"; c.beginPath(); c.moveTo(x - BW * .4, AY + 4 * k); c.lineTo(x + BW * .4, AY + 8 * k); c.lineTo(x + BW * .4 + stack * BH * .6, AY + 8 * k + stack * BH * .38); c.lineTo(x - BW * .2 + stack * BH * .6, AY + 2 * k + stack * BH * .38); c.fill(); }
+  c.strokeStyle = "#2a1c3d"; c.lineWidth = 2.6 * k; c.lineCap = "round";
+  for (let i = 0; i < 3; i++) for (const s of [-1, 1]) { const ph = Math.sin(run + i * 2.1 + (s > 0 ? Math.PI : 0)) * (alive ? 4 : 0) * k, ly = y + (4 + i * 6) * k; c.beginPath(); c.moveTo(x + s * 7 * k, ly); c.lineTo(x + s * 15 * k, ly - 3 * k + ph); c.lineTo(x + s * 20 * k, ly + 3 * k + ph); c.stroke(); }
+  c.fillStyle = "#2a1c3d"; c.beginPath(); c.ellipse(x, y + 13 * k, 11 * k, 12 * k, 0, 0, TAU); c.fill(); c.beginPath(); c.ellipse(x, y + 2 * k, 7 * k, 6 * k, 0, 0, TAU); c.fill();
+  c.fillStyle = "rgba(255,255,255,.16)"; c.beginPath(); c.ellipse(x - 3 * k, y + 9 * k, 4 * k, 6 * k, -.3, 0, TAU); c.fill();
+  c.fillStyle = "#3a2752"; c.beginPath(); c.arc(x, y - 6 * k, 10 * k, 0, TAU); c.fill();
+  c.strokeStyle = "#2a1c3d"; c.lineWidth = 2 * k; for (const s of [-1, 1]) { c.beginPath(); c.moveTo(x + s * 5 * k, y - 10 * k); c.quadraticCurveTo(x + s * 15 * k, y - 16 * k, x + s * 17 * k, y - 6 * k + Math.sin(t * 9 + s) * 2); c.stroke(); }
+  const look = clamp(vx * .25, -1.6, 1.6) * k, worried = Math.abs(lean) * stack / 9 > .62 || !alive;
+  c.fillStyle = "#fff"; for (const s of [-1, 1]) { c.beginPath(); c.arc(x + s * 4.4 * k, y - 4 * k, (worried ? 3.9 : 3.2) * k, 0, TAU); c.fill(); }
+  c.fillStyle = "#1a1026"; for (const s of [-1, 1]) { c.beginPath(); c.arc(x + s * 4.4 * k + look, y - 4.6 * k, 1.5 * k, 0, TAU); c.fill(); }
+  // the load
+  const by0 = y - 13 * k, strain = Math.abs(lean) * stack / 9;
+  for (let i = 0; i < stack; i++) { const top = i === stack - 1; drawBlock(c, x + off(i) + (strain > .62 ? Math.sin(t * 50 + i) * 1.2 : 0), by0 - i * BH, i % 2, top ? 1 + Math.sin(popT * Math.PI) * .25 : 1); }
+  if (strain > .62 && alive) draw.text(c, "!", x + off(stack) + (lean > 0 ? 1 : -1) * BW * .8, by0 - stack * BH, { size: 20 * k + 4, color: "#c2302a", stroke: CREAM, strokeW: 4 });
+  // count tag
+  const bx = x - BW * .5 - 15 * k, byy = y + 6 * k, pu = 1 + Math.sin(popT * Math.PI) * .25;
+  draw.circle(c, bx, byy, 12 * k * pu, CREAM, INK, 2.2); draw.text(c, stack, bx, byy + 1, { size: (14 * k + 2) * pu, color: INK });
+}
+function render(t) {
+  const c = Lab.ctx, g = groundSprite(), th = CW * 4, o = ((dist * CW) % th + th) % th;
+  for (let y = -th + o - 40; y < H + 40; y += th) c.drawImage(g, -40, y, g.w, g.h);
+  const lo = dist - (H - AY) / CW - 1, hi = dist + AY / CW + 1;
+  for (let r = Math.ceil(hi); r > lo; r--) { const h = hsh(r); if (h < .34) { const x = (h * 100 | 0) % 2 ? RX0 * .45 : W - RX0 * .45, y = sy(r), rr = RX0 * .3; if (rows.some(q => (q.type === "wall" || q.type === "gap") && Math.abs(q.y - r) < 5)) continue;
+      if (h > .2) { c.fillStyle = "rgba(70,30,90,.18)"; c.beginPath(); c.ellipse(x + rr * .5, y + rr * .3, rr * 1.1, rr * .5, .4, 0, TAU); c.fill(); draw.star(c, x, y, rr * 1.15, "#2c8f63", 7, .45); draw.star(c, x, y - 2, rr * .7, "#49b983", 7, .45); continue; } c.fillStyle = "rgba(70,30,90,.18)"; c.beginPath(); c.ellipse(x + rr * .7, y + rr * .3, rr * 1.2, rr * .5, .4, 0, TAU); c.fill(); c.fillStyle = "#c98f58"; c.fillRect(x - rr, y - rr * .8, rr * 2, rr * .8); draw.circle(c, x, y, rr, "#c98f58"); draw.circle(c, x, y - rr * .8, rr, "#f1d6a0"); draw.circle(c, x, y - rr * .8, rr * .55, null, "rgba(150,95,45,.4)", 1.5); } }
+  for (let i = rows.length - 1; i >= 0; i--) { const r = rows[i]; if (r.y < hi + 5 && r.y > lo - 5) drawFlat(c, r); }
+  // lifted things, far to near
+  const list = []; for (const r of rows) if ((r.type === "wall" || r.type === "beam") && r.y < hi + 2 && r.y > lo - 3) list.push([r.type === "wall" ? r.y + .55 : r.y, 0, r]);
+  for (const p of pickups) if (!p.taken && p.y < hi && p.y > lo) list.push([p.y, 1, p]);
+  for (const s of placed) if (dist >= s.at && s.y < hi && s.y > lo) list.push([s.y - (s.water ? 0 : .01 * (9 - s.lift)), 2, s]);
+  list.push([dist, 3, null]); list.sort((a, b) => b[0] - a[0]);
+  for (const [, k, e] of list) {
+    if (k === 0) drawRow(c, e);
+    else if (k === 1) { const x = sx(e.col + .5), y = sy(e.y) + TD * .5; draw.shadow(c, x + 4, y + 2, BW * .6, BW * .2, .2); for (let i = 0; i < e.n; i++) drawBlock(c, x + (i % 2 ? 2 : -1), y - i * BH + Math.sin(t * 4 + e.bob) * 1.2, i % 2); if (e.n > 1) { c.fillStyle = "rgba(255,255,255,.9)"; draw.star(c, x + BW * .5, y - e.n * BH - TD * .6, 5 * S + Math.sin(t * 6 + e.bob) * 1.5, "#fff", 4, .4); } }
+    else if (k === 2) { const x = sx(e.x), y = sy(e.y) + TD * .5; if (e.water) { const a = clamp((dist - e.at) * 5, 0, 1); drawBlock(c, x, y + 3 * S, 0, ease.outBack(a)); } else drawBlock(c, x, y - e.lift * BH, e.lift % 2); }
+    else drawAnt(c, t);
+  }
+  for (const b of loose) { if (b.t < 0) continue; c.save(); c.translate(b.x, b.y); c.rotate(b.rot); c.globalAlpha = clamp(1.6 - b.t * 2, 0, 1); const s = blockSprite(b.gold ? 2 : 0); c.drawImage(s, -s.w / 2, -s.h / 2, s.w, s.h); c.restore(); } c.globalAlpha = 1;
+  if (demo) return;
+  // HUD strip: level + progress to the shrine
+  const y0 = Lab.play.y + 16 * S + 2, pw = W * .34, pr = clamp((dist - secA) / Math.max(1, secB - secA), 0, 1);
+  draw.text(c, "LEVEL " + level, 14, y0, { size: 12 * S + 3, color: INK, align: "left", stroke: "rgba(255,244,216,.7)", strokeW: 3 });
+  draw.rect(c, W - 14 - pw, y0 - 5, pw, 10, 5, "rgba(59,33,64,.25)"); draw.rect(c, W - 14 - pw, y0 - 5, Math.max(10, pw * pr), 10, 5, "#1fa79b"); draw.rect(c, W - 14 - pw, y0 - 5, pw, 10, 5, null, INK, 2);
+  c.fillStyle = INK; c.beginPath(); c.moveTo(W - 14, y0 - 12); c.lineTo(W - 8, y0); c.lineTo(W - 14, y0 + 12); c.lineTo(W - 20, y0); c.closePath(); c.fill();
+  if (!dragged && dist < 6) draw.text(c, "Drag to steer", W / 2, AY + 56 * S, { size: 16 * S + 3, color: INK, stroke: CREAM, strokeW: 5 });
+}
+Lab.boot();
+})();
+</script></body></html>

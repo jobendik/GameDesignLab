@@ -1,0 +1,364 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Bamboo Span</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* BAMBOO SPAN — hold to grow a bamboo stalk, let go and it topples across the gap; a pangolin curls up and rolls over.
+ * Identity: misty karst valley, limestone pillars, jade/cream/vermilion woodblock palette that moves through four
+ *           times of day; bamboo nodes click up a pentatonic ladder as the stalk grows, so length is audible.
+ * Depth:    PERFECT streak (tip on the red mat), LEAP (span two pillars at once, x2), hop while rolling to catch
+ *           fireflies (5 light a lantern = one free rescue) and to clear crows; later: drifting islets, gold bamboo
+ *           that grows faster, crumbling pillars on a timer. A too-short tap just shrivels back (no cheap deaths). */
+Lab.init({
+  title: "Bamboo Span", tagline: "Grow a stalk, tip it over, roll across.", category: "Arcade & Action",
+  howto: ["Hold to grow bamboo, let go to drop it", "Land the tip on the red mat for a perfect", "Tap while rolling to hop for fireflies"],
+  theme: { bg: "#cfe3d6", bg2: "#f6efd9", fg: "#1f3b2c", muted: "#5d7a68", accent: "#e2553d", accent2: "#3f9a6b", light: true },
+  orient: "any", music: { style: "dream", key: "G", vol: .5 }, restart: start, attract,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, mix = Lab.color.mix, shade = Lab.color.shade, alpha = Lab.color.alpha;
+const SEG = 18, MAXLEN = 330, HR = 13, PERF = 7, RED = "#e2553d", OC = "#b9773f", DK = "#74421f", BL = "#f3dfb8";
+const VALLEYS = [
+  { n: "Dawn Mist", sky: ["#f6dcc6", "#f7ead2", "#dcebdc"], far: "#a9cbbb", near: "#74a892", mist: "#f1f6ea", sun: "#ffcf9a", rock: "#7d998b", grass: "#5cab5e", fg: "#1f3b2c", light: true },
+  { n: "Jade Noon", sky: ["#a9dcd8", "#cdeedd", "#eef6d8"], far: "#86c2aa", near: "#4b9a80", mist: "#f5fbf0", sun: "#fff7cf", rock: "#829c8a", grass: "#45a455", fg: "#17382b", light: true },
+  { n: "Amber Dusk", sky: ["#f2a678", "#f5c995", "#ecdcb9"], far: "#bb8f86", near: "#7f6a74", mist: "#f8e7d0", sun: "#ff8f52", rock: "#8c8377", grass: "#7c9c48", fg: "#3b2418", light: true },
+  { n: "Moon Hush", sky: ["#1f2c54", "#3b4f7b", "#7d92ad"], far: "#465e86", near: "#2c4168", mist: "#b4c5da", sun: "#f6f2da", rock: "#5b6d84", grass: "#3d7d6a", fg: "#f1f4ff", light: false },
+];
+let S = 1, gy = 0, camX = 0, camOff = 80, pillars, bridges, cur, hero, st, state, score, streak, bestStreak, crossed, flies, fliesTotal, lantern, stage, vPrev, vBlend,
+  holding, keyHeld, hookHold, target, doomed, leap, rollTo, nodeN, hopBuf, floatT, floatFrom, warnT, growLoop, taught;
+
+function layout() {
+  const P = Lab.play, port = Lab.H > Lab.W * 1.1;
+  gy = P.y + P.h * (port ? .66 : .7); S = clamp(Math.min(Lab.W / 400, (gy - P.y - 8) / 345), .45, 1.6); camOff = clamp(Lab.W * .2, 56, 240);
+  Lab.sprite.clear("bs:");
+}
+Lab.onResize(() => { if (pillars) layout(); });
+const X = x => (x - camX) * S, V = () => VALLEYS[stage % 4];
+
+/* ---------- world generation: gaps widen, pillars narrow, new pillar kinds join as the run goes on */
+function addPillar() {
+  const i = pillars.length, prev = pillars[i - 1], d = clamp(i / 36, 0, 1);
+  let w = Math.round(rand(lerp(84, 46, d), lerp(100, 62, d)) / 4) * 4, gap = rand(44, lerp(112, 178, d));
+  if (i < 3) { w = 92; gap = [0, 72, 98][i]; }
+  else if (i > 6 && Lab.chance(.12)) w = 32;
+  const p = { i, x: 0, w, kind: "rock", flies: [], crow: null, sink: 0, gold: i >= 12 && Lab.chance(.25), frozen: false, t: 0 };
+  if (i >= 8 && w > 40 && Lab.chance(lerp(.18, .4, d))) { p.kind = "drift"; p.amp = lerp(12, 26, d); p.ph = rand(0, TAU); p.sp = rand(1.5, 2.3); gap = Math.max(gap, p.amp + 50); }
+  else if (i >= 18 && Lab.chance(.22)) p.kind = "crumb";
+  if (prev && prev.kind === "drift") gap = Math.max(gap, prev.amp + 50);
+  p.x = p.ox = prev ? prev.x + prev.w + gap : 0;
+  const g0 = prev ? prev.x + prev.w : 0, m = (p.amp || 0) + 22;
+  if (i >= 2 && gap > 60 + m) {
+    const n = i > 2 && gap > 128 && Lab.chance(.5) ? 2 : 1;
+    for (let k = 0; k < n; k++) p.flies.push({ x: g0 + 20 + (gap - m - 20) * (k + .5 + (i > 2 ? rand(-.2, .2) : 0)) / n, y: 41, ph: rand(0, TAU), got: false });
+    if (i >= 14 && gap > 92 + m && Lab.chance(.32)) { p.crow = { x: g0 + (gap - m) * rand(.42, .7), hit: false, ph: rand(0, TAU) }; p.flies[0].x = p.crow.x; p.flies[0].y = 44; }
+  }
+  pillars.push(p);
+}
+function initWorld() { pillars = []; bridges = []; stage = 0; vPrev = 0; vBlend = 1; layout(); while (pillars.length < 9) addPillar(); cur = 0; camX = pillars[0].x + pillars[0].w - 18 - camOff / S; }
+
+function start() {
+  initWorld();
+  score = 0; streak = 0; bestStreak = 0; crossed = 0; flies = 0; fliesTotal = 0; lantern = false; holding = false; keyHeld = false; hookHold = false; target = null; doomed = false; leap = false; nodeN = 0; hopBuf = 0; warnT = 0; taught = 0;
+  const p = pillars[0];
+  hero = { x: p.x + p.w - 18, y: 0, h: 0, vh: 0, vx: 0, vy: 0, rot: 0, sq: 0, mode: "stand", joy: 0 };
+  st = newStalk(p); state = "ready";
+  Lab.setScore(0); Lab.setTheme({ fg: V().fg, muted: "#5d7a68", light: true }); Lab.music.intensity(.3);
+  growLoop = Lab.audio.loop({ noise: true, bp: 900, q: 2, vol: 0 });
+  Lab.input.onDown = [() => press()]; Lab.input.onUp = [() => release()];
+  Lab.input.onKey = [k => { if (k === " " || k === "ArrowUp" || k === "Enter") { keyHeld = true; press(); } }];
+  Lab.hint("Hold to grow · let go to drop", { sticky: true });
+  Lab.expose({
+    get state() { return state; }, get score() { return score; }, get cur() { return cur; }, get crossed() { return crossed; }, get streak() { return streak; }, get flies() { return flies; }, get lantern() { return lantern; },
+    get stalk() { return { x: st.x, len: st.len, gold: st.gold }; }, get hero() { return { x: hero.x, h: hero.h, mode: hero.mode }; }, get stage() { return stage; },
+    get pillars() { return pillars.map(q => ({ i: q.i, x: q.x, w: q.w, kind: q.kind, flies: q.flies.map(f => ({ x: f.x, got: f.got })), crow: q.crow && q.crow.x })); },
+    get need() { const q = pillars[cur + 1]; return { min: q.x - st.x, mid: q.x + q.w / 2 - st.x, max: q.x + q.w - st.x }; },
+    press() { hookHold = true; press(); }, release() { hookHold = false; release(); }, setFlies(n) { flies = n; lantern = n >= 5; }, screen: (x, y) => ({ x: X(x), y: gy - y * S }),
+  });
+  Lab.loop(frame);
+}
+const newStalk = p => ({ x: p.x + p.w - 3, len: 0, ang: 0, w: 0, bz: 0, bv: 0, sag: 0, gold: p.gold, shrink: false });
+const growSpeed = () => lerp(150, 212, clamp(crossed / 45, 0, 1)) * (st.gold ? 1.45 : 1);
+
+function press() { holding = true; if (state === "ready") beginGrow(); else if (state === "roll") hop(); }
+function release() { holding = false; if (state === "grow") letGo(); }
+function beginGrow() { if (st.shrink) return; state = "grow"; nodeN = 0; Lab.sfx("tap", { pitch: .8 }); Lab.buzz(6); }
+function letGo() {
+  growLoop.set({ vol: 0 });
+  if (st.len < 14) { st.shrink = true; state = "ready"; Lab.sfx("flip", { pitch: .7, vol: .6 }); return; }   // an accidental tap is forgiven
+  state = "fall"; st.w = 1.3; Lab.sfx("whoosh", { pitch: 1.25 - st.len / 500 });
+}
+function hop() { if (hero.h <= 0) { hero.vh = 232; hero.h = .01; hero.sq = -.22; Lab.sfx("jump", { pitch: 1.25, vol: .7 }); } else hopBuf = .14; }
+function add(pts, wx, wy, label, col) { score += pts; Lab.setScore(score); Lab.bumpScore(); fx.text(X(wx), gy - wy * S, label || "+" + pts, { color: col || V().fg, size: 20, outline: V().light ? "rgba(255,255,255,.7)" : "rgba(0,0,0,.4)" }); }
+
+function land() {
+  const tip = st.x + st.len; st.bv = -2.6; target = null; leap = false;
+  for (let k = 1; k <= 2; k++) { const p = pillars[cur + k]; if (p && tip >= p.x - 3 && tip <= p.x + p.w + 3) { target = p; leap = k === 2; break; } }
+  Lab.sfx("knock", { pitch: 1.15 - st.len / 700 }); Lab.shake(2.5, .12); Lab.buzz(10);
+  fx.burst(X(tip), gy, { n: 7, color: mix(V().grass, "#fff", .4), speed: 90, life: .45, size: 3, gravity: 240, angle: -Math.PI / 2, spread: 1.2 });
+  state = "roll"; hero.mode = "roll"; hero.h = 0; hero.vh = 0; hopBuf = 0;
+  if (!target) { doomed = true; rollTo = tip + 4; streak = 0; Lab.audio.tone({ f: 190, f2: 120, dur: .25, type: "triangle", vol: .12 }); return; }
+  doomed = false; target.frozen = true; rollTo = target.x + target.w - 18;
+  const mid = target.x + target.w / 2, perfect = Math.abs(tip - mid) <= PERF; let pts = 1;
+  if (perfect) {
+    streak++; bestStreak = Math.max(bestStreak, streak); pts = 2 + Math.min(3, streak - 1);
+    Lab.audio.combo(streak + 1, { vol: .22 }); Lab.sfx("chime", { vol: .7, pitch: 1 + Math.min(streak, 6) * .05 }); Lab.hitstop(.045);
+    fx.ring(X(mid), gy, { r0: 6, r1: 46 * S, color: RED, width: 4 }); fx.burst(X(mid), gy - 4, { n: 12, colors: [RED, "#ffd27a", "#fff"], speed: 170, life: .6, size: 3.5, gravity: 260, shape: "star" });
+  } else streak = 0;
+  if (target.w < 40) pts += 2;
+  if (leap) { pts *= 2; Lab.sfx("powerup", { vol: .6 }); Lab.banner("LEAP ×2", { color: RED, ms: 800, y: .24 }); }
+  add(pts, mid, 26, (perfect ? (streak > 1 ? "PERFECT ×" + streak + "  " : "PERFECT  ") : "") + "+" + pts, perfect ? RED : null);
+}
+function arrive(p, rescued) {
+  if (!rescued) { bridges.push({ x: st.x, len: st.len, gold: st.gold }); if (bridges.length > 4) bridges.shift(); }
+  crossed += p.i - cur; cur = p.i; state = "ready"; hero.mode = "stand"; hero.sq = .28; hero.joy = streak > 0 && !rescued ? 1 : 0; hero.h = 0; hero.y = 0; hero.x = p.x + p.w - 18; p.frozen = true; doomed = false;
+  st = newStalk(p);
+  while (pillars.length < cur + 8) addPillar();
+  if (p.kind === "crumb") { p.t = lerp(3.4, 2.5, clamp(crossed / 60, 0, 1)); Lab.sfx("crunch", { pitch: .7 }); }
+  const v = Math.floor(crossed / 10);
+  if (v > stage) { vPrev = stage % 4; stage = v; vBlend = 0; Lab.sprite.clear("bs:p:"); Lab.banner("Valley " + (stage + 1) + " · " + V().n, { color: stage % 4 === 3 ? "#f6f2da" : RED, ms: 1500, y: .2 }); Lab.sfx("levelup", { vol: .7 }); Lab.setTheme({ fg: V().fg, muted: V().light ? "#5d7a68" : "#c5d0e6", light: V().light }); }
+  if (crossed === 1) Lab.hint("");
+  const nx = pillars[cur + 1];
+  if (!taught && nx.flies.length) { taught = 1; Lab.hint("Tap while rolling to hop for the firefly", { sticky: true }); }
+  else if (taught === 1) { taught = 2; Lab.hint(""); }
+  if (st.gold && taught < 3) { taught = 3; Lab.toast("Gold bamboo grows fast!", 1300, { y: .3 }); }
+  Lab.music.intensity(clamp(.3 + crossed / 60 + streak * .06, 0, 1));
+}
+function startDrop(sinking) {
+  state = "drop"; hero.mode = "roll"; hero.vx = sinking ? 0 : 150; hero.vy = sinking ? 0 : 40; hero.y = hero.h; hero.h = 0;
+  Lab.audio.tone({ f: 1100, f2: 240, dur: .6, vol: .12, a: .02 }); Lab.buzz(30);
+}
+function gotFly(f) {
+  f.got = true; flies++; fliesTotal++;
+  const sx = X(f.x), sy = gy - (HR + hero.h + 14) * S;
+  fx.burst(sx, sy, { n: 9, colors: ["#fff6a8", "#d9ff8a", "#fff"], speed: 120, life: .5, size: 3, glow: 8 });
+  Lab.audio.note(["E5", "G5", "A5", "B5", "D6"][Math.min(4, flies - 1)], { dur: .22, vol: .2 }); Lab.buzz(8);
+  if (flies >= 5 && !lantern) { lantern = true; flies = 5; Lab.sfx("powerup"); Lab.toast("Lantern lit — one free rescue", 1500, { y: .3 }); add(1, f.x, 60); }
+  else if (lantern) add(2, f.x, 60, "+2", "#b8860b"); else add(1, f.x, 60);
+}
+function bonk(cr) {
+  cr.hit = true; streak = 0; const lost = lantern ? 0 : Math.min(2, flies); flies -= lost;
+  Lab.sfx("hurt", { vol: .7 }); Lab.shake(6, .2); Lab.buzz(25); hero.vh = 150; hero.h = Math.max(hero.h, .01);
+  fx.burst(X(cr.x), gy - 14 * S, { n: 10, color: "#2b2a33", speed: 150, life: .6, size: 4, gravity: 300, shape: "shard" });
+  fx.text(X(cr.x), gy - 44 * S, lost ? "−" + lost + " fireflies" : "Ouch!", { color: "#2b2a33", size: 16, outline: "rgba(255,255,255,.7)" });
+}
+
+function update(dt, t) {
+  if (keyHeld && !(Lab.input.keys[" "] || Lab.input.keys.ArrowUp || Lab.input.keys.Enter)) { keyHeld = false; release(); }
+  if (holding && !keyHeld && !hookHold && !Lab.input.down) release();        // e.g. finger lifted while paused
+  for (const p of pillars) if (p.kind === "drift" && !p.frozen) p.x = p.ox + Math.sin(t * p.sp + p.ph) * p.amp;
+  const P = pillars[cur], pc = camX;
+  hero.sq = Lab.damp(hero.sq, 0, 10, dt); hero.joy = Math.max(0, hero.joy - dt * 1.6);
+  if (st.shrink) { st.len -= 160 * dt; if (st.len <= 0) { st.len = 0; st.shrink = false; } }
+  if (state === "ready" && holding && !st.shrink) beginGrow();
+  if (state === "grow") {
+    st.len = Math.min(MAXLEN, st.len + growSpeed() * dt);
+    const n = Math.floor(st.len / SEG);
+    if (n > nodeN) { nodeN = n; Lab.audio.tone({ f: Lab.audio.scaleFreq(n, 55), dur: .07, type: "square", lp: 1500, vol: .1 }); Lab.sfx("tick", { vol: .5, pitch: .8 + n * .03 }); }
+    growLoop.set({ vol: st.len < MAXLEN ? .05 : 0, f: 700 + st.len * 3 });
+  }
+  if ((state === "ready" || state === "grow") && P.kind === "crumb" && P.t > 0) {
+    P.t -= dt; warnT -= dt; if (warnT <= 0) { Lab.sfx("heartbeat", { pitch: 1.6 - P.t * .15, vol: .5 }); warnT = .2 + P.t * .12; }
+    if (P.t <= 0) { growLoop.set({ vol: 0 }); P.sinking = true; Lab.sfx("explode", { vol: .6, pitch: 1.3 }); Lab.shake(8, .3); startDrop(true); }
+  }
+  if (P.sinking) P.sink += (60 + P.sink * 4) * dt;
+  if (state === "fall") { st.w += (3 + 24 * Math.sin(st.ang)) * dt; st.ang += st.w * dt; if (st.ang >= Math.PI / 2) { st.ang = Math.PI / 2; land(); } }
+  if (st.bz || st.bv) { st.bv += (-260 * st.bz - 14 * st.bv) * dt; st.bz += st.bv * dt; if (st.bz > 0) { st.bz = 0; st.bv = Math.abs(st.bv) < .4 ? 0 : -st.bv * .35; } }
+  if (state === "roll") {
+    const v = lerp(205, 250, clamp(crossed / 50, 0, 1));
+    hero.x += v * dt; hero.rot += v * dt / HR; hopBuf -= dt;
+    if (hero.h > 0) { hero.vh -= 900 * dt; hero.h += hero.vh * dt; if (hero.h <= 0) { hero.h = 0; hero.vh = 0; hero.sq = .25; Lab.sfx("land", { vol: .45 }); if (hopBuf > 0) hop(); } }
+    if (doomed && st.x + st.len < pillars[cur + 1].x) st.sag = Lab.damp(st.sag, clamp((hero.x - st.x) / st.len, 0, 1) * .2, 10, dt);
+    for (let k = 1; k <= 2; k++) {
+      const p = pillars[cur + k]; if (!p) continue;
+      for (const f of p.flies) if (!f.got && Math.hypot(f.x - hero.x, f.y - HR - hero.h) < 21) gotFly(f);
+      if (p.crow && !p.crow.hit && Math.hypot(p.crow.x - hero.x, 12 - HR - hero.h) < 18) bonk(p.crow);
+    }
+    if (hero.x >= rollTo) { hero.x = rollTo; if (doomed) startDrop(false); else if (hero.h <= 0) arrive(target); }
+  }
+  if (state === "drop") {
+    hero.vy -= 1100 * dt; hero.x += hero.vx * dt; hero.y += hero.vy * dt; hero.rot += 9 * dt;
+    if (st.sag > 0) st.ang = Math.min(Math.PI * .96, st.ang + 3.2 * dt);
+    if (hero.y < -175) {
+      if (lantern) { state = "float"; floatT = 0; floatFrom = { x: hero.x, y: hero.y }; lantern = false; flies = 0; streak = 0; target = pillars[cur + 1]; target.frozen = true; Lab.sfx("powerup", { pitch: .8 }); Lab.sfx("chime"); }
+      else { state = "dead"; Lab.sfx("splash", { pitch: .6 }); Lab.shake(7, .3); fx.puff(X(hero.x), gy + 175 * S, { n: 14, color: alpha(V().mist, .9), size: 12, speed: 90 }); Lab.gameover({ title: "Lost in the mist", score, stats: [["Pillars", crossed], ["Best streak", bestStreak], ["Fireflies", fliesTotal]] }); }
+    }
+  }
+  if (state === "float") {
+    floatT = Math.min(1, floatT + dt / 1.5); const e = Lab.ease.inOutQuad(floatT), tx = target.x + target.w - 18;
+    hero.x = lerp(floatFrom.x, tx, e); hero.y = lerp(floatFrom.y, 0, e) + Math.sin(e * Math.PI) * 46; hero.rot += 2 * dt;
+    if (floatT >= 1) { arrive(target, true); fx.burst(X(hero.x), gy - 50 * S, { n: 14, colors: [RED, "#ffd27a"], speed: 140, life: .6, size: 4 }); }
+  }
+  vBlend = Math.min(1, vBlend + dt * .7);
+  const cx = (state === "roll" || state === "float" || state === "drop" ? hero.x : P.x + P.w - 18) - camOff / S;
+  camX = Lab.damp(camX, cx, 7, dt);
+  const dpx = (camX - pc) * S; if (dpx) for (const q of fx.list) q.x -= dpx;       // particles follow the scrolling world
+}
+function frame(dt, t) { update(dt, t); render(t); }
+
+/* ---------- baked art */
+function skySprite(v) {
+  const W = Lab.W + 80, H = Lab.H + 80, Vv = VALLEYS[v];
+  return Lab.sprite("bs:sky:" + v, W, H, g => {
+    draw.vgrad(g, 0, 0, W, H, [[0, Vv.sky[0]], [.3, Vv.sky[1]], [.62, Vv.sky[2]], [1, Vv.mist]]);
+    const sx = W * .74, sy = 40 + Lab.play.y + (gy - Lab.play.y) * .3, r = clamp(Math.min(Lab.W, Lab.H) * .09, 26, 60);
+    draw.glow(g, sx, sy, r * 3.2, Vv.sun, .5); draw.circle(g, sx, sy, r, Vv.sun);
+    if (v === 3) { g.fillStyle = "rgba(255,255,255,.7)"; const rnd = Lab.rng(5); for (let i = 0; i < 60; i++) g.fillRect(rnd() * W, rnd() * H * .5, 1.5, 1.5); draw.circle(g, sx + r * .35, sy - r * .2, r * .8, Vv.sky[0]); }
+  });
+}
+const TW = 560;
+function peakSprite(layer, v) {
+  const Vv = VALLEYS[v], h = Math.max(120, (gy - Lab.play.y) * .78);
+  return Lab.sprite("bs:pk:" + layer + ":" + v, TW, h + 4, g => {
+    const rnd = Lab.rng(layer * 31 + 7), col = layer ? Vv.near : Vv.far, gr = g.createLinearGradient(0, 0, 0, h);
+    gr.addColorStop(0, col); gr.addColorStop(1, mix(col, Vv.mist, layer ? .55 : .8)); g.fillStyle = gr;
+    for (let i = 0; i < 6; i++) {
+      const cx = (i + rnd() * .7) * TW / 6, w = (60 + rnd() * 80) * (layer ? 1.15 : .9), ph = h * (.34 + rnd() * .62) * (layer ? .78 : 1);
+      for (const o of [-TW, 0, TW]) { const x = cx + o; g.beginPath(); g.moveTo(x - w / 2, h + 4); g.bezierCurveTo(x - w * .46, h - ph * .86, x - w * .3, h - ph, x, h - ph); g.bezierCurveTo(x + w * .3, h - ph, x + w * .46, h - ph * .86, x + w / 2, h + 4); g.fill(); }
+    }
+  });
+}
+function cloudSprite(v) {
+  return Lab.sprite("bs:cl:" + v, TW, 90, g => {
+    const rnd = Lab.rng(19); g.fillStyle = alpha(VALLEYS[v].mist, .55);
+    for (let i = 0; i < 16; i++) { const x = rnd() * TW, y = 34 + rnd() * 30, rx = 50 + rnd() * 70, ry = 12 + rnd() * 14; for (const o of [-TW, 0, TW]) { g.beginPath(); g.ellipse(x + o, y, rx, ry, 0, 0, TAU); g.fill(); } }
+  });
+}
+function pillarSprite(p) {
+  const Vv = V(), w = Math.round(p.w * S), hh = Math.round(Lab.H - gy + 60), pad = Math.round(12 * S), kind = p.kind;
+  return Lab.sprite("bs:p:" + kind + ":" + w + ":" + (stage % 4), w + pad * 2, hh + pad, (g, sw, sh) => {
+    const rnd = Lab.rng(w * 13 + kind.length), rock = kind === "crumb" ? mix(Vv.rock, "#c79a62", .6) : Vv.rock, x0 = pad, top = pad;
+    if (kind === "drift") {
+      const bh = 74 * S, gr = g.createLinearGradient(0, top, 0, top + bh); gr.addColorStop(0, shade(rock, .05)); gr.addColorStop(1, shade(rock, -.28)); g.fillStyle = gr;
+      g.beginPath(); g.moveTo(x0, top + 4 * S); g.lineTo(x0 + w, top + 4 * S); g.quadraticCurveTo(x0 + w * .86, top + bh * .62, x0 + w * .52, top + bh); g.quadraticCurveTo(x0 + w * .16, top + bh * .6, x0, top + 4 * S); g.fill();
+      g.fillStyle = alpha("#ffffff", .75); for (let i = 0; i < 5; i++) { g.beginPath(); g.ellipse(x0 + w * (.1 + i * .2), top + bh * (.92 + rnd() * .1), w * .16, 7 * S, 0, 0, TAU); g.fill(); }
+    } else {
+      const gr = g.createLinearGradient(0, top, 0, sh); gr.addColorStop(0, shade(rock, -.06)); gr.addColorStop(.45, mix(rock, Vv.mist, .4)); gr.addColorStop(.9, mix(rock, Vv.mist, .88)); g.fillStyle = gr;
+      g.beginPath(); g.moveTo(x0 + 1.5 * S, top + 3 * S); g.lineTo(x0 + w - 1.5 * S, top + 3 * S); g.lineTo(x0 + w - 6 * S, sh); g.lineTo(x0 + 6 * S, sh); g.closePath(); g.fill();
+      g.strokeStyle = alpha(shade(rock, -.45), .22); g.lineWidth = Math.max(1, 1.5 * S); g.lineCap = "round";
+      for (let i = 0; i < w / (8 * S); i++) { const x = x0 + 5 * S + rnd() * (w - 10 * S), y1 = top + 12 * S + rnd() * 90 * S; g.beginPath(); g.moveTo(x, y1); g.lineTo(x + (rnd() - .5) * 5 * S, y1 + (18 + rnd() * 70) * S); g.stroke(); }
+      g.fillStyle = "rgba(255,255,255,.13)"; g.fillRect(x0 + 2 * S, top + 3 * S, Math.max(2, w * .16), sh);
+      if (kind === "crumb") { g.strokeStyle = "rgba(70,40,20,.55)"; g.lineWidth = Math.max(1.2, 2 * S); for (let i = 0; i < 3; i++) { let x = x0 + w * (.2 + i * .3), y = top + 8 * S; g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (rnd() - .5) * 14 * S; y += 12 * S; g.lineTo(x, y); } g.stroke(); } }
+    }
+    const gc = kind === "crumb" ? "#c9ae66" : Vv.grass;
+    draw.rect(g, x0 - 3 * S, top - 1 * S, w + 6 * S, 9 * S, 5 * S, gc); draw.rect(g, x0 - 1 * S, top, w + 2 * S, 3 * S, 2 * S, shade(gc, .22));
+    g.fillStyle = gc; for (let i = 0; i < w / (10 * S); i++) { const x = x0 + rnd() * w, hgt = (4 + rnd() * 6) * S; g.beginPath(); g.moveTo(x - 2 * S, top); g.lineTo(x + (rnd() - .5) * 4 * S, top - hgt); g.lineTo(x + 2 * S, top); g.fill(); }
+    g.fillStyle = shade(gc, -.12); for (let i = 0; i < 3; i++) draw.rect(g, x0 + rnd() * (w - 6 * S), top + 5 * S, 5 * S, (5 + rnd() * 8) * S, 2.5 * S, shade(gc, -.12));
+  });
+}
+function heroSprite() {
+  const u = S, w = 56 * u, h = 34 * u;
+  return Lab.sprite("bs:hero:" + Math.round(S * 100), w, h, g => {
+    g.translate(w / 2, h - 2 * u); g.scale(u, u);
+    g.fillStyle = OC; g.beginPath(); g.moveTo(-6, -15); g.quadraticCurveTo(-23, -13, -27, -1); g.quadraticCurveTo(-17, -4, -5, -2); g.closePath(); g.fill();
+    g.fillStyle = DK; g.beginPath(); g.ellipse(-6, -2, 3.4, 3, 0, 0, TAU); g.ellipse(7, -2, 3.4, 3, 0, 0, TAU); g.fill();
+    g.fillStyle = OC; g.beginPath(); g.ellipse(0, -12, 13.5, 10.5, 0, 0, TAU); g.fill();
+    g.fillStyle = BL; g.beginPath(); g.ellipse(2, -5.4, 9, 3.6, 0, 0, TAU); g.fill();
+    g.save(); g.beginPath(); g.rect(-30, -30, 60, 22); g.clip(); g.beginPath(); g.ellipse(0, -12, 13.5, 10.5, 0, 0, TAU); g.clip();
+    g.strokeStyle = DK; g.lineWidth = 1.1; for (let r = 0; r < 4; r++) for (let k = 0; k < 7; k++) { g.beginPath(); g.arc(-14 + k * 5 + (r % 2) * 2.5, -22 + r * 4.4, 3.1, .1 * Math.PI, .9 * Math.PI); g.stroke(); }
+    g.restore();
+    g.fillStyle = BL; g.beginPath(); g.moveTo(8, -16); g.quadraticCurveTo(18, -17, 24, -8.5); g.quadraticCurveTo(17, -5, 9, -7); g.closePath(); g.fill();
+    g.fillStyle = OC; g.beginPath(); g.ellipse(9.5, -16.5, 2.6, 3.4, -.5, 0, TAU); g.fill();
+    g.fillStyle = "#2a1a12"; g.beginPath(); g.arc(15, -12.2, 1.6, 0, TAU); g.arc(23.4, -8.6, 1.2, 0, TAU); g.fill();
+    g.fillStyle = "rgba(255,130,110,.45)"; g.beginPath(); g.ellipse(13.5, -9, 2.2, 1.3, 0, 0, TAU); g.fill();
+  });
+}
+function ballSprite() {
+  const u = S, sz = (HR * 2 + 4) * u;
+  return Lab.sprite("bs:ball:" + Math.round(S * 100), sz, sz, g => {
+    g.translate(sz / 2, sz / 2); g.scale(u, u);
+    const gr = g.createRadialGradient(-4, -5, 2, 0, 0, HR); gr.addColorStop(0, shade(OC, .3)); gr.addColorStop(1, shade(OC, -.12)); g.fillStyle = gr; g.beginPath(); g.arc(0, 0, HR, 0, TAU); g.fill();
+    g.save(); g.clip(); g.strokeStyle = DK; g.lineWidth = 1.3;
+    for (let r = 4; r <= 16; r += 4) for (let k = 0; k < r; k++) { const a = k / r * TAU + r; g.beginPath(); g.arc(Math.cos(a) * r, Math.sin(a) * r, 3.2, a - 1.2, a + 1.2); g.stroke(); }
+    g.restore(); g.fillStyle = BL; g.beginPath(); g.ellipse(HR * .5, 0, 3, 5, 0, 0, TAU); g.fill();
+    g.strokeStyle = DK; g.lineWidth = 1.5; g.beginPath(); g.arc(0, 0, HR - .7, 0, TAU); g.stroke();
+  });
+}
+function drawStalk(c, bx, len, ang, gold, t, live) {
+  if (len <= 0) return;
+  const u = S, n = Math.ceil(len / SEG), a = gold ? "#e2b93c" : "#5fb24d", b = gold ? "#b98a1f" : "#3c8a3a", w = 6.5 * u;
+  c.save(); c.translate(X(bx), gy); c.rotate(ang);
+  for (let i = 0; i < n; i++) {
+    const y0 = -i * SEG * u, l = Math.min(SEG, len - i * SEG) * u;
+    c.fillStyle = i % 2 ? a : shade(a, -.08); c.fillRect(-w / 2, y0 - l, w, l + .5);
+    c.fillStyle = "rgba(255,255,255,.28)"; c.fillRect(-w / 2 + 1, y0 - l, w * .28, l);
+    c.fillStyle = b; c.fillRect(-w / 2 - 1, y0 - 1.2 * u, w + 2, 2.2 * u);
+    if (i > 1 && i % 2 === 0 && l > SEG * u * .6) { const sd = i % 4 ? 1 : -1; c.fillStyle = b; c.beginPath(); c.ellipse(sd * 8 * u, y0 - 5 * u, 7 * u, 2.4 * u, sd * -.5, 0, TAU); c.fill(); }
+  }
+  if (live) { const sway = Math.sin(t * 9) * .12; c.translate(0, -len * u); c.fillStyle = shade(a, .15); for (const sd of [-1, 1]) { c.beginPath(); c.ellipse(sd * 6 * u, -4 * u, 7.5 * u, 2.6 * u, sd * (-.9 + sway), 0, TAU); c.fill(); } c.beginPath(); c.moveTo(-w / 2, 0); c.lineTo(0, -9 * u); c.lineTo(w / 2, 0); c.fill(); }
+  c.restore();
+}
+function drawLantern(c, x, y, s, lit) {
+  if (lit) draw.glow(c, x, y, 22 * s, "#ffb347", .55);
+  draw.rect(c, x - 6 * s, y - 8 * s, 12 * s, 16 * s, 5 * s, lit ? RED : "rgba(140,140,140,.3)", lit ? null : "rgba(110,110,110,.6)", 1.5); c.fillStyle = lit ? "#ffd27a" : "rgba(255,255,255,.5)"; c.fillRect(x - 4.5 * s, y - 9.5 * s, 9 * s, 2.4 * s); c.fillRect(x - 4.5 * s, y + 7 * s, 9 * s, 2.4 * s);
+  if (lit) { c.fillStyle = "rgba(255,230,160,.55)"; c.fillRect(x - 1 * s, y - 6 * s, 2 * s, 12 * s); }
+}
+
+function render(t, demo) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, Vv = V(), u = S;
+  const bgLayer = (v, a) => {
+    c.globalAlpha = a; const sk = skySprite(v); c.drawImage(sk, -40, -40, sk.w, sk.h);
+    for (let l = 0; l < 2; l++) { const sp = peakSprite(l, v), par = l ? .22 : .09, y = gy + (l ? 70 : 20) * u - sp.h; let x = -(((camX * S * par) % TW) + TW) % TW; for (; x < W + 40; x += TW) c.drawImage(sp, x, y, sp.w, sp.h); }
+    c.globalAlpha = 1;
+  };
+  if (vBlend < 1) bgLayer(vPrev, 1); bgLayer(stage % 4, vBlend < 1 ? vBlend : 1);
+  const cl = cloudSprite(stage % 4); let cx0 = -(((camX * S * .5 + t * 8) % TW) + TW) % TW; for (let x = cx0; x < W + 40; x += TW) c.drawImage(cl, x, gy + 54 * u, cl.w, cl.h * 1.2);
+  // pillars
+  for (const p of pillars) {
+    const x = X(p.x); if (x > W + 60 || x + p.w * S < -60) continue;
+    const sp = pillarSprite(p), pad = Math.round(12 * S), jx = p.kind === "crumb" && p.t > 0 && p.i === cur ? Math.sin(t * 60) * (1.2 + (3.4 - p.t) * .5) : 0, bob = p.kind === "drift" ? Math.sin(t * 2 + p.ph) * 2 * u : 0;
+    c.drawImage(sp, x - pad + jx, gy - pad + p.sink * S + bob, sp.w, sp.h);
+    const mx = x + p.w * S / 2 + jx, my = gy + p.sink * S + bob;
+    if (p.i > 0) { draw.rect(c, mx - PERF * u, my - 2.5 * u, PERF * 2 * u, 4 * u, 2 * u, RED); c.fillStyle = "#ffd27a"; c.fillRect(mx - 1 * u, my - 2.5 * u, 2 * u, 4 * u); if (p.w < 40) draw.star(c, mx, my - 9 * u, 4.5 * u, "#f2b632"); }
+    if (p.gold) { for (let k = 0; k < 3; k++) { c.fillStyle = k % 2 ? "#e2b93c" : "#c99a26"; c.fillRect(x + p.w * S - (9 + k * 5) * u, my - (10 - k * 3) * u, 3 * u, (10 - k * 3) * u); } }
+    if (p.kind === "crumb" && p.i === cur && p.t > 0) draw.text(c, p.t.toFixed(1), mx, my + 26 * u, { size: 15 * Math.max(.8, u), color: "#fff", stroke: "rgba(90,40,20,.8)" });
+  }
+  // tutorial band: where the tip has to end up
+  if (!demo && crossed < 3 && (state === "ready" || state === "grow")) {
+    const q = pillars[cur + 1], bx = X(st.x), y0 = gy - (q.x + q.w - st.x) * u, y1 = gy - (q.x - st.x) * u, ym = (y0 + y1) / 2, a = .5 + .25 * Math.sin(t * 5);
+    c.setLineDash([5, 5]); draw.rect(c, bx - 13 * u, y0, 26 * u, y1 - y0, 6 * u, alpha("#ffffff", .32 * a + .1), alpha(RED, .5 + a * .3), 2); c.setLineDash([]);
+    c.fillStyle = alpha(RED, .85); c.fillRect(bx - 13 * u, ym - PERF * u * .5, 26 * u, PERF * u);
+  }
+  for (const b of bridges) if (X(b.x + b.len) > -40) drawStalk(c, b.x, b.len, Math.PI / 2, b.gold, t);
+  if (!demo) drawStalk(c, st.x + (st.len >= MAXLEN && state === "grow" ? Math.sin(t * 50) : 0), st.len, st.ang + st.bz + st.sag, st.gold, t, state === "grow" || state === "ready");
+  // fireflies + crows
+  for (let k = Math.max(0, cur - 1); k < pillars.length; k++) {
+    const p = pillars[k]; if (X(p.x) > W + 300) break;
+    for (const f of p.flies) if (!f.got) { const x = X(f.x) + Math.sin(t * 2.3 + f.ph) * 4 * u, y = gy - (f.y + Math.sin(t * 3.1 + f.ph) * 4) * u; draw.glow(c, x, y, 16 * u, "#f4ff8a", .5 + .25 * Math.sin(t * 6 + f.ph)); draw.circle(c, x, y, 3.2 * u, "#fffbd0"); c.fillStyle = "rgba(255,255,255,.6)"; c.beginPath(); c.ellipse(x - 3 * u, y - 3 * u, 3.4 * u, 1.6 * u, -.6 + Math.sin(t * 40) * .3, 0, TAU); c.ellipse(x + 3 * u, y - 3 * u, 3.4 * u, 1.6 * u, .6 - Math.sin(t * 40) * .3, 0, TAU); c.fill(); }
+    if (p.crow && !p.crow.hit) {
+      const x = X(p.crow.x), y = gy - (13 + Math.sin(t * 5 + p.crow.ph) * 2.5) * u, fl = Math.sin(t * 16 + p.crow.ph);
+      c.fillStyle = "#2b2a33"; c.beginPath(); c.ellipse(x, y, 9 * u, 6.5 * u, 0, 0, TAU); c.fill();
+      c.beginPath(); c.moveTo(x - 2 * u, y - 2 * u); c.lineTo(x + 7 * u, y - 2 * u); c.lineTo(x + 5 * u, y - (4 + 10 * fl) * u); c.closePath(); c.fill();
+      c.beginPath(); c.moveTo(x + 7 * u, y); c.lineTo(x + 15 * u, y - 3 * u); c.lineTo(x + 13 * u, y + 3 * u); c.closePath(); c.fill();
+      c.fillStyle = "#f2a83a"; c.beginPath(); c.moveTo(x - 8 * u, y - 2 * u); c.lineTo(x - 14 * u, y + .5 * u); c.lineTo(x - 8 * u, y + 2 * u); c.fill();
+      draw.circle(c, x - 4.5 * u, y - 2 * u, 2 * u, "#fff"); draw.circle(c, x - 5 * u, y - 1.8 * u, 1 * u, "#2b2a33"); draw.line(c, x - 7.5 * u, y - 5 * u, x - 2.5 * u, y - 3.6 * u, "#2b2a33", 1.6 * u);
+    }
+  }
+  // hero
+  if (!demo && state !== "dead") {
+    const hx = X(hero.x), P = pillars[cur];
+    if (hero.mode === "stand") {
+      const sp = heroSprite(), k = state === "grow" ? clamp(st.len / 120, 0, 1) : 0, sq = hero.sq + (state === "grow" ? Math.sin(t * 22) * .025 : 0), jy = Math.sin(hero.joy * Math.PI) * 9 * u, y = gy + P.sink * S;
+      draw.shadow(c, hx, y + 1, 15 * u, 3 * u, .18);
+      c.save(); c.translate(hx, y - jy); c.rotate(-k * .16); c.scale(1 + sq, 1 - sq); c.drawImage(sp, -sp.w / 2, -sp.h + 2 * u, sp.w, sp.h); c.restore();
+    } else {
+      const sp = ballSprite(), sag = st.sag > 0 && hero.x > st.x && state === "roll" ? (hero.x - st.x) * Math.tan(st.sag) : 0, y = gy - (HR + hero.h + hero.y - sag) * u;
+      if (state === "roll") draw.shadow(c, hx, gy + sag * u + 1, 11 * u * (1 - hero.h / 90), 2.6 * u, .2);
+      if (state === "float") { const ly = y - 34 * u; draw.line(c, hx, y - HR * u, hx, ly + 12 * u, "rgba(60,40,30,.6)", 1.5); drawLantern(c, hx, ly, 1.5 * u, true); }
+      c.save(); c.translate(hx, y); c.scale(1 + hero.sq, 1 - hero.sq); c.rotate(hero.rot); c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore();
+    }
+  }
+  // front mist
+  const mg = c.createLinearGradient(0, gy + 40 * u, 0, H); mg.addColorStop(0, alpha(Vv.mist, 0)); mg.addColorStop(.75, alpha(Vv.mist, .92)); mg.addColorStop(1, Vv.mist); c.fillStyle = mg; c.fillRect(-40, gy + 40 * u, W + 80, H - gy + 40);
+  c.fillStyle = alpha(Vv.mist, .5); c.fillRect(-40, H - 40, W + 80, 80);
+  cx0 = -(((camX * S * 1.25 + t * 16) % TW) + TW) % TW; for (let x = cx0; x < W + 40; x += TW) c.drawImage(cl, x, gy + (H - gy) * .42, cl.w, cl.h * 1.5);
+  if (demo) return;
+  // firefly jar + lantern
+  const jx = Lab.play.x + 16, jy = Lab.play.y + 16, dk = Vv.light ? "rgba(31,59,44,.28)" : "rgba(255,255,255,.3)";
+  for (let i = 0; i < 5; i++) { const on = i < flies; if (on) draw.glow(c, jx + i * 15, jy, 11, "#f4ff8a", .7); draw.circle(c, jx + i * 15, jy, on ? 4.6 : 3.6, on ? "#fffbd0" : null, on ? "#c9b84a" : dk, 1.5); }
+  drawLantern(c, jx + 5 * 15 + 8, jy, 1.05 + (lantern ? Math.sin(t * 4) * .06 : 0), lantern);
+  if (streak > 1) draw.text(c, "PERFECT ×" + streak, Lab.play.x + Lab.play.w - 14, jy, { size: 14, align: "right", color: RED, stroke: Vv.light ? "rgba(255,255,255,.75)" : "rgba(0,0,0,.45)" });
+}
+function attract(dt, t) { if (!pillars || state) { initWorld(); state = null; flies = 0; lantern = false; streak = 0; } camX += 16 * dt; while (pillars[pillars.length - 1].x < camX + Lab.W / S + 200) addPillar(); if (pillars.length > 40) pillars.splice(0, 10); render(t, true); }
+Lab.boot();
+})();
+</script></body></html>

@@ -1,0 +1,291 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Blacktop Buzzer</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* BLACKTOP BUZZER — side-on street hoops under a lamp, against the clock.
+ * Core idea kept: shoot into a hoop against a limit.  Now: pull back anywhere to aim (rubber-band slingshot), a dotted arc
+ * that only shows the rise once the warm-up is over, real rim / backboard / chain-net physics (fixed 240 Hz step),
+ * rapid fire with several balls in the air, and a clock that makes add to (swish +3 s).  Three makes in a row set the
+ * ball ON FIRE: double points and the full arc.  Every four makes the court changes: deeper spots, a telescoping hoop
+ * that bobs, gusting wind.  A ball still in the air at 0:00 can be a buzzer beater.
+ * Identity: night asphalt, lamp cone with moths, chalk marks, orange leather, steel chain net that jingles.          */
+let demo = false, demoT = 1;
+Lab.init({
+  title: "Blacktop Buzzer", tagline: "Night hoops against the clock.", category: "Arcade & Action",
+  howto: ["Pull back anywhere, release to shoot", "Makes add time — a clean swish adds more", "3 in a row: ON FIRE, double points"],
+  theme: { bg: "#11152b", bg2: "#2c2a4d", accent: "#ff7a2f", accent2: "#ffd36b" },
+  orient: "any", music: { style: "drive", key: "G", bpm: 100, vol: .3 }, restart: start,
+  attract(dt, t) {
+    if (!demo) { demo = true; layout(); reset(); }
+    if (held && (demoT -= dt) < 0) { demoT = 1.5; const v = solve(Lab.rand(1.02, 1.2)), k = Lab.rand(.97, 1.03); launch(v.vx * k, v.vy * k); }
+    update(dt); render(t);
+  },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp;
+const G = 1500, STEP = 1 / 240, BR = 17, RIMW = 64, RIMR = 3.5, VMAX = 1400, HOLD_Y = -70, RIM_H = 300, START_T = 45, MAX_T = 60;
+const LEVELS = ["", "Warm-up", "Deep spots · the arc hides", "The hoop bobs · less time back", "Wind picks up", "Faster hoop", "Gusts and a restless hoop"];
+let S, u, WW, xoff, floorY, PMAX;
+let hoop, balls, held, heldX, cool, time, score, makes, shots, streak, bestStreak, swishes, fire, level, wind, aim, kb, net, tNow, acc, ended, lastSec, fireLoop, moths, spotD, windShown;
+
+const X = x => xoff + x * S, Y = y => floorY + y * S, tipY = () => (Lab.play.y + 96 * u) / Lab.H;
+function layout() {
+  const P = Lab.play;
+  S = Math.min(Lab.W / 380, P.h / 520); u = clamp(S, .8, 1.35);
+  WW = Math.min(Lab.W / S, 900); xoff = (Lab.W - WW * S) / 2; floorY = Lab.H - Lab.safe.bottom - 62 * u; PMAX = 150 * u;
+  if (hoop) { hoop.x = WW - 44 - 5 - RIMW; hoop.bx = WW - 44; if (held) { spotD = clamp(spotD, 110, hoop.x - 46); held.tx = hoop.x - spotD; } }
+}
+Lab.onResize(() => { if (balls) layout(); });
+
+function reset() {
+  hoop = { x: 0, bx: 0, y: -RIM_H, amp: 0, sp: 0 }; balls = []; held = { x: 0, tx: 0, t: 1 }; spotD = 150;
+  layout(); held.x = held.tx = hoop.x - spotD;
+  cool = 0; time = START_T; score = 0; makes = 0; shots = 0; streak = 0; bestStreak = 0; swishes = 0; fire = false; level = 1; wind = 0; windShown = 0;
+  aim = null; kb = null; net = { x: 0, vx: 0, y: 0, vy: 0 }; tNow = 0; acc = 0; ended = false; lastSec = 99;
+  moths = Array.from({ length: 7 }, (_, i) => ({ a: i * 1.3, r: 18 + i * 7, s: 1.2 + (i % 3) * .7, p: i * 2.1 }));
+}
+function start() {
+  demo = false; reset(); Lab.setScore(0);
+  fireLoop = Lab.audio.loop({ noise: true, bp: 420, vol: 0 });
+  Lab.input.onDown = [(x, y) => { if (!ended && time > 0) { aim = { sx: x, sy: y, cx: x, cy: y }; kb = null; } }];
+  Lab.input.onMove = [(x, y) => { if (aim) { aim.cx = x; aim.cy = y; } }];
+  Lab.input.onUp = [() => { if (!aim) return; const v = aimVel(); aim = null; if (v) launch(v.vx, v.vy); }];
+  Lab.input.onKey = [k => {
+    if (k === " " || k === "Enter") { if (!kb) kb = { ang: -1.15, pow: .78 }; const v = aimVel(); if (v) launch(v.vx, v.vy); }
+    else if (k.indexOf("Arrow") === 0 && !kb) kb = { ang: -1.15, pow: .78 };
+  }];
+  Lab.expose({
+    get score() { return score; }, get time() { return time; }, set time(v) { time = v; }, get makes() { return makes; }, get shots() { return shots; }, get streak() { return streak; },
+    get fire() { return fire; }, get level() { return level; }, get balls() { return balls.length; }, get ready() { return !!held && cool <= 0 && held.t >= 1; }, get swishes() { return swishes; },
+    get ended() { return ended; }, get wind() { return wind; },
+    // the pull (screen px, from press point to release point) that would swish from the current spot; flat=true gives a hopeless airball
+    pullFor(flat) { const v = flat ? { vx: 300, vy: -200 } : solve(1.12), sp = Math.hypot(v.vx, v.vy), len = sp / VMAX * PMAX; return { dx: -v.vx / sp * len, dy: -v.vy / sp * len }; },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- shooting ---------- */
+function solve(T) {                                     // launch velocity that drops through the middle of the rim after T seconds
+  const tx = hoop.x + RIMW / 2 - 2, hx = held ? held.tx : hoop.x - spotD;
+  return { vx: (tx - hx) / T - .5 * wind * T, vy: (hoop.y - HOLD_Y - .5 * G * T * T) / T };
+}
+function aimVel() {
+  if (kb) return { vx: Math.cos(kb.ang) * kb.pow * VMAX, vy: Math.sin(kb.ang) * kb.pow * VMAX };
+  if (!aim) return null;
+  const dx = aim.sx - aim.cx, dy = aim.sy - aim.cy, len = Math.hypot(dx, dy); if (len < 14) return null;
+  const p = Math.min(len, PMAX) / PMAX * VMAX; return { vx: dx / len * p, vy: dy / len * p };
+}
+function launch(vx, vy) {
+  if (!held || cool > 0 || ended || (time <= 0 && !demo) || Lab.paused) return;
+  const d = hoop.x - held.x;
+  balls.push({ x: held.x, y: HOLD_Y, vx, vy, ang: 0, spin: -vx / BR * .6, touched: false, bank: false, scored: false, missed: false, floor: 0, dead: 0, deep: d > Math.max(180, .6 * (hoop.x - 46)), hot: fire, trail: [] });
+  if (balls.length > 7) balls.shift();
+  shots++; cool = .42; held = null; heldX = hoop.x - spotD;
+  if (!demo) { Lab.sfx("whoosh", { pitch: .8 + Math.hypot(vx, vy) / VMAX * .6 }); Lab.buzz(8); }
+}
+function newSpot() {
+  const dMax = hoop.x - 46, lo = 110, hi = level === 1 ? Math.min(190, dMax) : Math.min(dMax, lo + (dMax - lo) * Math.min(1, .5 + level * .14));
+  let d = spotD; for (let i = 0; i < 8 && Math.abs(d - spotD) < 45; i++) d = Lab.rand(lo, hi);
+  spotD = d; if (held) { held.tx = hoop.x - d; held.t = 0; held.x0 = held.x; }
+  wind = level >= 4 ? (Lab.chance(.5) ? 1 : -1) * Lab.rand(90, level >= 6 ? 260 : 180) : 0;
+}
+function setLevel(n) {
+  level = n; const k = Math.min(n, 9);
+  hoop.amp = n >= 3 ? Math.min(62, 30 + (k - 3) * 8) : 0; hoop.sp = n >= 5 ? 1.9 + (k - 5) * .15 : 1.1;
+  Lab.banner("LEVEL " + n, { color: "#ffd36b", ms: 900, y: .46 }); Lab.toast(LEVELS[Math.min(n, LEVELS.length - 1)], 1600, { y: tipY() }); Lab.sfx("levelup");
+}
+function scored(b) {
+  b.scored = true; makes++; streak++; bestStreak = Math.max(bestStreak, streak);
+  const sw = !b.touched, beater = time <= 0; if (sw) swishes++;
+  let pts = (b.deep ? 3 : 2) + (sw ? 1 : 0) + (b.bank ? 1 : 0); if (b.hot) pts *= 2; if (beater) pts += 5;
+  score += pts; if (!beater) time = Math.min(MAX_T, time + Math.max(1, (sw ? 3 : 2) - Math.floor((level - 1) / 2)));
+  net.vy += 420 + b.vy * .3; net.vx += b.vx * .9; b.vx *= .3; b.vy *= .55;
+  if (demo) return;
+  Lab.setScore(score); Lab.bumpScore();
+  const cx = X(hoop.x + RIMW / 2), cy = Y(hoop.y);
+  fx.text(cx, cy - 46 * u, (beater ? "BUZZER BEATER" : sw ? "SWISH" : b.bank ? "BANK" : "IN") + "  +" + pts, { color: b.hot ? "#ff9a3c" : sw ? "#ffd36b" : "#fff", size: (sw ? 22 : 18) + (b.hot ? 4 : 0) });
+  if (b.deep) fx.text(cx, cy - 72 * u, "DEEP", { color: "#8fd6ff", size: 14 });
+  fx.burst(cx, cy + 22 * u, { n: sw ? 16 : 9, colors: b.hot ? ["#ff7a2f", "#ffd36b", "#fff"] : ["#dfe6f2", "#ffd36b"], speed: 190, angle: Math.PI / 2, spread: 1.6, life: .5, size: 3.5, gravity: 500, shape: sw ? "star" : "circle" });
+  Lab.audio.noise({ dur: sw ? .26 : .16, vol: sw ? .16 : .1, hp: 4200 });
+  [0, 1, 2].forEach(i => Lab.audio.tone({ f: 2100 + i * 520 + streak * 40, dur: .07, vol: .035, delay: i * .035, type: "triangle" }));
+  Lab.audio.combo(Math.min(streak, 10) + (sw ? 2 : 0), { vol: .2 }); Lab.buzz(sw ? 18 : 10);
+  if (sw) Lab.hitstop(.035); if (beater) { Lab.flash("#ffd36b", .4, .5); Lab.shake(10, .4); }
+  if (streak >= 3 && !fire) { fire = true; Lab.banner("ON FIRE", { color: "#ff7a2f", ms: 900, y: .46 }); Lab.sfx("powerup"); Lab.flash("#ff7a2f", .3, .3); }
+  const nl = 1 + Math.floor(makes / 4); if (nl > level) setLevel(nl);
+  if (time > 0) newSpot();
+}
+function missed(b, why) {
+  if (b.scored || b.missed) return; b.missed = true;
+  if (demo) return;
+  if (fire) { Lab.sfx("slide", { pitch: .6 }); Lab.toast("Fire's out", 700, { y: tipY() }); }
+  streak = 0; fire = false;
+  fx.text(clamp(X(b.x), 40, Lab.W - 40), Math.min(Y(b.y) - 24, floorY - 30), why || (b.touched ? "RIM OUT" : "AIRBALL"), { color: "#9aa3c4", size: 14 });
+}
+
+/* ---------- physics ---------- */
+function hitCircle(b, px, py, r, e) {
+  const dx = b.x - px, dy = b.y - py, rr = r + BR, d2 = dx * dx + dy * dy; if (d2 >= rr * rr) return 0;
+  const d = Math.sqrt(d2) || .01, nx = dx / d, ny = dy / d; b.x = px + nx * rr; b.y = py + ny * rr;
+  const vn = b.vx * nx + b.vy * ny; if (vn >= 0) return 0;
+  b.vx -= (1 + e) * vn * nx; b.vy -= (1 + e) * vn * ny;
+  const vt = -b.vx * ny + b.vy * nx; b.spin = Lab.lerp(b.spin, vt / BR, .5); return -vn;
+}
+function stepBall(b, h) {
+  if (b.floor === 0) b.vx += wind * h;
+  b.vy += G * h; const py = b.y; b.x += b.vx * h; b.y += b.vy * h; b.ang += b.spin * h;
+  const hy = hoop.y;
+  let s = Math.max(hitCircle(b, hoop.x, hy, RIMR, .55), hitCircle(b, hoop.x + RIMW, hy, RIMR, .55));
+  if (s > 0) { b.touched = true; if (s > 60 && !demo) { Lab.sfx("knock", { pitch: 1.5, vol: Math.min(1, s / 500) }); Lab.audio.tone({ f: 660, f2: 600, dur: .14, vol: .07, type: "triangle" }); net.vx += b.vx * .2; fx.sparks(X(b.x), Y(b.y - BR * 0), 0, { n: 3, color: "#ffb37a" }); } }
+  const top = hy - 84, bot = hy + 16;                                                // backboard: a vertical capsule
+  s = hitCircle(b, hoop.bx + 3, clamp(b.y, top, bot), 3, .6);
+  if (s > 0) { b.touched = true; b.bank = true; if (s > 60 && !demo) Lab.sfx("thud", { pitch: 1.35, vol: Math.min(1, s / 600) }); }
+  if (!b.scored && b.vy > 0 && py < hy && b.y >= hy && b.x > hoop.x + RIMR && b.x < hoop.x + RIMW - RIMR) scored(b);
+  if (b.y > -BR) {
+    b.y = -BR;
+    if (b.vy > 0) { if (b.vy > 140 && !demo) Lab.sfx("bounce", { pitch: .75, vol: Math.min(1, b.vy / 900) }); b.vy *= -.6; b.vx *= .82; b.spin = b.vx / BR; b.floor++; missed(b); }
+  }
+  if (b.x < -80 || b.x > WW + 80) { missed(b, "WIDE"); b.dead = 9; }
+}
+
+function frame(dt, t) { update(dt); render(t); }
+function update(dt) {
+  tNow += dt; cool -= dt;
+  hoop.y = -RIM_H + hoop.amp * Math.sin(tNow * hoop.sp);
+  if (!held && cool <= 0 && (time > 0 || demo)) held = { x: heldX, tx: hoop.x - spotD, t: heldX === hoop.x - spotD ? 1 : 0, x0: heldX };
+  if (held && held.t < 1) { held.t = Math.min(1, held.t + dt * 3.2); held.x = Lab.lerp(held.x0, held.tx, ease.outCubic(held.t)); }
+  if (kb && !demo) { kb.ang = clamp(kb.ang + Lab.input.axisX() * dt * .9, -1.52, -.3); kb.pow = clamp(kb.pow - Lab.input.axisY() * dt * .35, .3, 1); }
+  acc = Math.min(acc + dt, .06);
+  while (acc >= STEP) { acc -= STEP; for (const b of balls) if (b.dead < 1.2) stepBall(b, STEP); }
+  for (const b of balls) { if (b.floor > 0) b.dead += dt; if (b.hot && b.floor === 0 && !demo && !Lab.reducedMotion && Lab.chance(.6)) fx.burst(X(b.x), Y(b.y), { n: 1, colors: ["#ff7a2f", "#ffd36b", "#ff4f3a"], speed: 60, life: .35, size: 5, gravity: -300 }); b.trail.push(b.x, b.y); if (b.trail.length > 16) b.trail.splice(0, 2); }
+  balls = balls.filter(b => b.dead < 1.2);
+  // chain net: a damped spring pulled by passing balls
+  net.vx += (-net.x * 90 - net.vx * 7) * dt; net.x += net.vx * dt; net.vy += (-net.y * 140 - net.vy * 9) * dt; net.y += net.vy * dt;
+  windShown = Lab.damp(windShown, wind, 4, dt);
+  if (demo) return;
+  if (fireLoop) fireLoop.set({ vol: fire ? .05 : 0 });
+  Lab.music.intensity(fire ? 1 : clamp(.3 + level * .08 + (time < 10 ? .3 : 0), 0, .9));
+  if (ended) return;
+  if (time > 0) {
+    time -= dt; const sec = Math.ceil(time);
+    if (sec !== lastSec) { lastSec = sec; if (sec <= 5 && sec > 0) Lab.sfx("heartbeat", { pitch: 1.1 }); else if (sec <= 10 && sec > 0) Lab.sfx("tick", { pitch: .8 }); }
+    if (time <= 0) { time = 0; aim = null; held = null; Lab.audio.tone({ f: 196, type: "sawtooth", dur: .9, vol: .16, lp: 1400 }); Lab.audio.tone({ f: 147, type: "square", dur: .9, vol: .06 }); Lab.shake(6, .5); Lab.buzz(60); }
+  } else if (!balls.some(b => b.floor === 0)) {
+    ended = true;
+    Lab.gameover({ neutral: true, title: "Final buzzer", score, stats: [["Made", makes + " / " + shots], ["Best streak", bestStreak], ["Swishes", swishes]] });
+  }
+}
+
+/* ---------- drawing ---------- */
+function backdrop() {
+  const w = Lab.W + 80, h = Lab.H + 80, fy = floorY + 40;
+  return Lab.sprite("bb:bg:" + Lab.W + "x" + Lab.H + ":" + Math.round(floorY), w, h, g => {
+    draw.vgrad(g, 0, 0, w, fy, [[0, "#0b0e22"], [.55, "#1b1f44"], [.86, "#3a3160"], [1, "#6a4763"]]);
+    const r = Lab.rng(11);
+    g.fillStyle = "#fff"; for (let i = 0; i < 46; i++) { g.globalAlpha = .15 + r() * .5; g.fillRect(r() * w, r() * fy * .6, 1.4, 1.4); } g.globalAlpha = 1;
+    for (let layer = 0; layer < 2; layer++) {                                           // skyline
+      let x = -10; g.fillStyle = layer ? "#161a36" : "#23244a";
+      while (x < w) { const bw = (26 + r() * 46) * u, bh = (70 + r() * 150 - layer * 40) * u; g.fillRect(x, fy - bh, bw, bh);
+        g.fillStyle = "rgba(255,211,107,.5)"; for (let wy = fy - bh + 8; wy < fy - 50 * u; wy += 13 * u) for (let wx = x + 5; wx < x + bw - 6; wx += 10 * u) if (r() < .16) g.fillRect(wx, wy, 4 * u, 5 * u);
+        g.fillStyle = layer ? "#161a36" : "#23244a"; x += bw + r() * 8; }
+    }
+    const fh = 132 * u; g.save(); g.beginPath(); g.rect(0, fy - fh, w, fh); g.clip();           // chain-link fence
+    g.strokeStyle = "rgba(170,180,215,.13)"; g.lineWidth = 1; g.beginPath();
+    for (let x = -fh; x < w + fh; x += 12 * u) { g.moveTo(x, fy); g.lineTo(x + fh, fy - fh); g.moveTo(x, fy - fh); g.lineTo(x + fh, fy); } g.stroke(); g.restore();
+    g.fillStyle = "#3c4160"; g.fillRect(0, fy - fh - 3, w, 4); for (let x = 30; x < w; x += 150 * u) g.fillRect(x, fy - fh, 4, fh);
+    const lx = 40 + Lab.W * .34, ly = fy - 330 * u;                                           // street lamp + light cone
+    const cone = g.createLinearGradient(0, ly, 0, fy); cone.addColorStop(0, "rgba(255,211,107,.26)"); cone.addColorStop(1, "rgba(255,211,107,.02)");
+    g.fillStyle = cone; g.beginPath(); g.moveTo(lx - 12, ly); g.lineTo(lx + 12, ly); g.lineTo(lx + 190 * u, fy); g.lineTo(lx - 190 * u, fy); g.fill();
+    g.fillStyle = "#0e1124"; g.fillRect(lx - 46 * u, ly - 12, 4, fy - ly + 12); g.fillRect(lx - 46 * u, ly - 14, 50 * u, 4); draw.rect(g, lx - 15, ly - 11, 30, 9, 4, "#0e1124");
+    draw.glow(g, lx, ly, 60 * u, "#ffd36b", .55); draw.circle(g, lx, ly, 5, "#fff3c9");
+    draw.vgrad(g, 0, fy, w, h - fy, ["#2b2f3d", "#1b1e29"]);                                  // asphalt
+    for (let i = 0; i < 420; i++) { g.fillStyle = r() < .5 ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.14)"; g.fillRect(r() * w, fy + r() * (h - fy), 2, 1.4); }
+    const pool = g.createRadialGradient(lx, fy + 22, 4, lx, fy + 22, 200 * u); pool.addColorStop(0, "rgba(255,211,107,.16)"); pool.addColorStop(1, "rgba(255,211,107,0)");
+    g.fillStyle = pool; g.fillRect(0, fy, w, h - fy);
+    g.fillStyle = "rgba(240,240,255,.4)"; g.fillRect(0, fy, w, 2.5);
+  });
+}
+function ballSprite(r) {
+  const sz = r * 2 + 4;
+  return Lab.sprite("bb:ball:" + r.toFixed(1), sz, sz, g => {
+    const c = sz / 2, gr = g.createRadialGradient(c - r * .35, c - r * .4, r * .1, c, c, r); gr.addColorStop(0, "#ffb169"); gr.addColorStop(.55, "#f2752a"); gr.addColorStop(1, "#b9461a");
+    g.fillStyle = gr; g.beginPath(); g.arc(c, c, r, 0, TAU); g.fill();
+    g.save(); g.beginPath(); g.arc(c, c, r, 0, TAU); g.clip(); g.strokeStyle = "rgba(60,22,10,.75)"; g.lineWidth = Math.max(1.2, r * .09);
+    g.beginPath(); g.moveTo(c - r, c); g.lineTo(c + r, c); g.moveTo(c, c - r); g.lineTo(c, c + r); g.stroke();
+    g.beginPath(); g.arc(c - r * 1.25, c, r * .95, -1, 1); g.stroke(); g.beginPath(); g.arc(c + r * 1.25, c, r * .95, Math.PI - 1, Math.PI + 1); g.stroke(); g.restore();
+  });
+}
+function drawBall(c, x, y, ang, sc, alpha) {
+  const sp = ballSprite(BR * S); c.save(); c.translate(X(x), Y(y)); c.rotate(ang); c.scale(sc || 1, sc || 1); if (alpha != null) c.globalAlpha = alpha;
+  c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, bg = backdrop(), hy = hoop.y, P = Lab.play;
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+  const lx = Lab.W * .34, ly = floorY - 330 * u;                                             // moths in the lamp light
+  c.fillStyle = "rgba(255,240,200,.8)"; for (const m of moths) { const a = t * m.s + m.p; c.fillRect(lx + Math.cos(a) * m.r * u, ly + 16 * u + Math.sin(a * 1.7) * m.r * .5 * u, 2, 2); }
+  if (Math.abs(windShown) > 20) {                                                            // wind streaks
+    c.strokeStyle = "rgba(200,215,255,.22)"; c.lineWidth = 1.5; c.lineCap = "round"; const dir = Math.sign(windShown), k = Math.abs(windShown) / 200;
+    for (let i = 0; i < 9; i++) { const yy = P.y + 90 + (i * 97 % (floorY - P.y - 140)), xx = Lab.wrap(i * 173 + t * dir * (260 + i * 30) * k, -60, Lab.W + 60); c.beginPath(); c.moveTo(xx, yy); c.lineTo(xx - dir * (26 + i * 3) * k * u, yy); c.stroke(); }
+  }
+  // chalk marks on the ground: shooting spot, deep line
+  const dLine = hoop.x - Math.max(180, .6 * (hoop.x - 46));
+  c.fillStyle = "rgba(143,214,255,.5)"; c.fillRect(X(0), floorY + 9 * u, X(dLine) - X(0), 3); draw.text(c, "+3", X(dLine) - 13 * u, floorY + 24 * u, { size: 12 * u, color: "rgba(143,214,255,.75)" });
+  const hx = held ? held.x : heldX;
+  if (hx != null) { c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = 2.5; c.lineCap = "round"; const s = 8 * u, mx = X(hx), my = floorY + 10 * u; c.beginPath(); c.moveTo(mx - s, my - s * .4); c.lineTo(mx + s, my + s * .4); c.moveTo(mx + s, my - s * .4); c.lineTo(mx - s, my + s * .4); c.stroke(); }
+  // hoop: telescoping pole, backboard
+  const px = X(hoop.bx + 22), bxs = X(hoop.bx);
+  draw.shadow(c, px, floorY + 3, 30 * S, 5 * S, .35);
+  c.fillStyle = "#7c86a8"; c.fillRect(px - 3.5 * S, Y(hy - 30), 7 * S, floorY - Y(hy - 30)); c.fillStyle = "#4a5173"; c.fillRect(px - 6 * S, Y(-200), 12 * S, 200 * S); c.fillStyle = "#2f3550"; c.fillRect(px - 9 * S, Y(-10), 18 * S, 10 * S);
+  c.fillStyle = "#7c86a8"; c.fillRect(bxs + 6 * S, Y(hy - 40), px - bxs - 6 * S, 5 * S); c.fillRect(bxs + 6 * S, Y(hy - 8), px - bxs - 6 * S, 5 * S);
+  draw.rect(c, bxs, Y(hy - 84), 7 * S, 100 * S, 2, "#eef1fa"); c.fillStyle = "#ff7a2f"; c.fillRect(bxs, Y(hy - 34), 2.5 * S, 34 * S);
+  // net (behind the ball), drawn as dashed chain strands
+  const rx0 = X(hoop.x), rx1 = X(hoop.x + RIMW), ry = Y(hy), nd = (48 + clamp(net.y, -10, 26)) * S, sway = clamp(net.x, -30, 30) * S * .5;
+  c.strokeStyle = "rgba(205,214,232,.8)"; c.lineWidth = 1.6 * u; c.setLineDash([3.5 * u, 2.2 * u]); c.beginPath();
+  for (let i = 0; i <= 5; i++) { const f = i / 5, x0 = Lab.lerp(rx0, rx1, f), x1 = Lab.lerp(rx0 + 13 * S, rx1 - 13 * S, f) + sway; c.moveTo(x0, ry); c.quadraticCurveTo(Lab.lerp(x0, x1, .3) + sway * .4, ry + nd * .5, x1, ry + nd); }
+  for (let k = 1; k <= 3; k++) { const f = k / 3.4, inset = 13 * S * f; c.moveTo(rx0 + inset + sway * f, ry + nd * f); c.lineTo(rx1 - inset + sway * f, ry + nd * f); }
+  c.stroke(); c.setLineDash([]);
+  // aim: rubber band + dotted arc
+  const v = held && !ended && (aim || kb) ? aimVel() : null;
+  if (v && !demo) {
+    const full = level === 1 || fire, ta = -v.vy / G, tEnd = full ? 1.9 : ta * 1.04;
+    for (let i = 1, tt = .04; tt < tEnd; i++, tt += .04) {
+      const x = held.x + v.vx * tt + .5 * wind * tt * tt, y = HOLD_Y + v.vy * tt + .5 * G * tt * tt; if (y > -BR || (full && tt > ta && y > hoop.y + 20)) break;
+      c.globalAlpha = full ? .85 - tt * .25 : .9 * (1 - tt / tEnd * .75); draw.circle(c, X(x), Y(y), (fire ? 3.4 : 2.8) * u, fire ? "#ffb169" : "#fff");
+    }
+    c.globalAlpha = 1;
+    if (aim) { const dx = aim.sx - aim.cx, dy = aim.sy - aim.cy, len = Math.hypot(dx, dy), p = Math.min(len, PMAX), bx = X(held.x), by = Y(HOLD_Y);
+      c.strokeStyle = Lab.color.mix("#ffd36b", "#ff5a3c", p / PMAX); c.lineWidth = 4 * u; c.lineCap = "round"; c.beginPath(); c.moveTo(bx, by); c.lineTo(bx - dx / len * p * .55, by - dy / len * p * .55); c.stroke();
+      draw.circle(c, bx - dx / len * p * .55, by - dy / len * p * .55, 6 * u, "#fff"); }
+  }
+  // balls
+  for (const b of balls) {
+    const fade = b.dead > .7 ? 1 - (b.dead - .7) / .5 : 1, hgt = clamp(-b.y / 400, 0, 1);
+    draw.shadow(c, X(b.x), floorY + 4 * u, BR * S * (1 - hgt * .5), BR * S * .22, .3 * (1 - hgt * .7) * fade);
+    if (b.floor === 0) for (let i = 0; i < b.trail.length; i += 2) { c.globalAlpha = .04 + .14 * i / b.trail.length; draw.circle(c, X(b.trail[i]), Y(b.trail[i + 1]), BR * S * (.4 + .5 * i / b.trail.length), b.hot ? "#ff7a2f" : "#ffd9b8"); }
+    c.globalAlpha = 1; if (b.hot && b.floor === 0) draw.glow(c, X(b.x), Y(b.y), 40 * S, "#ff7a2f", .5);
+    drawBall(c, b.x, b.y, b.ang, 1, fade);
+    if (Y(b.y) < P.y - 10) { const ax = clamp(X(b.x), 20, Lab.W - 20); c.fillStyle = "#ffb169"; c.beginPath(); c.moveTo(ax, P.y + 6); c.lineTo(ax - 7, P.y + 17); c.lineTo(ax + 7, P.y + 17); c.fill(); }
+  }
+  if (held && (time > 0 || demo)) {
+    const pull = aim ? Math.min(Math.hypot(aim.sx - aim.cx, aim.sy - aim.cy), PMAX) / PMAX : 0, bob = Math.sin(t * 3.2) * 3 * (1 - pull), pop = cool > -.18 ? ease.outBack(clamp((cool + .0) / -.18, 0, 1)) : 1;
+    draw.shadow(c, X(held.x), floorY + 4 * u, BR * S * .85, BR * S * .2, .28);
+    if (fire) draw.glow(c, X(held.x), Y(HOLD_Y + bob), 40 * S, "#ff7a2f", .45 + .15 * Math.sin(t * 12));
+    drawBall(c, held.x, HOLD_Y + bob, t * .4, pop * (1 - pull * .08));
+  }
+  // rim over the ball
+  c.strokeStyle = "#ff7a2f"; c.lineWidth = 5 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(rx0, ry); c.lineTo(X(hoop.bx), ry); c.stroke();
+  c.strokeStyle = "#ffb37a"; c.lineWidth = 1.5 * S; c.beginPath(); c.moveTo(rx0, ry - 1.5 * S); c.lineTo(X(hoop.bx), ry - 1.5 * S); c.stroke();
+  if (demo) return;
+  // clock board, heat pips, level, wind
+  const cw = 104 * u, cxm = Lab.W / 2, cy = P.y + 8, low = time <= 10, pulse = low ? .5 + .5 * Math.sin(t * (time <= 5 ? 14 : 8)) : 0;
+  draw.rect(c, cxm - cw / 2, cy, cw, 44 * u, 10 * u, "rgba(8,10,24,.78)", low ? `rgba(255,90,60,${.5 + pulse * .5})` : "rgba(255,255,255,.14)", 2);
+  draw.text(c, Math.floor(Math.ceil(time) / 60) + ":" + ("0" + Math.ceil(time) % 60).slice(-2), cxm, cy + 23 * u, { size: 27 * u, color: low ? Lab.color.mix("#ff9a7a", "#ff4f3a", pulse) : "#ffd36b" });
+  for (let i = 0; i < 3; i++) { const on = fire || i < streak, x = cxm + (i - 1) * 16 * u, y = cy + 56 * u; draw.circle(c, x, y, (on ? 5.5 : 4) * u, on ? (fire ? "#ff7a2f" : "#ffd36b") : "rgba(255,255,255,.16)"); if (fire) draw.glow(c, x, y, 12 * u, "#ff7a2f", .5); }
+  draw.text(c, fire ? "ON FIRE ×2" : "LEVEL " + level, 14, cy + 15 * u, { size: 13 * u, color: fire ? "#ff9a3c" : "rgba(255,255,255,.75)", align: "left" });
+  if (Math.abs(wind) > 1) draw.text(c, wind > 0 ? "WIND »" + (wind > 150 ? "»" : "") : (wind < -150 ? "«" : "") + "« WIND", Lab.W - 14, cy + 15 * u, { size: 13 * u, color: "#8fd6ff", align: "right" });
+  if (kb && held) draw.text(c, "arrows aim · space shoots", Lab.W / 2, floorY + 44 * u, { size: 11 * u, color: "rgba(255,255,255,.5)" });
+}
+Lab.boot();
+})();
+</script></body></html>

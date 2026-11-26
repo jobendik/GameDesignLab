@@ -81,13 +81,6 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab--07-beetle-box.jpg"
    },
    {
-    "n": 43,
-    "slug": "43-2048",
-    "t": "2048",
-    "d": "Swipe to merge equal tiles.",
-    "thumb": "../thumbs/PhoneGameLab--43-2048.jpg"
-   },
-   {
     "n": 44,
     "slug": "44-match-3",
     "t": "Match 3",
@@ -318,6 +311,22 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--24-spindle-drop.jpg"
+   },
+   {
+    "n": 39,
+    "slug": "39-blacktop-buzzer",
+    "t": "Blacktop Buzzer",
+    "d": "Night hoops against the clock.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 42,
+    "slug": "42-bamboo-span",
+    "t": "Bamboo Span",
+    "d": "Grow a stalk, tip it over, roll across.",
+    "v2": true,
+    "score": 8
    }
   ]
  },
@@ -405,25 +414,19 @@ window.LAB_GAMES = [
    },
    {
     "n": 38,
-    "slug": "38-plinko",
+    "slug": "38-tumblepeg",
     "t": "Tumblepeg",
-    "d": "Drop, thump and ping your way past the quota.",
+    "d": "Drop, thump and ping past the quota.",
     "v2": true,
-    "thumb": "../thumbs/PhoneGameLab--38-plinko.jpg"
-   },
-   {
-    "n": 39,
-    "slug": "39-basketball",
-    "t": "Basketball Flick",
-    "d": "Flick to shoot, arc to the hoop.",
-    "thumb": "../thumbs/PhoneGameLab--39-basketball.jpg"
+    "score": 7
    },
    {
     "n": 40,
-    "slug": "40-pool",
-    "t": "Pool",
-    "d": "Drag-aim the cue, pot the balls.",
-    "thumb": "../thumbs/PhoneGameLab--40-pool.jpg"
+    "slug": "40-brass-pocket",
+    "t": "Brass Pocket",
+    "d": "Pot them all before your shots run dry.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 41,
@@ -431,13 +434,6 @@ window.LAB_GAMES = [
     "t": "Goal Flick",
     "d": "Flick the ball past the keeper.",
     "thumb": "../thumbs/PhoneGameLab--41-goal-flick.jpg"
-   },
-   {
-    "n": 42,
-    "slug": "42-bridge-build",
-    "t": "Bridge Build",
-    "d": "Hold to extend a bridge over the gap.",
-    "thumb": "../thumbs/PhoneGameLab--42-bridge-build.jpg"
    }
   ]
  },
@@ -527,18 +523,19 @@ window.LAB_GAMES = [
    },
    {
     "n": 33,
-    "slug": "33-shape-gate",
+    "slug": "33-snug",
     "t": "Snug",
     "d": "Become the shape. Slip through.",
     "v2": true,
-    "thumb": "../thumbs/PhoneGameLab--33-shape-gate.jpg"
+    "score": 8
    },
    {
     "n": 34,
-    "slug": "34-stack-runner",
-    "t": "Stack Runner",
-    "d": "Collect blocks, lay them to cross gaps.",
-    "thumb": "../thumbs/PhoneGameLab--34-stack-runner.jpg"
+    "slug": "34-antiquity",
+    "t": "Antiquity",
+    "d": "Haul stone. Mind the wobble.",
+    "v2": true,
+    "score": 8
    }
   ]
  },
@@ -553,6 +550,17 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--37-star-jar.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Minigame",
+  "items": [
+   {
+    "n": 43,
+    "slug": "43-plumpling",
+    "t": "2048",
+    "d": "Swipe to slide tiles. Merge equal numbers to reach 2048."
    }
   ]
  },
