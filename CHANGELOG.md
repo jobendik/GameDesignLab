@@ -2,6 +2,21 @@
 
 Newest first. One entry per coherent, verified batch of work.
 
+## 2026-11-26 — Arcade launcher + Phone Game Lab wave 1 (29 games)
+- **Arcade** (`index.html`): data-driven from the generated catalog — featured by review score, continue playing,
+  favorites, instant search, genre / collection / control filters, sorts, URL-hash state, "Surprise me", keyboard
+  navigation, real gameplay thumbnails with seeded placeholders. **Player shell** (`play.html`) hosts standalone
+  games in an iframe with loading state, back / favorite / fullscreen / restart. **Collection launchers** for
+  Phone Game Lab and Pocket Pals (self-contained). Nine browser tests.
+- **Phone Game Lab 01–13, 17–22, 25–32** rebuilt from ~50-line placeholders into original games on engine v2, each
+  with its own name and identity, a gameplay test and a scored review (baseline 1–2 → 7–8, scripted-play judgement):
+  Splodge, Crab Bop, Flinch, Corkslinger, Misfired, Odd Mood, Beetle Box, Swindle, Tea Break, Bramble Drop,
+  Scribble Siege, Cold Snap, Suds Patrol, Windfletch, One Breath, Tin Topple, Frostfoot, Paper Rapids, Sundown Sprint,
+  Goat Up, Jelly Drift, Fizzwhiz, Hollowlight, Tiltwood, Wobblewire, Sinkstones, Inkstride (+ Star Jar).
+- **Engine additions driven by the rewrites**: sticky hints, more easings, sprite eviction by prefix, neutral run
+  endings, press timestamps, sustained audio loops, music beat callback, per-call SFX volume, runtime theme changes,
+  positioned toasts/banners; docs for `attract`, world-space particles and baked backgrounds.
+
 ## 2026-11-26 — Phase 0: foundation
 - **Restructure**: 65 standalone games moved to `games/` with clean kebab-case names; `bouce_dungon.html` and the
   pre-fix `busy-beavers.html` archived as superseded duplicates; `MagicSort.tsx` (non-playable React source) archived;

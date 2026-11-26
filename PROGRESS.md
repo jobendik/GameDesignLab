@@ -2,30 +2,36 @@
 
 Live state of the project. Update at the end of every batch. (Counts: `node tools/build-docs.js` → `GAME_INVENTORY.md`.)
 
-## State — 2026-11-26
+## State — 2026-11-26 (evening)
 | Area | State |
 |---|---|
 | Foundation / tooling / engine v2 / mascots | ✅ done (see `CHANGELOG.md`) |
-| Phone Game Lab (70) | 1 transformed (Star Jar). Wave 1 (games 01–32) **in progress** by 8 parallel agents |
+| Arcade launcher (`index.html`, `play.html`, lab launchers) | ✅ done and verified (9 tests in `tests/arcade/`) |
+| Phone Game Lab (70) | 29 transformed + verified: 01–13, 17–22, 25–32, 37. In progress: 14, 23, 24. Not started: 15, 16, 33–36, 38–70 |
 | Pocket Pals (80) | 0 transformed. `pals.js` + brief addendum ready. Not started |
-| Standalone games (65) | 0 transformed. Dependencies vendored, metadata seeded, brief ready. Not started |
-| Arcade launcher (`index.html`, `play.html`, lab launchers) | **in progress** (1 agent). Old `index.html` still has stale links until it lands |
+| Standalone games (65) | 0 finished. In progress: neon-strike (rewritten, test failing), sproutys-garden (edited), neon-hagen (test only). Not started: the rest |
+
+**Operational constraint:** the account's 5-hour usage limit has been hit three times; each time every running agent
+dies mid-task (work on disk is kept, the lead commits it as "WIP checkpoint"). Run **at most ~4 agents at a time**,
+give each a precise "what is on disk / what remains" resume message (SendMessage to the same agent id while this
+session lives; otherwise start a fresh agent with the brief + the on-disk state), and verify + commit each batch as
+it lands so nothing is lost when the limit hits.
 
 ## Batches
-| Batch | Games | Owner | Status |
-|---|---|---|---|
-| PGL1-A | 01–04 | agent | running |
-| PGL1-B | 05–08 | agent | running |
-| PGL1-C | 09–12 | agent | running |
-| PGL1-D | 13–16 | agent | running |
-| PGL1-E | 17–20 | agent | running |
-| PGL1-F | 21–24 | agent | running |
-| PGL1-G | 25–28 | agent | running |
-| PGL1-H | 29–32 | agent | running |
-| ARCADE | launcher + player shell | agent | running |
-| S1 | neon-hagen, sproutys-garden | agent | running |
-| S18 | neon-strike, breach-vector | agent | running |
-| S19 | little-hero-adventure, star-trail-adventure | agent | running |
+| Batch | Games | Status |
+|---|---|---|
+| PGL1-A | 01–04 | ✅ verified |
+| PGL1-B | 05–08 | ✅ verified |
+| PGL1-C | 09–12 | ✅ verified (agent died before its final report; lead ran tests + smoke) |
+| PGL1-D | 13–16 | 13 ✅ · 14 `14-sparkmoth` rewrite on disk, no test/review · 15, 16 untouched prototypes |
+| PGL1-E | 17–20 | ✅ verified |
+| PGL1-F | 21–24 | 21, 22 ✅ · 23 `23-pogo-peak` test failing ("burr knocks Pip down") · 24 rewrite on disk under old slug, no test/review |
+| PGL1-G | 25–28 | ✅ verified |
+| PGL1-H | 29–32 | ✅ verified |
+| ARCADE | launcher + player shell | ✅ verified |
+| S1 | neon-hagen, sproutys-garden | neon-hagen: only a test file so far; sproutys-garden: edited, unverified, no test/review |
+| S18 | neon-strike, breach-vector | neon-strike: rewritten, its test fails at "one core hit deals double damage"; breach-vector untouched |
+| S19 | little-hero-adventure, star-trail-adventure | not started (agent only surveyed) |
 
 ### Planned batches (not started)
 **Phone Game Lab wave 2** (brief: `docs/briefs/phone-game-brief.md`), 4 games each:
@@ -47,15 +53,16 @@ S29 aura-rooms + the-elevator · S30 svev-miner + void-drift · S31 frequency + 
 S33 unscrew-it + the-tower · S34 pinata-pop + lumis-luminescence
 
 ## Exact next actions
-1. When wave 1 agents finish: `node tools/smoke.js PhoneGameLab/` + `node tools/run-tests.js PhoneGameLab` →
-   inspect contact sheet → fix/return anything weak → `build-catalog` + `build-docs` → commit.
-2. Launch wave 2: Phone Game Lab 33–70 (38 games, skip 37) in batches of 4 with `docs/briefs/phone-game-brief.md`.
-3. Launch Pocket Pals waves (80 games, batches of 4) with the addendum brief.
-4. Launch standalone waves (1–2 games per agent) with `docs/briefs/standalone-game-brief.md`.
-5. Regenerate thumbnails (`node tools/thumbs.js`) once a collection is transformed; rebuild catalogs; verify launcher tests.
+1. Finish PGL1-D (14, 15, 16) and PGL1-F (23, 24); verify (`node tools/run-tests.js PhoneGameLab`, `node tools/smoke.js PhoneGameLab/`), thumbs for new slugs, `build-catalog`, `build-docs`, commit.
+2. Finish S18, S1, S19 (standalone pilots). Check each through `play.html?g=games/<name>` as well as directly.
+3. Phone Game Lab wave 2: 33–36 · 38–41 · 42–45 · 46–49 · 50–53 · 54–57 · 58–61 · 62–65 · 66–70.
+4. Pocket Pals waves (80 games, 4 per batch) with the addendum brief; then the remaining standalone batches (list below).
+5. After each collection: `node tools/thumbs.js <filter>`, prune stale thumbs, rebuild catalogs/docs, run `tests/arcade`.
+6. Re-subscribe to PR activity for jobendik/GameDesignLab#5 once pushes become infrequent (it was unsubscribed to stop a push → empty-CI-event → wake loop).
 
 ## Known issues / watch list
 - Headless smoke reports low fps for WebGL games (software rendering) — not a real-device signal.
 - `games/neon-hagen` is blank offline (React + Babel + Tailwind from CDNs) until its transformation pass rewrites it.
 - Standalone games still reference Google Fonts / Tailwind CDN / an ad SDK until their passes (listed per game in `GAME_INVENTORY.md`).
-- Engine font changed to bundled Fredoka after wave 1 started — check wave 1 games for text overflow during verification.
+- Launcher wishes not yet provided by the catalog: `was` (old slug, to migrate favourites/recents), `orient`, real `strip` previews, proper categories for Pocket Pals (all 80 still say "Minigame" until transformed).
+- Reviews repeatedly flag: no human playtest (all tuning is scripted), portrait games small in 844×390 landscape, late-game plateaus. Candidates for the second pass.

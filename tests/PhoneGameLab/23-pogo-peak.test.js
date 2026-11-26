@@ -56,7 +56,8 @@ module.exports = {
     const c2 = await game(g => ({ h: g.height, best: g.bestStreak, alive: g.alive }));
     expect(c2.best >= 2 && c2.h > c1.h, 'chained slams build a streak while climbing (' + JSON.stringify(c2) + ')');
     // --- hazard: a burr touching Pip's body knocks him down (dazed), it does not end the run by itself
-    for (let i = 0; i < 60 && !(await game(g => g.vy < -200 && !g.slamming)); i++) await wait(25);
+    // (wait out any mercy window from an earlier knock or balloon ride so the touch is a fair one)
+    for (let i = 0; i < 200 && !(await game(g => g.vy < -200 && !g.slamming && g.inv <= 0 && g.balloon <= 0 && g.dazed <= 0)); i++) await pilot(60, 'climb');
     await game(g => g.spawnThing('burr', g.x, g.y - 6)); await wait(80);
     expect(await game(g => g.dazed > 0 && g.vy > 0 && g.alive), 'a burr knocks Pip down and dazes him');
     // --- the only way to lose: fall off the bottom of the screen
