@@ -2,7 +2,7 @@
 // PhoneGameLab/shared is the source of truth for the phone engine; mirror it into PhoneGameLab2/shared.
 // `--check` exits 1 if the copies differ (used by tests).
 const fs = require('fs'), path = require('path');
-const ROOT = path.resolve(__dirname, '..'), FILES = ['core.js', 'style.css', 'ENGINE.md'];
+const ROOT = path.resolve(__dirname, '..'), FILES = ['core.js', 'style.css', 'ENGINE.md', 'fonts/fredoka.woff2', 'fonts/LICENSE-OFL.txt'];
 let bad = 0;
 for (const f of FILES) {
   const a = path.join(ROOT, 'PhoneGameLab/shared', f), b = path.join(ROOT, 'PhoneGameLab2/shared', f);

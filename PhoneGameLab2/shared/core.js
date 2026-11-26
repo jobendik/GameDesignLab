@@ -448,7 +448,7 @@
   }
 
   /* ------------------------------------------------------------------ drawing helpers */
-  const FONT = '"Baloo 2","Nunito","Fredoka",ui-rounded,"SF Pro Rounded","Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif';
+  const FONT = '"Fredoka","Baloo 2","Nunito",ui-rounded,"SF Pro Rounded","Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif';
   Lab.FONT = FONT;
   Lab.font = (size, weight) => `${weight || 800} ${Math.round(size)}px ${FONT}`;
   function starPath(c, x, y, r, n, inner) { n = n || 5; inner = inner == null ? .5 : inner; c.beginPath(); for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + i * Math.PI / n, rr = i % 2 ? r * inner : r; c[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * rr, y + Math.sin(a) * rr); } c.closePath(); }
@@ -678,6 +678,8 @@
     restartCb = opts.restart || null;
     injectShell();
     if (opts.music) music.play(opts.music);
+    // bundled UI font: canvas text switches to it as soon as it is ready; baked sprites are rebuilt once
+    try { if (doc.fonts && doc.fonts.load) Promise.all([doc.fonts.load('700 16px Fredoka'), doc.fonts.load('400 16px Fredoka')]).then(() => { sprites.clear(); Lab.fontReady = true; }).catch(() => { }); } catch (e) { }
     Lab.opts = opts;
     lastTs = performance.now();
     requestAnimationFrame(frame);
