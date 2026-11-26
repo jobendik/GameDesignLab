@@ -1,34 +1,303 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Wobblewire</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Balance Beam", instructions:"Tap LEFT / RIGHT side to nudge balance. Stay centered!", restart:start});
-let angle, vel, push, t, gust;
-function start(){
-  angle=0; vel=0; push=0; t=0; gust=0;
+(function(){ "use strict";
+/* WOBBLEWIRE — a fox on a high wire. Hold the left / right side of the screen to lean; the fox is a real inverted
+ * pendulum (gravity torque grows with the lean) pushed around by telegraphed gusts, birds landing on the balance
+ * pole and a swaying rope. Identity: paper-cut alpine morning that drifts through five skies, circus-march music.
+ * Depth: walking speed and the STEADY multiplier both reward small, early corrections over big safe ones.      */
+Lab.init({
+  title: "Wobblewire", tagline: "Lean left, lean right. Don't look down.", category: "Runner & Movement",
+  howto: ["Hold the left or right side to lean", "Stay upright to walk faster and score more", "Lean into gusts, away from birds"],
+  theme: { bg: "#f3d2b0", bg2: "#ffe9c9", fg: "#3b2a3a", accent: "#ef7f3a", accent2: "#2aa39a", muted: "#7a6672", light: true },
+  orient: "portrait", music: { style: "march", key: "G", vol: .4 }, restart: start,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, PI = Math.PI;
+const UC = 3.0, CD = 1.2, BM = .95, DZ = 7, VW = 1.5, STEP = 1 / 120, FALL = 1.08;
+const PALS = [
+  { sky: ["#ffc392", "#ffe4bd", "#d9efe2"], m: ["#b3d3c8", "#78afa9", "#44828a"], sun: "#fff6cf", v: "#2f6770" },
+  { sky: ["#86cdf2", "#c4e9fa", "#e8f7ee"], m: ["#b0d6e4", "#78adc8", "#487fa3"], sun: "#ffffff", v: "#35698a" },
+  { sky: ["#ffb072", "#ffd69c", "#ffecd4"], m: ["#e3aa90", "#ba7676", "#814c66"], sun: "#fff1b8", v: "#663d5c" },
+  { sky: ["#f594a2", "#fbc5ae", "#fdebd3"], m: ["#cf9fb8", "#98719f", "#624a80"], sun: "#ffe3c9", v: "#4c3a6c" },
+  { sky: ["#a5a2dc", "#cdc7ee", "#ece6f6"], m: ["#aaaed8", "#787bb6", "#4b4f8d"], sun: "#fffbe8", v: "#393d75" },
+];
+const FOX = "#f08a3c", FOXD = "#c9642a", CREAM = "#fff1dc", INK = "#3b2a3a", TEAL = "#2aa39a", ROPE = "#6e4f3f";
+let S, cx, footY, vy, PL, th, om, dist, rope, L, total, scoreF, mult, steadyT, bestMult, mode, modeT, walkPh, stepN;
+let wind, gustT, birds, birdT, swayPh, swayX, flex, droop, override, noiseV, noiseTgt, noiseT, clouds, trees, streaks, fallB, carried, pal, acc, hbT, blink, pressL, pressR, coach, cfg, ridge;
+
+function conf(r) { // what each rope adds
+  return { K: Math.min(4.9, 3.9 + r * .14), gust: r >= 2, gmag: [Math.min(1.9, .65 + r * .2), Math.min(2.35, .95 + r * .26)], ggap: [Math.max(2.6, 6.6 - r * .55), Math.max(4, 8.6 - r * .6)],
+    birds: r < 3 ? 0 : r < 5 ? 1 : 2, sway: r < 4 ? 0 : Math.min(.75, .3 + (r - 4) * .12), len: Math.min(46, 14 + r * 5) };
+}
+function start() {
+  layout();
+  th = 0; om = 0; dist = 0; rope = 1; total = 0; scoreF = 0; mult = 1; steadyT = 0; bestMult = 1; mode = "ready"; modeT = 0; walkPh = 0; stepN = 0;
+  wind = { phase: "idle", t: 0, dir: 1, mag: 0, dur: 1 }; birds = []; swayPh = 0; swayX = 0; flex = 0; droop = [0, 0]; override = null;
+  noiseV = 0; noiseTgt = 0; noiseT = 0; streaks = []; fallB = null; carried = 0; acc = 0; hbT = 0; blink = 2; pressL = pressR = 0; coach = true;
+  cfg = conf(1); L = cfg.len; gustT = 5; birdT = 3; pal = { a: 0, b: 0, k: 1 };
+  clouds = Array.from({ length: 5 }, (_, i) => ({ x: Lab.rand(0, 1), y: .08 + i * .06 + Lab.rand(0, .03), s: Lab.rand(.6, 1.2), v: Lab.rand(.006, .016) }));
+  trees = Array.from({ length: 54 }, () => ({ x: Lab.rand(-.1, 1.1), d: Lab.rand(.04, 1), h: Lab.rand(.8, 1.3) })).sort((a, b) => a.d - b.d);
+  ridge = [0, 1, 2].map(i => Array.from({ length: 4 }, () => [Lab.rand(.6, 1.6) * (i + 1.4), Lab.rand(0, TAU)]));
   Lab.setScore(0);
-  Lab.input.onTap=[(x,y)=>{ if(x<Lab.W/2) push=-1; else push=1; setTimeout(()=>push=0,80);}];
-  Lab.loop(dt=>{
-    t+=dt;
-    gust+=dt;
-    if(gust>1.5){ gust=0; vel+=Lab.rand(-0.6,0.6); }
-    // gravity-like: angle accelerates away from 0
-    vel += angle*1.8*dt;
-    vel += push*1.2*dt*30;
-    vel *= 0.985;
-    angle += vel*dt;
-    if(Math.abs(angle)>Math.PI/3){ Lab.gameover({title:"Fell!",message:"Survived "+t.toFixed(1)+"s"}); return; }
-    Lab.setScore(t.toFixed(1));
-    const c=Lab.ctx; c.fillStyle="#0e1428"; c.fillRect(0,0,Lab.W,Lab.H);
-    const cx=Lab.W/2, cy=Lab.H-100;
-    c.save(); c.translate(cx,cy); c.rotate(angle);
-    c.fillStyle="#cc8855"; c.fillRect(-160,-10,320,20);
-    c.fillStyle="#5af"; c.fillRect(-20,-60,40,50);
-    c.beginPath(); c.fillStyle="#5af"; c.arc(0,-80,18,0,Lab.TAU); c.fill();
-    c.restore();
-    c.strokeStyle="#aa3322"; c.beginPath(); c.moveTo(cx-30,cy+10); c.lineTo(cx-20,Lab.H); c.moveTo(cx+30,cy+10); c.lineTo(cx+20,Lab.H); c.stroke();
-    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
-    c.fillText("Tap "+(angle<0?"RIGHT":"LEFT")+" to balance!", Lab.W/2, 70);
+  Lab.input.onDown = [x => kick(x < cx ? -1 : 1)];
+  Lab.input.onKey = [k => { if (k === "ArrowLeft" || k === "a" || k === "A") kick(-1); if (k === "ArrowRight" || k === "d" || k === "D") kick(1); }];
+  Lab.expose({
+    get theta() { return th; }, get omega() { return om; }, get dist() { return dist; }, get total() { return total + dist; }, get rope() { return rope; },
+    get score() { return Math.round(scoreF); }, get mult() { return mult; }, get mode() { return mode; }, get wind() { return { phase: wind.phase, dir: wind.dir, mag: wind.mag }; },
+    get birds() { return birds.map(b => ({ side: b.side, state: b.state })); }, get length() { return L; }, get lean() { return ctrl(); }, get torque() { return ext(); },
+    hold(d) { override = d; },       // virtual hold for scripted play: -1 / 0 / 1, null = real input
+  });
+  Lab.loop(frame);
+}
+function layout() {
+  const P = Lab.play; S = Math.min(Lab.W / 390, P.h / 760);
+  cx = Lab.W / 2; footY = P.y + P.h * .795; vy = P.y + P.h * .36; PL = Math.min(Lab.W * .455, 190 * S);
+}
+Lab.onResize(() => { if (clouds) layout(); });
+
+function ctrl() {
+  if (override != null) return override;
+  let l = 0, r = 0; for (const p of Lab.input.pointers) { if (p.x < cx) l = 1; else r = 1; }
+  const k = Lab.input.axisX(); if (k < 0) l = 1; if (k > 0) r = 1; return r - l;
+}
+function kick(d) { // a press also gives a small instant shove so taps feel crisp
+  if (mode !== "walk" || Lab.paused) return;
+  om += d * .2; coach = coach && total + dist < 6; Lab.sfx("tick", { pitch: d < 0 ? .7 : .9 }); Lab.buzz(4);
+}
+function ext() { // disturbance torque: gust + birds + rope sway + tiny restless noise
+  let q = noiseV + cfg.sway * Math.sin(swayPh);
+  if (wind.phase === "blow") { const s = Math.sin(PI * wind.t / wind.dur); q += wind.dir * wind.mag * s * s; }
+  for (const b of birds) if (b.state === "sit") q += b.side * b.arm * BM;
+  return q;
+}
+function step(h) {
+  if (mode === "walk") {
+    const K = cfg.K * (rope === 1 ? Lab.map(dist, 0, 10, .62, 1) : 1);
+    om += (K * Math.sin(th) + ext() * Math.cos(th) + ctrl() * UC - CD * om) * h;
+  } else om += (-14 * th - 7 * om) * h; // on a platform the fox simply steadies itself
+  th += om * h;
+}
+
+/* ------------------------------------------------------------------ events */
+function birdPos(b) { // where a bird sits: on the pole, measured from the hands
+  const hy = 118 * S, bx = cx + swayX + hy * Math.sin(th), by = footY - hy * Math.cos(th), pa = th + flex, d = b.side * b.arm * PL;
+  return [bx + d * Math.cos(pa), by + d * Math.sin(pa) + droop[b.side < 0 ? 0 : 1] * b.arm * b.arm - 11 * S];
+}
+function spawnBird() {
+  const side = Lab.chance(.5) ? -1 : 1, arm = Lab.rand(.72, .93);
+  if (birds.some(b => b.side === side && b.state !== "out" && Math.abs(b.arm - arm) < .2)) return;
+  birds.push({ side, arm, state: "in", t: 0, sit: Lab.rand(4.2, 6.5), x: cx + side * Lab.W * .75, y: footY - 300 * S - Lab.rand(0, 120) * S, x0: 0, y0: 0, flap: 0, hop: 0 });
+  const b = birds[birds.length - 1]; b.x0 = b.x; b.y0 = b.y; Lab.audio.tone({ f: 2300, f2: 3100, dur: .07, vol: .06 }); Lab.audio.tone({ f: 2600, f2: 3400, dur: .07, vol: .06, delay: .1 });
+}
+function leave(b, scared) {
+  if (b.state === "out") return; const was = b.state; b.state = "out"; b.t = 0; b.x0 = b.x; b.y0 = b.y; b.vx = (scared ? wind.dir : b.side) * Lab.rand(260, 380) * S;
+  Lab.audio.tone({ f: 3000, f2: 2200, dur: .09, vol: .06 });
+  if (was === "sit" && !scared && mode === "walk") { const g = 30 * mult; scoreF += g; carried++; fx.text(b.x, b.y - 22 * S, "+" + g, { color: "#2a7fd0", size: 17, outline: "rgba(255,255,255,.8)" }); Lab.sfx("pickup", { pitch: 1.3 }); }
+}
+function arrive() {
+  mode = "rest"; modeT = 0; total += L; dist = 0; const bonus = 100 * rope; scoreF += bonus; rope++;
+  for (const b of birds) leave(b, false); wind.phase = "idle";
+  Lab.sfx("levelup"); Lab.buzz(18); Lab.bumpScore();
+  fx.text(cx, footY - 250 * S, "+" + bonus, { color: "#fff", size: 30, outline: "rgba(60,30,50,.6)", life: 1.3 });
+  fx.burst(cx, footY - 10 * S, { n: 18, colors: ["#ef7f3a", "#2aa39a", "#ffd166", "#fff"], speed: 260 * S, spread: PI, angle: -PI / 2, life: .9, size: 4, shape: "square", gravity: 500 });
+  cfg = conf(rope); L = cfg.len; pal = { a: (rope - 2) % 5, b: (rope - 1) % 5, k: 0 }; Lab.tween(pal, { k: 1 }, 1.4, { ease: "inOutQuad" });
+  const news = rope === 2 ? "a breeze picks up" : rope === 3 ? "birds like your pole" : rope === 4 ? "the rope sways" : rope === 5 ? "two birds at once" : "stronger gusts";
+  Lab.after(.5, () => { Lab.banner("ROPE " + rope, { color: "#fff", ms: 1000 }); Lab.toast(news, 1500); });
+  Lab.after(1.7, () => { if (mode === "rest") { mode = "walk"; gustT = Lab.rand(2.5, 4); birdT = Lab.rand(2, 4); swayPh = 0; } });
+}
+function tumble() {
+  mode = "fall"; modeT = 0; const d = Math.sign(th) || 1;
+  fallB = { x: 0, y: 0, vx: d * 150 * S, vy: -120 * S, rot: th, vr: d * 5 };
+  for (const b of birds) leave(b, false);
+  Lab.audio.tone({ f: 1500, f2: 240, dur: .95, vol: .13, type: "sine", a: .02 }); Lab.sfx("hurt"); Lab.shake(8, .3); Lab.buzz(60);
+  Lab.after(1.05, () => {
+    Lab.sfx("thud"); fx.burst(cx + fallB.x, Lab.H + 10, { n: 16, color: "#ffffff", speed: 220 * S, spread: PI, angle: -PI / 2, life: .8, size: 9, gravity: 60, drag: 2.5 });
+    Lab.gameover({ title: "Whoops!", score: Math.round(scoreF), stats: [["Distance", Math.round(total + dist) + " m"], ["Ropes crossed", rope - 1], ["Best steady", "×" + bestMult]] });
   });
 }
-start();
+
+/* ------------------------------------------------------------------ frame */
+function frame(dt, t) {
+  modeT += dt; const lean = ctrl();
+  pressL = Lab.damp(pressL, lean < 0 ? 1 : 0, 26, dt); pressR = Lab.damp(pressR, lean > 0 ? 1 : 0, 26, dt);
+  if (mode === "ready" && modeT > .9) { mode = "walk"; Lab.sfx("whistle"); }
+  if (mode !== "fall") { acc = Math.min(acc + dt, .05); while (acc >= STEP) { step(STEP); acc -= STEP; } }
+  const ath = Math.abs(th), danger = Lab.clamp((ath - .3) / .5, 0, 1);
+  if (mode === "walk") {
+    noiseT -= dt; if (noiseT <= 0) { noiseT = Lab.rand(.3, .7); noiseTgt = Lab.rand(-.3, .3); } noiseV = Lab.damp(noiseV, noiseTgt, 4, dt);
+    swayPh += dt * 2.1; swayX = Lab.damp(swayX, cfg.sway * 30 * S * Math.sin(swayPh), 8, dt);
+    const v = VW * Lab.clamp(1 - Math.pow(ath / .55, 2), .12, 1); dist += v * dt; walkPh += v * dt * 2.6;
+    if (Math.floor(walkPh) !== stepN) { stepN = Math.floor(walkPh); Lab.audio.tone({ f: stepN % 2 ? 150 : 170, f2: 90, dur: .05, vol: .09 * v }); }
+    scoreF += v * dt * 10 * mult;
+    // steady multiplier: builds while nearly upright, holds through small wobbles, breaks on a big one
+    if (ath < .15) steadyT += dt; else if (ath > .4 && steadyT > 0) { if (mult > 1) { Lab.sfx("error", { pitch: 1.2 }); fx.text(cx, footY - 255 * S, "steady lost", { color: "#d2553f", size: 15, outline: "rgba(255,255,255,.8)" }); } steadyT = 0; }
+    const m = 1 + Math.min(4, Math.floor(steadyT / 2.5));
+    if (m > mult) { Lab.audio.combo(m * 2, { vol: .2 }); fx.text(cx, footY - 255 * S, "STEADY ×" + m, { color: "#18877f", size: 22, outline: "rgba(255,255,255,.9)" }); Lab.bumpScore(); bestMult = Math.max(bestMult, m); }
+    mult = m;
+    // gusts: 0.9 s of warning (streaks, chevrons, whoosh) before the push
+    if (wind.phase === "idle") { gustT -= dt; if (gustT <= 0 && cfg.gust && dist < L - 3) { wind = { phase: "warn", t: 0, dir: Lab.chance(.5) ? -1 : 1, mag: Lab.rand(cfg.gmag[0], cfg.gmag[1]), dur: Lab.rand(1.5, 2.3) }; Lab.sfx("whoosh", { pitch: .7 }); } }
+    else { wind.t += dt; if (wind.phase === "warn" && wind.t > .9) { wind.phase = "blow"; wind.t = 0; Lab.sfx("whoosh", { pitch: 1 }); for (const b of birds) leave(b, true); } else if (wind.phase === "blow" && wind.t > wind.dur) { wind.phase = "idle"; gustT = Lab.rand(cfg.ggap[0], cfg.ggap[1]); } }
+    birdT -= dt; if (birdT <= 0) { birdT = Lab.rand(3, 5.5); if (cfg.birds > birds.filter(b => b.state !== "out").length && wind.phase === "idle" && dist < L - 5) spawnBird(); }
+    if (dist >= L) arrive();
+    else if (ath > FALL) tumble();
+    if (danger > .25) { hbT -= dt; if (hbT <= 0) { Lab.sfx("heartbeat", { pitch: 1 + danger * .4 }); hbT = .62 - danger * .25; if (Lab.chance(.6)) fx.burst(cx + swayX + Math.sin(th) * 170 * S, footY - Math.cos(th) * 185 * S, { n: 2, color: "#8fd3f4", speed: 110 * S, life: .5, size: 3, gravity: 600 }); } }
+  } else if (mode === "fall") { fallB.vy += 1500 * S * dt; fallB.x += fallB.vx * dt; fallB.y += fallB.vy * dt; fallB.rot += fallB.vr * dt; swayX = Lab.damp(swayX, 0, 3, dt); }
+  else { swayX = Lab.damp(swayX, 0, 5, dt); if (mode === "rest") walkPh += dt * 1.2; }
+  // pole follow-through and bird bookkeeping
+  flex = Lab.damp(flex, Lab.clamp(-om * .07, -.12, .12), 10, dt);
+  const w = [0, 0]; for (const b of birds) if (b.state === "sit") w[b.side < 0 ? 0 : 1] += 15 * S; droop[0] = Lab.damp(droop[0], w[0], 9, dt); droop[1] = Lab.damp(droop[1], w[1], 9, dt);
+  for (let i = birds.length - 1; i >= 0; i--) {
+    const b = birds[i]; b.t += dt; b.flap += dt * 22;
+    if (b.state === "in") { const u = Math.min(1, b.t / .95), e = Lab.ease.outCubic(u), [tx, ty] = birdPos(b); b.x = Lab.lerp(b.x0, tx, e); b.y = Lab.lerp(b.y0, ty, e) - Math.sin(u * PI) * 50 * S; if (u >= 1) { b.state = "sit"; b.t = 0; b.hop = 1; om += b.side * .3; Lab.sfx("knock", { pitch: 1.5 }); Lab.buzz(8); } }
+    else if (b.state === "sit") { [b.x, b.y] = birdPos(b); b.hop = Math.max(0, b.hop - dt * 4); if (b.t > b.sit || ath > .8) leave(b, false); }
+    else { b.x += b.vx * dt; b.y = b.y0 - b.t * 240 * S - Math.sin(b.t * 5) * 14 * S; if (b.t > 1.6) birds.splice(i, 1); }
+  }
+  const blowing = wind.phase === "blow" ? Math.sin(PI * wind.t / wind.dur) : wind.phase === "warn" ? .3 : 0;
+  if (blowing > 0 && streaks.length < 26 && Lab.chance(dt * (10 + blowing * 34))) streaks.push({ x: wind.dir > 0 ? -90 : Lab.W + 90, y: Lab.rand(Lab.play.y + 40, Lab.H - 20), l: Lab.rand(40, 110) * S, v: Lab.rand(600, 1000) * S * wind.dir, a: Lab.rand(.25, .7) });
+  for (let i = streaks.length - 1; i >= 0; i--) { const s = streaks[i]; s.x += s.v * dt; if (s.x < -200 || s.x > Lab.W + 200) streaks.splice(i, 1); }
+  for (const cl of clouds) { cl.x += cl.v * dt * (1 + blowing * 6 * wind.dir); if (cl.x > 1.3) cl.x = -.3; if (cl.x < -.3) cl.x = 1.3; }
+  blink -= dt; if (blink < -.12) blink = Lab.rand(1.5, 4.5);
+  Lab.music.intensity(mode === "walk" ? .3 + danger * .7 : .2);
+  Lab.setScore(Math.round(scoreF));
+  render(t, danger, blowing);
+}
+
+/* ------------------------------------------------------------------ rendering */
+const yz = z => vy + (footY - vy) * DZ / (DZ + z), mixP = (f, i) => Lab.color.mix(f(PALS[pal.a])[i], f(PALS[pal.b])[i], pal.k);
+function platform(c, z, col, pine) { // a deck lashed to the top of a tall pine
+  if (z < -DZ * .78) return; const s = DZ / (DZ + z), y = yz(z), w = 170 * S * s, x = cx + swayX * Math.min(1, s) * .15;
+  c.fillStyle = pine; for (let i = 0; i < 6; i++) { const ty = y + (8 + i * 62) * S * s, hw = (46 + i * 30) * S * s; if (ty > Lab.H + 20) break; c.beginPath(); c.moveTo(x, ty - 30 * S * s); c.lineTo(x - hw, ty + 96 * S * s); c.lineTo(x + hw, ty + 96 * S * s); c.fill(); }
+  c.fillStyle = Lab.color.shade(col, -.35); c.beginPath(); c.moveTo(x - w * .32, y + 12 * S * s); c.lineTo(x - 12 * S * s, y + 44 * S * s); c.lineTo(x + 12 * S * s, y + 44 * S * s); c.lineTo(x + w * .32, y + 12 * S * s); c.fill();
+  draw.rect(c, x - w / 2, y - 3 * S * s, w, 15 * S * s, 4 * s, col); draw.rect(c, x - w / 2, y - 3 * S * s, w, 5 * S * s, 3 * s, Lab.color.shade(col, .25));
+  if (s > .25) { c.strokeStyle = Lab.color.shade(col, -.35); c.lineWidth = 3 * S * s; c.beginPath(); c.moveTo(x + w * .42, y); c.lineTo(x + w * .42, y - 62 * S * s); c.stroke(); c.fillStyle = "#e3524a"; c.beginPath(); c.moveTo(x + w * .42, y - 62 * S * s); c.lineTo(x + w * .42 - 30 * S * s, y - 53 * S * s); c.lineTo(x + w * .42, y - 44 * S * s); c.fill(); }
+}
+function drawBird(c, b) {
+  const r = 11 * S, f = b.side; c.save(); c.translate(b.x, b.y - (b.state === "sit" ? Math.sin(b.hop * PI) * 6 * S : 0)); c.scale(-f, 1);
+  if (b.state !== "sit") { const wy = Math.sin(b.flap) * r * 1.1; c.fillStyle = "#3f78bd"; c.beginPath(); c.moveTo(-r * .3, -r * .2); c.lineTo(-r * 1.5, -r * .2 - wy); c.lineTo(r * .4, r * .1); c.fill(); }
+  else { c.strokeStyle = "#e9973a"; c.lineWidth = 1.6 * S; c.beginPath(); c.moveTo(-3 * S, r * .8); c.lineTo(-3 * S, r + 2 * S); c.moveTo(3 * S, r * .8); c.lineTo(3 * S, r + 2 * S); c.stroke(); }
+  c.fillStyle = "#3f78bd"; c.beginPath(); c.moveTo(-r * .7, 0); c.lineTo(-r * 1.7, -r * .5); c.lineTo(-r * 1.5, r * .3); c.fill();
+  draw.circle(c, 0, 0, r, "#5a9ae0"); c.fillStyle = "#e4f1ff"; c.beginPath(); c.ellipse(r * .2, r * .35, r * .62, r * .5, 0, 0, TAU); c.fill();
+  c.fillStyle = "#f2a23a"; c.beginPath(); c.moveTo(r * .85, -r * .25); c.lineTo(r * 1.5, 0); c.lineTo(r * .85, r * .2); c.fill();
+  draw.circle(c, r * .38, -r * .3, r * .2, INK); draw.circle(c, r * .44, -r * .36, r * .07, "#fff");
+  c.restore();
+}
+function drawFox(c, t, danger, wdir) {
+  const u = S, lw = c.lineWidth, hy = 118 * u, falling = mode === "fall", pan = falling ? 1 : danger;
+  c.lineCap = "round"; c.lineJoin = "round";
+  // tail: swings against the lean like a counterweight
+  const tx = -46 * u - th * 70 * u - om * 16 * u + Math.sin(t * 2.2) * 5 * u;
+  c.strokeStyle = FOX; c.lineWidth = 25 * u; c.beginPath(); c.moveTo(0, -76 * u); c.quadraticCurveTo(tx * 1.15, -58 * u, tx * 1.25, -96 * u); c.stroke();
+  c.strokeStyle = CREAM; c.lineWidth = 17 * u; c.beginPath(); c.moveTo(tx * 1.25, -93 * u); c.lineTo(tx * 1.25, -99 * u); c.stroke();
+  // legs: one foot in front of the other
+  const sp = Math.sin(walkPh * PI), lifts = [Math.max(0, sp), Math.max(0, -sp)];
+  for (let i = 0; i < 2; i++) {
+    const sd = i ? 1 : -1, lift = lifts[i] * 8 * u, fxp = sd * 3 * u + (falling ? sd * 14 * u * Math.sin(t * 20 + i) : 0);
+    c.strokeStyle = FOXD; c.lineWidth = 11 * u; c.beginPath(); c.moveTo(sd * 12 * u, -72 * u); c.quadraticCurveTo(sd * 15 * u, -36 * u, fxp, -8 * u - lift); c.stroke();
+    c.fillStyle = "#4a2f2a"; c.beginPath(); c.ellipse(fxp, -5 * u - lift, (8 + lifts[i] * 2) * u, 6 * u, 0, 0, TAU); c.fill();
+  }
+  c.fillStyle = FOX; c.beginPath(); c.ellipse(0, -104 * u, 31 * u, 41 * u, 0, 0, TAU); c.fill();
+  c.fillStyle = CREAM; c.beginPath(); c.ellipse(0, -97 * u, 19 * u, 28 * u, 0, 0, TAU); c.fill();
+  // scarf tails blow with the wind
+  c.strokeStyle = TEAL; c.lineWidth = 9 * u; c.beginPath(); c.moveTo(14 * u, -142 * u);
+  const sw = wdir * 34 * u, fl = wdir ? Math.sin(t * 16) * 5 * u : Math.sin(t * 3) * 2 * u;
+  c.quadraticCurveTo(22 * u + sw * .5, -132 * u + fl, 20 * u + sw, (wdir ? -128 : -112) * u - fl); c.stroke();
+  // balance pole (flexes after the body, droops under birds) and arms
+  c.save(); c.translate(0, -hy); c.rotate(flex + (falling ? Math.sin(t * 9) * .3 : 0));
+  for (const [col, wd, a, b] of [["#f7f0e2", 7, -1, 1], ["#e3524a", 7, -1, -.86], ["#e3524a", 7, .86, 1], ["#e3524a", 7, -.72, -.66], ["#e3524a", 7, .66, .72]]) {
+    c.strokeStyle = col; c.lineWidth = wd * u; c.lineCap = Math.abs(a) === 1 || Math.abs(b) === 1 ? "round" : "butt"; c.beginPath();
+    for (let i = 0; i <= 6; i++) { const f = a + (b - a) * i / 6, y = droop[f < 0 ? 0 : 1] * f * f; i ? c.lineTo(f * PL, y) : c.moveTo(f * PL, y); } c.stroke();
+  }
+  c.restore(); c.lineCap = "round";
+  for (const sd of [-1, 1]) { c.strokeStyle = FOX; c.lineWidth = 11 * u; c.beginPath(); c.moveTo(sd * 25 * u, -130 * u); c.quadraticCurveTo(sd * 40 * u, -122 * u, sd * 32 * u, -hy + 2 * u); c.stroke(); draw.circle(c, sd * 32 * u, -hy + 1 * u, 7.5 * u, "#4a2f2a"); }
+  draw.rect(c, -21 * u, -150 * u, 42 * u, 14 * u, 7 * u, TEAL);
+  // head keeps itself level-ish: counter-rotates against the lean
+  c.save(); c.translate(0, -146 * u); c.rotate(falling ? Math.sin(t * 14) * .2 : -th * .55); c.translate(0, -26 * u);
+  for (const sd of [-1, 1]) {
+    c.fillStyle = FOX; c.beginPath(); c.moveTo(sd * 8 * u, -22 * u); c.lineTo(sd * 24 * u, -50 * u + pan * 6 * u); c.lineTo(sd * 30 * u, -10 * u); c.fill();
+    c.fillStyle = INK; c.beginPath(); c.moveTo(sd * 19 * u, -40 * u + pan * 5 * u); c.lineTo(sd * 24 * u, -50 * u + pan * 6 * u); c.lineTo(sd * 26.5 * u, -36 * u + pan * 4 * u); c.fill();
+  }
+  draw.circle(c, 0, 0, 31 * u, FOX);
+  c.fillStyle = CREAM; c.beginPath(); c.moveTo(-31 * u, 2 * u); c.quadraticCurveTo(-14 * u, 2 * u, 0, 10 * u); c.quadraticCurveTo(14 * u, 2 * u, 31 * u, 2 * u); c.quadraticCurveTo(40 * u, 18 * u, 22 * u, 22 * u); c.quadraticCurveTo(0, 38 * u, -22 * u, 22 * u); c.quadraticCurveTo(-40 * u, 18 * u, -31 * u, 2 * u); c.fill();
+  const look = Lab.clamp(th * 7 + om * 2, -1, 1) * 2.4 * u, ey = -7 * u;
+  for (const sd of [-1, 1]) {
+    if (pan > .35) { draw.circle(c, sd * 12 * u, ey, (6.5 + pan * 2.5) * u, "#fff", INK, 1.5 * u); draw.circle(c, sd * 12 * u + look, ey, 2.6 * u, INK); }
+    else if (blink < 0) { c.strokeStyle = INK; c.lineWidth = 2.4 * u; c.beginPath(); c.moveTo(sd * 12 * u - 4 * u, ey); c.lineTo(sd * 12 * u + 4 * u, ey); c.stroke(); }
+    else { c.fillStyle = INK; c.beginPath(); c.ellipse(sd * 12 * u + look * .5, ey, 4.2 * u, 5.6 * u, 0, 0, TAU); c.fill(); draw.circle(c, sd * 12 * u + look * .5 - 1.3 * u, ey - 2 * u, 1.5 * u, "#fff"); }
+    if (pan > .2) { c.strokeStyle = INK; c.lineWidth = 2.2 * u; c.beginPath(); c.moveTo(sd * 6 * u, ey - (12 + pan * 5) * u); c.lineTo(sd * 18 * u, ey - (9 + pan * 2) * u); c.stroke(); }
+  }
+  c.fillStyle = INK; c.beginPath(); c.ellipse(0, 10 * u, 5 * u, 3.6 * u, 0, 0, TAU); c.fill();
+  if (pan > .35) { c.fillStyle = "#7a2f3a"; c.beginPath(); c.ellipse(0, 20 * u, (4 + pan * 2) * u, (3 + pan * 4) * u, 0, 0, TAU); c.fill(); }
+  else { c.strokeStyle = INK; c.lineWidth = 2 * u; c.beginPath(); c.arc(0, 13 * u, 6 * u, .2 * PI, .8 * PI); c.stroke(); }
+  c.restore(); c.lineWidth = lw;
+}
+function render(t, danger, blowing) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, P = Lab.play;
+  const sky = [0, 1, 2].map(i => mixP(p => p.sky, i)), mt = [0, 1, 2].map(i => mixP(p => p.m, i)), vcol = Lab.color.mix(PALS[pal.a].v, PALS[pal.b].v, pal.k), sun = Lab.color.mix(PALS[pal.a].sun, PALS[pal.b].sun, pal.k);
+  const roll = mode === "fall" ? 0 : -th * .05, px = -th * 30 * S - swayX * .2;
+  c.save(); c.translate(cx, vy); c.rotate(roll); c.translate(-cx, -vy); // the camera sympathises with the lean
+  draw.vgrad(c, -60, -60, W + 120, vy + 100, [[0, sky[0]], [.55, sky[1]], [1, sky[2]]]);
+  const sunP = ((rope - 1) % 5) - (1 - pal.k), sx = W * (.76 - sunP * .12), sy = P.y + P.h * (.13 + Math.abs(sunP - 2) * .03);
+  draw.glow(c, sx, sy, 150 * S, sun, .55); draw.circle(c, sx, sy, 34 * S, sun);
+  c.fillStyle = "rgba(255,255,255,.72)";
+  for (const cl of clouds) { const x = cl.x * W + px * .2, y = P.y + cl.y * P.h, r = 20 * S * cl.s; c.beginPath(); c.ellipse(x, y, r * 2.2, r * .7, 0, 0, TAU); c.ellipse(x - r * .7, y - r * .45, r * .9, r * .7, 0, 0, TAU); c.ellipse(x + r * .5, y - r * .6, r * 1.1, r * .85, 0, 0, TAU); c.fill(); }
+  for (let i = 0; i < 3; i++) { // paper-cut ridgelines
+    const base = vy + (i * 26 - 34) * S, amp = (62 - i * 13) * S, ox = px * (.25 + i * .25); c.fillStyle = mt[i]; c.beginPath(); c.moveTo(-80, H + 60);
+    for (let x = -80; x <= W + 80; x += 18) { const q = (x - ox) / (390 * S); let y = 0; for (const [f, ph] of ridge[i]) y += Math.sin(q * f * 2.2 + ph) / f; c.lineTo(x, base - amp * (.55 + y * .5) - Math.abs(Math.sin(q * 5.1 + i * 2)) * amp * .28); }
+    c.lineTo(W + 80, H + 60); c.fill();
+  }
+  draw.vgrad(c, -80, vy + 36 * S, W + 160, H - vy + 60, [[0, Lab.color.mix(mt[2], vcol, .55)], [1, Lab.color.shade(vcol, -.3)]]);
+  const tc = Lab.color.shade(vcol, -.42), tb = vy + 44 * S;
+  for (const tr of trees) { const y = tb + tr.d * tr.d * (H - tb + 40), sz = (5 + tr.d * 30) * S * tr.h, x = (tr.x - .5) * W * (1 + tr.d * .8) + cx + px * (.6 + tr.d * 1.4); c.globalAlpha = .35 + tr.d * .5; c.fillStyle = tc; c.beginPath(); c.moveTo(x, y - sz * 2.2); c.lineTo(x - sz * .7, y); c.lineTo(x + sz * .7, y); c.fill(); }
+  c.globalAlpha = 1; draw.vgrad(c, -80, vy + 20 * S, W + 160, 120 * S, [[0, "rgba(255,255,255,0)"], [.4, "rgba(255,255,255,.38)"], [1, "rgba(255,255,255,0)"]]);
+  // the wire: departure platform far behind, ribbons every 2 m, destination rises from below
+  platform(c, dist, "#b98152", Lab.color.mix(tc, vcol, .35));
+  const s0 = DZ / (DZ + dist), fxp = cx + swayX, yb = H + 40;
+  c.fillStyle = ROPE; c.beginPath(); c.moveTo(cx + swayX * s0 - .6 * S, yz(dist)); c.lineTo(fxp - 2 * S, footY); c.lineTo(fxp - 3.6 * S, yb); c.lineTo(fxp + 3.6 * S, yb); c.lineTo(fxp + 2 * S, footY); c.lineTo(cx + swayX * s0 + .6 * S, yz(dist)); c.fill();
+  c.strokeStyle = "rgba(255,225,190,.5)"; c.lineWidth = 1.6 * S; // rope twist, sliding toward the camera as the fox walks
+  for (let k = 0; k < 9; k++) { const z = -((dist * 1.0 + k * .45) % 4.05) + 1.2; if (z < -DZ * .6) continue; const s = DZ / (DZ + z), y = yz(z), x = cx + swayX * Math.min(1, s), w2 = 2.6 * S * Math.min(1.5, s); c.beginPath(); c.moveTo(x - w2, y - w2); c.lineTo(x + w2, y + w2); c.stroke(); }
+  const cols = ["#e3524a", "#ffd166", "#2aa39a"];
+  for (let k = Math.max(1, Math.ceil((dist - 40) / 2)); k * 2 < L - .5; k++) {
+    const z = dist - k * 2; if (z < -DZ * .7) break; const s = DZ / (DZ + z), y = yz(z), x = cx + swayX * Math.min(1, s), sz = 13 * S * s, fl = Math.sin(t * 7 + k) * sz * .25 + (blowing ? wind.dir * sz * .8 * blowing : 0);
+    c.fillStyle = cols[k % 3]; c.beginPath(); c.moveTo(x - sz * .2, y); c.lineTo(x + sz * .2, y); c.lineTo(x + fl, y + sz * 1.5); c.fill();
+  }
+  platform(c, dist - L, "#b98152", Lab.color.mix(tc, vcol, .35));
+  // fox
+  c.save();
+  if (mode === "fall") { c.translate(fxp + fallB.x, footY + fallB.y - 100 * S); c.rotate(fallB.rot); c.translate(0, 100 * S); } else { c.translate(fxp, footY); c.rotate(th); }
+  drawFox(c, t, danger, wind.phase === "blow" ? wind.dir * Math.min(1, blowing * 1.5) : 0);
+  c.restore();
+  for (const b of birds) drawBird(c, b);
+  c.restore();
+  c.lineCap = "round"; for (const s of streaks) { c.strokeStyle = `rgba(255,255,255,${s.a})`; c.lineWidth = 2.5 * S; c.beginPath(); c.moveTo(s.x, s.y); c.lineTo(s.x - Math.sign(s.v) * s.l, s.y); c.stroke(); }
+  if (danger > 0) { c.fillStyle = `rgba(214,60,60,${danger * (.1 + .06 * Math.sin(t * 12))})`; c.fillRect(0, 0, W, H); }
+  // gust warning: chevrons on the side the wind comes from, pointing the way it will push
+  if (wind.phase === "warn" || (wind.phase === "blow" && wind.t < .35)) {
+    const d = wind.dir, x0 = d > 0 ? 18 * S : W - 18 * S, y0 = footY - 205 * S, a = wind.phase === "warn" ? .55 + .45 * Math.sin(t * 20) : 1 - wind.t / .35;
+    c.strokeStyle = `rgba(255,255,255,${a})`; c.lineWidth = 6 * S; c.lineJoin = "round";
+    for (let i = 0; i < 3; i++) { const x = x0 + d * (i * 17 + ((t * 60) % 17)) * S; c.beginPath(); c.moveTo(x - d * 8 * S, y0 - 13 * S); c.lineTo(x + d * 3 * S, y0); c.lineTo(x - d * 8 * S, y0 + 13 * S); c.stroke(); }
+    draw.text(c, "GUST", d > 0 ? 52 * S : W - 52 * S, y0 + 30 * S, { size: 13 * S, color: `rgba(255,255,255,${a})`, stroke: "rgba(60,40,60,.35)" });
+  }
+  // HUD: rope progress, steady multiplier, lean pads
+  const hy = P.y + 16, x0 = Math.max(W * .2, 66), x1 = W - x0, pr = Lab.clamp(dist / L, 0, 1), dark = "rgba(59,42,58,.78)";
+  draw.line(c, x0, hy, x1, hy, "rgba(59,42,58,.4)", 3); draw.rect(c, x0 - 7, hy - 7, 7, 14, 2, dark); draw.rect(c, x1, hy - 7, 7, 14, 2, dark);
+  draw.line(c, x0, hy, x0 + (x1 - x0) * pr, hy, FOX, 4); const mx = x0 + (x1 - x0) * pr;
+  c.fillStyle = FOX; c.beginPath(); c.moveTo(mx - 7, hy - 3); c.lineTo(mx - 6, hy - 12); c.lineTo(mx - 1, hy - 6); c.lineTo(mx + 1, hy - 6); c.lineTo(mx + 6, hy - 12); c.lineTo(mx + 7, hy - 3); c.fill(); draw.circle(c, mx, hy, 7, FOX, "#fff", 1.5);
+  draw.text(c, "ROPE " + rope, x0 - 14, hy, { size: 12, color: dark, align: "right" }); draw.text(c, Math.round(total + dist) + " m", x1 + 14, hy, { size: 12, color: dark, align: "left" });
+  if (mode === "walk" && (mult > 1 || steadyT > .4)) {
+    const f = mult >= 5 ? 1 : (steadyT % 2.5) / 2.5, bw = 86, y = hy + 24;
+    draw.text(c, "STEADY ×" + mult, cx, y, { size: 14 + mult, color: "#18877f", stroke: "rgba(255,255,255,.75)" });
+    draw.rect(c, cx - bw / 2, y + 13, bw, 5, 3, "rgba(59,42,58,.22)"); draw.rect(c, cx - bw / 2, y + 13, bw * f, 5, 3, TEAL);
+  }
+  const py = H - 54 * S - Lab.safe.bottom, pr2 = 34 * S, need = coach && mode === "walk" && Math.abs(th) > .07 ? -Math.sign(th) : 0;
+  for (const sd of [-1, 1]) {
+    const on = sd < 0 ? pressL : pressR, x = cx + sd * W * .34, hintP = need === sd ? .5 + .5 * Math.sin(t * 12) : 0;
+    draw.circle(c, x, py, pr2 * (1 + on * .12), `rgba(255,255,255,${.2 + on * .5 + hintP * .4})`, `rgba(255,255,255,${.55 + on * .4})`, 2.5);
+    c.strokeStyle = on > .5 || hintP ? FOXD : "rgba(59,42,58,.6)"; c.lineWidth = 5 * S; c.lineJoin = "round"; c.beginPath(); c.moveTo(x - sd * 5 * S, py - 11 * S); c.lineTo(x + sd * 8 * S, py); c.lineTo(x - sd * 5 * S, py + 11 * S); c.stroke();
+    if (hintP) draw.text(c, "hold", x, py - pr2 - 12 * S, { size: 13 * S, color: "#fff", stroke: "rgba(59,42,58,.5)" });
+  }
+}
+Lab.boot();
+})();
 </script></body></html>

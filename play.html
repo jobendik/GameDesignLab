@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en" data-state="boot">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0d0b0a">
+<title>GameDesignLab — player</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23ffb347'/%3E%3Cpath d='M12.5 9.6v12.8a1 1 0 0 0 1.5.86l10.6-6.4a1 1 0 0 0 0-1.72L14 8.74a1 1 0 0 0-1.5.86z' fill='%23221503'/%3E%3Ccircle cx='7.6' cy='16' r='2' fill='%23221503'/%3E%3C/svg%3E">
+<style>
+:root{--bg:#0d0b0a;--surface:#211c19;--surface-2:#2b2521;--line:rgba(255,236,214,.16);--ink:#f7f2ea;--ink-2:#d2c8bb;--ink-3:#a89d90;--accent:#ffb347;--accent-hi:#ffc670;--accent-ink:#221503;--accent-2:#6fdcc9;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue","Noto Sans",Arial,sans-serif;--ease:cubic-bezier(.2,.7,.2,1)}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--ink);font:400 1rem/1.45 var(--font);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+h1,h2,p{margin:0}
+button{font:inherit;color:inherit;cursor:pointer}
+svg.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+svg.i.solid{fill:currentColor;stroke:none}
+:focus{outline:none}
+:focus-visible{outline:2.5px solid var(--accent);outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+#game{position:fixed;inset:0;width:100%;height:100%;border:0;display:block;background:var(--bg)}
+
+/* floating control cluster — shown on load and on demand, fades when idle, never intercepts input while hidden */
+.dock{position:fixed;z-index:6;left:50%;top:max(8px,env(safe-area-inset-top));transform:translate(-50%,0);display:flex;align-items:center;gap:2px;height:48px;padding:0 4px;max-width:calc(100vw - 16px);
+  border-radius:999px;background:rgba(24,20,18,.94);box-shadow:0 0 0 1px var(--line),0 10px 28px -8px rgba(0,0,0,.8);transition:opacity .22s,transform .22s var(--ease)}
+.dock:not(.show):not(:focus-within){opacity:0;transform:translate(-50%,-14px);pointer-events:none}
+.db{width:44px;height:44px;flex:none;border:0;background:none;border-radius:999px;display:grid;place-items:center;color:var(--ink-2);text-decoration:none;transition:background .14s,color .14s}
+.db:hover{background:rgba(255,236,214,.1);color:var(--ink)}
+.db[aria-pressed=true]{color:var(--accent)}.db[aria-pressed=true] svg{fill:currentColor}
+.dt{min-width:0;max-width:min(38vw,300px);padding:0 10px 0 4px;font-size:.92rem;font-weight:680;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsep{width:1px;height:22px;background:var(--line);flex:none;margin:0 2px}
+#grip{position:fixed;z-index:5;left:50%;top:env(safe-area-inset-top);transform:translateX(-50%);width:76px;height:22px;padding:0;border:0;background:none;display:grid;place-items:start center;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+#grip i{display:block;width:38px;height:5px;margin-top:5px;border-radius:9px;background:rgba(255,255,255,.5);box-shadow:0 0 0 1px rgba(0,0,0,.4);opacity:.6;transition:opacity .16s,width .16s}
+#grip:hover i,#grip:focus-visible i{opacity:1;width:48px}
+.dock.show~#grip{visibility:hidden}
+
+/* loading state */
+#loader{position:fixed;inset:0;z-index:4;display:grid;place-items:center;padding:24px;overflow:hidden;background:var(--bg);transition:opacity .28s}
+#loader.out{opacity:0;pointer-events:none}
+#loader .bg{position:absolute;inset:-8%;width:116%;height:116%;object-fit:cover;filter:blur(32px) brightness(.42) saturate(1.2)}
+.lc{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;max-width:460px;gap:6px}
+.lt{position:relative;width:min(300px,62vw);aspect-ratio:16/10;border-radius:16px;overflow:hidden;margin-bottom:14px;background:linear-gradient(155deg,hsl(var(--h,30) 34% 30%),hsl(var(--h2,60) 40% 14%));box-shadow:0 0 0 1px rgba(255,255,255,.14),0 24px 50px -14px rgba(0,0,0,.8)}
+.lt img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.lc h1{font-size:clamp(1.4rem,3.5vw,2rem);letter-spacing:-.025em;line-height:1.12;font-weight:800;text-wrap:balance}
+.lc p{color:var(--ink-2);max-width:40ch;text-wrap:pretty}
+.hints{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 8px;margin:10px 0 0;padding:0;list-style:none;font-size:.84rem;color:var(--ink-2)}
+.hints li{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:999px;background:rgba(255,236,214,.1);white-space:nowrap}
+.hints svg{width:16px;height:16px}.hints .bs{color:var(--accent-2)}
+.spin{display:flex;align-items:center;gap:10px;margin-top:18px;color:var(--ink-3);font-size:.9rem}
+.spin i{width:20px;height:20px;border-radius:50%;border:2.5px solid rgba(255,236,214,.2);border-top-color:var(--accent);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* brief "how it plays" toast once the game is on screen */
+#intro{position:fixed;z-index:5;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translate(-50%,0);width:max-content;max-width:calc(100vw - 24px);padding:12px 18px 13px;border-radius:18px;background:rgba(24,20,18,.94);box-shadow:0 0 0 1px var(--line),0 14px 34px -10px rgba(0,0,0,.85);
+  text-align:center;pointer-events:none;transition:opacity .4s,transform .4s var(--ease)}
+#intro.out{opacity:0;transform:translate(-50%,10px)}
+#intro b{display:block;font-size:.98rem;letter-spacing:-.01em}
+#intro span.d{display:block;color:var(--ink-2);font-size:.86rem;max-width:44ch}
+#intro .hints{margin-top:8px}
+
+/* unknown game */
+#missing{position:fixed;inset:0;overflow:auto;display:grid;place-items:center;padding:24px}
+.mc{max-width:520px;width:100%;padding:28px;border-radius:22px;background:var(--surface);box-shadow:0 0 0 1px var(--line)}
+.mc h1{font-size:1.5rem;letter-spacing:-.02em;line-height:1.2}
+.mc p{color:var(--ink-2);margin-top:.6rem;overflow-wrap:anywhere}
+.mc code{background:rgba(255,236,214,.1);padding:2px 7px;border-radius:6px;font-size:.9em;color:var(--ink)}
+.mc ul{list-style:none;margin:1rem 0 0;padding:0;display:grid;gap:8px}
+.mc li a{display:flex;align-items:center;gap:10px;min-height:48px;padding:6px 14px;border-radius:12px;background:var(--surface-2);color:var(--ink);text-decoration:none;font-weight:650}
+.mc li a:hover{background:#3a322c}
+.mc li small{color:var(--ink-3);font-weight:500;margin-left:auto;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 22px;margin-top:1.3rem;border-radius:999px;background:var(--accent);color:var(--accent-ink);font-weight:750;text-decoration:none}
+.btn:hover{background:var(--accent-hi)}
+.btn:focus-visible{outline-color:var(--ink)}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}.spin i{animation-duration:2.4s}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <symbol id="i-touch" viewBox="0 0 24 24"><path d="M9 13.5V5.2a1.7 1.7 0 0 1 3.4 0V11l4.6.9a2.4 2.4 0 0 1 1.9 2.7l-.5 3.5a3.4 3.4 0 0 1-3.4 2.9h-3a3.4 3.4 0 0 1-2.7-1.3l-3.6-4.8a1.5 1.5 0 0 1 2.2-2z"/></symbol>
+  <symbol id="i-mouse" viewBox="0 0 24 24"><rect x="6.5" y="3" width="11" height="18" rx="5.5"/><path d="M12 7v3.2"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.6"/><path d="M6.4 10h.01M10.1 10h.01M13.9 10h.01M17.6 10h.01M7.5 14h9"/></symbol>
+  <symbol id="i-gamepad" viewBox="0 0 24 24"><path d="M7.5 7h9a5 5 0 0 1 4.9 4l.8 4.3a2.4 2.4 0 0 1-4.2 2L16 15H8l-2 2.3a2.4 2.4 0 0 1-4.2-2L2.600 11a5 5 0 0 1 4.900-4z"/><path d="M8 10v3M6.500 11.500h3M15.500 11h.01M17.500 12.600h.01"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.3s-7.6-4.5-7.6-10.2a4.3 4.3 0 0 1 7.6-2.7 4.3 4.3 0 0 1 7.6 2.7c0 5.7-7.6 10.2-7.6 10.2z"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M19 12H5.5M11 6l-6 6 6 6"/></symbol>
+  <symbol id="i-full" viewBox="0 0 24 24"><path d="M9 4H5a1 1 0 0 0-1 1v4M15 4h4a1 1 0 0 1 1 1v4M9 20H5a1 1 0 0 1-1-1v-4M15 20h4a1 1 0 0 0 1-1v-4"/></symbol>
+  <symbol id="i-unfull" viewBox="0 0 24 24"><path d="M4 9h4a1 1 0 0 0 1-1V4M20 9h-4a1 1 0 0 1-1-1V4M4 15h4a1 1 0 0 1 1 1v4M20 15h-4a1 1 0 0 0-1 1v4"/></symbol>
+  <symbol id="i-reload" viewBox="0 0 24 24"><path d="M19.500 12a7.500 7.500 0 1 1-2.400-5.500M19.500 4.500v4.200h-4.200"/></symbol>
+  <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M7.5 4h9v5a4.5 4.5 0 0 1-9 0zM7.5 6H4.3v1.200a3.200 3.200 0 0 0 3.200 3.200M16.500 6h3.200v1.200a3.200 3.200 0 0 1-3.200 3.200M12 13.500V17M8.500 20h7M9.500 17h5v3h-5z"/></symbol>
+</defs></svg>
+
+<div class="dock show" id="dock" role="toolbar" aria-label="Player controls" hidden>
+  <a class="db" id="back" href="index.html" aria-label="Back to the arcade" title="Back to the arcade"><svg class="i" aria-hidden="true"><use href="#i-left"/></svg></a>
+  <span class="dt" id="title"></span>
+  <span class="dsep" aria-hidden="true"></span>
+  <button class="db" id="fav" type="button" aria-pressed="false" aria-label="Favorite" title="Favorite"><svg class="i" aria-hidden="true"><use href="#i-heart"/></svg></button>
+  <button class="db" id="fs" type="button" aria-label="Fullscreen" title="Fullscreen"><svg class="i" aria-hidden="true"><use href="#i-full"/></svg></button>
+  <button class="db" id="reload" type="button" aria-label="Restart the game" title="Restart the game"><svg class="i" aria-hidden="true"><use href="#i-reload"/></svg></button>
+</div>
+<button id="grip" type="button" aria-label="Show player controls" hidden><i></i></button>
+<iframe id="game" title="Game" allow="fullscreen; autoplay; gamepad" hidden></iframe>
+<div id="loader" hidden></div>
+<div id="intro" class="out" hidden></div>
+<main id="missing" hidden></main>
+<noscript><main style="position:fixed;inset:0;display:grid;place-items:center;padding:24px"><p>The player needs JavaScript. <a href="index.html" style="color:#ffc670">Back to the arcade</a></p></main></noscript>
+
+<script src="catalog.js"></script>
+<script>
+(function () {
+'use strict';
+var $ = function (s) { return document.querySelector(s); };
+var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+var store = (function () {
+  var mem = {}, ls = null;
+  try { ls = window.localStorage; ls.getItem('gdl:favs'); } catch (e) { ls = null; }
+  return {
+    get: function (k, d) { if (k in mem) return mem[k]; if (!ls) return d; try { var v = ls.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { if (ls) { try { ls.setItem(k, JSON.stringify(v)); delete mem[k]; return; } catch (e) { } } mem[k] = v; }
+  };
+})();
+function hash(s) { var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function fmt(n) { return Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M' : (Math.round(n * 100) / 100).toLocaleString(); }
+var CTL = { touch: 'Touch', mouse: 'Mouse', keyboard: 'Keyboard', gamepad: 'Gamepad' };
+var root = document.documentElement, params;
+try { params = new URLSearchParams(location.search); } catch (e) { params = { get: function () { return null; }, forEach: function () { } }; }
+var wanted = (params.get('g') || '').replace(/\.html$/i, '');
+var CAT = window.GDL_CATALOG, games = CAT && Array.isArray(CAT.games) ? CAT.games.filter(function (g) { return g && typeof g.id === 'string' && g.path; }) : [];
+var game = null;
+games.forEach(function (g) { if (g.id === wanted || g.id === 'games/' + wanted) game = game || g; });
+
+/* where "back" goes: the arcade view the player came from (same-origin only), else the arcade home */
+var home = 'index.html';
+try { var ret = sessionStorage.getItem('gdl:return'); if (ret) { var u = new URL(ret, location.href); if (u.origin === location.origin && !/play\.html$/i.test(u.pathname)) home = u.href; } } catch (e) { }
+
+function missing() {
+  root.dataset.state = 'missing'; document.title = 'Game not found — GameDesignLab';
+  var words = wanted.toLowerCase().split(/[^a-z0-9]+/).filter(function (w) { return w.length > 2 && w !== 'games'; });
+  var near = games.map(function (g) { var hay = (g.id + ' ' + (g.title || '')).toLowerCase(), s = 0; words.forEach(function (w) { if (hay.indexOf(w) >= 0) s += w.length; }); return { g: g, s: s }; })
+    .filter(function (x) { return x.s > 0; }).sort(function (a, b) { return b.s - a.s; }).slice(0, 4);
+  var m = $('#missing'); m.hidden = false;
+  m.innerHTML = '<div class="mc">' + (!games.length
+    ? '<h1>The game catalog didn’t load</h1><p>The player looks games up in <code>catalog.js</code>, which is missing or empty. Regenerate it with <code>node tools/build-catalog.js</code>.</p>'
+    : '<h1>That game isn’t in the arcade</h1><p>' + (wanted ? 'Nothing is catalogued as <code>' + esc(wanted) + '</code> — it may have been renamed or retired.' : 'This link doesn’t name a game.') + '</p>' +
+      (near.length ? '<p>Were you looking for one of these?</p><ul>' + near.map(function (x) { var g = x.g, href = g.collection === 'arcade' ? 'play.html?g=' + encodeURIComponent(g.id).replace(/%2F/gi, '/') : g.path; return '<li><a href="' + esc(href) + '">' + esc(g.title || g.id) + '<small>' + esc((g.genre || [])[0] || '') + '</small></a></li>'; }).join('') + '</ul>' : '')) +
+    '<a class="btn" id="home" href="' + esc(home) + '">Browse the arcade</a></div>';
+  $('#home').focus();
+}
+if (!game) { missing(); return; }
+
+/* forward any extra query parameters (seed, level…) to the game itself */
+var extra = []; params.forEach(function (v, k) { if (k !== 'g') extra.push(encodeURIComponent(k) + '=' + encodeURIComponent(v)); });
+var src = game.path + (extra.length ? (game.path.indexOf('?') < 0 ? '?' : '&') + extra.join('&') : '');
+if (game.collection !== 'arcade') { location.replace(src); return; }           // phone games bring their own shell
+
+var id = game.id, title = String(game.title || id), controls = Array.isArray(game.controls) ? game.controls : [];
+document.title = title + ' — GameDesignLab';
+
+/* a launch counts as a play (phone games record these themselves through their engine) */
+(function () {
+  var r = store.get('gdl:recent', []); r = (Array.isArray(r) ? r : []).filter(function (x) { return x !== id; }); r.unshift(id); store.set('gdl:recent', r.slice(0, 24));
+  var p = store.get('gdl:plays', {}); if (!p || typeof p !== 'object' || Array.isArray(p)) p = {}; p[id] = (+p[id] || 0) + 1; store.set('gdl:plays', p);
+})();
+
+var frame = $('#game'), dock = $('#dock'), grip = $('#grip'), loader = $('#loader'), intro = $('#intro');
+var h = hash(id), hue = 'style="--h:' + (h % 360) + ';--h2:' + ((h % 360 + 28 + (h >>> 9) % 70) % 360) + '"';
+function hintsHTML() {
+  var best = store.get('gdl:best:' + id, null);
+  return '<ul class="hints">' + controls.map(function (c) { return '<li><svg class="i" aria-hidden="true"><use href="#i-' + (CTL[c] ? c : 'gamepad') + '"/></svg>' + esc(CTL[c] || c) + '</li>'; }).join('') +
+    (typeof best === 'number' && isFinite(best) ? '<li class="bs"><svg class="i" aria-hidden="true"><use href="#i-trophy"/></svg>Your best ' + esc(fmt(best)) + '</li>' : '') + '</ul>';
+}
+function showLoader(restart) {
+  loader.hidden = false; loader.className = '';
+  loader.innerHTML = (game.thumb ? '<img class="bg" src="' + esc(game.thumb) + '" alt="">' : '') +
+    '<div class="lc"><div class="lt" ' + hue + '>' + (game.thumb ? '<img src="' + esc(game.thumb) + '" alt="" width="480" height="300">' : '') + '</div>' +
+    '<h1>' + esc(title) + '</h1>' + (game.desc ? '<p>' + esc(game.desc) + '</p>' : '') + hintsHTML() +
+    '<div class="spin" role="status"><i></i><span id="lmsg">' + (restart ? 'Restarting…' : 'Loading…') + '</span></div></div>';
+  root.dataset.state = 'loading';
+  clearTimeout(slowT); slowT = setTimeout(function () { var m = $('#lmsg'); if (m) m.textContent = 'Still loading — bigger games take a moment…'; }, 7000);
+}
+var slowT = 0, introT = 0, hideT = 0, loads = 0, ownReloads = 0;
+loader.addEventListener('error', function (e) { if (e.target.tagName === 'IMG') e.target.remove(); }, true);
+
+/* ---- control cluster ---- */
+function show(ms) { dock.classList.add('show'); clearTimeout(hideT); hideT = setTimeout(hide, ms || 2600); }
+function hide() {
+  if (root.dataset.state !== 'ready' || hovering || dock.contains(document.activeElement)) { hideT = setTimeout(hide, 1500); return; }
+  dock.classList.remove('show');
+}
+function focusGame() { try { frame.focus({ preventScroll: true }); if (frame.contentWindow) frame.contentWindow.focus(); } catch (e) { } }
+$('#title').textContent = title;
+dock.hidden = false; grip.hidden = false;
+grip.addEventListener('click', function () { show(3600); });
+grip.addEventListener('pointerenter', function (e) { if (e.pointerType !== 'touch') show(); });
+var hovering = false;         // a real mouse resting on the controls keeps them up (":hover" would stick after a tap on touch screens)
+dock.addEventListener('pointerenter', function (e) { hovering = e.pointerType === 'mouse'; });
+dock.addEventListener('pointerleave', function () { hovering = false; });
+dock.addEventListener('pointermove', function (e) { if (e.pointerType === 'mouse') show(); });
+dock.addEventListener('focusin', function () { show(4000); });
+
+var fav = $('#fav');
+function favs() { var f = store.get('gdl:favs', []); return (Array.isArray(f) ? f : []).filter(function (x) { return typeof x === 'string'; }); }
+function paintFav() { var on = favs().indexOf(id) >= 0; fav.setAttribute('aria-pressed', String(on)); fav.setAttribute('aria-label', on ? 'Remove from favorites' : 'Add to favorites'); fav.title = on ? 'Remove from favorites' : 'Add to favorites'; }
+fav.addEventListener('click', function () { var f = favs(), i = f.indexOf(id); if (i < 0) f.unshift(id); else f.splice(i, 1); store.set('gdl:favs', f); paintFav(); show(); focusGame(); });
+paintFav();
+
+var fs = $('#fs'), fsOK = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+fs.hidden = !fsOK;
+function fsEl() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+fs.addEventListener('click', function () {
+  try {
+    if (fsEl()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    else { var r = (root.requestFullscreen || root.webkitRequestFullscreen).call(root, { navigationUI: 'hide' }); if (r && r.catch) r.catch(function () { }); }
+  } catch (e) { }
+  show(); focusGame();
+});
+function paintFs() { var on = !!fsEl(); fs.querySelector('use').setAttribute('href', on ? '#i-unfull' : '#i-full'); fs.setAttribute('aria-label', on ? 'Exit fullscreen' : 'Fullscreen'); fs.title = on ? 'Exit fullscreen' : 'Fullscreen'; }
+document.addEventListener('fullscreenchange', paintFs); document.addEventListener('webkitfullscreenchange', paintFs);
+
+$('#reload').addEventListener('click', function () {
+  ownReloads++; showLoader(true); intro.classList.add('out'); show(6000);
+  try { frame.contentWindow.location.reload(); } catch (e) { frame.src = src; }
+});
+
+var back = $('#back'); back.href = home;
+back.addEventListener('click', function (e) {
+  /* arrived from the arcade and the game never navigated → a real "back" restores scroll position and filters instantly */
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+  var fromArcade = false; try { fromArcade = !!document.referrer && new URL(document.referrer).origin === location.origin && !/play\.html$/i.test(new URL(document.referrer).pathname) && new URL(document.referrer).pathname === new URL(home, location.href).pathname; } catch (x) { }
+  if (fromArcade && loads - ownReloads <= 1 && history.length > 1) { e.preventDefault(); var t = setTimeout(function () { location.href = home; }, 700); window.addEventListener('pagehide', function () { clearTimeout(t); }); history.back(); }
+});
+
+/* ---- the game ---- */
+frame.title = title;
+frame.addEventListener('load', function () {
+  loads++; clearTimeout(slowT); root.dataset.state = 'ready';
+  loader.classList.add('out'); setTimeout(function () { if (root.dataset.state === 'ready') { loader.hidden = true; loader.innerHTML = ''; } }, 320);
+  focusGame();
+  if (loads === 1 && (game.desc || controls.length)) {
+    intro.hidden = false; intro.innerHTML = '<b>' + esc(title) + '</b>' + (game.desc ? '<span class="d">' + esc(game.desc) + '</span>' : '') + hintsHTML();
+    requestAnimationFrame(function () { intro.classList.remove('out'); });
+    clearTimeout(introT); introT = setTimeout(function () { intro.classList.add('out'); setTimeout(function () { intro.hidden = true; }, 450); }, 4600);
+  }
+  show(3400);
+  try {            // same-origin: a mouse resting near the top-centre brings the controls back; nothing else is touched
+    var w = frame.contentWindow;
+    w.addEventListener('mousemove', function (e) { if (e.clientY < 64 && Math.abs(e.clientX - w.innerWidth / 2) < 190 && !w.document.pointerLockElement) show(); }, { passive: true });
+    w.addEventListener('pointerdown', function () { if (!intro.classList.contains('out')) { clearTimeout(introT); intro.classList.add('out'); } }, { passive: true, capture: true });
+  } catch (e) { }
+});
+showLoader(false);
+frame.hidden = false;
+frame.src = src;
+loader.addEventListener('click', focusGame);
+window.addEventListener('focus', function () { if (document.activeElement === document.body && root.dataset.state === 'ready') focusGame(); });
+})();
+</script>
+</body>
+</html>

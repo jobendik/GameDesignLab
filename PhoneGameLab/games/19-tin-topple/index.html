@@ -1,60 +1,395 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Tin Topple</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Cannon", instructions:"Drag from cannon to aim; release to fire (parabolic).", restart:start});
-let cannon, ball, targets, aiming, sx,sy, ex,ey, score, shots;
-function makeTargets(){
-  targets=[];
-  for(let i=0;i<5;i++){
-    targets.push({x:Lab.rand(Lab.W*0.4, Lab.W-40), y:Lab.rand(120, Lab.H-80), r:24});
+(function(){ "use strict";
+/* TIN TOPPLE — a toy cannon on a nursery table versus forts of building blocks full of wind-up tin bots.
+ * Core idea kept: aim a cannon (angle + power) and lob ballistic shots at targets.  Now a ten-level physics puzzle:
+ * limited balls per level, breakable card and wood, steel that deflects, spring blocks that bank shots, BANG boxes that
+ * chain, blocks that drop when their support goes (and squash what is underneath).  Spare balls and multi-bot shots
+ * are the score; three lives; a deterministic fixed-step world (the same code runs dry for the test solver).
+ * Identity: warm toy-room pastels, painted blocks, bots with antennae that watch the ball, swung-funk music.      */
+Lab.init({
+  title: "Tin Topple", tagline: "Topple the block forts. Bonk every tin bot.", category: "Stack & Physics",
+  howto: ["Drag back anywhere to aim, release to fire", "Break supports — falling blocks squash bots", "Spare balls and multi-bot shots score big"],
+  theme: { bg: "#f6e2c6", bg2: "#f3cfa8", fg: "#3d2c1e", muted: "#806a55", accent: "#e4572e", accent2: "#2a9d8f", light: true },
+  orient: "any", music: { style: "funk", key: "F", vol: .34 }, restart: start,
+  attract(dt, t) { if (!demo) { reset(); demo = true; } now = t; for (const b of W.blocks) b.drop = 0; render(t, dt); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp;
+fx.auto = false;                                    // particles live in world units; drawn inside the world transform
+const VW = 480, XOFF = -60, GRAV = 900, STEP = 1 / 120, BR = 9, BOT_W = 24, BOT_H = 26, PIV = { x: 50, y: -26 }, ANG_MIN = -1.5, ANG_MAX = .17;
+const WOODS = ["#f28482", "#84a59d", "#f6bd60", "#cdb4db", "#b5838d", "#a7c957"], TINS = ["#2a9d8f", "#f4a261", "#457b9d", "#c8553d"];
+/* levels: blocks "type x elevation w h" (w wood, c card, s steel, x bang box, p spring), bots "centreX elevation" */
+const LEVELS = [
+  { balls: 3, b: ["w 350 0 36 36", "w 350 36 36 36"], t: ["368 72", "442 0"] },
+  { balls: 3, b: ["c 330 0 12 48", "c 400 0 12 48", "w 322 48 98 12"], t: ["371 0", "371 60"] },
+  { balls: 2, b: ["x 392 0 36 36", "w 392 36 36 36", "w 446 0 36 36"], t: ["410 72", "356 0", "464 36"] },
+  { balls: 3, b: ["s 290 0 18 96", "w 400 0 36 36", "c 452 0 12 48", "c 502 0 12 48", "w 446 48 74 12"], t: ["350 0", "418 36", "483 0"] },
+  { balls: 4, b: ["s 300 0 12 60", "s 300 60 172 12", "p 506 0 28 76"], t: ["372 72", "366 0", "428 0"] },
+  { balls: 3, b: ["s 326 0 14 40", "c 372 0 12 60", "c 458 0 12 60", "s 364 60 114 20"], t: ["404 0", "436 0", "420 80"] },
+  { balls: 2, b: ["s 296 0 16 84", "x 336 0 36 36", "x 410 0 36 36", "w 410 36 36 36", "x 462 0 36 36", "s 508 0 12 110", "s 366 110 154 12"], t: ["392 0", "428 72", "480 36"] },
+  { balls: 4, b: ["s 430 0 14 120", "s 384 120 86 12", "p 514 0 26 70", "w 352 0 14 56"], t: ["404 132", "452 132", "396 0", "480 0"] },
+  { balls: 4, b: ["w 340 0 14 56", "c 404 0 14 56", "w 468 0 14 56", "w 334 56 154 12", "c 350 68 12 44", "c 462 68 12 44", "w 344 112 136 12", "x 392 124 36 36"], t: ["374 0", "440 0", "410 68", "410 160"] },
+  { balls: 5, b: ["s 276 0 16 104", "p 514 0 24 130", "x 318 0 36 36", "s 366 0 14 72", "w 440 0 36 36", "w 440 36 36 36", "w 360 72 122 12", "x 392 84 36 36", "s 386 120 48 10"], t: ["336 36", "408 0", "458 84", "494 0", "372 84"] },
+];
+let S, ox, oy, u, wideHud;
+let W, level, lives, score, ballsLeft, state, stateT, bonked, bestCombo, shotsFired, settleT, cool, aim, kbAim, shownAng, recoil, ghost, trail, trailT, now, demo = false, levelStart, scareT, msg;
+
+function layout() {
+  const P = Lab.play, port = Lab.H > Lab.W * 1.1;
+  S = Math.min(Lab.W / VW, (P.h - 54) / 240, 2); u = clamp(S, .85, 1.3);
+  ox = (Lab.W - VW * S) / 2; oy = port ? P.y + P.h * .72 : P.y + P.h - Math.max(44, 46 * S);
+}
+Lab.onResize(() => { if (W) layout(); });
+
+/* ---------- world (pure data + fixed-step rules; ev collects things worth showing/hearing, or is null on dry runs) ---------- */
+function buildWorld(n) {
+  const L = LEVELS[n], w = { blocks: [], bots: [], balls: [], pending: [], t: 0, dirty: true, kills: 0 };
+  L.b.forEach((s, i) => { const [ty, x, e, bw, bh] = s.split(" "), type = { w: "wood", c: "card", s: "steel", x: "bang", p: "spring" }[ty]; w.blocks.push({ type, x: +x + XOFF, y: -(+e + +bh), w: +bw, h: +bh, hp: type === "wood" ? 2 : 1, max: type === "wood" ? 2 : 1, vy: 0, fall: false, dead: false, col: (i * 2 + n) % WOODS.length, drop: 0, tilt: 0, sq: 0, id: i }); });
+  L.t.forEach((s, i) => { const [x, e] = s.split(" "); w.bots.push({ x: +x + XOFF - BOT_W / 2, y: -(+e + BOT_H), w: BOT_W, h: BOT_H, vy: 0, fall: false, from: 0, dead: false, col: (i + n) % TINS.length, ph: i * 1.7, sq: 0, drop: 0, id: i }); });
+  return w;
+}
+const ovx = (a, b) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+function floorUnder(w, o) {   // y of the highest resting surface below o
+  let top = 0; const bottom = o.y + o.h;
+  for (const b of w.blocks) if (b !== o && !b.dead && !b.fall && ovx(o, b) > 3 && b.y >= bottom - 2 && b.y < top) top = b.y;
+  return top;
+}
+function destroy(w, b, ev) {
+  if (b.dead || b.type === "steel" || b.type === "spring") return;
+  b.dead = true; w.dirty = true; if (ev) ev.push({ k: "break", b });
+  if (b.type === "bang") w.pending.push({ t: b.primed ? 0 : .001, x: b.x + b.w / 2, y: b.y + b.h / 2 });
+}
+function kill(w, bot, cause, ev) { if (bot.dead) return; bot.dead = true; w.kills++; if (ev) ev.push({ k: "bot", bot, cause, n: w.kills }); }
+function explode(w, p, ev) {
+  if (ev) ev.push({ k: "boom", x: p.x, y: p.y });
+  for (const b of w.blocks) {
+    if (b.dead) continue; const d = Math.hypot(b.x + b.w / 2 - p.x, b.y + b.h / 2 - p.y); if (d > 82 + Math.max(b.w, b.h) * .12) continue;
+    if (b.type === "bang") { if (!b.primed) { b.primed = true; b.dead = true; w.dirty = true; if (ev) ev.push({ k: "break", b }); w.pending.push({ t: .13, x: b.x + b.w / 2, y: b.y + b.h / 2 }); } }
+    else if (b.type === "wood" || b.type === "card") destroy(w, b, ev);
+  }
+  for (const t of w.bots) if (!t.dead && Math.hypot(t.x + t.w / 2 - p.x, t.y + t.h / 2 - p.y) < 86) kill(w, t, "boom", ev);
+  for (const a of w.balls) { const dx = a.x - p.x, dy = a.y - p.y, d = Math.hypot(dx, dy) || 1; if (d < 120) { const k = (1 - d / 120) * 420; a.vx += dx / d * k; a.vy += dy / d * k - 60; } }
+}
+function stepWorld(w, h, ev) {
+  w.t += h;
+  for (let i = w.pending.length - 1; i >= 0; i--) { const p = w.pending[i]; p.t -= h; if (p.t <= 0) { w.pending.splice(i, 1); explode(w, p, ev); } }
+  if (w.dirty) {   // anything that lost its support starts to fall
+    w.dirty = false;
+    for (const b of w.blocks) if (!b.dead && !b.fall && floorUnder(w, b) > b.y + b.h + 1) { b.fall = true; b.vy = 0; w.dirty = true; }
+    for (const t of w.bots) if (!t.dead && !t.fall && floorUnder(w, t) > t.y + t.h + 1) { t.fall = true; t.vy = 0; t.from = t.y; }
+  }
+  for (const b of w.blocks) {
+    if (b.dead || !b.fall) continue;
+    b.vy += GRAV * h; const top = floorUnder(w, b), ny = b.y + b.vy * h;
+    for (const t of w.bots) if (!t.dead && ovx(b, t) > 3 && ny + b.h > t.y + 5 && b.y < t.y + t.h * .5) kill(w, t, "crush", ev);
+    if (ny + b.h >= top) {
+      b.y = top - b.h; b.fall = false; w.dirty = true; if (ev && b.vy > 60) ev.push({ k: "land", b, v: b.vy });
+      if (b.vy > 330) { if (b.type === "card" || b.type === "bang") destroy(w, b, ev); for (const o of w.blocks) if (o !== b && !o.dead && o.type === "card" && Math.abs(o.y - top) < 1 && ovx(b, o) > 3 && (b.type === "steel" || b.w * b.h > 1200)) destroy(w, o, ev); }
+      b.vy = 0;
+    } else b.y = ny;
+  }
+  for (const t of w.bots) {
+    if (t.dead || !t.fall) continue;
+    t.vy += GRAV * h; const top = floorUnder(w, t), ny = t.y + t.vy * h;
+    if (ny + t.h >= top) { t.y = top - t.h; t.fall = false; if (t.y - t.from > 34) kill(w, t, "fall", ev); else if (ev) ev.push({ k: "hop", t }); t.vy = 0; } else t.y = ny;
+  }
+  for (let i = w.balls.length - 1; i >= 0; i--) {
+    const a = w.balls[i]; a.life += h; a.vy += GRAV * h; a.x += a.vx * h; a.y += a.vy * h; a.rot += a.vx / BR * h;
+    for (const b of w.blocks) {
+      if (b.dead) continue;
+      const qx = clamp(a.x, b.x, b.x + b.w), qy = clamp(a.y, b.y, b.y + b.h); let dx = a.x - qx, dy = a.y - qy, d2 = dx * dx + dy * dy; if (d2 >= BR * BR) continue;
+      let nx, ny, pen;
+      if (d2 > 1e-6) { const d = Math.sqrt(d2); nx = dx / d; ny = dy / d; pen = BR - d; }
+      else { const l = a.x - b.x, r = b.x + b.w - a.x, tp = a.y - b.y, bt = b.y + b.h - a.y, m = Math.min(l, r, tp, bt); nx = m === l ? -1 : m === r ? 1 : 0; ny = m === tp ? -1 : m === bt ? 1 : 0; if (nx) ny = 0; pen = m + BR; }
+      const vn = a.vx * nx + a.vy * ny; if (vn >= 0) { a.x += nx * pen; a.y += ny * pen; continue; }
+      const sp = -vn; let e = .4;
+      if (b.type === "steel") e = .5; else if (b.type === "spring") { e = 1.22; b.sq = 1; }
+      else { const dmg = sp > 470 ? 2 : sp > 105 ? 1 : 0; if (dmg) { b.hp -= dmg; if (b.hp <= 0) { destroy(w, b, ev); const k = b.type === "card" ? .86 : .6; a.vx *= k; a.vy *= k; continue; } else if (ev) ev.push({ k: "crack", b }); } }
+      a.x += nx * pen; a.y += ny * pen; a.vx -= (1 + e) * vn * nx; a.vy -= (1 + e) * vn * ny;
+      const tx = -ny, ty = nx, vt = a.vx * tx + a.vy * ty; a.vx -= vt * tx * .12; a.vy -= vt * ty * .12;
+      const s2 = Math.hypot(a.vx, a.vy); if (s2 > 900) { a.vx *= 900 / s2; a.vy *= 900 / s2; }
+      if (ev && sp > 70) ev.push({ k: "bounce", x: qx, y: qy, v: sp, m: b.type });
+    }
+    for (const t of w.bots) if (!t.dead && Math.hypot(a.x - t.x - t.w / 2, a.y - t.y - t.h / 2) < BR + 12) { if (Math.hypot(a.vx, a.vy) > 150) { kill(w, t, "ball", ev); a.vx *= .8; a.vy *= .8; } else if (a.vx * (t.x + t.w / 2 - a.x) > 0) { a.vx *= -.35; if (ev && !t.sq) ev.push({ k: "hop", t }); } }
+    if (a.y + BR > 0) { a.y = -BR; if (a.vy > 0) { if (ev && a.vy > 130) ev.push({ k: "bounce", x: a.x, y: 0, v: a.vy, m: "ground" }); a.vy = a.vy > 70 ? -a.vy * .42 : 0; } a.vx *= Math.exp(-2.6 * h); }
+    const sp = Math.hypot(a.vx, a.vy); a.rest = sp < 30 ? a.rest + h : 0;
+    if (a.rest > .4 || a.life > 8 || a.x < -70 || a.x > VW + 70) { w.balls.splice(i, 1); if (ev) ev.push({ k: "gone", a }); }
   }
 }
-function start(){
-  cannon={x:60,y:Lab.H-60}; ball=null; aiming=false; score=0; shots=10;
-  Lab.setScore(0); makeTargets();
-  Lab.input.onDown=[(x,y)=>{ if(ball) return; aiming=true; sx=x; sy=y; ex=x; ey=y; }];
-  Lab.input.onMove=[(x,y)=>{ if(aiming){ ex=x; ey=y; } }];
-  Lab.input.onUp=[(x,y)=>{ if(!aiming) return; aiming=false;
-    if(shots<=0) return;
-    const dx=sx-x, dy=sy-y; const pw=Math.min(Math.hypot(dx,dy),200);
-    if(pw<10) return;
-    shots--;
-    const ang=Math.atan2(dy,dx);
-    ball={x:cannon.x,y:cannon.y, vx:Math.cos(ang)*pw*7, vy:Math.sin(ang)*pw*7};
-  }];
-  Lab.loop(dt=>{
-    if(ball){ ball.vy+=700*dt; ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
-      for(let i=targets.length-1;i>=0;i--){ const t=targets[i]; if(Lab.dist(t.x,t.y,ball.x,ball.y)<t.r+8){ targets.splice(i,1); score++; Lab.setScore(score); Lab.beep(900,.06);}}
-      if(ball.y>Lab.H||ball.x>Lab.W||ball.x<0) ball=null;
+const settled = w => !w.balls.length && !w.pending.length && !w.dirty && !w.blocks.some(b => b.fall && !b.dead) && !w.bots.some(t => t.fall && !t.dead);
+const alive = w => w.bots.reduce((n, t) => n + (t.dead ? 0 : 1), 0);
+const speedOf = p => lerp(300, 840, p);
+function mkBall(ang, power) { const v = speedOf(power); return { x: PIV.x + Math.cos(ang) * 36, y: PIV.y + Math.sin(ang) * 36, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v, rot: 0, life: 0, rest: 0 }; }
+/* dry runs: the same rules stepped without an event sink — used by the test to find shots that really work */
+const cloneW = w => ({ blocks: w.blocks.filter(b => !b.dead).map(b => Object.assign({}, b)), bots: w.bots.filter(t => !t.dead).map(t => Object.assign({}, t)), balls: [], pending: [], t: 0, dirty: true, kills: 0 });
+function runShot(w, ang, power) {
+  const n0 = w.blocks.length; w.balls.push(mkBall(ang, power)); w.kills = 0;
+  for (let i = 0; i < 1300 && !(i > 10 && settled(w)); i++) stepWorld(w, STEP, null);
+  w.balls.length = 0; w.blocks = w.blocks.filter(b => !b.dead); w.bots = w.bots.filter(t => !t.dead);
+  return { kills: w.kills, broken: n0 - w.blocks.length, left: w.bots.length };
+}
+const trial = (ang, power) => runShot(cloneW(W), ang, power);
+function solve(src) {
+  src = src || W; let best = null;
+  for (let a = ANG_MIN + .02; a <= ANG_MAX; a += .03) for (let p = .3; p <= 1.001; p += .05) { const r = runShot(cloneW(src), a, p), sc = r.kills * 1000 + r.broken * 10 + p; if (!best || sc > best.sc) best = { ang: a, power: p, sc, kills: r.kills, broken: r.broken }; }
+  return best;
+}
+function stats(n) { const w = cloneW(buildWorld(n)), w0 = cloneW(w); let any = 0, all = 0, tot = 0, moved = 0; for (let i = 0; i < 400; i++) stepWorld(w0, STEP, null); w0.blocks.forEach((b, i) => { if (b.dead || Math.abs(b.y - w.blocks[i].y) > .01) moved++; }); moved += w0.kills; for (let a = ANG_MIN + .02; a <= ANG_MAX; a += .03) for (let p = .3; p <= 1.001; p += .05) { const r = runShot(cloneW(w), a, p); tot++; if (r.kills) any++; if (!r.left) all++; } return { any, all, tot, moved }; }
+function plan(n) { const w = cloneW(buildWorld(n)), shots = []; while (w.bots.length && shots.length < 8) { const s = solve(w); runShot(w, s.ang, s.power); shots.push({ ang: +s.ang.toFixed(3), power: +s.power.toFixed(2), kills: s.kills }); } return { shots, cleared: !w.bots.length, balls: LEVELS[n].balls }; }
+
+/* ---------- run ---------- */
+function reset() {
+  layout(); level = 0; lives = 3; score = 0; bonked = 0; bestCombo = 0; shotsFired = 0; now = 0;
+  aim = { on: false, sx: 0, sy: 0, x: 0, y: 0 }; kbAim = { ang: -.6, pow: .7, on: false }; shownAng = -.6; recoil = 0; ghost = []; msg = null;
+  fx.clear(); loadLevel(0, true);
+}
+function start() {
+  reset(); demo = false; Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => { if (state !== "play") return; aim.on = true; kbAim.on = false; aim.sx = aim.x = x; aim.sy = aim.y = y; }];
+  Lab.input.onMove = [(x, y) => { if (aim.on) { aim.x = x; aim.y = y; } }];
+  Lab.input.onUp = [(x, y) => { if (!aim.on) return; aim.x = x; aim.y = y; aim.on = false; const p = pull(); if (p.power >= .08) { kbAim.ang = p.ang; kbAim.pow = p.power; fire(p.ang, p.power); } }];
+  Lab.input.onKey = [k => { if (k === " " || k === "Enter") { if (state === "play") { kbAim.on = true; fire(kbAim.ang, kbAim.pow); } } }];
+  Lab.expose({
+    get score() { return score; }, get lives() { return lives; }, get level() { return level + 1; }, get balls() { return ballsLeft; }, get bots() { return alive(W); }, get blocks() { return W.blocks.filter(b => !b.dead).length; },
+    get state() { return state; }, get flying() { return W.balls.length; }, get pullMin() { return 10 * u; }, get pullMax() { return 120 * u; }, get levels() { return LEVELS.length; }, get bonked() { return bonked; },
+    fire, trial, solve() { return solve(); }, plan, stats, loadLevel(n) { level = n; loadLevel(n, false); },
+  });
+  Lab.loop(frame);
+}
+function loadLevel(n, first) {
+  W = buildWorld(n); ballsLeft = LEVELS[n].balls; state = "build"; stateT = 0; settleT = 0; cool = 0; trail = []; trailT = 0; ghost = []; levelStart = now; scareT = 0; aim.on = false;
+  for (const o of W.blocks.concat(W.bots)) { o.drop = -(360 + o.x * .4 - o.y); Lab.tween(o, { drop: 0 }, .5, { ease: "outBounce", delay: (first ? .05 : .25) + (o.x - 220) * .0011 - o.y * .0016 }); }
+  if (!demo) { Lab.after(first ? .1 : .3, () => Lab.sfx("slide", { pitch: .7 })); Lab.after(first ? .55 : .8, () => Lab.sfx("knock", { pitch: .8 })); }
+}
+function pull() {
+  const dx = aim.sx - aim.x, dy = aim.sy - aim.y, len = Math.hypot(dx, dy); let ang = Math.atan2(dy, dx); if (dx < 0) ang = dy < 0 ? ANG_MIN : ANG_MAX;
+  return { ang: clamp(ang, ANG_MIN, ANG_MAX), power: clamp((len - 10 * u) / (110 * u), 0, 1), len };
+}
+function fire(ang, power) {
+  if (state !== "play" || ballsLeft <= 0 || cool > 0) return false;
+  ang = clamp(ang, ANG_MIN, ANG_MAX); power = clamp(power, 0, 1);
+  const a = mkBall(ang, power); W.balls.push(a); W.kills = 0; ballsLeft--; shotsFired++; cool = .55; recoil = 1; shownAng = ang;
+  if (trail.length) ghost = trail; trail = []; trailT = 0;
+  Lab.audio.tone({ f: 170 + power * 60, f2: 50, dur: .2, vol: .5 }); Lab.audio.noise({ dur: .16, vol: .3, lp: 1800, f2: 300 }); Lab.sfx("pop", { pitch: .6 });
+  Lab.shake(3 + power * 4, .15); Lab.buzz(14);
+  fx.burst(a.x, a.y, { n: 9, colors: ["#fff", "#f1e3d0", "#d9c7b0"], speed: 120 + power * 140, angle: ang, spread: .9, life: .5, size: 5, gravity: -40, drag: 3 });
+  fx.sparks(a.x, a.y, ang, { n: 5, color: "#ffd166", speed: 260, life: .2 });
+  return true;
+}
+function gain(n, x, y, txt, big) { score += n; Lab.setScore(score); if (big) Lab.bumpScore(); if (x != null) fx.text(x, y, txt || "+" + n, { color: big ? "#fff" : "#fff8e8", size: big ? 22 : 13, outline: "rgba(70,40,20,.6)", life: big ? 1 : .7 }); }
+function handle(ev) {
+  for (const e of ev) {
+    if (e.k === "break") {
+      const b = e.b, cx = b.x + b.w / 2, cy = b.y + b.h / 2, col = b.type === "wood" ? WOODS[b.col] : b.type === "card" ? "#fff8ea" : "#e4572e";
+      fx.burst(cx, cy, { n: Math.min(16, 5 + b.w * b.h / 160), colors: [col, Lab.color.shade(col, -.25), "#fff"], speed: 190, life: .6, size: 4, shape: b.type === "card" ? "square" : "shard", gravity: 700 });
+      if (b.type === "wood") { Lab.sfx("crunch", { pitch: 1.3 - b.w * b.h / 4000 }); gain(20, cx, cy - 6); } else if (b.type === "card") { Lab.sfx("flip", { pitch: .8 }); Lab.sfx("snap", { pitch: .7 }); gain(10, cx, cy - 6); } else gain(50, cx, cy - 6);
+    } else if (e.k === "crack") { const b = e.b; fx.burst(b.x + b.w / 2, b.y + b.h / 2, { n: 4, color: Lab.color.shade(WOODS[b.col], -.2), speed: 110, life: .35, size: 2.5, shape: "shard" }); Lab.sfx("knock", { pitch: 1.1 }); }
+    else if (e.k === "bounce") {
+      const p = clamp(1.5 - e.v / 900, .7, 1.5), loud = e.v > 200;
+      if (e.m === "steel") { Lab.audio.tone({ f: 1250 * p, dur: .22, vol: .12, type: "triangle" }); Lab.audio.tone({ f: 1870 * p, dur: .14, vol: .06 }); fx.sparks(e.x, e.y, -Math.PI / 2, { n: 4, color: "#eaf2f6", speed: 160, spread: TAU, life: .2, size: 2 }); }
+      else if (e.m === "spring") { Lab.sfx("boing", { pitch: 1.2 }); fx.ring(e.x, e.y, { r0: 4, r1: 26, color: "#7be0d0", width: 3 }); }
+      else if (e.m === "ground") { Lab.sfx("thud", { pitch: p * 1.2 }); if (loud) fx.puff(e.x, -2, { n: 4, color: "rgba(255,240,220,.7)", size: 5 }); }
+      else Lab.sfx("knock", { pitch: p });
+    } else if (e.k === "land") { const b = e.b; Lab.sfx("thud", { pitch: clamp(1.5 - b.w * b.h / 3000, .6, 1.4) }); Lab.shake(Math.min(7, e.v / 110), .16); fx.puff(b.x + b.w / 2, b.y + b.h, { n: 6, color: "rgba(255,240,220,.75)", size: 6, speed: 70 }); b.sq = .6; }
+    else if (e.k === "hop") { e.t.sq = 1; Lab.sfx("bounce", { pitch: 1.5 }); }
+    else if (e.k === "boom") {
+      Lab.sfx("explode", { pitch: 1.1 }); Lab.shake(11, .35); Lab.flash("#fff0c8", .16, .4); Lab.hitstop(.05); Lab.buzz(30);
+      fx.ring(e.x, e.y, { r0: 10, r1: 92, color: "#ffd166", width: 7, life: .35 }); fx.burst(e.x, e.y, { n: 22, colors: ["#ffd166", "#f4a261", "#e4572e", "#fff"], speed: 330, life: .6, size: 6, gravity: 200 });
+      fx.burst(e.x, e.y, { n: 8, color: "rgba(90,70,60,.55)", speed: 90, life: .9, size: 11, gravity: -60, drag: 2.5 });
+    } else if (e.k === "bot") {
+      const t = e.bot, cx = t.x + t.w / 2, cy = t.y + t.h / 2, col = TINS[t.col]; bonked++; bestCombo = Math.max(bestCombo, e.n);
+      fx.burst(cx, cy, { n: 10, colors: [col, "#d7dde2", "#ffd166"], speed: 230, life: .8, size: 4.5, shape: "ring", gravity: 650 }); fx.burst(cx, cy, { n: 7, colors: [col, Lab.color.shade(col, -.3)], speed: 200, life: .7, size: 4, shape: "square", gravity: 800 });
+      fx.ring(cx, cy, { r0: 6, r1: 34, color: "#fff", width: 3 });
+      gain(500 * e.n, cx, cy - 22, "+" + 500 * e.n + (e.n > 1 ? "  ×" + e.n : ""), true);
+      Lab.sfx("spring", { pitch: 1 + e.n * .15 }); Lab.sfx(e.cause === "crush" ? "crunch" : "pop", { pitch: .9 }); Lab.audio.combo(e.n * 2 + (e.cause === "crush" ? 2 : 0), { vol: .16 });
+      Lab.hitstop(.045); Lab.shake(5, .2); Lab.buzz(16);
+      if (e.cause === "crush") fx.text(cx, cy - 44, "SQUASH!", { color: "#ffd166", size: 15, outline: "rgba(70,40,20,.6)" });
     }
-    if(!targets.length){ Lab.win("All down! Shots used: "+(10-shots)); return; }
-    if(shots<=0 && !ball){ Lab.gameover({title:"Out of shots",message:"Hit "+score}); return; }
-    const c=Lab.ctx; c.fillStyle="#2b1d0f"; c.fillRect(0,0,Lab.W,Lab.H);
-    c.fillStyle="#3a2516"; c.fillRect(0,Lab.H-40,Lab.W,40);
-    // cannon
-    c.fillStyle="#666"; c.beginPath(); c.arc(cannon.x,cannon.y,18,0,Lab.TAU); c.fill();
-    let bangle = -1;
-    if(aiming){ bangle = Math.atan2(sy-ey, sx-ex); }
-    c.save(); c.translate(cannon.x,cannon.y); c.rotate(bangle); c.fillStyle="#888"; c.fillRect(0,-7,40,14); c.restore();
-    // targets
-    for(const t of targets){
-      c.beginPath(); c.fillStyle="#ff5577"; c.arc(t.x,t.y,t.r,0,Lab.TAU); c.fill();
-      c.beginPath(); c.fillStyle="#fff"; c.arc(t.x,t.y,t.r*0.6,0,Lab.TAU); c.fill();
-      c.beginPath(); c.fillStyle="#ff5577"; c.arc(t.x,t.y,t.r*0.25,0,Lab.TAU); c.fill();
-    }
-    if(ball){ c.beginPath(); c.fillStyle="#222"; c.arc(ball.x,ball.y,8,0,Lab.TAU); c.fill(); }
-    if(aiming){
-      const dx=sx-ex, dy=sy-ey; const pw=Math.min(Math.hypot(dx,dy),200);
-      const ang=Math.atan2(dy,dx);
-      // predicted trajectory
-      let px=cannon.x, py=cannon.y, vx=Math.cos(ang)*pw*7, vy=Math.sin(ang)*pw*7;
-      c.strokeStyle="rgba(255,255,255,.4)"; c.setLineDash([4,6]); c.beginPath(); c.moveTo(px,py);
-      for(let i=0;i<60;i++){ px+=vx*0.04; py+=vy*0.04; vy+=700*0.04; c.lineTo(px,py); if(py>Lab.H) break; }
-      c.stroke(); c.setLineDash([]);
-    }
-    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
-    c.fillText("Shots left: "+shots+"  •  Targets: "+targets.length, Lab.W/2, 70);
+  }
+}
+function frame(dt, t) {
+  now = t; stateT += dt; cool -= dt; recoil = Math.max(0, recoil - dt * 3.5);
+  // keyboard aim: arrows tilt / set power, Space fires
+  const ax = Lab.input.axisX(), ay = Lab.input.axisY();
+  if ((ax || ay) && state === "play") { kbAim.on = true; aim.on = false; kbAim.ang = clamp(kbAim.ang + ay * 1.0 * dt, ANG_MIN, ANG_MAX); kbAim.pow = clamp(kbAim.pow + ax * .55 * dt, .08, 1); }
+  if (aim.on && !Lab.input.down) aim.on = false;
+  const ev = []; let acc = Math.min(dt, .05) + (frame.acc || 0);
+  while (acc >= STEP) { stepWorld(W, STEP, ev); acc -= STEP; } frame.acc = acc;
+  if (ev.length) handle(ev);
+  if (W.blocks.some(b => b.dead)) W.blocks = W.blocks.filter(b => !b.dead);
+  if (W.bots.some(b => b.dead)) W.bots = W.bots.filter(b => !b.dead);
+  for (const a of W.balls) { trailT -= dt; if (trailT <= 0 && a === W.balls[W.balls.length - 1]) { trailT = .035; if (trail.length < 400) trail.push(a.x, a.y); } }
+  for (const b of W.blocks) { b.tilt = Lab.damp(b.tilt, b.fall ? (b.id % 2 ? .07 : -.07) : 0, 10, dt); b.sq = Lab.damp(b.sq, 0, 9, dt); }
+  for (const b of W.bots) b.sq = Lab.damp(b.sq, 0, 8, dt);
+  if (state === "build" && stateT > 1.0) { state = "play"; stateT = 0; }
+  else if (state === "play") {
+    const left = alive(W);
+    if (left === 0) { state = "clear"; stateT = 0; onClear(); }
+    else if (ballsLeft === 0 && settled(W)) { settleT += dt; if (settleT > .7) { state = "fail"; stateT = 0; onFail(); } } else settleT = 0;
+  }
+  Lab.music.intensity(clamp(.3 + level * .05 + (W.balls.length ? .25 : 0) + (ballsLeft === 1 ? .15 : 0), 0, 1));
+  render(t, dt);
+}
+function onClear() {
+  const spare = ballsLeft; W.balls.length = 0;
+  Lab.sfx("levelup"); msg = { title: level === LEVELS.length - 1 ? "TOY BOX CLEARED!" : "FORT TOPPLED!", sub: spare ? "" : "with your last ball", t: 0, col: "#fff" };
+  for (let i = 0; i < spare; i++) Lab.after(.5 + i * .28, () => { ballsLeft--; gain(300, 18 + ballsLeft * 20, 6, "+300", true); Lab.sfx("coin", { pitch: 1 + i * .12 }); msg.sub = "spare ball bonus"; });
+  Lab.after(.9 + spare * .28 + .7, () => {
+    if (level >= LEVELS.length - 1) { gain(lives * 1000); fx.clear(); Lab.win({ title: "Toy box cleared!", message: "Every fort toppled with " + lives + (lives === 1 ? " life" : " lives") + " to spare.", score, stats: [["Bots bonked", bonked], ["Best shot", "×" + bestCombo], ["Shots", shotsFired]] }); return; }
+    level++; msg = null; loadLevel(level, false);
   });
 }
-start();
+function onFail() {
+  lives--; Lab.sfx("hurt", { pitch: .8 }); Lab.shake(6, .3);
+  msg = { title: "OUT OF BALLS", sub: lives > 0 ? "the bots rebuild…  " + lives + (lives === 1 ? " life left" : " lives left") : "", t: 0, col: "#ffd9cf" };
+  Lab.after(1.5, () => {
+    if (lives <= 0) { fx.clear(); Lab.gameover({ title: "Out of balls", message: "The tin bots hold fort " + (level + 1) + ".", score, stats: [["Fort", (level + 1) + " / " + LEVELS.length], ["Bots bonked", bonked], ["Best shot", "×" + bestCombo]] }); return; }
+    msg = null; loadLevel(level, false);
+  });
+}
+
+/* ---------- drawing ---------- */
+function backdrop() {
+  const Wd = Lab.W, H = Lab.H;
+  return Lab.sprite("tt-bg:" + Wd + "x" + H + ":" + Math.round(oy), Wd, H, g => {
+    draw.vgrad(g, 0, 0, Wd, oy, ["#f9e9d2", "#f6dcc0"]);
+    const sw = 34 * u; for (let x = (Wd / 2) % sw - sw; x < Wd; x += sw * 2) { g.fillStyle = "rgba(233,150,122,.13)"; g.fillRect(x, 0, sw, oy); }
+    const rnd = Lab.rng(4); g.fillStyle = "rgba(42,157,143,.16)"; for (let i = 0, n = Math.ceil(Wd * oy / 9000); i < n; i++) draw.star(g, rnd() * Wd, rnd() * (oy - 30), (4 + rnd() * 3) * u, "rgba(42,157,143,.16)");
+    // window with sky
+    const ww = Math.min(150 * u, Wd * .34), wh = Math.min(170 * u, (oy - Lab.play.y) * .42), wx = Wd * .36 - ww / 2, wy = Lab.play.y + Math.max(26, (oy - Lab.play.y) * .1);
+    if (wh > 70) {
+      draw.rect(g, wx - 7 * u, wy - 7 * u, ww + 14 * u, wh + 14 * u, 8 * u, "#fffaf0", "#d9b99a", 2); draw.vgrad(g, wx, wy, ww, wh, ["#8fd0e8", "#d8f0f2"]);
+      g.fillStyle = "#fff"; for (const [cx, cy, r] of [[.3, .35, .13], [.42, .3, .17], [.55, .37, .12], [.7, .68, .1], [.8, .64, .13]]) { g.beginPath(); g.arc(wx + cx * ww, wy + cy * wh, r * ww, 0, TAU); g.fill(); }
+      g.fillStyle = "#fffaf0"; g.fillRect(wx + ww / 2 - 3 * u, wy, 6 * u, wh); g.fillRect(wx, wy + wh / 2 - 3 * u, ww, 6 * u);
+      g.fillStyle = "#e4572e"; for (const s of [0, 1]) { g.beginPath(); const x0 = s ? wx + ww + 9 * u : wx - 9 * u, d = s ? -1 : 1; g.moveTo(x0, wy - 12 * u); g.lineTo(x0 + d * ww * .32, wy - 12 * u); g.quadraticCurveTo(x0 + d * ww * .26, wy + wh * .5, x0 + d * ww * .08, wy + wh + 10 * u); g.lineTo(x0, wy + wh + 10 * u); g.closePath(); g.fill(); }
+      g.fillStyle = "#b97b4a"; g.fillRect(wx - 18 * u, wy - 17 * u, ww + 36 * u, 6 * u);
+    }
+    // table top + front
+    g.fillStyle = "#f0d6b4"; g.fillRect(0, oy - 5 * u, Wd, 5 * u);
+    draw.vgrad(g, 0, oy, Wd, 16 * S + 8, ["#c98f55", "#b47a44"]); draw.vgrad(g, 0, oy + 16 * S + 8, Wd, H, [[0, "#9c6536"], [.4, "#8a5730"], [1, "#6f4424"]]);
+    g.fillStyle = "rgba(255,255,255,.22)"; g.fillRect(0, oy, Wd, 2); g.fillStyle = "rgba(0,0,0,.18)"; g.fillRect(0, oy + 16 * S + 6, Wd, 3);
+    g.strokeStyle = "rgba(60,30,10,.12)"; g.lineWidth = 1.5; for (let i = 0; i < 14; i++) { const y = oy + 30 * S + rnd() * (H - oy), x = rnd() * Wd; g.beginPath(); g.moveTo(x, y); g.bezierCurveTo(x + 60, y - 5, x + 120, y + 6, x + 190, y); g.stroke(); }
+    if (H - oy > 130) {   // two drawers in the table front
+      const gap = 14 * u, dw = Math.min((Wd - gap * 3) / 2, 230 * u), dy = oy + 16 * S + 8 + 20 * u, dh = Math.min(92 * u, H - dy - 40), x0 = Wd / 2 - dw - gap / 2;
+      for (let i = 0; i < 2; i++) { const dx = x0 + i * (dw + gap); draw.rect(g, dx, dy, dw, dh, 9 * u, "rgba(60,30,10,.16)"); draw.rect(g, dx + 3, dy + 3, dw - 6, dh - 6, 7 * u, "#a36a3a", "rgba(255,230,190,.16)", 1.5); draw.circle(g, dx + dw / 2, dy + dh / 2 + 2, 9 * u, "rgba(60,30,10,.3)"); draw.circle(g, dx + dw / 2, dy + dh / 2, 9 * u, "#e9c46a", "#b8892e", 1.5); draw.circle(g, dx + dw / 2 - 3 * u, dy + dh / 2 - 3 * u, 2.6 * u, "rgba(255,255,255,.6)"); }
+    }
+  });
+}
+function blockSprite(b) {
+  return Lab.sprite("tt-b:" + b.type + ":" + b.w + "x" + b.h + ":" + (b.type === "wood" ? b.col : 0) + ":" + Math.round(S * 100), b.w * S, b.h * S, g => {
+    g.scale(S, S); const w = b.w, h = b.h, r = Math.min(4, w / 3, h / 3);
+    const base = b.type === "wood" ? WOODS[b.col] : b.type === "card" ? "#fff8ea" : b.type === "steel" ? "#9fb0bd" : b.type === "bang" ? "#e4572e" : "#2a9d8f";
+    draw.rect(g, 0, 0, w, h, r, Lab.color.shade(base, -.28)); draw.rect(g, 0, 0, w - 1.6, h - 2, r, base);
+    g.fillStyle = "rgba(255,255,255,.3)"; draw.rr(g, 1.5, 1.5, w - 4.5, Math.min(4, h * .3), 2); g.fill();
+    g.save(); draw.rr(g, 0, 0, w, h, r); g.clip();
+    if (b.type === "wood") {
+      g.strokeStyle = "rgba(90,50,30,.14)"; g.lineWidth = 1; const horiz = w >= h; for (let i = 1; i < 4; i++) { g.beginPath(); if (horiz) { g.moveTo(0, h * i / 4 + (i % 2)); g.quadraticCurveTo(w / 2, h * i / 4 + 2.5 - i, w, h * i / 4); } else { g.moveTo(w * i / 4, 0); g.quadraticCurveTo(w * i / 4 + 2 - i, h / 2, w * i / 4, h); } g.stroke(); }
+      if (w >= 30 && h >= 30) { const k = b.col % 3; g.fillStyle = "rgba(255,255,255,.6)"; if (k === 0) draw.star(g, w / 2, h / 2 + 1, 10, "rgba(255,255,255,.6)"); else if (k === 1) { g.beginPath(); g.arc(w / 2, h / 2, 8.5, 0, TAU); g.fill(); } else { g.beginPath(); g.moveTo(w / 2, h / 2 - 9); g.lineTo(w / 2 + 10, h / 2 + 8); g.lineTo(w / 2 - 10, h / 2 + 8); g.closePath(); g.fill(); } }
+    } else if (b.type === "card") {
+      g.strokeStyle = "#e4572e"; g.lineWidth = 1.2; draw.rr(g, 2.2, 2.2, w - 5.5, h - 6, 2); g.stroke();
+      const n = Math.max(1, Math.round(Math.max(w, h) / 16)); for (let i = 0; i < n; i++) { const cx = w >= h ? (i + .5) * w / n : w / 2, cy = w >= h ? h / 2 : (i + .5) * h / n; g.fillStyle = i % 2 ? "#457b9d" : "#e4572e"; g.beginPath(); g.moveTo(cx, cy - 3.4); g.lineTo(cx + 2.6, cy); g.lineTo(cx, cy + 3.4); g.lineTo(cx - 2.6, cy); g.closePath(); g.fill(); }
+    } else if (b.type === "steel") {
+      g.fillStyle = "rgba(255,255,255,.22)"; g.beginPath(); g.moveTo(w * .15, 0); g.lineTo(w * .15 + Math.min(10, w * .4), 0); g.lineTo(Math.min(10, w * .4) - h * .3 + w * .15, h); g.lineTo(w * .15 - h * .3, h); g.closePath(); g.fill();
+      g.fillStyle = "rgba(40,55,70,.55)"; const st = 14; for (let x = 4; x < w - 2; x += Math.max(st, w - 8.01)) for (let y = 4; y < h - 2; y += Math.max(st, h - 8.01)) { g.beginPath(); g.arc(x, y, 1.5, 0, TAU); g.fill(); }
+    } else if (b.type === "bang") {
+      g.fillStyle = "#3d2c1e"; for (let x = -h; x < w; x += 9) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 4.5, 0); g.lineTo(x + 4.5 + 6, 6); g.lineTo(x + 6, 6); g.closePath(); g.fill(); }
+      draw.star(g, w / 2, h / 2 + 3, Math.min(w, h) * .36, "#ffd166", 8, .6); draw.rect(g, w / 2 - 1.8, h / 2 - 4, 3.6, 8, 1.5, "#3d2c1e"); draw.circle(g, w / 2, h / 2 + 8, 2, "#3d2c1e");
+    } else {
+      g.strokeStyle = "rgba(210,255,245,.85)"; g.lineWidth = 2.2; g.lineJoin = "round"; g.beginPath(); const n = Math.max(3, Math.round(h / 9)); for (let i = 0; i <= n; i++) { const y = 5 + (h - 10) * i / n, x = i % 2 ? w - 5 : 5; i ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke();
+    }
+    g.restore();
+  });
+}
+function drawBlock(c, b) {
+  const sp = blockSprite(b), cx = b.x + b.w / 2, cy = b.y + b.h / 2 + b.drop;
+  c.save(); c.translate(cx, cy); if (b.tilt) c.rotate(b.tilt);
+  if (b.sq) { if (b.type === "spring") c.scale(1 - b.sq * .16, 1 + b.sq * .05); else { c.translate(0, b.h / 2); c.scale(1 + b.sq * .06, 1 - b.sq * .08); c.translate(0, -b.h / 2); } }
+  c.drawImage(sp, -b.w / 2, -b.h / 2, b.w, b.h);
+  if (b.hp < b.max) { c.strokeStyle = "rgba(70,35,20,.7)"; c.lineWidth = 1.3; c.lineJoin = "round"; c.beginPath(); const w = b.w / 2, h = b.h / 2; c.moveTo(-w * .5, -h); c.lineTo(-w * .1, -h * .3); c.lineTo(-w * .45, h * .15); c.lineTo(w * .05, h); c.moveTo(-w * .1, -h * .3); c.lineTo(w * .55, -h * .05); c.lineTo(w * .3, h * .5); c.stroke(); }
+  if (b.type === "bang") { c.globalAlpha = .25 + .25 * Math.sin(now * 6 + b.id); draw.circle(c, 0, 3, Math.min(b.w, b.h) * .2, "#fff"); c.globalAlpha = 1; }
+  c.restore();
+}
+function drawBot(c, t, ball) {
+  const cx = t.x + t.w / 2, by = t.y + t.h + t.drop, col = TINS[t.col], dk = Lab.color.shade(col, -.3), lt = Lab.color.shade(col, .3);
+  let lx = 0, ly = 0, scared = t.fall; if (ball) { const dx = ball.x - cx, dy = ball.y - (t.y + 8), d = Math.hypot(dx, dy) || 1; lx = dx / d; ly = dy / d; if (d < 150) scared = true; }
+  const bob = scared ? Math.sin(now * 30 + t.ph) * .7 : Math.sin(now * 2.4 + t.ph) * .8, sq = t.sq;
+  c.save(); c.translate(cx, by); c.scale(1 + sq * .18, 1 - sq * .2);
+  c.fillStyle = "#3d2c1e"; c.fillRect(-8, -4, 5.5, 4); c.fillRect(2.5, -4, 5.5, 4);                                   // feet
+  const key = Math.cos(now * (scared ? 9 : 2.5) + t.ph);                                                               // wind-up key
+  c.fillStyle = "#d9a441"; c.fillRect(10, -13, 4, 2.4); c.beginPath(); c.ellipse(16, -11.8, 1.2 + Math.abs(key) * 2.6, 4.2, 0, 0, TAU); c.fill();
+  c.strokeStyle = dk; c.lineWidth = 2.6; c.lineCap = "round"; c.beginPath();                                          // arms
+  if (scared) { c.moveTo(-10, -13); c.lineTo(-14, -21 + bob); c.moveTo(10, -13); c.lineTo(14, -21 - bob); } else { c.moveTo(-10, -13); c.lineTo(-13.5, -7 + bob * .5); c.moveTo(10, -13); c.lineTo(13.5, -7 - bob * .5); } c.stroke();
+  draw.rect(c, -10.5, -17, 21, 13.5, 3.5, dk); draw.rect(c, -10.5, -17, 20, 12.5, 3.5, col);                           // body
+  draw.rect(c, -6, -14, 12, 7, 2, lt); c.fillStyle = dk; c.fillRect(-4, -12.2, 2, 3.4); c.fillRect(-1, -12.2, 2, 3.4); c.fillRect(2, -12.2, 2, 3.4);
+  const hy = -27 + bob * .4;                                                                                           // head
+  draw.rect(c, -9, hy, 18, 11.5, 4, dk); draw.rect(c, -9, hy, 17, 10.6, 4, lt);
+  const er = scared ? 3.5 : 2.9, blink = !scared && (now * .37 + t.ph * .13) % 1 > .96;
+  for (const s of [-1, 1]) { if (blink) { c.fillStyle = "#3d2c1e"; c.fillRect(s * 4.2 - 2.4, hy + 4.6, 4.8, 1.2); } else { draw.circle(c, s * 4.2, hy + 5, er, "#fff"); draw.circle(c, s * 4.2 + lx * 1.3, hy + 5 + ly * 1.1, scared ? 1.2 : 1.5, "#3d2c1e"); } }
+  c.fillStyle = "#3d2c1e"; if (scared) { c.beginPath(); c.ellipse(0, hy + 9.3, 1.6, 1.3, 0, 0, TAU); c.fill(); } else c.fillRect(-2.5, hy + 8.6, 5, 1.1);
+  const wig = Math.sin(now * (scared ? 26 : 5) + t.ph) * (scared ? 2.2 : 1.1);                                         // antenna
+  c.strokeStyle = "#806a55"; c.lineWidth = 1.2; c.beginPath(); c.moveTo(0, hy); c.quadraticCurveTo(wig * .5, hy - 4, wig, hy - 7.5); c.stroke(); draw.circle(c, wig, hy - 8.5, 2.3, "#e4572e");
+  c.restore();
+}
+function drawCannon(c, ang, pow) {
+  const k = recoil * recoil, bx = PIV.x - Math.cos(ang) * k * 9, by = PIV.y - Math.sin(ang) * k * 9;
+  draw.shadow(c, PIV.x - 2, 0, 30, 4, .18);
+  c.save(); c.translate(bx, by); c.rotate(ang); c.scale(1 - k * .1, 1 + k * .12);
+  draw.rect(c, -14, -11, 54, 22, 9, "#b8402a"); draw.rect(c, -14, -11, 53, 20.5, 9, "#e4572e");
+  c.fillStyle = "#fff3df"; c.fillRect(6, -11, 6, 20.5); c.fillRect(22, -11, 6, 20.5);
+  draw.rect(c, 34, -13, 9, 26, 4, "#3d2c1e"); c.fillStyle = "rgba(255,255,255,.28)"; draw.rr(c, -10, -9, 42, 4, 2); c.fill();
+  if (pow > 0) { c.fillStyle = "#ffd166"; c.fillRect(-10, 4, 40 * pow, 3); }
+  c.restore();
+  c.fillStyle = "#806a55"; c.beginPath(); c.moveTo(PIV.x - 20, 0); c.lineTo(PIV.x - 8, PIV.y - 2); c.lineTo(PIV.x + 8, PIV.y - 2); c.lineTo(PIV.x + 20, 0); c.closePath(); c.fill();
+  const wr = 13; c.save(); c.translate(PIV.x, -wr); c.rotate(-k * .5); draw.circle(c, 0, 0, wr, "#f6bd60", "#3d2c1e", 2.5); c.strokeStyle = "#3d2c1e"; c.lineWidth = 2; c.beginPath(); for (let i = 0; i < 4; i++) { const a = i * Math.PI / 4; c.moveTo(Math.cos(a) * wr, Math.sin(a) * wr); c.lineTo(-Math.cos(a) * wr, -Math.sin(a) * wr); } c.stroke(); draw.circle(c, 0, 0, 3.4, "#e4572e", "#3d2c1e", 1.5); c.restore();
+}
+function drawBall(c, x, y, rot, r) {
+  draw.circle(c, x, y, r, "#2f6fa3"); c.save(); c.translate(x, y); c.rotate(rot || 0); c.fillStyle = "#ffd166"; c.beginPath(); c.arc(0, 0, r, -.5, .5); c.arc(0, 0, r, Math.PI - .5, Math.PI + .5); c.fill(); c.restore();
+  draw.circle(c, x, y, r, null, "#1d4566", 1.4); draw.circle(c, x - r * .35, y - r * .4, r * .28, "rgba(255,255,255,.7)");
+}
+function render(t, dt) {
+  const c = Lab.ctx, Wd = Lab.W, H = Lab.H, P = Lab.play;
+  c.drawImage(backdrop(), 0, 0, Wd, H);
+  c.save(); c.translate(ox, oy); c.scale(S, S);
+  // aim (pointer or keyboard)
+  let ang = kbAim.ang, pow = 0, showing = false;
+  if (state === "play" && !demo) { if (aim.on) { const p = pull(); if (p.len > 10 * u) { ang = p.ang; pow = p.power; showing = pow > .02; } } else if (kbAim.on) { ang = kbAim.ang; pow = kbAim.pow; showing = true; } }
+  shownAng = Lab.damp(shownAng, ang, 24, dt);
+  for (let i = 0; i < ghost.length; i += 2) { c.globalAlpha = .22; draw.circle(c, ghost[i], ghost[i + 1], 2, "#3d2c1e"); } c.globalAlpha = 1;
+  for (const b of W.blocks) if (!b.fall) draw.shadow(c, b.x + b.w / 2, 0, b.w * .55, 3, b.y + b.h > -1 && !b.drop ? .16 : 0);
+  for (const b of W.blocks) drawBlock(c, b);
+  const lead = W.balls[W.balls.length - 1];
+  for (const b of W.bots) drawBot(c, b, lead);
+  if (showing && ballsLeft > 0) {
+    const a = mkBall(ang, pow); let x = a.x, y = a.y, vy = a.vy; const h = .045;
+    for (let i = 0; i < 13 && y < -2; i++) { x += a.vx * h; vy += GRAV * h; y += vy * h; c.globalAlpha = .9 * (1 - i / 14); draw.circle(c, x, y, 3.3 - i * .13, "#fff", "rgba(61,44,30,.5)", 1); } c.globalAlpha = 1;
+  }
+  drawCannon(c, shownAng, showing ? pow : 0);
+  for (let i = 0; i < trail.length; i += 2) { c.globalAlpha = .5 * (i / trail.length); draw.circle(c, trail[i], trail[i + 1], 2.2, "#fff"); } c.globalAlpha = 1;
+  for (const a of W.balls) drawBall(c, a.x, a.y, a.rot, BR);
+  for (let i = 0; i < ballsLeft; i++) drawBall(c, 18 + i * 20, 17, 0, 7.5);                                                       // ammo tray on the table edge
+  fx.draw(c);
+  c.restore();
+  if (demo) return;
+  // drag feedback in screen space
+  if (aim.on && state === "play") { c.strokeStyle = "rgba(61,44,30,.45)"; c.lineWidth = 2; c.setLineDash([4, 6]); c.beginPath(); c.moveTo(aim.sx, aim.sy); c.lineTo(aim.x, aim.y); c.stroke(); c.setLineDash([]); draw.circle(c, aim.sx, aim.sy, 5, "rgba(61,44,30,.4)"); draw.circle(c, aim.x, aim.y, 10, "rgba(255,255,255,.5)", "rgba(61,44,30,.6)", 2); }
+  // HUD
+  const y = P.y + 8, hh = 26 * u;
+  draw.rect(c, 10, y, 30 * u + 3 * 19 * u, hh, hh / 2, "rgba(255,250,240,.85)", "rgba(90,60,40,.2)", 1);
+  for (let i = 0; i < 3; i++) draw.heart(c, 10 + 22 * u + i * 19 * u, y + hh / 2 + .5 * u, 6.2 * u, i < lives ? "#e4572e" : "rgba(90,60,40,.18)");
+  const lw = 96 * u; draw.rect(c, Wd - 10 - lw, y, lw, hh, hh / 2, "rgba(255,250,240,.85)", "rgba(90,60,40,.2)", 1);
+  draw.text(c, "FORT " + (level + 1) + " / " + LEVELS.length, Wd - 10 - lw / 2, y + hh / 2 + .5, { size: 12 * u, color: "#3d2c1e", weight: 700 });
+  const left = alive(W), bw = (24 + left * 15) * u, bx = Wd / 2 - bw / 2;
+  if (left && Wd > 360) { draw.rect(c, bx, y, bw, hh, hh / 2, "rgba(255,250,240,.85)", "rgba(90,60,40,.2)", 1); for (let i = 0; i < left; i++) { const x = bx + (19.5 + i * 15) * u; draw.rect(c, x - 5 * u, y + hh / 2 - 5 * u, 10 * u, 10 * u, 3 * u, TINS[(i + level) % 4]); draw.circle(c, x - 2 * u, y + hh / 2 - 1 * u, 1.3 * u, "#fff"); draw.circle(c, x + 2 * u, y + hh / 2 - 1 * u, 1.3 * u, "#fff"); } }
+  if (msg) { msg.t += dt; const k = msg.t < .2 ? ease.outBack(msg.t / .2) : 1, my = P.y + (oy - P.y) * .3; draw.text(c, msg.title, Wd / 2, my, { size: Math.min(34 * u, Wd * .085) * k, color: msg.col, stroke: "rgba(90,45,25,.85)", strokeW: 6 }); if (msg.sub) draw.text(c, msg.sub, Wd / 2, my + 30 * u, { size: 14 * u, color: "#3d2c1e", weight: 700 }); }
+  else if (state === "play" && level === 0 && shotsFired === 0 && !aim.on && !kbAim.on) {   // first-shot gesture hint
+    const q = (t * .6) % 1, e = ease.inOutQuad(Math.min(1, q * 1.5)), x0 = Wd * .6, y0 = Math.min(H - 60, oy + Math.max(40, (H - oy) * .45)), x1 = x0 - 80 * u * e, y1 = y0 + 44 * u * e;
+    c.globalAlpha = q > .8 ? (1 - q) * 5 : 1; c.strokeStyle = "rgba(255,255,255,.75)"; c.lineWidth = 2; c.setLineDash([4, 6]); c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); c.setLineDash([]);
+    draw.circle(c, x1, y1, 11 * u, "rgba(255,255,255,.9)", "rgba(61,44,30,.4)", 2); draw.text(c, "drag back, let go", x0 - 26 * u, y0 - 20 * u, { size: 13 * u, color: "#fff", stroke: "rgba(90,45,25,.7)" }); c.globalAlpha = 1;
+  }
+}
+Lab.boot();
+})();
 </script></body></html>

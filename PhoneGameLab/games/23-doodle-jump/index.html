@@ -1,36 +1,281 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Pogo Peak</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Doodle Jump", instructions:"Drag to steer left/right. Auto-bounce on platforms.", restart:start});
-let p,plats,t,height,maxH;
-function newPlat(y){ return {x:Lab.rand(40,Lab.W-100), y, w:80, h:14, vx: Math.random()<0.3?Lab.rand(-60,60):0}; }
-function start(){
-  p={x:Lab.W/2,y:Lab.H-100,vx:0,vy:0,r:18};
-  plats=[{x:Lab.W/2-40,y:Lab.H-60,w:80,h:14,vx:0}];
-  for(let i=1;i<14;i++) plats.push(newPlat(Lab.H-60-i*60));
-  height=0; maxH=0; Lab.setScore(0);
-  Lab.input.onMove=[(x)=>{ if(Lab.input.down) p.vx = (x-p.x)*8; }];
-  Lab.loop(dt=>{
-    p.vy+=1400*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=0.92;
-    if(p.x<0)p.x=Lab.W; if(p.x>Lab.W)p.x=0;
-    for(const pl of plats){ pl.x+=(pl.vx||0)*dt; if(pl.x<10||pl.x+pl.w>Lab.W-10)pl.vx*=-1;}
-    if(p.vy>0){
-      for(const pl of plats){
-        if(p.x>pl.x&&p.x<pl.x+pl.w&&p.y+p.r>pl.y&&p.y+p.r<pl.y+pl.h+12){
-          p.vy=-740; Lab.beep(700,.04); break;
-        }
-      }
+(function(){ "use strict";
+/* POGO PEAK — Pip, a round chick in a bobble hat, pogo-sticks up a mountain from meadow to starlight.
+ * Identity: soft storybook altitude bands (Meadow → Pinewood → Snowline → Cloud Sea → Starfield), chunky ledges, chiptune.
+ * Core: endless auto-bounce; steer by relative drag (1.45x gain, screen wraps) or arrow keys.
+ * Hook: the SLAM — flick down (or Down/Space) to dive. A slam landing is a POWER BOUNCE (1.3x height), pops burrs and
+ * crows from above and builds a slam streak for bonus points; mistime it and you dive straight past the ledge.
+ * Hazards knock you down and daze you instead of killing outright; the only way to lose is to fall off the screen.
+ * World is in units (1 u = S px; x wraps over WU = W/S), y grows downward, the climb goes toward negative y.      */
+Lab.init({
+  title: "Pogo Peak", tagline: "Bounce a pogo chick from meadow to starlight.", category: "Arcade & Action",
+  howto: ["Drag left / right to steer — the screen wraps", "Flick down to SLAM for a power bounce", "Slam onto burrs and crows to pop them"],
+  theme: { bg: "#7cc4e8", bg2: "#fff3d6", fg: "#22324a", accent: "#ff8a3d", accent2: "#3fb8a9", muted: "#6c7f96", light: true },
+  orient: "portrait", music: { style: "arcade", key: "C", bpm: 120, vol: .3 }, restart: start,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, C = Lab.color;
+const G = 2300, VB = 1000, FOOT = 30, M = 12; // gravity, bounce speed, body-centre → pogo tip, units per metre
+const ZONES = [
+  { at: 0, n: "Meadow", top: "#8fd3f4", bot: "#fff3d6", cap: "#7ccf5a", body: "#a9744f", ink: "#22324a" },
+  { at: 150, n: "Pinewood", top: "#7fcfc0", bot: "#e9f7d6", cap: "#3f9d6b", body: "#7a5a46", ink: "#1f3a3a" },
+  { at: 400, n: "Snowline", top: "#a9c9f5", bot: "#f3f9ff", cap: "#ffffff", body: "#8fa3b8", ink: "#27405e" },
+  { at: 800, n: "Cloud Sea", top: "#ff9fc0", bot: "#ffe6c2", cap: "#fff1f7", body: "#d08fb0", ink: "#5a2a4a" },
+  { at: 1300, n: "Starfield", top: "#1d1f5c", bot: "#6a4c9c", cap: "#c9b8ff", body: "#5a4c9c", ink: "#f2ecff" },
+];
+let S, W, H, WU, HU, p, plats, things, camY, genY, lastCrumb, nextBalloon, maxH, bonus, score, streak, bestStreak, starsN, pops, zone, alive, bestH, hist, bounces, fallT, steered, hintT;
+
+function layout() { W = Lab.W; H = Lab.H; S = Math.min(W / 390, Lab.play.h / 700); const w = W / S; if (WU && p && Math.abs(w - WU) > .5) { const k = w / WU; p.x *= k; p.tx *= k; for (const q of plats) q.x *= k; for (const q of things) q.x *= k; } WU = w; HU = H / S; }
+Lab.onResize(() => { if (p) layout(); });
+const wrapDx = (a, b) => ((a - b + WU * 1.5) % WU + WU) % WU - WU / 2;
+const frac = v => v - Math.floor(v), hash = i => frac(Math.sin(i * 78.233 + 12.9898) * 43758.5453);
+const zoneOf = h => { let z = 0; for (let i = 1; i < ZONES.length; i++) if (h >= ZONES[i].at) z = i; return z; };
+
+function start() {
+  WU = 0; p = null; layout();
+  p = { x: WU / 2, tx: WU / 2, y: -FOOT - 60, vy: 0, sq: 0, lean: 0, slam: false, dazed: 0, inv: 0, balloon: 0, blink: 2, sx: WU / 2, sy: -60, flap: 0 };
+  plats = [{ x: WU / 2, y: 0, w: 4000, type: "ground", z: 0, dip: 0 }]; things = [];
+  camY = -HU + 96; genY = 0; lastCrumb = false; nextBalloon = 170; maxH = 0; bonus = 0; score = 0; streak = 0; bestStreak = 0; starsN = 0; pops = 0; zone = 0; alive = true;
+  bestH = Lab.store.get("bestH", 0); hist = []; bounces = 0; fallT = 0; steered = false; hintT = 0;
+  while (genY > camY - 400) gen();
+  Lab.setScore(0); Lab.hint("");
+  Lab.input.onDown = [(x, y) => { hist = [{ t: performance.now(), x, y }]; steered = true; }];
+  Lab.input.onMove = [(x, y, dx) => {
+    if (!Lab.input.down || !alive) return;
+    if (p.dazed <= 0) p.tx += dx / S * 1.45;
+    const now = performance.now(); hist.push({ t: now, x, y }); while (hist.length > 1 && now - hist[0].t > 130) hist.shift();
+    const o = hist[0]; if (y - o.y > 30 && y - o.y > Math.abs(x - o.x) * 1.3) { slam(); hist = [{ t: now, x, y }]; }   // flick down
+  }];
+  Lab.input.onKey = [k => { steered = true; if (k === "ArrowDown" || k === "s" || k === "S" || k === " ") slam(); }];
+  Lab.expose({
+    get x() { return p.x; }, get y() { return p.y; }, get vy() { return p.vy; }, get foot() { return p.y + FOOT; }, get slamming() { return p.slam; }, get dazed() { return p.dazed; },
+    get height() { return Math.floor(maxH); }, get score() { return score; }, get streak() { return streak; }, get bestStreak() { return bestStreak; }, get stars() { return starsN; }, get pops() { return pops; },
+    get bounces() { return bounces; }, get alive() { return alive; }, get WU() { return WU; }, get HU() { return HU; }, get camY() { return camY; }, get zone() { return zone; }, get S() { return S; },
+    get plats() { return plats.filter(q => !q.broken).map(q => ({ x: q.x, y: q.y, w: q.w, type: q.type })); }, get things() { return things.map(q => ({ k: q.k, x: q.x, y: q.y })); },
+    steerTo(x) { if (p.dazed <= 0) p.tx = p.x + wrapDx(x, p.x); }, slam,
+    spawnPlat(type, x, y, w) { plats.push({ x, y, w: w || 80, type, z: zone, dip: 0, vx: 0 }); }, spawnThing(k, x, y) { things.push({ k, x, y, y0: y, vx: 0, ph: 0 }); },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- world generation: a reachable main chain + decoys, hazards and treats */
+function gen() {
+  const hm = -genY / M, d = Lab.clamp(hm / 1700, 0, 1), z = zoneOf(hm);
+  const gap = hm < 25 ? Lab.rand(50, 72) : Lab.rand(54 + d * 40, 90 + d * 72); genY -= gap;
+  const w = Lab.lerp(86, 58, d) * (hm < 25 ? 1.2 : 1), r = Math.random();
+  let type = "solid";
+  if (hm > 40 && r < .075) type = "spring"; else if (hm > 110 && r < .1 + Math.min(.28, .06 + d * .5)) type = "cloud"; else if (hm > 70 && !lastCrumb && r > 1 - (.08 + d * .25)) type = "crumbly";
+  lastCrumb = type === "crumbly";
+  const x = Lab.rand(w / 2 + 10, WU - w / 2 - 10);
+  plats.push({ x, y: genY, w, type, z, dip: 0, vx: type === "cloud" ? Lab.rand(38, 60 + d * 60) * Lab.choose([-1, 1]) : 0, pop: 0 });
+  const away = min => { let ox; for (let i = 0; i < 8; i++) { ox = Lab.rand(30, WU - 30); if (Math.abs(wrapDx(ox, x)) > min) break; } return ox; };
+  if (hm > 60 && Lab.chance(.16 + d * .3)) plats.push({ x: away(w + 30), y: genY + Lab.rand(-26, 26), w: w * .9, type: "crumbly", z, dip: 0, vx: 0 });
+  if (hm > 90 && Lab.chance(.07 + d * .2)) { const by = genY - Lab.rand(46, 84); things.push({ k: "burr", x: away(70), y: by, y0: by, vx: 0, ph: Lab.rand(0, TAU) }); }
+  if (hm > 380 && Lab.chance(.04 + d * .1)) { const cy = genY - gap * .5; things.push({ k: "crow", x: Lab.rand(30, WU - 30), y: cy, y0: cy, vx: Lab.rand(80, 110 + d * 60) * Lab.choose([-1, 1]), ph: Lab.rand(0, TAU) }); }
+  if (Lab.chance(.24)) { const sx = Lab.rand(50, WU - 50), n = Lab.randInt(2, 4), dir = Lab.choose([-1, 1]); for (let i = 0; i < n; i++) { const yy = genY - 64 - Math.sin(i / (n - 1 || 1) * Math.PI) * 26; things.push({ k: "star", x: sx + dir * (i - (n - 1) / 2) * 30, y: yy, y0: yy, vx: 0, ph: i }); } }
+  if (hm > nextBalloon) { nextBalloon = hm + Lab.rand(240, 400); const by = genY - 90; things.push({ k: "balloon", x: away(60), y: by, y0: by, vx: 0, ph: 0 }); }
+}
+
+/* ---------- actions */
+function slam() {
+  if (!alive || p.slam || p.balloon > 0 || p.dazed > 0 || Lab.paused) return;
+  p.slam = true; p.vy = Math.max(p.vy, 1450); p.sq = -1; Lab.sfx("swish", { pitch: .7 });
+}
+function land(pl, y) {
+  const power = p.slam; let v = VB;
+  if (pl && pl.type === "spring") { v = 1620; pl.pop = 1; Lab.sfx("spring", { pitch: power ? 1.2 : 1 }); }
+  else if (power) v = VB * 1.3;
+  p.y = y - FOOT; p.vy = -v; p.sq = 1; p.slam = false; bounces++; if (pl) pl.dip = 1;
+  const px = p.x * S, py = (y - camY) * S;
+  if (power) {
+    streak++; bestStreak = Math.max(bestStreak, streak); const pts = 5 * Math.min(streak, 10); bonus += pts;
+    fx.ring(px, py, { r0: 6, r1: 62 * S, color: "#fff", width: 5 }); fx.burst(px, py, { n: 10, colors: ["#fff", "#ffd166", "#ff8a3d"], speed: 260 * S, spread: Math.PI, angle: -Math.PI / 2, life: .45, size: 3.5 * S, gravity: 500 });
+    fx.text(px, py - 54 * S, (streak > 1 ? "SLAM ×" + streak + "  +" : "SLAM +") + pts, { color: "#ff8a3d", outline: "#fffaf0", size: (15 + Math.min(streak, 6)) * Math.max(.85, S) });
+    Lab.sfx("boing", { pitch: 1 + Math.min(streak, 8) * .06 }); Lab.audio.combo(streak, { vol: .16 }); Lab.shake(3 + Math.min(streak, 5), .15); Lab.buzz(12);
+  } else {
+    streak = 0; if (!pl || pl.type !== "spring") Lab.sfx("bounce", { pitch: pl && pl.type === "cloud" ? 1.25 : pl && pl.type === "crumbly" ? .8 : 1 });
+    fx.puff(px, py, { n: 4, color: "rgba(255,255,255,.7)", speed: 50 * S, size: 5 * S, life: .35 });
+  }
+  if (pl && pl.type === "crumbly") { pl.broken = true; pl.bt = 0; Lab.sfx("crunch", { pitch: 1.2 }); fx.burst(pl.x * S, py + 6 * S, { n: 9, colors: ["#d9b38c", "#b98f66"], speed: 150 * S, life: .6, size: 4 * S, shape: "shard", gravity: 900 }); }
+}
+function pop(th, i) {
+  const power = p.slam, pts = power ? 50 : 25, px = th.x * S, py = (th.y - camY) * S; things.splice(i, 1); pops++; bonus += pts;
+  fx.burst(px, py, { n: 14, colors: th.k === "crow" ? ["#3b3552", "#6b6190", "#fff"] : ["#7a4a7e", "#c58ac9", "#fff"], speed: 280 * S, life: .5, size: 4 * S, shape: th.k === "crow" ? "shard" : "star", gravity: 600 });
+  fx.text(px, py - 30 * S, "POP +" + pts, { color: "#fff", outline: "rgba(60,30,80,.6)", size: 16 * Math.max(.85, S) }); Lab.sfx("pop", { pitch: power ? 1.3 : 1 }); Lab.hitstop(.04);
+  land(null, th.y - 8);
+}
+function knock(th) {
+  p.dazed = .55; p.inv = 1.3; p.vy = 380; p.slam = false; streak = 0; p.tx = p.x;
+  Lab.sfx("hurt"); Lab.shake(8, .25); Lab.flash("#ff5d73", .18, .25); Lab.hitstop(.06); Lab.buzz(35);
+  fx.burst(p.x * S, (p.y - camY) * S, { n: 10, colors: ["#fff", "#ffd166"], speed: 240 * S, life: .45, size: 4 * S, shape: "star", gravity: 300 });
+}
+
+/* ---------- update */
+function update(dt) {
+  if (p.dazed > 0) p.dazed -= dt; if (p.inv > 0) p.inv -= dt; p.blink -= dt; if (p.blink < -.12) p.blink = Lab.rand(1.5, 4);
+  const ax = Lab.input.axisX(); if (ax && p.dazed <= 0) { p.tx += ax * 560 * dt; steered = true; }
+  const ox = p.x; p.x = Lab.damp(p.x, p.tx, 24, dt);
+  p.lean = Lab.damp(p.lean, Lab.clamp((p.x - ox) / Math.max(dt, 1e-4) / 900, -.45, .45) + (p.dazed > 0 ? Math.sin(p.dazed * 30) * .5 : 0), 12, dt);
+  if (p.x < 0) { p.x += WU; p.tx += WU; p.sx += WU; } else if (p.x > WU) { p.x -= WU; p.tx -= WU; p.sx -= WU; }
+  p.sq = Lab.damp(p.sq, 0, 9, dt);
+  const footOld = p.y + FOOT;
+  if (p.balloon > 0) { p.balloon -= dt; p.vy = Lab.damp(p.vy, -880, 6, dt); if (p.balloon <= 0) { Lab.sfx("pop", { pitch: .8 }); fx.burst(p.x * S, (p.y - 62 - camY) * S, { n: 12, colors: ["#ff5d73", "#ff9aa8", "#fff"], speed: 240 * S, life: .5, size: 4 * S }); } }
+  else p.vy = Math.min(p.vy + G * dt, 1700);
+  p.y += p.vy * dt; const foot = p.y + FOOT;
+  // platforms: land only while falling and only when the pogo tip crosses the top edge this frame
+  for (let i = plats.length - 1; i >= 0; i--) {
+    const q = plats[i];
+    if (q.vx) { q.x += q.vx * dt; if (q.x < q.w / 2 + 6) { q.x = q.w / 2 + 6; q.vx = Math.abs(q.vx); } else if (q.x > WU - q.w / 2 - 6) { q.x = WU - q.w / 2 - 6; q.vx = -Math.abs(q.vx); } }
+    q.dip = Lab.damp(q.dip, 0, 10, dt); if (q.pop > 0) q.pop = Math.max(0, q.pop - dt * 2.6);
+    if (q.broken) { q.bt += dt; q.y += (120 + q.bt * 900) * dt; if (q.bt > .8) plats.splice(i, 1); continue; }
+    if (q.y > camY + HU + 140) { plats.splice(i, 1); continue; }
+    if (alive && p.vy > 0 && footOld <= q.y + 1 && foot >= q.y && Math.abs(q.type === "ground" ? 0 : wrapDx(p.x, q.x)) < q.w / 2 + 11) land(q, q.y);
+  }
+  // hazards and treats
+  for (let i = things.length - 1; i >= 0; i--) {
+    const th = things[i];
+    if (th.y > camY + HU + 140) { things.splice(i, 1); continue; }
+    if (th.k === "crow") { th.x += th.vx * dt; if (th.x < -30) th.x += WU + 60; else if (th.x > WU + 30) th.x -= WU + 60; th.y = th.y0 + Math.sin(Lab.now() * 3 + th.ph) * 10; }
+    else if (th.k !== "burr") th.y = th.y0 + Math.sin(Lab.now() * 2.6 + th.ph) * 5;
+    if (!alive) continue;
+    const dx = wrapDx(p.x, th.x), dyB = p.y - 6 - th.y;
+    if (th.k === "star") { if (Math.abs(dx) < 30 && Math.abs(p.y + 4 - th.y) < 38) { things.splice(i, 1); starsN++; bonus += 10; Lab.sfx("star", { pitch: 1 + (starsN % 6) * .06 }); fx.burst(th.x * S, (th.y - camY) * S, { n: 6, colors: ["#ffd166", "#fff"], speed: 150 * S, life: .4, size: 3.5 * S, shape: "star", gravity: 200 }); fx.text(th.x * S, (th.y - camY) * S - 16 * S, "+10", { color: "#ffd166", size: 13 * Math.max(.85, S), life: .6 }); } }
+    else if (th.k === "balloon") { if (Math.abs(dx) < 30 && Math.abs(dyB + 20) < 44 && p.balloon <= 0) { things.splice(i, 1); p.balloon = 1.7; p.slam = false; p.dazed = 0; p.inv = 2.2; Lab.sfx("powerup"); Lab.banner("LIFT OFF!", { color: "#ff5d73", ms: 900 }); } }
+    else {
+      const r = th.k === "crow" ? 17 : 16;
+      if (p.vy > 0 && Math.abs(dx) < r + 13 && foot >= th.y - r - 4 && footOld <= th.y + 2) pop(th, i);
+      else if (p.inv <= 0 && p.balloon <= 0 && dx * dx + dyB * dyB < (r + 9) * (r + 9)) knock(th);
     }
-    // scroll
-    if(p.y<Lab.H/2){ const dy=Lab.H/2-p.y; p.y=Lab.H/2; height+=dy; for(const pl of plats) pl.y+=dy;}
-    plats=plats.filter(pl=>pl.y<Lab.H+20);
-    while(plats.length<14) plats.push(newPlat(Math.min(...plats.map(p=>p.y))-Lab.rand(50,90)));
-    if(p.y>Lab.H+40){ Lab.gameover({title:"Fell",message:"Height: "+Math.floor(height/10)}); return; }
-    Lab.setScore(Math.floor(height/10));
-    const c=Lab.ctx; c.fillStyle="#0e1428"; c.fillRect(0,0,Lab.W,Lab.H);
-    for(const pl of plats){ c.fillStyle="#3df58a"; c.fillRect(pl.x,pl.y,pl.w,pl.h);}
-    c.beginPath(); c.fillStyle="#ffd35a"; c.arc(p.x,p.y,p.r,0,Lab.TAU); c.fill();
+  }
+  // scarf tail follows with a lag
+  p.sx = Lab.damp(p.sx, p.x - p.lean * 30, 9, dt); p.sy = Lab.damp(p.sy, p.y - 2 + Lab.clamp(-p.vy * .016, -14, 14), 9, dt); p.flap += dt * (p.vy > 200 ? 22 : 6);
+  // camera only ever climbs
+  const tgt = p.y - HU * .46; if (tgt < camY) camY = Lab.damp(camY, tgt, 12, dt);
+  while (genY > camY - 400) gen();
+  if (!alive) return;
+  const h = -(p.y + FOOT) / M; if (h > maxH) maxH = h;
+  const z = zoneOf(maxH); if (z > zone) { zone = z; Lab.banner(ZONES[z].n.toUpperCase(), { color: z === 4 ? "#c9b8ff" : "#fffaf0", ms: 1300 }); Lab.sfx("levelup"); bonus += 50 * z; Lab.bumpScore(); }
+  score = Math.floor(maxH) + bonus; Lab.setScore(score);
+  Lab.music.intensity(.3 + zone * .12 + Math.min(.2, streak * .05));
+  if (p.y > camY + HU + 70) { // fell out of the world
+    alive = false; Lab.sfx("drop", { pitch: .6 }); Lab.shake(8, .3);
+    if (Math.floor(maxH) > bestH) Lab.store.set("bestH", Math.floor(maxH));
+    Lab.after(.45, () => Lab.gameover({ title: maxH >= 1300 ? "Among the stars" : "Long way down", score, stats: [["Height", Math.floor(maxH) + " m"], ["Best slam", "×" + bestStreak], ["Stars", starsN]] }));
+  }
+}
+
+/* ---------- sprites (baked at S, drawn in unit space) */
+function platSprite(type, z, w) {
+  const hh = type === "spring" ? 40 : 30, pad = 5;
+  return Lab.sprite(["pl", type, z, Math.round(w), Math.round(S * 100)].join(":"), (w + pad * 2) * S, hh * S, g => {
+    g.scale(S, S); g.translate(pad, type === "spring" ? 14 : 4); const Z = ZONES[z];
+    if (type === "cloud") {
+      g.fillStyle = "rgba(60,80,120,.14)"; for (const [cx, r] of [[.2, 9], [.42, 12], [.66, 11], [.84, 8]]) { g.beginPath(); g.arc(w * cx, 12, r, 0, TAU); g.fill(); }
+      g.fillStyle = z === 4 ? "#e4dcff" : "#ffffff"; draw.rr(g, 2, 4, w - 4, 12, 6); g.fill(); for (const [cx, r] of [[.2, 8], [.42, 11], [.66, 10], [.84, 7]]) { g.beginPath(); g.arc(w * cx, 7, r, 0, TAU); g.fill(); }
+      g.fillStyle = "rgba(120,160,220,.25)"; draw.rr(g, 6, 11, w - 12, 5, 2.5); g.fill(); return;
+    }
+    const body = type === "crumbly" ? "#d9b38c" : Z.body, cap = type === "crumbly" ? "#ecd0ad" : Z.cap;
+    draw.rect(g, 0, 4, w, 15, 7, "rgba(30,40,70,.18)"); draw.rect(g, 0, 0, w, 15, 7, body);
+    g.fillStyle = C.shade(body, -.18); draw.rr(g, 3, 9, w - 6, 5, 2.5); g.fill();
+    g.fillStyle = cap; draw.rr(g, 0, 0, w, 7, 3.5); g.fill(); const n = Math.max(3, Math.round(w / 16)); for (let i = 0; i < n; i++) { g.beginPath(); g.arc((i + .5) * w / n, 6.5, w / n * .42, 0, Math.PI); g.fill(); }
+    g.fillStyle = "rgba(255,255,255,.35)"; draw.rr(g, 5, 1.5, w * .4, 2, 1); g.fill();
+    if (type === "crumbly") { g.strokeStyle = "#8a6748"; g.lineWidth = 1.4; g.lineCap = "round"; g.beginPath(); g.moveTo(w * .3, 1); g.lineTo(w * .36, 7); g.lineTo(w * .28, 14); g.moveTo(w * .62, 0); g.lineTo(w * .58, 6); g.lineTo(w * .68, 10); g.lineTo(w * .64, 15); g.stroke(); }
   });
 }
-start();
+function drawShroom(c, x, y, pop) { // spring: a red-capped bounce shroom that squashes and pings
+  const k = pop > 0 ? 1 - ease.pulse(Math.min(1, (1 - pop) * 1.4)) * .5 + (pop < .5 ? Math.sin((.5 - pop) * 30) * pop * .3 : 0) : 1;
+  draw.rect(c, x - 5, y - 9 * k, 10, 9 * k + 2, 3, "#fff3dc");
+  c.fillStyle = "#e8483f"; c.beginPath(); c.ellipse(x, y - 9 * k, 19, 11 * k, 0, Math.PI, TAU); c.fill(); c.fillRect(x - 19, y - 9 * k - .5, 38, 2.5);
+  c.fillStyle = "#fff"; for (const [dx, dy, r] of [[-9, -5, 3], [3, -7, 3.4], [11, -3, 2.2]]) { c.beginPath(); c.arc(x + dx, y - 9 * k + dy * k, r, 0, TAU); c.fill(); }
+}
+function drawPip(c, x, y, t) {
+  const sq = p.sq, sx = 1 + sq * .22 - Math.abs(Lab.clamp(p.vy / 2600, -.5, .5)) * .16, sy = 1 - sq * .22 + Math.abs(Lab.clamp(p.vy / 2600, -.5, .5)) * .2, comp = Math.max(0, sq) * 9;
+  const dazed = p.dazed > 0, look = Lab.clamp(p.lean * 6, -3, 3);
+  c.save(); c.translate(x, y); c.rotate(p.lean * .6);
+  // scarf tail (lagging point) behind the body
+  const tx = Lab.clamp(wrapDx(p.sx, p.x), -34, 34), ty = Lab.clamp(p.sy - p.y, -22, 22);
+  c.strokeStyle = "#3fb8a9"; c.lineWidth = 6; c.lineCap = "round"; c.beginPath(); c.moveTo(-6, -2); c.quadraticCurveTo(tx * .5 - 8, ty * .4 + 4, tx - 10, ty + 2); c.stroke();
+  c.strokeStyle = "#fffaf0"; c.lineWidth = 2; c.beginPath(); c.moveTo(tx * .6 - 9, ty * .55 + 3); c.lineTo(tx * .8 - 9.6, ty * .78 + 2.6); c.stroke();
+  // pogo stick: shaft, spring coil, rubber tip, pegs and handle
+  c.strokeStyle = "#5b6b7a"; c.lineWidth = 3.4; c.beginPath(); c.moveTo(0, -14); c.lineTo(0, 16); c.stroke();
+  c.strokeStyle = "#c7d0d9"; c.lineWidth = 2.2; c.beginPath(); const s0 = 15, s1 = FOOT - 4 - comp * .4; for (let i = 0; i <= 6; i++) c.lineTo((i % 2 ? 4.5 : -4.5) * (i === 0 || i === 6 ? 0 : 1), s0 + (s1 - s0) * i / 6); c.stroke();
+  draw.rect(c, -5, FOOT - 6, 10, 6, 2.5, "#e8483f"); draw.rect(c, -11, 12, 22, 3.6, 1.8, "#5b6b7a");
+  // body
+  c.save(); c.translate(0, -6 + comp * .5); c.scale(sx, sy);
+  if (p.slam) { c.fillStyle = "rgba(255,255,255,.55)"; for (const dx of [-13, 0, 13]) { c.beginPath(); c.moveTo(dx - 2, -18); c.lineTo(dx, -46 - Math.abs(dx)); c.lineTo(dx + 2, -18); c.fill(); } }
+  const wf = Math.sin(p.flap) * (p.vy > 200 ? .7 : .15);
+  c.fillStyle = "#f4a531"; for (const s of [-1, 1]) { c.save(); c.translate(s * 13, 0); c.rotate(s * (.5 - wf)); c.beginPath(); c.ellipse(s * 4, 0, 8, 4.6, 0, 0, TAU); c.fill(); c.restore(); }
+  draw.circle(c, 0, 0, 15, "#ffc24a"); c.fillStyle = "#ffe6ad"; c.beginPath(); c.ellipse(0, 5, 9.5, 8, 0, 0, TAU); c.fill();
+  c.fillStyle = "#ff7a45"; c.beginPath(); c.moveTo(look - 3.4, 1.5); c.lineTo(look + 3.4, 1.5); c.lineTo(look, 6.5); c.closePath(); c.fill();
+  if (dazed) { c.strokeStyle = "#3a2a1a"; c.lineWidth = 1.8; for (const s of [-1, 1]) { c.beginPath(); c.moveTo(s * 6 - 2.5, -6.5); c.lineTo(s * 6 + 2.5, -1.5); c.moveTo(s * 6 + 2.5, -6.5); c.lineTo(s * 6 - 2.5, -1.5); c.stroke(); } }
+  else if (p.blink < 0) { c.fillStyle = "#3a2a1a"; c.fillRect(-8.5 + look, -4.6, 5, 1.6); c.fillRect(3.5 + look, -4.6, 5, 1.6); }
+  else for (const s of [-1, 1]) { draw.circle(c, s * 6 + look * .5, -4, 4.2, "#fff"); draw.circle(c, s * 6 + look, -4 + Lab.clamp(p.vy / 700, -1.4, 1.6), 2.2, "#3a2a1a"); }
+  // bobble hat
+  c.fillStyle = "#3fb8a9"; c.beginPath(); c.arc(0, -8, 12.5, Math.PI * 1.08, Math.PI * 1.92); c.closePath(); c.fill(); draw.rect(c, -12.5, -12.5, 25, 4.6, 2.3, "#fffaf0"); draw.circle(c, -p.lean * 10, -22 - Math.max(0, -sq) * 3, 4.2, "#fffaf0");
+  c.restore();
+  draw.rect(c, -10, -9 + comp * .5, 20, 3.2, 1.6, "#5b6b7a");
+  if (p.balloon > 0) { const bob = Math.sin(t * 5) * 2; c.strokeStyle = "rgba(60,40,60,.6)"; c.lineWidth = 1.2; c.beginPath(); c.moveTo(0, -20); c.lineTo(bob, -44); c.stroke(); balloonAt(c, bob, -62, p.balloon < .5 ? .7 + .3 * Math.sin(t * 40) : 1); }
+  c.restore();
+}
+function balloonAt(c, x, y, k) { c.fillStyle = "#ff5d73"; c.beginPath(); c.ellipse(x, y, 15 * k, 18 * k, 0, 0, TAU); c.fill(); c.beginPath(); c.moveTo(x - 3, y + 17 * k); c.lineTo(x + 3, y + 17 * k); c.lineTo(x, y + 21 * k); c.fill(); c.fillStyle = "rgba(255,255,255,.5)"; c.beginPath(); c.ellipse(x - 5 * k, y - 7 * k, 3.4 * k, 5.4 * k, -.4, 0, TAU); c.fill(); }
+
+/* ---------- render */
+function frame(dt, t) { update(dt); if (!steered) hintT += dt; render(t); }
+function render(t) {
+  const c = Lab.ctx, hv = Math.max(0, -(camY + HU * .5) / M);
+  let zi = zoneOf(hv), k = 0; if (zi < ZONES.length - 1) k = Lab.clamp((hv - ZONES[zi + 1].at + 60) / 60, 0, 1);
+  const A = ZONES[zi], B = ZONES[Math.min(zi + 1, ZONES.length - 1)], top = k ? C.mix(A.top, B.top, k) : A.top, bot = k ? C.mix(A.bot, B.bot, k) : A.bot, ink = k > .5 ? B.ink : A.ink;
+  draw.bg(c, top, bot);
+  const starA = zi >= 4 ? 1 : zi === 3 ? k : 0;
+  if (starA > 0) for (let i = 0; i < 60; i++) { c.globalAlpha = starA * (.4 + .6 * Math.abs(Math.sin(t * (1 + hash(i) * 2) + i))); c.fillStyle = "#fff"; const y = ((hash(i * 3) * H - camY * S * .06) % H + H) % H; c.fillRect(hash(i * 7) * W, y, 1.2 + hash(i * 11) * 1.6, 1.2 + hash(i * 11) * 1.6); }
+  c.globalAlpha = 1;
+  // far ridges sink away as you climb
+  const rise = -(camY + HU - 96);
+  for (let L = 0; L < 2; L++) {
+    const by = H - (150 - L * 70) * S + rise * S * (.1 + L * .08); if (by > H + 10) continue;
+    c.fillStyle = C.mix(bot, L ? "#4f8f6a" : "#7fa9c9", L ? .55 : .5); c.beginPath(); c.moveTo(-10, H + 10);
+    for (let i = 0; i <= 12; i++) { const x = i / 12 * (W + 20) - 10; c.lineTo(x, by - (hash(i + L * 40) * 110 + (i % 2) * 40) * S * (L ? .6 : 1)); }
+    c.lineTo(W + 10, H + 10); c.closePath(); c.fill();
+  }
+  // drifting clouds (parallax) and altitude ticks
+  for (let i = 0; i < 6; i++) {
+    const y = ((hash(i * 5 + 1) * (H + 200) - camY * S * (.18 + hash(i) * .2)) % (H + 200) + H + 200) % (H + 200) - 100, x = ((hash(i * 9) * (W + 200) + t * (6 + i * 3)) % (W + 200)) - 100, r = (16 + hash(i * 2) * 14) * S;
+    c.fillStyle = zi >= 4 ? "rgba(200,190,255,.12)" : "rgba(255,255,255,.55)"; c.beginPath(); c.arc(x, y, r, 0, TAU); c.arc(x + r * 1.1, y + r * .15, r * .8, 0, TAU); c.arc(x - r * 1.1, y + r * .2, r * .7, 0, TAU); c.fill();
+  }
+  c.save(); c.scale(S, S); c.translate(0, -camY);
+  const m0 = Math.ceil(-(camY + HU) / M / 50) * 50, m1 = -camY / M;
+  for (let m = Math.max(50, m0); m <= m1; m += 50) { const y = -m * M; c.strokeStyle = C.alpha(ink, .16); c.lineWidth = 1.5; c.setLineDash([6, 10]); c.beginPath(); c.moveTo(0, y); c.lineTo(WU, y); c.stroke(); c.setLineDash([]); draw.text(c, m + " m", 8, y - 9, { size: 11, color: C.alpha(ink, .5), align: "left" }); }
+  if (bestH > 20) { const y = -bestH * M; if (y > camY - 20 && y < camY + HU + 20) { c.strokeStyle = "#ff8a3d"; c.lineWidth = 2; c.setLineDash([10, 6]); c.beginPath(); c.moveTo(0, y); c.lineTo(WU, y); c.stroke(); c.setLineDash([]); draw.rect(c, WU - 92, y - 20, 86, 18, 9, "#ff8a3d"); draw.text(c, "BEST " + bestH + " m", WU - 49, y - 10.5, { size: 10.5, color: "#fffaf0" }); } }
+  // platforms
+  for (const q of plats) {
+    if (q.y < camY - 60) continue;
+    if (q.type === "ground") { c.fillStyle = "#7ccf5a"; c.fillRect(-20, q.y, WU + 40, 14); c.fillStyle = "#a9744f"; c.fillRect(-20, q.y + 12, WU + 40, 200); c.fillStyle = "rgba(90,60,40,.25)"; for (let i = 0; i < 9; i++) c.fillRect(hash(i) * WU, q.y + 26 + hash(i * 3) * 50, 14, 4); c.fillStyle = "#6bbb4c"; for (let i = 0; i < WU / 14; i++) { c.beginPath(); c.arc(i * 14 + 7, q.y + 12, 6, 0, Math.PI); c.fill(); } continue; }
+    const sp = platSprite(q.type === "spring" ? "solid" : q.type, q.z, q.w), dy = q.dip * 5, a = q.broken ? Math.max(0, 1 - q.bt / .7) : 1;
+    c.globalAlpha = a; c.save(); c.translate(q.x, q.y + dy); if (q.broken) c.rotate(q.bt * (q.x % 2 > 1 ? 1 : -1)); c.drawImage(sp, -sp.w / S / 2, -4, sp.w / S, sp.h / S); c.restore(); c.globalAlpha = 1;
+    if (q.type === "spring") drawShroom(c, q.x, q.y + dy, q.pop);
+    if (q.type === "cloud") { c.fillStyle = C.alpha(ink, .3); const d = Math.sign(q.vx); c.beginPath(); c.moveTo(q.x + d * (q.w / 2 + 9), q.y + 8); c.lineTo(q.x + d * (q.w / 2 + 3), q.y + 4); c.lineTo(q.x + d * (q.w / 2 + 3), q.y + 12); c.fill(); }
+  }
+  // treats and hazards
+  for (const th of things) {
+    if (th.y < camY - 60) continue;
+    if (th.k === "star") { draw.glow(c, th.x, th.y, 16, "#ffe38a", .5); c.save(); c.translate(th.x, th.y); c.rotate(Math.sin(t * 3 + th.ph) * .25); draw.star(c, 0, 0, 9.5, "#ffd166"); draw.star(c, -1, -1, 4.5, "#fff3c4"); c.restore(); }
+    else if (th.k === "balloon") { c.strokeStyle = "rgba(60,40,60,.5)"; c.lineWidth = 1.2; c.beginPath(); c.moveTo(th.x, th.y + 20); c.quadraticCurveTo(th.x + 5, th.y + 32, th.x - 2, th.y + 44); c.stroke(); balloonAt(c, th.x, th.y, 1 + Math.sin(t * 4) * .04); }
+    else if (th.k === "burr") { const pu = 1 + Math.sin(t * 5 + th.ph) * .06; c.save(); c.translate(th.x, th.y); c.rotate(t * .8 + th.ph); c.scale(pu, pu); draw.star(c, 0, 0, 19, "#7a4a7e", 9, .62); c.restore(); draw.circle(c, th.x, th.y, 10.5, "#9a65a0"); for (const s of [-1, 1]) { draw.circle(c, th.x + s * 4, th.y - 1, 2.8, "#fff"); draw.circle(c, th.x + s * 4, th.y - .4, 1.3, "#2a1830"); } c.strokeStyle = "#2a1830"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(th.x - 7.5, th.y - 6); c.lineTo(th.x - 1.5, th.y - 3.6); c.moveTo(th.x + 7.5, th.y - 6); c.lineTo(th.x + 1.5, th.y - 3.6); c.stroke(); }
+    else { const d = Math.sign(th.vx), fl = Math.sin(t * 14 + th.ph); c.save(); c.translate(th.x, th.y); c.scale(d, 1); c.fillStyle = "#3b3552"; c.beginPath(); c.ellipse(0, 0, 15, 9.5, 0, 0, TAU); c.fill(); c.beginPath(); c.moveTo(-4, -3); c.lineTo(-14, -3 - fl * 15); c.lineTo(6, -2); c.fill(); c.beginPath(); c.moveTo(-12, 0); c.lineTo(-23, -3); c.lineTo(-22, 4); c.fill(); c.fillStyle = "#ffb347"; c.beginPath(); c.moveTo(13, -2); c.lineTo(22, 1); c.lineTo(13, 3.4); c.fill(); draw.circle(c, 8, -2.5, 2.6, "#fff"); draw.circle(c, 8.8, -2.5, 1.2, "#1a1426"); c.restore(); }
+  }
+  // Pip (drawn again on the far side while wrapping)
+  if (p.inv <= 0 || p.balloon > 0 || Math.floor(p.inv * 14) % 2 === 0) for (const off of [0, p.x < 40 ? WU : p.x > WU - 40 ? -WU : null]) if (off !== null) drawPip(c, p.x + off, p.y, t);
+  c.restore();
+  // top haze for the HUD + altitude pill + first-run prompt
+  const hz = c.createLinearGradient(0, 0, 0, Lab.play.y + 40); hz.addColorStop(0, zi >= 4 ? "rgba(20,20,70,.55)" : "rgba(255,250,240,.7)"); hz.addColorStop(1, zi >= 4 ? "rgba(20,20,70,0)" : "rgba(255,250,240,0)"); c.fillStyle = hz; c.fillRect(-40, -40, W + 80, Lab.play.y + 80);
+  const u = Math.max(.85, S), txt = Math.floor(maxH) + " m", pw = (34 + txt.length * 8) * u;
+  draw.rect(c, 10 * u, Lab.play.y + 4 * u, pw, 24 * u, 12 * u, "rgba(34,50,74,.78)"); c.fillStyle = "#ffd166"; c.beginPath(); c.moveTo(22 * u, Lab.play.y + 10 * u); c.lineTo(28 * u, Lab.play.y + 20 * u); c.lineTo(16 * u, Lab.play.y + 20 * u); c.fill();
+  draw.text(c, txt, 34 * u, Lab.play.y + 16.5 * u, { size: 13 * u, color: "#fffaf0", align: "left" });
+  if (!steered && alive) { const a = Math.min(1, hintT * 2) * (.7 + .3 * Math.sin(t * 5)), y = H - Lab.safe.bottom - 150 * S, dx = Math.sin(t * 2.4) * 34 * u; c.globalAlpha = a; draw.text(c, "DRAG TO STEER", W / 2, y, { size: 19 * u, color: "#fffaf0", stroke: "rgba(34,50,74,.75)" }); draw.circle(c, W / 2 + dx, y + 30 * u, 10 * u, "rgba(255,250,240,.9)", "rgba(34,50,74,.6)", 2); c.globalAlpha = 1; }
+}
+Lab.boot();
+})();
 </script></body></html>

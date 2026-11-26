@@ -1,0 +1,294 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Flinch</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* FLINCH — a reaction-time instrument. Eight trials; tap the instant the big lamp turns green; your score is the average
+ * in milliseconds (lower is better). The machine fights back with escalating feints: side lamps, needle twitches, the big
+ * lamp glowing the WRONG colour, thumps and flickers. Tap on anything but green and it is a flinch (+500 ms); three
+ * flinches lock you out with no score.
+ * Identity: a slate-blue enamelled lab instrument — panel meter whose needle sweeps in real time and stops on your
+ * reaction, jewel lamps, a paper tape that prints every trial. Sound is relays, bells and buzzers.                        */
+const fmtMs = v => Math.round(v) + " ms";
+Lab.init({
+  title: "Flinch", tagline: "Eight green lights. Don't jump the gun.", category: "Reflex & Taps",
+  howto: ["Tap the instant the big lamp turns green", "Everything else is a trick: hold still", "Lowest average wins. 3 flinches lock you out"],
+  theme: { bg: "#2c3542", bg2: "#4b596c", accent: "#35c977", accent2: "#f2a33a" },
+  orient: "any", music: { style: "chill", key: "A", vol: .26 }, lowerIsBetter: true, formatScore: fmtMs, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, PI = Math.PI;
+const N = 8, PENALTY = 500, SLOW = 600, TOO_SOON = 90;
+const CREAM = "#f1e8cf", INKC = "#2a2622", GREEN = "#2fd673", RED = "#ff4d4d", AMBER = "#ffae2b", OFF = "#3c4a4a";
+const RANKS = [[205, "Hummingbird"], [235, "Mongoose"], [265, "Fencer"], [300, "Goalkeeper"], [350, "Sunday driver"], [430, "Daydreamer"], [1e9, "Sloth"]];
+const RATING = [[180, "UNREAL"], [215, "BLAZING"], [255, "SHARP"], [310, "SOLID"], [400, "STEADY"], [1e9, "SLEEPY"]];
+const MONO = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+let S, G, wide, st, stT, waitDur, feints, goAt, trials, strikes, needle, needleV, lamp, sideA, sideR, lastReal, status, statusCol, bestSingle, lampPop, tickT, printT, strikeFlash, flick;
+
+function layout() {
+  const p = Lab.play; wide = p.w > p.h * 1.2;
+  if (!wide) {
+    S = Math.min(p.w / 390, p.h / 660, 1.5);
+    const cx = p.x + p.w / 2, dw = 318 * S, dh = 168 * S, spare = Math.max(0, p.h - 660 * S), y0 = p.y + 16 * S + spare * .14;
+    const sy = y0 + dh + 20 * S + spare * .1, ly = sy + 40 * S + 122 * S + spare * .22, ty = ly + 184 * S + spare * .2;
+    G = { dial: { x: cx - dw / 2, y: y0, w: dw, h: dh }, stat: { x: cx - dw / 2, y: sy, w: dw, h: 40 * S }, lamp: { x: cx, y: ly, r: 92 * S }, tape: { x: cx - 181 * S, y: ty, w: 362 * S, h: 62 * S } };
+  } else {
+    S = Math.min(p.w / 760, p.h / 330, 1.6);
+    const cx = p.x + p.w / 2, dw = 318 * S, dh = 168 * S, y0 = p.y + (p.h - 330 * S) / 2 + 6 * S;
+    G = { dial: { x: cx - 350 * S, y: y0, w: dw, h: dh }, stat: { x: cx - 350 * S, y: y0 + dh + 14 * S, w: dw, h: 40 * S },
+      lamp: { x: cx + 190 * S, y: y0 + 98 * S, r: 80 * S }, tape: { x: cx - 181 * S, y: y0 + 258 * S, w: 362 * S, h: 62 * S } };
+  }
+  const d = G.dial; d.px = d.x + d.w / 2; d.py = d.y + d.h * .93; d.rs = d.h * .68;
+}
+Lab.onResize(() => { if (G) layout(); });
+
+function start() {
+  layout();
+  trials = []; strikes = 0; needle = 0; needleV = 0; lamp = { col: OFF, lvl: 0 }; sideA = 0; sideR = 0; lampPop = 0; tickT = 0; printT = 1; strikeFlash = 0; flick = 0;
+  bestSingle = Lab.store.get("single", null); lastReal = performance.now();
+  Lab.setScore("— ms");
+  Lab.input.onDown = [() => press(performance.now())];
+  Lab.input.onKey = [k => { if (k === " " || k === "Enter") press(performance.now()); }];
+  Lab.expose({
+    get state() { return st; }, get trials() { return trials.map(t => ({ ms: t.ms, kind: t.kind })); }, get strikes() { return strikes; }, get avg() { return avg(); },
+    get feints() { return feints.map(f => f.type); }, get lamp() { return lamp.lvl > .5 ? lamp.col : "off"; }, get waitLeft() { return st === "wait" ? waitDur - stT : 0; },
+    skipWait() { if (st === "arm") { st = "wait"; stT = 0; } if (st === "wait") { waitDur = stT; feints.forEach(f => f.done = true); } }, feint(type) { doFeint(type); }, N, PENALTY, SLOW,
+  });
+  arm();
+  Lab.loop(frame);
+}
+const avg = () => trials.length ? Math.round(trials.reduce((a, t) => a + t.ms, 0) / trials.length) : 0;
+const say = (text, col) => { status = text; statusCol = col || AMBER; };
+
+/* ------------------------------------------------------------------ trial flow */
+function arm() {
+  st = "arm"; stT = 0; const n = trials.length;                      // n = trials done; plan the next one
+  waitDur = n < 2 ? Lab.rand(1.5, 2.8) : n >= 5 && Lab.chance(.3) ? Lab.rand(.8, 1.2) : Lab.rand(1.4, n >= 6 ? 4.6 : 3.6);
+  const tier1 = ["amber", "red", "twitch"], tier2 = ["bigred", "bigamber", "thunk"], tier3 = ["flicker", "bigred", "bigamber", "twitch", "amber"];
+  const count = n < 2 ? 0 : n < 4 ? 1 : n < 6 ? Lab.randInt(1, 2) : Lab.randInt(2, 3), pool = n < 4 ? tier1 : n < 6 ? tier1.concat(tier2) : tier2.concat(tier3);
+  feints = [];
+  if (count) waitDur = Math.max(waitDur, .9 + count * .75);
+  for (let i = 0; i < count; i++) {                                  // spread through the wait; never closer than .32 s to the real signal
+    const lo = .45 + (waitDur - .8) * i / count, hi = .45 + (waitDur - .8) * (i + 1) / count;
+    feints.push({ at: Lab.rand(lo, Math.max(lo, hi - .1)), type: Lab.choose(pool), done: false });
+  }
+  say(n === 0 ? "TAP WHEN THE BIG LAMP IS GREEN" : n === N - 1 ? "LAST ONE — STEADY…" : "STEADY…", n === 0 ? CREAM : AMBER);
+  lamp.col = OFF; lamp.lvl = 0;
+}
+function doFeint(type) {
+  if (type === "amber") { sideA = 1; relay(1.1); }
+  else if (type === "red") { sideR = 1; Lab.audio.tone({ f: 330, dur: .12, type: "square", vol: .06, lp: 1400 }); relay(.9); }
+  else if (type === "twitch") { needleV += 900; Lab.audio.tone({ f: 1900, f2: 900, dur: .03, vol: .1 }); }
+  else if (type === "bigred") { lamp.col = RED; lamp.lvl = 1; flick = .36; Lab.audio.tone({ f: 196, dur: .22, type: "sawtooth", vol: .1, lp: 900 }); }
+  else if (type === "bigamber") { lamp.col = AMBER; lamp.lvl = 1; flick = .32; Lab.audio.tone({ f: 660, dur: .14, type: "triangle", vol: .14 }); }
+  else if (type === "flicker") { lamp.col = "#b8d8c8"; lamp.lvl = .6; flick = .16; Lab.audio.noise({ dur: .12, vol: .08, hp: 5000 }); }
+  else if (type === "thunk") { Lab.shake(6, .16); Lab.sfx("thud", { pitch: 1.2 }); needleV += 260; }
+}
+const relay = p => { Lab.audio.noise({ dur: .018, vol: .2, bp: 2600 * p, q: 2 }); Lab.audio.tone({ f: 140 * p, dur: .03, type: "square", vol: .05, lp: 800 }); };
+function go() {
+  st = "go"; stT = 0; goAt = performance.now(); lamp.col = GREEN; lamp.lvl = 1; lampPop = 1; flick = 0; say("NOW!", GREEN);
+  Lab.audio.tone({ f: 1319, dur: .45, vol: .2 }); Lab.audio.tone({ f: 1976, dur: .3, vol: .1 }); Lab.buzz(20);
+}
+function press(now) {
+  if (Lab.paused || !trials) return;
+  if (st === "arm" && stT > .45) st = "wait", stT = 0;                // an eager tap late in the arming pause still counts as a flinch
+  if (st === "wait") return flinch("FLINCH!  +" + PENALTY + " ms");
+  if (st !== "go") return;
+  const ms = Math.round(now - goAt);
+  if (ms < TOO_SOON) return flinch("GUESSING!  +" + PENALTY + " ms");
+  record(ms);
+}
+function record(ms) {
+  const L = G.lamp, rating = RATING.find(r => ms < r[0])[1], isBest = bestSingle == null || ms < bestSingle;
+  trials.push({ ms, kind: "ok" }); st = "result"; stT = 0; printT = 0; needle = ms; needleV = 0; lamp.lvl = .35;
+  if (isBest) { bestSingle = ms; Lab.store.set("single", ms); }
+  say(ms + " ms · " + rating + (isBest && trials.length > 1 ? " · BEST" : ""), ms < 255 ? GREEN : ms < 400 ? CREAM : AMBER);
+  Lab.setScore(avg()); Lab.bumpScore();
+  fx.ring(L.x, L.y, { r0: L.r * .8, r1: L.r * 1.9, color: GREEN, width: 6 * S, life: .4 });
+  fx.burst(L.x, L.y, { n: ms < 255 ? 16 : 8, colors: [GREEN, "#d7ffe7", "#fff"], speed: 360 * S, life: .5, size: 4 * S, shape: "spark", gravity: 200 });
+  fx.text(L.x, L.y, String(ms), { color: "#fff", size: 58 * S, life: 1.05, vy: -26, outline: "rgba(20,40,30,.55)" });
+  const p = Lab.map(ms, 150, 520, 1.7, .75);
+  Lab.audio.tone({ f: 880 * p, dur: .28, type: "triangle", vol: .24 }); Lab.audio.tone({ f: 1320 * p, dur: .2, vol: .1, delay: .04 }); relay(1);
+  if (ms < 215) { Lab.hitstop(.05); Lab.shake(4, .14); Lab.sfx("star"); }
+  Lab.buzz(10);
+}
+function flinch(text) {
+  strikes++; trials.push({ ms: PENALTY, kind: "flinch" }); st = "flinch"; stT = 0; printT = 0; strikeFlash = 1;
+  lamp.col = RED; lamp.lvl = 1; flick = 0; say(text, RED); Lab.setScore(avg());
+  Lab.audio.tone({ f: 110, dur: .42, type: "sawtooth", vol: .16, lp: 700 }); Lab.audio.tone({ f: 116, dur: .42, type: "square", vol: .07, lp: 500 });
+  Lab.shake(9, .28); Lab.flash(RED, .2, .22); Lab.buzz(70);
+  fx.text(G.lamp.x, G.lamp.y, "✕", { color: "#fff", size: 70 * S, life: .9, vy: -10, outline: "rgba(60,0,0,.5)" });
+}
+function slow() {
+  trials.push({ ms: SLOW, kind: "slow" }); st = "result"; stT = 0; printT = 0; needle = SLOW; lamp.lvl = .2; say("ASLEEP?  " + SLOW + " ms", AMBER); Lab.setScore(avg());
+  Lab.sfx("error", { pitch: .8 });
+}
+function next() {
+  if (strikes >= 3) { st = "done"; return Lab.gameover({ title: "Locked out", message: "Three flinches. The machine wants a steadier hand.", stats: [["Trials", trials.length + "/" + N], ["Flinches", strikes]] }); }
+  if (trials.length < N) return arm();
+  st = "done";
+  const a = avg(), ok = trials.filter(t => t.kind === "ok").map(t => t.ms), best = ok.length ? Math.min(...ok) : null;
+  const sd = ok.length > 1 ? Math.round(Math.sqrt(ok.reduce((s, v) => s + (v - ok.reduce((x, y) => x + y, 0) / ok.length) ** 2, 0) / ok.length)) : 0;
+  const prev = Lab.best, pb = prev == null || a < prev;
+  Lab.sfx(pb ? "win" : "levelup");
+  Lab.gameover({ title: RANKS.find(r => a < r[0])[1], message: pb && prev != null ? "New personal best — " + (prev - a) + " ms quicker." : strikes ? "Each flinch cost you " + PENALTY + " ms." : "A clean sheet. Now shave it down.",
+    score: a, lower: true, sound: false, scoreLabel: "Average", stats: [["Best trial", best == null ? "—" : best + " ms"], ["Spread", "±" + sd + " ms"], ["Flinches", strikes]] });
+}
+
+/* ------------------------------------------------------------------ frame */
+function frame(dt, t) {
+  const now = performance.now();
+  if (now - lastReal > 260 && (st === "wait" || st === "go")) { arm(); say("INTERRUPTED — AGAIN", CREAM); }   // pause / tab switch voids the trial, never the timing
+  lastReal = now; stT += dt;
+  if (st === "arm") { if (stT > .75) { st = "wait"; stT = 0; } }
+  else if (st === "wait") {
+    for (const f of feints) if (!f.done && stT >= f.at && waitDur - stT > .32) { f.done = true; doFeint(f.type); }
+    tickT -= dt; if (tickT <= 0) { tickT = .5; Lab.audio.tone({ f: 2400, dur: .012, vol: .025 }); }
+    if (stT >= waitDur) go();
+  } else if (st === "go") { needle = now - goAt; if (now - goAt > SLOW + 80) slow(); }
+  else if (st === "result") { if (stT > 1.35) next(); }
+  else if (st === "flinch") { if (stT > 1.3) next(); }
+  // needle: spring back to rest while idle (feints kick it)
+  if (st === "arm" || st === "wait" || st === "flinch") { needleV += (-needle * 90 - needleV * 11) * dt; needle = Math.max(-8, needle + needleV * dt); }
+  if (flick > 0) { flick -= dt; if (flick <= 0 && st === "wait") lamp.lvl = 0; }
+  if (st === "result" || st === "flinch") lamp.lvl = Lab.damp(lamp.lvl, st === "flinch" && stT < .7 ? 1 : 0, 6, dt);
+  sideA = Lab.damp(sideA, 0, 4.5, dt); sideR = Lab.damp(sideR, 0, 4.5, dt); lampPop = Lab.damp(lampPop, 0, 12, dt); strikeFlash = Lab.damp(strikeFlash, 0, 3, dt);
+  printT = Math.min(1, printT + dt / .28);
+  Lab.music.intensity(st === "wait" || st === "go" || st === "arm" ? .1 : .5);
+  render(t);
+}
+
+/* ------------------------------------------------------------------ drawing */
+const dialAng = ms => Lab.lerp(-1.02, 1.02, Lab.clamp(ms / SLOW, -.02, 1.04));
+function jewel(key, r, col) {
+  const sz = r * 2 + 4;
+  return Lab.sprite("jw" + key + col + Math.round(r * 4), sz, sz, g => {
+    const c = sz / 2, gr = g.createRadialGradient(c - r * .3, c - r * .36, r * .08, c, c, r);
+    gr.addColorStop(0, Lab.color.shade(col, .62)); gr.addColorStop(.5, col); gr.addColorStop(1, Lab.color.shade(col, -.5));
+    g.fillStyle = gr; g.beginPath(); g.arc(c, c, r, 0, TAU); g.fill();
+    g.strokeStyle = "rgba(255,255,255,.1)"; g.lineWidth = r * .05; for (let i = 1; i < 4; i++) { g.beginPath(); g.arc(c, c, r * i / 4, 0, TAU); g.stroke(); }
+    g.fillStyle = "rgba(255,255,255,.5)"; g.beginPath(); g.ellipse(c - r * .34, c - r * .42, r * .3, r * .15, -.6, 0, TAU); g.fill();
+    g.strokeStyle = "rgba(255,255,255,.22)"; g.lineWidth = r * .06; g.beginPath(); g.arc(c, c, r * .86, .2 * PI, .62 * PI); g.stroke();
+  });
+}
+function bezel(g, x, y, r, w) {
+  const gr = g.createLinearGradient(x - r, y - r, x + r, y + r); gr.addColorStop(0, "#f2f4f5"); gr.addColorStop(.45, "#8e98a3"); gr.addColorStop(.55, "#59626c"); gr.addColorStop(1, "#c9d0d6");
+  draw.shadow(g, x + r * .05, y + r * .12, r + w, r + w, .28);
+  g.fillStyle = "#14181d"; g.beginPath(); g.arc(x, y, r + w * 1.25, 0, TAU); g.fill();
+  g.fillStyle = gr; g.beginPath(); g.arc(x, y, r + w, 0, TAU); g.fill();
+  g.fillStyle = "#14181d"; g.beginPath(); g.arc(x, y, r + w * .12, 0, TAU); g.fill();
+}
+function panel(c) {
+  const W = Lab.W, H = Lab.H, p = Lab.play;
+  const sp = Lab.sprite("panel" + W + "x" + H, W, H, g => {
+    draw.vgrad(g, 0, 0, W, H, ["#566477", "#3d4a5b", "#2f3947"]);
+    const rnd = Lab.rng(21);
+    for (let i = 0; i < W * H / 420; i++) { g.fillStyle = rnd() < .5 ? "rgba(255,255,255,.035)" : "rgba(0,0,0,.05)"; g.beginPath(); g.arc(rnd() * W, rnd() * H, 1 + rnd() * 3.2, 0, TAU); g.fill(); }
+    g.strokeStyle = "rgba(255,255,255,.1)"; g.lineWidth = 2; draw.rr(g, 7, p.y + 2, W - 14, H - p.y - 9, 16); g.stroke();
+    g.strokeStyle = "rgba(0,0,0,.25)"; draw.rr(g, 9, p.y + 4, W - 18, H - p.y - 13, 15); g.stroke();
+    for (const [sx, sy] of [[24, p.y + 20], [W - 24, p.y + 20], [24, H - 24], [W - 24, H - 24]]) {       // screws
+      draw.circle(g, sx, sy + 1, 7, "rgba(0,0,0,.3)"); draw.circle(g, sx, sy, 6.5, "#aeb7c0"); draw.circle(g, sx, sy, 6.5, null, "#59626c", 1);
+      const a = rnd() * PI; draw.line(g, sx - Math.cos(a) * 4.5, sy - Math.sin(a) * 4.5, sx + Math.cos(a) * 4.5, sy + Math.sin(a) * 4.5, "#4a525b", 1.8);
+    }
+    // meter
+    const d = G.dial;
+    draw.shadow(g, d.x + d.w / 2, d.y + d.h + 6 * S, d.w * .52, 12 * S, .3);
+    draw.rect(g, d.x - 9 * S, d.y - 9 * S, d.w + 18 * S, d.h + 18 * S, 20 * S, "#14181d");
+    draw.rect(g, d.x - 5 * S, d.y - 5 * S, d.w + 10 * S, d.h + 10 * S, 16 * S, null, "rgba(255,255,255,.14)", 1.5);
+    g.save(); draw.rr(g, d.x, d.y, d.w, d.h, 11 * S); g.clip();
+    draw.vgrad(g, d.x, d.y, d.w, d.h, ["#f8f1dc", "#e9dfc2"]);
+    const arc = (a0, a1, r, col, lw) => { g.strokeStyle = col; g.lineWidth = lw; g.lineCap = "butt"; g.beginPath(); g.arc(d.px, d.py, r, -PI / 2 + dialAng(a0), -PI / 2 + dialAng(a1)); g.stroke(); };
+    arc(0, 250, d.rs - 9 * S, "#3fba74", 7 * S); arc(250, 400, d.rs - 9 * S, "#e9a93a", 7 * S); arc(400, 600, d.rs - 9 * S, "#d9584c", 7 * S);
+    arc(0, 600, d.rs, INKC, 1.6 * S);
+    for (let ms = 0; ms <= 600; ms += 25) {
+      const a = -PI / 2 + dialAng(ms), major = ms % 100 === 0, len = (major ? 13 : ms % 50 === 0 ? 9 : 5) * S;
+      draw.line(g, d.px + Math.cos(a) * d.rs, d.py + Math.sin(a) * d.rs, d.px + Math.cos(a) * (d.rs + len), d.py + Math.sin(a) * (d.rs + len), INKC, (major ? 2.2 : 1.2) * S);
+      if (major) draw.text(g, String(ms), d.px + Math.cos(a) * (d.rs + 25 * S), d.py + Math.sin(a) * (d.rs + 25 * S), { size: 12.5 * S, color: INKC, weight: 700 });
+    }
+    draw.text(g, "MILLISECONDS", d.px, d.py - d.rs * .42, { size: 9.5 * S, color: "rgba(42,38,34,.6)", weight: 700 });
+    draw.text(g, "REFLEXOMETER", d.px, d.py - d.rs * .26, { size: 8 * S, color: "rgba(42,38,34,.38)", weight: 700 });
+    g.fillStyle = "#14181d"; g.beginPath(); g.ellipse(d.px, d.y + d.h + 4 * S, d.w * .2, d.h * .2, 0, 0, TAU); g.fill();
+    g.restore();
+    // status window
+    const s = G.stat; draw.rect(g, s.x - 3 * S, s.y - 3 * S, s.w + 6 * S, s.h + 6 * S, 12 * S, "rgba(255,255,255,.12)"); draw.rect(g, s.x, s.y, s.w, s.h, 9 * S, "#12161b");
+    draw.rect(g, s.x + 2, s.y + 2, s.w - 4, s.h * .45, 8 * S, "rgba(255,255,255,.035)");
+    // lamp housings
+    const L = G.lamp; bezel(g, L.x, L.y, L.r, L.r * .16);
+    for (const [sx, lab] of [[-1, "STANDBY"], [1, "FAULT"]]) { const x = L.x + sx * L.r * 1.52, y = L.y + L.r * .82, r = L.r * .2; bezel(g, x, y, r, r * .3); draw.text(g, lab, x, y + r * 2.25, { size: 8.5 * S, color: "rgba(241,232,207,.6)", weight: 700 }); }
+    draw.text(g, "FLINCHES", L.x, L.y + L.r * 1.74, { size: 8.5 * S, color: "rgba(241,232,207,.6)", weight: 700 });
+    // tape slot
+    const T = G.tape; draw.rect(g, T.x - 8 * S, T.y - 6 * S, T.w + 16 * S, T.h + 12 * S, 10 * S, "#14181d"); draw.rect(g, T.x - 8 * S, T.y - 6 * S, T.w + 16 * S, T.h + 12 * S, 10 * S, null, "rgba(255,255,255,.12)", 1.5);
+  });
+  c.fillStyle = "#2f3947"; c.fillRect(-40, -40, W + 80, H + 80); c.drawImage(sp, 0, 0, W, H);
+}
+function drawLamp(c, t, col, lvl, pop) {
+  const L = G.lamp, r = L.r * (1 + pop * .07);
+  const off = jewel("L", L.r, OFF); c.drawImage(off, L.x - off.w / 2, L.y - off.h / 2, off.w, off.h);
+  if (lvl > .01) {
+    draw.glow(c, L.x, L.y, r * 2.3, col, .42 * lvl);
+    const on = jewel("L", L.r, col); c.globalAlpha = Math.min(1, lvl); c.drawImage(on, L.x - r - 2, L.y - r - 2, r * 2 + 4, r * 2 + 4); c.globalAlpha = 1;
+    if (col === GREEN && lvl > .8) draw.text(c, "GO", L.x, L.y + r * .06, { size: r * .5, color: "rgba(255,255,255,.92)", stroke: "rgba(10,90,45,.45)" });   // not colour alone
+    if (col === RED && st === "wait") draw.text(c, "✕", L.x, L.y + r * .04, { size: r * .5, color: "rgba(255,255,255,.75)" });
+  }
+}
+function drawSide(c, sx, col, lvl) {
+  const L = G.lamp, x = L.x + sx * L.r * 1.52, y = L.y + L.r * .82, r = L.r * .2;
+  const off = jewel("s", r, "#4a4640"); c.drawImage(off, x - off.w / 2, y - off.h / 2, off.w, off.h);
+  if (lvl > .02) { draw.glow(c, x, y, r * 3.4, col, .5 * lvl); const on = jewel("s", r, col); c.globalAlpha = Math.min(1, lvl * 1.4); c.drawImage(on, x - on.w / 2, y - on.h / 2, on.w, on.h); c.globalAlpha = 1; }
+}
+function drawMeter(c, ms) {
+  const d = G.dial, mark = (v, col, lab, off) => { if (v == null) return; const a = -PI / 2 + dialAng(v), r = d.rs - off * S, x = d.px + Math.cos(a) * r, y = d.py + Math.sin(a) * r; c.save(); c.translate(x, y); c.rotate(a + PI / 2); c.fillStyle = col; c.beginPath(); c.moveTo(0, -5 * S); c.lineTo(5 * S, 4 * S); c.lineTo(-5 * S, 4 * S); c.closePath(); c.fill(); draw.text(c, lab, 0, 11 * S, { size: 7.5 * S, color: col, weight: 700 }); c.restore(); };
+  c.save(); draw.rr(c, d.x, d.y, d.w, d.h, 11 * S); c.clip();
+  mark(bestSingle, "#1d5fbf", "BEST", 15); if (trials.length) mark(avg(), "#7a3fb8", "AVG", 39);
+  const a = -PI / 2 + dialAng(ms), len = d.rs + 9 * S;
+  c.lineCap = "round"; draw.line(c, d.px + 2 * S, d.py + 3 * S, d.px + Math.cos(a) * len + 2 * S, d.py + Math.sin(a) * len + 3 * S, "rgba(0,0,0,.16)", 3 * S);
+  draw.line(c, d.px - Math.cos(a) * 14 * S, d.py - Math.sin(a) * 14 * S, d.px + Math.cos(a) * len, d.py + Math.sin(a) * len, "#e2522b", 2.6 * S);
+  g2(c, d.px, d.y + d.h + 4 * S, d.w * .2, d.h * .2);
+  c.fillStyle = "rgba(255,255,255,.1)"; c.beginPath(); c.moveTo(d.x, d.y); c.lineTo(d.x + d.w * .55, d.y); c.lineTo(d.x + d.w * .3, d.y + d.h); c.lineTo(d.x, d.y + d.h); c.closePath(); c.fill();   // glass glare
+  c.restore();
+}
+function g2(c, x, y, rx, ry) { c.fillStyle = "#14181d"; c.beginPath(); c.ellipse(x, y, rx, ry, 0, 0, TAU); c.fill(); c.fillStyle = "#8e98a3"; c.beginPath(); c.arc(x, y - ry * .55, 3.2 * S, 0, TAU); c.fill(); }
+function drawTape(c, list, cur) {
+  const T = G.tape, cw = T.w / N;
+  draw.rect(c, T.x, T.y, T.w, T.h, 3 * S, CREAM);
+  c.fillStyle = "rgba(42,38,34,.14)"; for (let i = 0; i < N * 3; i++) { c.beginPath(); c.arc(T.x + (i + .5) * T.w / (N * 3), T.y + T.h - 6 * S, 1.8 * S, 0, TAU); c.fill(); }
+  for (let i = 0; i < N; i++) {
+    const x = T.x + (i + .5) * cw, tr = list[i];
+    if (i) { c.fillStyle = "rgba(42,38,34,.12)"; c.fillRect(T.x + i * cw - .5, T.y + 5 * S, 1, T.h - 18 * S); }
+    draw.text(c, String(i + 1), x, T.y + 9 * S, { size: 7.5 * S, color: "rgba(42,38,34,.45)", weight: 700 });
+    if (!tr) { if (i === cur) { const k = .5 + .5 * Math.sin(Lab.now() * 6); c.fillStyle = `rgba(226,82,43,${.35 + .5 * k})`; c.fillRect(x - 8 * S, T.y + 31 * S, 16 * S, 2.5 * S); } continue; }
+    const u = i === list.length - 1 ? ease.outBack(printT) : 1, bad = tr.kind !== "ok";
+    c.save(); c.translate(x, T.y + 27 * S); c.scale(1, u);
+    c.font = `700 ${Math.round(15 * S)}px ${MONO}`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillStyle = bad ? "#c2382c" : INKC; c.fillText(String(tr.ms), 0, 0);
+    if (tr.kind === "flinch") { c.strokeStyle = "#c2382c"; c.lineWidth = 2 * S; c.beginPath(); c.moveTo(-13 * S, 0); c.lineTo(13 * S, 0); c.stroke(); draw.text(c, "FLINCH", 0, 13 * S, { size: 6.5 * S, color: "#c2382c", weight: 700 }); }
+    else if (tr.kind === "slow") draw.text(c, "SLOW", 0, 13 * S, { size: 6.5 * S, color: "#c2382c", weight: 700 });
+    else if (tr.ms === Math.min(...list.filter(q => q.kind === "ok").map(q => q.ms))) draw.star(c, 0, 13.5 * S, 4.5 * S, "#d79a1c");
+    c.restore();
+  }
+}
+function attract(dt, t) {
+  if (!G) layout();
+  const c = Lab.ctx; panel(c); bestSingle = Lab.store.get("single", null); trials = trials || [];
+  const k = Math.max(0, Math.sin(t * 1.6)); drawMeter(c, 230 * k); drawLamp(c, t, GREEN, k * k, 0); drawSide(c, -1, AMBER, 0); drawSide(c, 1, RED, 0);
+  drawTape(c, [{ ms: 248, kind: "ok" }, { ms: 231, kind: "ok" }, { ms: 500, kind: "flinch" }], 3);
+}
+function render(t) {
+  const c = Lab.ctx, L = G.lamp, s = G.stat;
+  panel(c);
+  drawMeter(c, needle);
+  // status window
+  c.save(); draw.rr(c, s.x, s.y, s.w, s.h, 9 * S); c.clip();
+  const txt = st === "wait" && statusCol !== CREAM ? "WAIT" + ".".repeat(1 + Math.floor(stT * 2.5) % 3) : status;
+  draw.text(c, txt, s.x + s.w / 2, s.y + s.h / 2 + 1, { size: (txt.length > 24 ? 13.5 : 16) * S, color: statusCol, weight: 700, maxWidth: s.w - 18 * S });
+  c.restore();
+  drawLamp(c, t, lamp.col, lamp.lvl, lampPop); drawSide(c, -1, AMBER, sideA); drawSide(c, 1, RED, sideR);
+  for (let i = 0; i < 3; i++) {                                                     // flinch counter bulbs
+    const x = L.x + (i - 1) * L.r * .34, y = L.y + L.r * 1.46, r = L.r * .085, on = i < strikes, hot = on && i === strikes - 1 ? strikeFlash : 0;
+    draw.circle(c, x, y, r * 1.5, "#14181d"); if (on) draw.glow(c, x, y, r * (3 + hot * 3), RED, .5 + hot * .4);
+    draw.circle(c, x, y, r, on ? "#ff5a4f" : "#4b3a3a"); draw.circle(c, x - r * .3, y - r * .3, r * .3, "rgba(255,255,255,.4)");
+  }
+  drawTape(c, trials, st === "done" ? -1 : trials.length);
+}
+Lab.boot();
+})();
+</script></body></html>

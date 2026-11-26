@@ -1,0 +1,268 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Beetle Box</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* BEETLE BOX — a collector's drawer of specimen cards. Flip two; matching beetles get pinned.
+ * Identity: walnut drawer, moss felt, kraft-backed cards, jewel-tone beetles drawn entirely in code
+ *           (8 colourways × 5 body plans × 6 wing patterns), calm "puzzle" music.
+ * Fairness hook: blind guesses are free. A miss only costs a pin when you had already seen a card that would have
+ *           told you better ("careless"), so the game punishes forgetting, never luck.
+ * Depth: combo multiplier for consecutive pairs, look-alike species in later drawers, and restless drawers where
+ *           two face-down cards visibly scuttle to swap places every few seconds.
+ * Feel: real flip (squash, lift, shear, shadow), no input lock — a third tap flips the mismatch back instantly. */
+Lab.init({
+  title: "Beetle Box", tagline: "Pin the pairs. Only forgetting costs you.", category: "Puzzle & Logic",
+  howto: ["Flip two cards to find matching beetles", "Blind guesses are free; a miss on a card you'd seen costs a pin", "Pairs in a row build a combo. Later, the cards scuttle"],
+  theme: { bg: "#241812", bg2: "#4a3426", accent: "#c98f3d", accent2: "#6fae7c" },
+  orient: "any", music: { style: "puzzle", key: "D", vol: .5 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp;
+const INK = "#2b2026", PAPER = "#fbf5e6";
+const COLS = [{ b: "#d9453d", p: "#2b2026" }, { b: "#f0a92b", p: "#2b2026" }, { b: "#4aa564", p: "#f6edcf" }, { b: "#27a3a0", p: "#0f3a42" },
+  { b: "#3f74dd", p: "#f6edcf" }, { b: "#9159cf", p: "#f8d76a" }, { b: "#efe3c4", p: "#8a3d2e" }, { b: "#3b3342", p: "#ff8f5a" }];
+// level table: [short side, long side, look-alike groups, seconds between scuttles (0 = calm)]
+const LEVELS = [[2, 3, 0, 0], [3, 4, 0, 0], [4, 4, 0, 0], [4, 5, 2, 0], [4, 5, 1, 9], [4, 6, 3, 8], [5, 6, 3, 7]];
+const levelDef = n => { const d = LEVELS[Math.min(n, LEVELS.length - 1)].slice(); if (n >= LEVELS.length) { d[2] = 5; d[3] = Math.max(4.5, 7 - (n - LEVELS.length + 1) * .6); } return d; };
+const MAXPINS = 4;
+let S = 1, cols = 2, rows = 3, cw = 60, chh = 80, gx = 0, gy = 0, cellW = 0, cellH = 0;
+let cards = [], open = [], level, pins, score, combo, bestCombo, pairs, pairsAll, found, phase, hideT, scutT, scutEvery, scutPair, levelT, clean, cursor, pinPop, moves, careless;
+
+function layout() {
+  const P = Lab.play; S = clamp(Math.min(Lab.W / 390, P.h / 700), .62, 1.4);
+  const d = levelDef(level || 0), top = 50 * Math.max(S, .8), w = P.w - 16 * S, h = P.h - top - 48 * Math.max(S, .8);
+  const size = (c, r) => Math.min(w / c * .93, h / r * .93 * .76);
+  if (size(d[0], d[1]) >= size(d[1], d[0])) { cols = d[0]; rows = d[1]; } else { cols = d[1]; rows = d[0]; }
+  cw = Math.min(size(cols, rows), 132 * S); chh = cw / .76; cellW = cw / .93; cellH = chh / .93;
+  gx = P.x + (P.w - cellW * cols) / 2; gy = P.y + top + 4 * S + (h - cellH * rows) * .45;
+}
+Lab.onResize(layout);
+const slotXY = s => ({ x: gx + (s % cols + .5) * cellW, y: gy + (Math.floor(s / cols) + .5) * cellH });
+
+function start() {
+  level = 0; pins = MAXPINS; score = 0; combo = 0; bestCombo = 0; pairsAll = 0; cursor = -1; pinPop = 0; moves = 0; careless = 0; cards = []; open = [];
+  Lab.setScore(0); deal();
+  Lab.input.onDown = [(x, y) => { cursor = -1; flip(hit(x, y)); }];
+  Lab.input.onKey = [k => {
+    if (phase !== "play") return;
+    if (cursor < 0) { if (/^Arrow|^ $|^Enter$/.test(k)) cursor = 0; return; }
+    const cx = cursor % cols, cy = Math.floor(cursor / cols);
+    if (k === "ArrowLeft") cursor = cy * cols + (cx + cols - 1) % cols; else if (k === "ArrowRight") cursor = cy * cols + (cx + 1) % cols;
+    else if (k === "ArrowUp") cursor = ((cy + rows - 1) % rows) * cols + cx; else if (k === "ArrowDown") cursor = ((cy + 1) % rows) * cols + cx;
+    else if (k === " " || k === "Enter") flip(cards.findIndex(c => c.slot === cursor));
+  }];
+  Lab.expose({
+    get cards() { return cards.map(c => ({ key: c.key, slot: c.slot, up: c.up, matched: c.matched, seen: c.seen, x: c.x, y: c.y })); },
+    get level() { return level; }, get pins() { return pins; }, get score() { return score; }, get combo() { return combo; }, get phase() { return phase; }, get found() { return found; },
+    get pairs() { return pairs; }, get open() { return open.length; }, get ready() { return phase === "play" && cards.every(c => c.deal <= 0 && Math.hypot(c.x - c.tx, c.y - c.ty) < 3); },
+    get grid() { return [cols, rows]; }, get cursor() { return cursor; }, get scuttleEvery() { return scutEvery; }, get careless() { return careless; },
+    setPins(v) { pins = v; }, setLevel(v) { level = v; deal(); }, scuttle() { return scuttle(true); }, flip,
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- deck building: distinct species early, look-alike families (same colour + body, different wings) later */
+function buildDeck(k, alike) {
+  const out = [], used = new Set(), order = Lab.shuffle([0, 1, 2, 3, 4, 5, 6, 7]); let ci = 0;
+  const add = (c, s, p) => { const key = c + "-" + s + "-" + p; if (used.has(key)) return false; used.add(key); out.push({ c, s, p, key }); return true; };
+  while (out.length < k) {
+    const c = order[ci % 8], s = Lab.randInt(0, 4); ci++;
+    const group = alike > 0 && out.length <= k - 2 ? Math.min(k - out.length, Lab.chance(.4) ? 3 : 2) : 1; if (group > 1) alike--;
+    const pats = Lab.shuffle([0, 1, 2, 3, 4, 5]); let n = 0;
+    for (const p of pats) { if (n >= group || out.length >= k) break; if (add(c, s, p)) n++; }
+  }
+  return out;
+}
+function deal() {
+  const d = levelDef(level); pairs = d[0] * d[1] / 2; found = 0; open = []; hideT = 0; scutEvery = d[3]; scutT = scutEvery + 2; scutPair = null; levelT = 0; clean = true;
+  Lab.sprite.clear(); layout();
+  const deck = buildDeck(pairs, d[2]), list = Lab.shuffle(deck.concat(deck));
+  cards = list.map((sp, i) => ({ sp, key: sp.key, slot: i, x: Lab.W / 2 + Lab.rand(-20, 20), y: Lab.H + chh, tx: 0, ty: 0, ang: 0, up: false, seen: false, matched: false, pop: 0, shake: 0, wig: 0, lift: 0, deal: .12 + i * .035, rot: Lab.rand(-.03, .03), bad: 0, sweep: -1 }));
+  phase = "play"; if (cursor >= 0) cursor = 0;
+  Lab.hint(scutEvery ? "Restless drawer: watch for cards that scuttle" : level === 0 ? "Flip two cards to find a pair" : d[2] && level === 3 ? "Careful: some species look alike" : "");
+}
+function hit(x, y) {
+  let best = -1, bd = 1e9;
+  for (let i = 0; i < cards.length; i++) { const c = cards[i], dx = Math.abs(x - c.x) / (cellW * .56), dy = Math.abs(y - c.y) / (cellH * .56), d = Math.max(dx, dy); if (d < 1 && d < bd) { bd = d; best = i; } }
+  return best;
+}
+
+function flip(i) {
+  if (phase !== "play" || Lab.paused || i < 0 || i >= cards.length) return false;
+  const c = cards[i]; if (c.matched || c.deal > 0) return false;
+  if (hideT > 0) hideNow();                       // buffered: a new tap dismisses the showing mismatch at once
+  if (c.up) return false;
+  c.up = true; Lab.sfx("flip", { pitch: 1 + open.length * .12 }); Lab.buzz(6);
+  open.push(i);
+  if (open.length < 2) { c.wasSeen = c.seen; c.seen = true; return true; }
+  const a = cards[open[0]], b = c; moves++;
+  if (a.key === b.key) {
+    a.matched = b.matched = true; a.pop = b.pop = 1.25; b.seen = true; open = []; found++; pairsAll++;
+    combo++; bestCombo = Math.max(bestCombo, combo);
+    const gain = 100 * Math.min(combo, 6); score += gain; Lab.setScore(score); if (combo > 1) Lab.bumpScore();
+    const col = COLS[a.sp.c].b;
+    Lab.after(.2, () => {
+      for (const q of [a, b]) { fx.burst(q.x, q.y, { n: 10, colors: [col, "#f8d76a", "#fff"], speed: 190, life: .55, size: 3.5, gravity: 260, shape: "star" }); fx.ring(q.x, q.y, { r0: cw * .3, r1: cw * .85, color: "#f8d76a", width: 4, life: .35 }); }
+      fx.text((a.x + b.x) / 2, (a.y + b.y) / 2 - chh * .2, "+" + gain + (combo > 1 ? "  ×" + Math.min(combo, 6) : ""), { color: combo > 1 ? "#f8d76a" : "#fff", size: (18 + Math.min(combo, 6) * 2) * S });
+      Lab.audio.combo(Math.min(combo - 1, 12) + 2, { vol: .2 }); Lab.sfx("snap", { pitch: .9 });
+    });
+    if (found === pairs) clearLevel();
+  } else {
+    // careless = the second card was already known, or the first card's partner had already been seen
+    const partnerSeen = cards.some(q => q !== a && q.key === a.key && q.seen), slip = b.seen || partnerSeen;
+    b.seen = true; combo = 0; hideT = slip ? 1.0 : .8; a.shake = b.shake = 1;
+    if (slip) {
+      pins--; pinPop = -1; clean = false; careless++; a.bad = b.bad = 1;
+      Lab.after(.2, () => { Lab.sfx("hurt", { pitch: .8 }); Lab.shake(5, .2); Lab.buzz(35); fx.text(b.x, b.y - chh * .55, "you'd seen that!", { color: "#ff9d8a", size: 15 * S, life: 1.1 }); });
+      if (pins <= 0) lose();
+    } else Lab.after(.2, () => Lab.sfx("knock", { pitch: .8 }));
+  }
+  return true;
+}
+function hideNow() { hideT = 0; for (const i of open) { cards[i].up = false; cards[i].bad = 0; } if (open.length) Lab.sfx("flip", { pitch: .8 }); open = []; }
+function clearLevel() {
+  phase = "clear"; const par = pairs * 4.5, tb = Math.max(0, Math.round((par - levelT) * 8)), bonus = pins * 50 + tb + (clean ? 250 : 0);
+  Lab.after(.55, () => {
+    score += bonus; Lab.setScore(score); Lab.bumpScore(); Lab.sfx("levelup");
+    Lab.banner(clean ? "Flawless!" : "Drawer " + (level + 1) + " done", { color: clean ? "#f8d76a" : "#bfe3c5", ms: 1100 });
+    fx.text(Lab.W / 2, Lab.play.y + Lab.play.h * .56, "+" + bonus + " bonus", { color: "#f8d76a", size: 22 * S, life: 1.2 });
+    cards.forEach((c, i) => { c.pop = 1 + (c.slot % cols + Math.floor(c.slot / cols)) * .12; });
+    if (pins < MAXPINS) { pins++; pinPop = 1; }
+  });
+  Lab.after(1.75, () => { for (const c of cards) c.leave = 1; Lab.sfx("whoosh"); });
+  Lab.after(2.15, () => { level++; deal(); });
+}
+function lose() {
+  phase = "lost"; hideT = 0;
+  Lab.after(.5, () => { cards.forEach((c, i) => { if (!c.up) Lab.after(i * .03, () => { c.up = true; }); }); Lab.sfx("slide"); });
+  Lab.after(1.7, () => Lab.gameover({ title: "Out of pins", score, stats: [["Drawers", level], ["Pairs", pairsAll], ["Best combo", "×" + Math.min(bestCombo, 6)]] }));
+}
+/* two face-down cards trade places — telegraphed by a wiggle, then a visible lifted slide */
+function scuttle(force) {
+  const pool = cards.filter(c => !c.up && !c.matched); if (pool.length < 4 && !force || pool.length < 2) return null;
+  const a = Lab.choose(pool), near = pool.filter(c => c !== a).sort((p, q) => Math.hypot(p.tx - a.tx, p.ty - a.ty) - Math.hypot(q.tx - a.tx, q.ty - a.ty)), b = near[Lab.randInt(0, Math.min(3, near.length - 1))];
+  scutPair = [a, b]; a.wig = b.wig = .6; Lab.sfx("tick", { pitch: .7 }); Lab.after(.12, () => Lab.sfx("tick", { pitch: .8 })); Lab.after(.24, () => Lab.sfx("tick", { pitch: .9 }));
+  const doSwap = () => { if (a.matched || b.matched || a.up || b.up) return; const s = a.slot; a.slot = b.slot; b.slot = s; a.lift = b.lift = 1; Lab.sfx("swish", { pitch: .8 }); };
+  if (force) doSwap(); else Lab.after(.6, doSwap);
+  return [cards.indexOf(a), cards.indexOf(b)];
+}
+
+function frame(dt, t) {
+  if (phase === "play") {
+    levelT += dt;
+    if (hideT > 0) { hideT -= dt; if (hideT <= 0) hideNow(); }
+    if (scutEvery) { scutT -= dt; if (scutT <= 0) { scutT = scutEvery; scuttle(false); } }
+    Lab.music.intensity(.25 + .35 * (found / pairs) + (pins === 1 ? .3 : 0) + Math.min(combo, 4) * .05);
+  }
+  pinPop = Lab.damp(pinPop, 0, 5, dt);
+  for (const c of cards) {
+    const p = slotXY(c.slot); c.tx = p.x; c.ty = c.leave ? Lab.H + chh * 1.2 : p.y;
+    if (c.deal > 0) { c.deal -= dt; if (c.deal <= 0) Lab.sfx("slide", { pitch: .9 + c.slot * .02 }); }
+    else { const k = c.leave ? 6 : c.lift > .05 ? 6 : 13; c.x = Lab.damp(c.x, c.tx, k, dt); c.y = Lab.damp(c.y, c.ty, k, dt); }
+    c.ang = Lab.approach(c.ang, c.up ? 1 : 0, dt / .24);
+    c.pop = Math.max(0, c.pop - dt * 2.4); c.shake = Math.max(0, c.shake - dt * 2.2); c.wig = Math.max(0, c.wig - dt); c.lift = Lab.damp(c.lift, 0, 3.2, dt);
+    if (c.matched && c.sweep < 1.2) c.sweep += dt * 1.3;
+  }
+  render(t);
+}
+
+/* ---------- art */
+function drawBeetle(g, sp, u) {
+  const col = COLS[sp.c], s = sp.s, rx = [.74, .46, .68, .56, .72][s] * u, ry = [.7, .86, .76, .68, .62][s] * u, cy = .16 * u, hy = cy - ry - u * .16;
+  g.lineCap = "round"; g.lineJoin = "round"; g.strokeStyle = INK; g.fillStyle = INK;
+  g.lineWidth = u * .075;
+  for (const sd of [-1, 1]) for (let i = 0; i < 3; i++) { const y = cy + (i - 1) * ry * .5, a = i - 1; g.beginPath(); g.moveTo(sd * rx * .6, y); g.lineTo(sd * (rx + u * .2), y + a * u * .14 - u * .06); g.lineTo(sd * (rx + u * .32), y + a * u * .36 + u * .08); g.stroke(); }
+  g.lineWidth = u * .05;
+  for (const sd of [-1, 1]) { const lx = sd * u * (s === 1 ? .78 : .46), ly = hy - u * (s === 1 ? .12 : .36); g.beginPath(); g.moveTo(sd * u * .1, hy - u * .1); g.quadraticCurveTo(sd * u * .3, hy - u * .46, lx, ly); g.stroke(); g.beginPath(); g.arc(lx, ly, u * .05, 0, TAU); g.fill(); }
+  if (s === 3) { g.lineWidth = u * .1; for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(sd * u * .13, hy - u * .06); g.quadraticCurveTo(sd * u * .46, hy - u * .36, sd * u * .1, hy - u * .5); g.stroke(); } }
+  if (s === 4) { g.beginPath(); g.moveTo(-u * .08, hy); g.quadraticCurveTo(0, hy - u * .3, u * .12, hy - u * .46); g.lineTo(u * .1, hy); g.closePath(); g.fill(); }
+  g.beginPath(); g.ellipse(0, hy, u * .25, u * .2, 0, 0, TAU); g.fill();
+  g.fillStyle = Lab.color.shade(col.b, -.5); g.beginPath(); g.ellipse(0, cy - ry * .8, rx * (s === 4 ? .9 : .68), u * .27, 0, 0, TAU); g.fill();
+  const shell = () => { g.beginPath(); if (s === 2) { g.moveTo(-rx, cy - ry * .55); g.quadraticCurveTo(0, cy - ry * 1.15, rx, cy - ry * .55); g.bezierCurveTo(rx * 1.05, cy + ry * .3, rx * .45, cy + ry * .85, 0, cy + ry * 1.05); g.bezierCurveTo(-rx * .45, cy + ry * .85, -rx * 1.05, cy + ry * .3, -rx, cy - ry * .55); g.closePath(); } else g.ellipse(0, cy, rx, ry, 0, 0, TAU); };
+  const gr = g.createRadialGradient(-rx * .35, cy - ry * .4, u * .05, 0, cy, Math.max(rx, ry) * 1.1);
+  gr.addColorStop(0, Lab.color.shade(col.b, .3)); gr.addColorStop(.55, col.b); gr.addColorStop(1, Lab.color.shade(col.b, -.3));
+  shell(); g.fillStyle = gr; g.fill();
+  g.save(); shell(); g.clip(); g.fillStyle = g.strokeStyle = col.p;
+  if (sp.p === 0) for (const sd of [-1, 1]) { g.beginPath(); g.arc(sd * rx * .46, cy + ry * .05, rx * .27, 0, TAU); g.fill(); }
+  else if (sp.p === 1) for (const sd of [-1, 1]) for (let i = -1; i <= 1; i++) { g.beginPath(); g.arc(sd * rx * (.48 - Math.abs(i) * .08), cy + i * ry * .48, rx * .15, 0, TAU); g.fill(); }
+  else if (sp.p === 2) { g.lineWidth = rx * .13; for (const sd of [-1, 1]) for (const k of [.3, .64]) { g.beginPath(); g.moveTo(sd * rx * k, cy - ry); g.lineTo(sd * rx * k, cy + ry); g.stroke(); } }
+  else if (sp.p === 3) { for (const k of [-.3, .34]) g.fillRect(-rx, cy + k * ry - ry * .11, rx * 2, ry * .22); }
+  else if (sp.p === 5) { g.lineWidth = rx * .14; for (const k of [-.25, .3]) { g.beginPath(); g.moveTo(-rx * .8, cy + k * ry - ry * .25); g.lineTo(0, cy + k * ry + ry * .12); g.lineTo(rx * .8, cy + k * ry - ry * .25); g.stroke(); } }
+  else { g.globalAlpha = .28; g.fillStyle = "#fff"; g.beginPath(); g.ellipse(-rx * .3, cy, rx * .2, ry * .7, .15, 0, TAU); g.fill(); g.globalAlpha = 1; }
+  g.restore();
+  g.strokeStyle = INK; g.lineWidth = u * .06; shell(); g.stroke(); g.lineWidth = u * .04; g.beginPath(); g.moveTo(0, cy - ry * (s === 2 ? .8 : .97)); g.lineTo(0, cy + ry); g.stroke();
+  g.strokeStyle = "rgba(255,255,255,.6)"; g.lineWidth = u * .07; g.beginPath(); g.ellipse(0, cy, rx * .72, ry * .74, 0, Math.PI * 1.12, Math.PI * 1.4); g.stroke();
+}
+const faceSprite = sp => Lab.sprite("f" + sp.key + ":" + Math.round(cw), cw, chh, (g, w, h) => {
+  draw.rect(g, 0, 0, w, h, w * .1, PAPER); draw.rect(g, 1, 1, w - 2, h - 2, w * .1, null, "rgba(90,70,50,.35)", 1.5);
+  draw.rect(g, w * .07, w * .07, w - w * .14, h - w * .14, w * .06, null, "rgba(150,120,80,.3)", 1);
+  g.save(); g.translate(w / 2, h * .46); drawBeetle(g, sp, h * .3); g.restore();
+  g.fillStyle = "rgba(90,70,50,.35)"; g.fillRect(w * .3, h * .875, w * .4, Math.max(1, h * .012)); g.fillRect(w * .38, h * .91, w * .24, Math.max(1, h * .012));
+});
+const backSprite = () => Lab.sprite("back:" + Math.round(cw), cw, chh, (g, w, h) => {
+  draw.rect(g, 0, 0, w, h, w * .1, "#c79a62"); draw.rect(g, 1, 1, w - 2, h - 2, w * .1, null, "rgba(70,45,25,.5)", 1.5);
+  g.save(); draw.rr(g, w * .08, w * .08, w * .84, h - w * .16, w * .05); g.clip(); g.fillStyle = "#b98850"; g.fillRect(0, 0, w, h);
+  g.strokeStyle = "rgba(255,236,200,.28)"; g.lineWidth = Math.max(1, w * .018); const st = w * .17;
+  for (let x = -h; x < w + h; x += st) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x + h, h); g.moveTo(x + h, 0); g.lineTo(x, h); g.stroke(); }
+  g.restore(); draw.rr(g, w * .08, w * .08, w * .84, h - w * .16, w * .05); g.strokeStyle = "rgba(70,45,25,.45)"; g.lineWidth = 1.2; g.stroke();
+  draw.circle(g, w / 2, h / 2, w * .24, "#c79a62", "rgba(70,45,25,.45)", 1.2);
+  g.fillStyle = "rgba(70,45,25,.6)"; g.beginPath(); g.ellipse(w / 2, h / 2 + w * .02, w * .1, w * .13, 0, 0, TAU); g.fill(); g.beginPath(); g.arc(w / 2, h / 2 - w * .13, w * .055, 0, TAU); g.fill();
+  g.strokeStyle = "#c79a62"; g.lineWidth = 1; g.beginPath(); g.moveTo(w / 2, h / 2 - w * .09); g.lineTo(w / 2, h / 2 + w * .15); g.stroke();
+});
+function drawCard(c, cd, t) {
+  const a = cd.ang, sx = Math.abs(Math.cos(a * Math.PI)), lift = Math.sin(a * Math.PI), pop = cd.pop > 0 && cd.pop < 1 ? ease.pulse(1 - cd.pop) * .16 : 0;
+  const sc = 1 + lift * .1 + cd.lift * .12 + pop, shx = cd.shake > 0 && a > .9 ? Math.sin(cd.shake * 28) * cd.shake * cw * .07 : 0, wg = cd.wig > 0 ? Math.sin(cd.wig * 40) * .09 : 0;
+  const up = lift * 7 * S + cd.lift * 9 * S + pop * 30 * S;
+  draw.rect(c, cd.x - cw / 2 * sx + 2 + up * .4, cd.y - chh / 2 + 4 + up * .9, cw * sx, chh, cw * .1, `rgba(0,0,0,${.3 - Math.min(.14, up * .008)})`);
+  c.save(); c.translate(cd.x + shx, cd.y - up); c.rotate(cd.rot + wg); c.transform(1, (a < .5 ? 1 : -1) * lift * .1, 0, 1, 0, 0); c.scale(sc * Math.max(.03, sx), sc);
+  const sp = a > .5 ? faceSprite(cd.sp) : backSprite();
+  if (cd.matched && cd.pop <= 0) c.globalAlpha = .78;
+  c.drawImage(sp, -cw / 2, -chh / 2, cw, chh); c.globalAlpha = 1;
+  if (a > .5 && cd.bad) { draw.rr(c, -cw / 2, -chh / 2, cw, chh, cw * .1); c.strokeStyle = "rgba(230,80,60,.9)"; c.lineWidth = Math.max(2.5, cw * .045); c.stroke(); }
+  if (cd.matched && a > .9) {
+    if (cd.sweep >= 0 && cd.sweep < 1) { c.save(); draw.rr(c, -cw / 2, -chh / 2, cw, chh, cw * .1); c.clip(); c.rotate(-.5); c.fillStyle = `rgba(255,255,255,${.5 * ease.pulse(cd.sweep)})`; c.fillRect(-cw + cd.sweep * cw * 2.2, -chh, cw * .25, chh * 2); c.restore(); }
+    draw.circle(c, 0, -chh * .41, cw * .065, "#e3b64f", "#7a5a1e", 1.2); draw.circle(c, -cw * .018, -chh * .42, cw * .022, "rgba(255,255,255,.8)");
+  }
+  c.restore();
+}
+function backdrop(c) {
+  draw.bg(c, "#4b3527", "#241812", "#34231a");
+  const grain = Lab.sprite("grain", 256, 128, g => { const r = Lab.rng(3); for (let i = 0; i < 26; i++) { g.strokeStyle = `rgba(${r() < .5 ? "0,0,0" : "255,220,170"},${.04 + r() * .05})`; g.lineWidth = .8 + r() * 1.6; const y = r() * 128, a = r() * 6; g.beginPath(); g.moveTo(0, y); for (let x = 0; x <= 256; x += 32) g.lineTo(x, y + Math.sin(x / 256 * TAU + a) * 3); g.stroke(); } });
+  for (let y = 0; y < Lab.H; y += 128) for (let x = 0; x < Lab.W; x += 256) c.drawImage(grain, x, y, 256, 128);
+  // felt-lined tray
+  const pad = 9 * S, x = gx - pad, y = gy - pad, w = cellW * cols + pad * 2, h = cellH * rows + pad * 2;
+  draw.rect(c, x - 5 * S, y - 5 * S, w + 10 * S, h + 10 * S, 20 * S, "#1c120d");
+  draw.rect(c, x, y, w, h, 16 * S, "#3f5a44"); draw.vgrad(c, x, y, w, Math.min(h, 26 * S), ["rgba(0,0,0,.28)", "rgba(0,0,0,0)"]);
+  draw.rect(c, x, y, w, h, 16 * S, null, "rgba(255,255,255,.07)", 1.5);
+}
+function pinIcon(c, x, y, s, on) {
+  c.strokeStyle = on ? "#d8dde3" : "rgba(255,255,255,.14)"; c.lineWidth = 2 * s; c.lineCap = "round"; c.beginPath(); c.moveTo(x, y); c.lineTo(x - 4 * s, y + 13 * s); c.stroke();
+  draw.circle(c, x, y, 5.5 * s, on ? "#e3b64f" : "rgba(255,255,255,.14)"); if (on) draw.circle(c, x - 1.6 * s, y - 1.8 * s, 1.8 * s, "rgba(255,255,255,.75)");
+}
+function hud(c, t) {
+  const P = Lab.play, U = Math.max(S, .8), y = P.y + 17 * U, x0 = Math.max(P.x + 16 * U, gx - 4 * S), x1 = Math.min(P.x + P.w - 14 * U, gx + cellW * cols + 4 * S);
+  for (let i = 0; i < MAXPINS; i++) { const on = i < pins, k = i === pins - 1 && pinPop > 0 ? 1 + pinPop * .5 : i === pins && pinPop < 0 ? 1 - pinPop * .5 : 1; pinIcon(c, x0 + 4 * U + i * 17 * U, y - 5 * U, U * k, on); }
+  draw.text(c, "DRAWER " + (level + 1) + "  ·  " + found + "/" + pairs, (x0 + x1) / 2, y, { size: Math.max(11, 12.5 * U), color: "rgba(255,240,215,.75)", weight: 700 });
+  if (combo > 1) draw.text(c, "×" + Math.min(combo, 6), x1, y, { size: (17 + Math.min(combo, 6)) * U, color: "#f8d76a", align: "right", weight: 800, stroke: "rgba(30,18,10,.6)" });
+  if (scutEvery && phase === "play") { // restlessness meter: fills until the next scuttle
+    const w = Math.min(120 * U, (x1 - x0) * .4), fr = clamp(1 - scutT / scutEvery, 0, 1), bx = (x0 + x1) / 2 - w / 2, by = y + 13 * U;
+    draw.rect(c, bx, by, w, 4 * U, 2 * U, "rgba(0,0,0,.35)"); draw.rect(c, bx, by, Math.max(4 * U, w * fr), 4 * U, 2 * U, fr > .85 ? "#ff9d6a" : "#6fae7c");
+  }
+}
+function render(t) {
+  const c = Lab.ctx; backdrop(c); hud(c, t);
+  const order = cards.slice().sort((a, b) => (a.lift + Math.sin(a.ang * Math.PI) + (a.pop > 0 ? 1 : 0)) - (b.lift + Math.sin(b.ang * Math.PI) + (b.pop > 0 ? 1 : 0)));
+  for (const cd of order) if (cd.deal <= 0 || cd.y < Lab.H) drawCard(c, cd, t);
+  if (cursor >= 0 && phase === "play") { const p = slotXY(cursor); draw.rr(c, p.x - cw / 2 - 4, p.y - chh / 2 - 4, cw + 8, chh + 8, cw * .12); c.strokeStyle = "#fff"; c.lineWidth = 3; c.setLineDash([8, 6]); c.lineDashOffset = -t * 20; c.stroke(); c.setLineDash([]); }
+}
+/* splash backdrop: a small tray with a few specimens showing */
+function attract(dt, t) {
+  level = 1; layout(); const c = Lab.ctx; backdrop(c);
+  const demo = [[0, 0, 0], null, [4, 1, 2], null, [5, 2, 5], [1, 3, 1], null, [2, 4, 3], null, [7, 0, 1], [3, 2, 0], null];
+  demo.forEach((d, i) => { const p = slotXY(i); drawCard(c, { sp: d ? { c: d[0], s: d[1], p: d[2], key: d.join("-") } : null, x: p.x, y: p.y + Math.sin(t * 1.4 + i) * 2, ang: d ? 1 : 0, pop: 0, shake: 0, wig: 0, lift: 0, rot: Math.sin(i * 7) * .03, bad: 0, sweep: -1, matched: false }, t); });
+  level = 0;
+}
+Lab.boot();
+})();
+</script></body></html>

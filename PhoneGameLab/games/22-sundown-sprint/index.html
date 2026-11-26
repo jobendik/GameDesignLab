@@ -1,0 +1,255 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Sundown Sprint</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* SUNDOWN SPRINT — a checkpoint dash down a desert highway as the light goes.
+ * Identity: warm retro top-down drive; plum asphalt, sand shoulders, long evening shadows, time of day shifts per stage.
+ * Core: free analog steering (relative drag / arrows) and a one-thumb throttle: touch = floor it, lift = brake.
+ * Hook: the clock. Checkpoints add time, and so does every CLOSE PASS (skimming a car's flank at speed), which also
+ * builds a combo. Crashes do not kill, they spin you out and burn seconds. Fast + close = far; safe + slow = out of time.
+ * World units: x in lane units (0..4), along-road distance in "u" (1 u = S px), so resizing never desyncs anything. */
+Lab.init({
+  title: "Sundown Sprint", tagline: "Floor it down the desert highway. Skim traffic to buy time.", category: "Arcade & Action",
+  howto: ["Hold to accelerate, drag to steer", "Lift off to brake", "Skim past cars for bonus time"],
+  theme: { bg: "#2b2140", bg2: "#e8915a", accent: "#ff6b4a", accent2: "#ffc15e" },
+  orient: "portrait", music: { style: "drive", key: "E", vol: .42 }, restart: start,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, C = Lab.color;
+const LANES = 4, VMIN = 340, PWU = .56, PLEN = 80;
+const SKY = [
+  { n: "Golden Hour", road: "#54466a", sand: "#eaa560", sand2: "#d98a4c", tint: "#ffb35c", ta: .16, night: 0 },
+  { n: "Sunset", road: "#4b3a62", sand: "#de7c4e", sand2: "#c5633f", tint: "#ff7a4a", ta: .2, night: .1 },
+  { n: "Dusk", road: "#3a3358", sand: "#93597c", sand2: "#7a4770", tint: "#a05cff", ta: .14, night: .32 },
+  { n: "Night", road: "#262947", sand: "#3f3c68", sand2: "#343258", tint: "#3a4bd0", ta: .1, night: .55 },
+  { n: "Daybreak", road: "#4d4968", sand: "#e7a590", sand2: "#d48a7c", tint: "#ffc9a8", ta: .14, night: .12 },
+];
+const KINDS = {
+  sedan: { w: .56, l: 78, cols: ["#3fb8a9", "#f4e3c1", "#e9b44c", "#7c9eea", "#f08a6c", "#b9c2cf"] },
+  van: { w: .6, l: 98, cols: ["#f4e3c1", "#6fb1d6", "#d98f5a"] },
+  truck: { w: .64, l: 156, cols: ["#e9b44c", "#3fb8a9", "#d9605a"] },
+};
+let S, W, H, roadL, roadW, laneW, carY;
+let car, speed, vmax, dist, time, stage, cpS, cpPrev, score, bonus, combo, comboT, closeN, passN, topSpeed, crashes, cars, relAcc, gap, alive, thr, palFrom, palK, engT, outT, tickT, sandT, steered;
+
+function layout() {
+  W = Lab.W; H = Lab.H; S = Math.min(W / 390, Lab.play.h / 700);
+  roadW = Math.min(W * .8, 520 * S); roadL = (W - roadW) / 2; laneW = roadW / LANES; carY = Lab.play.y + Lab.play.h * .74;
+}
+Lab.onResize(() => { if (car) layout(); });
+const X = u => roadL + u * laneW, Y = s => carY - (s - dist) * S;
+const frac = v => v - Math.floor(v), hash = i => frac(Math.sin(i * 91.7 + 13.3) * 43758.5453);
+const cpLen = n => 11000 + Math.min(n, 8) * 1500, cpBonus = n => Math.max(7, 14 - n * 1.5);
+
+function start() {
+  layout();
+  car = { x: 2, tx: 2, yaw: 0, spin: 0, inv: 0, lean: 0 };
+  speed = VMIN; vmax = 860; dist = 0; time = 24; stage = 0; cpPrev = 0; cpS = cpLen(0); score = 0; bonus = 0; combo = 0; comboT = 0; closeN = 0; passN = 0; topSpeed = 0; crashes = 0;
+  cars = []; relAcc = 0; gap = 900; alive = true; thr = false; palFrom = 0; palK = 1; engT = 0; outT = 0; tickT = 0; sandT = 0; steered = false;
+  Lab.setScore(0); Lab.hint("");
+  Lab.input.onDown = [() => { steered = true; }];
+  Lab.input.onMove = [(x, y, dx) => { if (Lab.input.down && alive) car.tx = Lab.clamp(car.tx + dx / laneW * 1.25, -.34, LANES + .34); }];
+  Lab.input.onKey = [() => { steered = true; }];
+  Lab.expose({
+    get score() { return score; }, get time() { return time; }, set time(v) { time = v; }, get speed() { return speed; }, get vmax() { return vmax; }, get x() { return car.x; },
+    get dist() { return dist; }, get stage() { return stage; }, get combo() { return combo; }, get closeN() { return closeN; }, get passN() { return passN; }, get crashes() { return crashes; },
+    get alive() { return alive; }, get inv() { return car.inv; }, get cpIn() { return cpS - dist; }, get throttle() { return thr; },
+    steerTo(u) { car.tx = Lab.clamp(u, -.34, LANES + .34); },
+    /* traffic ahead of / alongside the player: x in lane units, w in lane units, ahead = bumper-to-bumper gap in u */
+    traffic() { return cars.filter(c => !c.bumped).map(c => ({ x: c.x, w: c.w, l: c.l, lane: c.lane, v: c.v, ahead: c.s - dist - (c.l + PLEN) / 2, chg: c.chg ? c.chg.to : -1 })).sort((a, b) => a.ahead - b.ahead); },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- traffic */
+function spawn() {
+  const s = dist + (carY + 170 * S) / S, band = cars.filter(c => Math.abs(c.s - s) < 250), used = new Set();
+  band.forEach(c => { used.add(c.lane); if (c.chg) used.add(c.chg.to); });
+  if (band.length >= (stage < 2 ? 2 : 3)) return false;
+  const free = [0, 1, 2, 3].filter(l => !used.has(l)); if (!free.length) return false;
+  const lane = Lab.choose(free), r = Math.random(), kind = r < (lane >= 2 ? .16 : .04) + Math.min(.1, stage * .02) ? "truck" : r < .34 ? "van" : "sedan", K = KINDS[kind];
+  const c = { kind, lane, x: lane + .5, s: s + K.l / 2, v: 300 - lane * 18 + Lab.rand(-12, 12) - (kind === "truck" ? 34 : kind === "van" ? 12 : 0), w: K.w, l: K.l, col: Lab.choose(K.cols), passed: false, bumped: false, vx: 0, rot: 0, chg: null, will: 0 };
+  if (stage >= 1 && kind !== "truck" && Lab.chance(Math.min(.34, .1 + stage * .05))) c.will = lane === 0 ? 1 : lane === 3 ? -1 : Lab.choose([-1, 1]);
+  cars.push(c); return true;
+}
+function updateTraffic(dt) {
+  relAcc += Math.max(0, speed - 280) * dt;
+  if (relAcc > gap) { if (spawn()) { relAcc = 0; gap = Lab.rand(.7, 1.3) * Math.max(250, 560 - stage * 48 - Math.min(dist / 600, 60)); } else relAcc = gap * .6; }
+  for (let i = cars.length - 1; i >= 0; i--) {
+    const c = cars[i]; let v = c.v;
+    if (c.bumped) { c.x += c.vx * dt; c.vx *= Math.exp(-2 * dt); c.rot += c.vx * 1.6 * dt; c.s += (v + 120) * dt; }
+    else {
+      for (const o of cars) if (o !== c && !o.bumped && (o.lane === c.lane || (o.chg && o.chg.to === c.lane)) && o.s > c.s && o.s - c.s < (o.l + c.l) / 2 + 60) v = Math.min(v, o.v); // don't rear-end
+      c.s += v * dt;
+      const ahead = c.s - dist;
+      if (c.will && !c.chg && ahead > 250 && ahead < 560 && alive) { // signal, then drift one lane if it stays clear
+        const to = c.lane + c.will, near = cars.filter(o => o !== c && !o.bumped && Math.abs(o.s - c.s) < 210);
+        if (!near.some(o => o.lane === to || (o.chg && o.chg.to === to)) && near.length <= 1) { c.chg = { to, t: 0, from: c.lane }; Lab.sfx("tick", { pitch: .8 }); }
+        c.will = 0;
+      }
+      if (c.chg) { c.chg.t += dt; const k = Lab.clamp((c.chg.t - .85) / .65, 0, 1); c.x = Lab.lerp(c.chg.from, c.chg.to, ease.inOutQuad(k)) + .5; c.rot = (c.chg.to - c.chg.from) * ease.pulse(k) * .16; if (k >= .5) c.lane = c.chg.to; if (k >= 1) { c.chg = null; c.rot = 0; } }
+    }
+    const dy = c.s - dist, hl = (c.l + PLEN) / 2, dx = Math.abs(c.x - car.x), side = (c.w + PWU) / 2;
+    if (dy < -(H - carY) / S - 200 || dy > 2600) { cars.splice(i, 1); continue; }
+    if (c.bumped || !alive) continue;
+    if (car.inv <= 0 && dx < side - .07 && Math.abs(dy) < hl - 7) { crash(c); continue; }
+    if (!c.passed && dy < 0) {
+      c.passed = true; passN++;
+      const gapPx = (dx - side) * laneW / S, fast = speed > VMIN + (vmax - VMIN) * .45;
+      if (gapPx < 15 && fast && car.inv <= 0) closePass(c, gapPx < 6); else { bonus += 10; fx.text(X(car.x), carY - 58 * S, "+10", { color: "rgba(255,240,214,.85)", size: 13 * Math.max(.85, S), life: .6 }); Lab.sfx("swish", { pitch: .7 + speed / vmax * .5 }); }
+    }
+  }
+}
+function closePass(c, razor) {
+  combo = Math.min(9, combo + 1); comboT = 3.6; closeN++;
+  const pts = (razor ? 50 : 30) * combo, add = razor ? .7 : .4, dir = Math.sign(c.x - car.x) || 1, x = X(car.x);
+  bonus += pts; time += add; Lab.bumpScore();
+  fx.text(x, carY - 64 * S, (razor ? "PAINT SWAP! +" : "CLOSE +") + pts, { color: razor ? "#ffe08a" : "#fff0d6", size: (razor ? 21 : 17) * Math.max(.85, S) });
+  fx.text(W / 2 + 44 * Math.max(.85, S), Lab.play.y + 32 * S, "+" + add.toFixed(1) + "s", { color: "#8dffb0", size: 15 * Math.max(.85, S), life: .8 });
+  fx.sparks(x + dir * PWU * laneW * .5, carY, Math.PI / 2, { n: razor ? 12 : 7, colors: ["#ffe08a", "#fff", "#ff9a4a"], speed: 420 * S, size: 2.6 * S, spread: .7 });
+  Lab.audio.combo(combo + (razor ? 2 : 0), { vol: .18 }); Lab.sfx("whoosh", { pitch: 1 + combo * .07 }); Lab.buzz(10);
+  if (razor) Lab.hitstop(.03);
+}
+function crash(c) {
+  crashes++; combo = 0; comboT = 0; car.inv = 1.7; car.spin = 1; speed = Math.max(150, speed * .3);
+  const dir = Math.sign(c.x - car.x) || 1; c.bumped = true; c.vx = dir * 1.6; c.passed = true;
+  const x = X((c.x + car.x) / 2), y = Y(c.s) + (c.s > dist ? c.l : -c.l) * S * .3;
+  fx.burst(x, y, { n: 18, colors: ["#ffe08a", "#fff", c.col, "#ff6b4a"], speed: 340 * S, life: .55, size: 4 * S, shape: "shard", gravity: 0, drag: 3 });
+  fx.ring(x, y, { r0: 8, r1: 70 * S, color: "#fff0d6", width: 5 });
+  fx.text(X(car.x), carY - 64 * S, "SPIN OUT!", { color: "#ff6b4a", size: 20 * Math.max(.85, S), outline: "#fff0d6" });
+  Lab.sfx("crunch"); Lab.sfx("hit", { pitch: .8 }); Lab.shake(11, .35); Lab.hitstop(.07); Lab.flash("#ff6b4a", .2, .25); Lab.buzz(45);
+}
+
+/* ---------- update */
+function update(dt) {
+  const K = Lab.input.keys;
+  thr = alive && (Lab.input.down || K.ArrowUp || K.KeyW || K.Space);
+  const ax = Lab.input.axisX(); if (ax && alive) car.tx = Lab.clamp(car.tx + ax * 3.4 * dt, -.34, LANES + .34);
+  const px = car.x; car.x = Lab.damp(car.x, car.tx, 17, dt);
+  const lat = (car.x - px) / Math.max(dt, 1e-4); car.yaw = Lab.damp(car.yaw, Lab.clamp(lat * .11, -.3, .3), 14, dt); car.lean = Lab.damp(car.lean, Lab.clamp(lat * .05, -1, 1), 10, dt);
+  if (car.inv > 0) car.inv -= dt; if (car.spin > 0) car.spin = Math.max(0, car.spin - dt / .75);
+  const onSand = car.x < PWU * .2 || car.x > LANES - PWU * .2;
+  vmax = Math.min(1150, 860 + stage * 45);
+  let target = thr ? vmax : VMIN; if (onSand) target = Math.min(target, vmax * .55); if (!alive) target = 0;
+  if (speed < target) speed = Math.min(target, speed + 400 * (1.2 - speed / vmax * .65) * dt); else speed = Math.max(target, speed - (alive ? (onSand ? 700 : 520) : 900) * dt);
+  dist += speed * dt; topSpeed = Math.max(topSpeed, speed);
+  if (onSand && speed > 200) { sandT -= dt; if (sandT <= 0) { sandT = .05; fx.puff(X(car.x) + Lab.rand(-10, 10) * S, carY + 34 * S, { n: 2, color: C.alpha(SKY[stage % SKY.length].sand, .7), speed: 70 * S, size: 8 * S, life: .5, vy: speed * S * .5 }); } if (Math.random() < dt * 9) Lab.sfx("slide", { pitch: .6 }); }
+  updateTraffic(dt);
+  if (!alive) { outT += dt; return; }
+  if (comboT > 0) { comboT -= dt; if (comboT <= 0) combo = 0; }
+  if (dist >= cpS) checkpoint();
+  time -= dt;
+  if (time <= 5.5 && time > 0) { tickT -= dt; if (tickT <= 0) { tickT = time < 2.5 ? .5 : 1; Lab.sfx("warn", { pitch: time < 2.5 ? 1.25 : 1 }); } }
+  if (time <= 0) { time = 0; alive = false; outT = 0; Lab.sfx("error"); Lab.after(1.25, () => Lab.gameover({ title: "Out of time", score: Math.floor(score), stats: [["Distance", (dist / 20000).toFixed(2) + " km"], ["Close", closeN], ["Top speed", Math.round(topSpeed / 5) + " km/h"]] })); }
+  score = dist / 20 + bonus; Lab.setScore(Math.floor(score));
+  // engine: short low pulses whose pitch follows the revs (stops with the frame loop when paused)
+  engT -= dt; if (engT <= 0) { const k = speed / 1150; engT = .1; Lab.audio.tone({ f: 46 + k * 78 + (thr ? 6 : 0), dur: .13, type: "sawtooth", vol: thr ? .05 : .028, lp: 260 + k * 620 }); }
+  Lab.music.intensity(.25 + .55 * (speed - VMIN) / (1150 - VMIN) + combo * .03);
+}
+function checkpoint() {
+  const add = cpBonus(stage); stage++; time += add; cpPrev = cpS; cpS += cpLen(stage); bonus += 100 * stage; palFrom = (stage - 1) % SKY.length; palK = 0;
+  Lab.banner("+" + add + " s", { color: "#8dffb0", ms: 1100 }); Lab.toast("Stage " + (stage + 1) + " · " + SKY[stage % SKY.length].n, 1500); Lab.sfx("levelup"); Lab.flash("#fff0d6", .25, .25); Lab.bumpScore();
+}
+
+/* ---------- sprites */
+function vehSprite(kind, col, w, l) {
+  const k = S, pw = w * laneW, ph = l * k, pad = 6 * k;
+  return Lab.sprite(["v", kind, col, Math.round(pw), Math.round(ph)].join(":"), pw + pad * 2, ph + pad * 2, g => {
+    g.translate(pad, pad); const dk = C.shade(col, -.28), lt = C.shade(col, .3), glass = "#2a2f4a";
+    if (kind === "truck") {
+      const cab = 40 * k;
+      draw.rect(g, pw * .06, cab - 4 * k, pw * .88, ph - cab + 4 * k, 5 * k, "#efe6d6"); draw.rect(g, pw * .06, ph - 16 * k, pw * .88, 16 * k, 5 * k, "#d8cdb8");
+      g.fillStyle = col; g.fillRect(pw * .06, cab + (ph - cab) * .3, pw * .88, 9 * k); g.fillStyle = "rgba(60,50,80,.18)"; for (let i = 1; i < 5; i++) g.fillRect(pw * .1, cab + (ph - cab) * i / 5, pw * .8, 1.5 * k);
+      draw.rect(g, pw * .09, 0, pw * .82, cab, 8 * k, col); draw.rect(g, pw * .16, 9 * k, pw * .68, 13 * k, 4 * k, glass); draw.rect(g, pw * .09, cab - 9 * k, pw * .82, 9 * k, 3 * k, dk);
+      for (const sx of [.16, .68]) draw.rect(g, pw * sx, 1.5 * k, pw * .16, 4 * k, 2 * k, "#fff3c4");
+      for (const sx of [.1, .74]) draw.rect(g, pw * sx, ph - 4 * k, pw * .16, 3.5 * k, 1.5 * k, "#ff4a3a");
+      return;
+    }
+    const r = (kind === "van" ? 9 : 13) * k;
+    draw.rect(g, 0, 0, pw, ph, r, col); draw.rect(g, pw * .1, ph * .5, pw * .8, ph * .47, r * .7, dk); draw.rect(g, pw * .06, ph * .03, pw * .88, ph * .86, r * .9, col);
+    draw.rect(g, pw * .16, ph * (kind === "van" ? .13 : .22), pw * .68, ph * .16, 5 * k, glass);                       // windshield
+    draw.rect(g, pw * .16, ph * (kind === "van" ? .3 : .39), pw * .68, ph * (kind === "van" ? .5 : .27), 6 * k, lt);   // roof
+    draw.rect(g, pw * .2, ph * (kind === "van" ? .82 : .69), pw * .6, ph * .09, 4 * k, glass);                         // rear glass
+    for (const sx of [.1, .7]) { draw.rect(g, pw * sx, 1.5 * k, pw * .2, 5 * k, 2.5 * k, "#fff3c4"); draw.rect(g, pw * sx, ph - 5.5 * k, pw * .2, 4.5 * k, 2 * k, "#ff4a3a"); }
+    if (kind === "player") { g.fillStyle = "#fff0d6"; g.fillRect(pw * .36, 0, pw * .09, ph * .2); g.fillRect(pw * .55, 0, pw * .09, ph * .2); g.fillRect(pw * .36, ph * .41, pw * .09, ph * .23); g.fillRect(pw * .55, ph * .41, pw * .09, ph * .23); draw.rect(g, pw * .04, ph - 10 * k, pw * .92, 6 * k, 2.5 * k, "#2a2238"); }
+    g.fillStyle = dk; g.fillRect(-2 * k, ph * .26, 3 * k, 6 * k); g.fillRect(pw - 1 * k, ph * .26, 3 * k, 6 * k);
+  });
+}
+function drawVeh(c, sp, x, y, rot, w, l, night) {
+  const pw = w * laneW, ph = l * S;
+  c.save(); c.translate(x + 7 * S, y + 6 * S); c.rotate(rot); draw.rect(c, -pw / 2, -ph / 2, pw, ph, 12 * S, "rgba(20,12,40,.3)"); c.restore();
+  c.save(); c.translate(x, y); c.rotate(rot); c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h);
+  if (night > .2) { c.globalAlpha = Math.min(.9, night * 1.5); for (const sx of [-.3, .3]) { draw.glow(c, pw * sx, ph / 2 - 2 * S, 12 * S, "#ff4a3a", .8); } c.globalAlpha = 1; }
+  c.restore();
+}
+
+/* ---------- render */
+function frame(dt, t) { update(dt); if (palK < 1) palK = Math.min(1, palK + dt / 2); render(t); }
+function sky(key) { const a = SKY[palFrom][key], b = SKY[stage % SKY.length][key]; if (typeof b === "number") return Lab.lerp(a, b, palK); return palK >= 1 ? b : C.mix(a, b, ease.inOutQuad(palK)); }
+function render(t) {
+  const c = Lab.ctx, road = sky("road"), sand = sky("sand"), sand2 = sky("sand2"), night = sky("night"), R = roadL + roadW, u = Math.max(.85, S);
+  c.fillStyle = sand; c.fillRect(-40, -40, W + 80, H + 80);
+  // shoulder texture + roadside scrub with long evening shadows (deterministic slots)
+  const stepU = 96, i0 = Math.floor((dist - (H - carY) / S - 60) / stepU), i1 = Math.ceil((dist + carY / S + 60) / stepU);
+  for (let i = i0; i <= i1; i++) for (const side of [0, 1]) {
+    const h = hash(i * 2 + side), h2 = hash(i * 7 + side * 3 + 1), y = Y(i * stepU + h2 * 60), sw = roadL - 8 * S, x = side ? R + 8 * S + h * sw : h * sw, kind = Math.floor(h2 * 5);
+    c.fillStyle = sand2; c.beginPath(); c.ellipse(side ? R + sw * .5 + 8 * S : sw * .5, y + 30 * S, sw * (.3 + h * .3), 5 * S, 0, 0, TAU); c.fill();
+    if (kind < 2) { const r = (5 + h * 5) * S; c.fillStyle = "rgba(30,15,50,.22)"; c.beginPath(); c.ellipse(x + r * 1.6, y + r * .5, r * 2, r * .7, .3, 0, TAU); c.fill(); draw.circle(c, x, y, r, kind ? "#5f8f6a" : "#7fa06c"); draw.circle(c, x - r * .3, y - r * .3, r * .5, kind ? "#7fb083" : "#9bbd82"); }
+    else if (kind === 3) { const r = (7 + h * 4) * S; c.fillStyle = "rgba(30,15,50,.22)"; c.beginPath(); c.ellipse(x + r * 1.8, y + r * .6, r * 2.2, r * .6, .3, 0, TAU); c.fill(); c.strokeStyle = "#4f8a63"; c.lineCap = "round"; c.lineWidth = r * .8; c.beginPath(); c.moveTo(x, y - r); c.lineTo(x, y + r); c.moveTo(x - r, y); c.lineTo(x + r, y); c.stroke(); c.strokeStyle = "#7fb083"; c.lineWidth = r * .25; c.beginPath(); c.moveTo(x - r * .1, y - r); c.lineTo(x - r * .1, y + r); c.stroke(); }
+    else if (kind === 2) { const r = (4 + h * 4) * S; c.fillStyle = "rgba(30,15,50,.2)"; c.beginPath(); c.ellipse(x + r * 1.3, y + r * .4, r * 1.6, r * .6, .3, 0, TAU); c.fill(); draw.poly(c, x, y, r, 6, h * 3, C.shade(sand2, -.25)); }
+  }
+  c.fillStyle = road; c.fillRect(roadL, -40, roadW, H + 80);
+  c.fillStyle = "rgba(255,255,255,.035)"; for (let l = 0; l < LANES; l += 2) c.fillRect(roadL + l * laneW, -40, laneW, H + 80);
+  // paint: solid edges, dashes that scroll with the road, reflector posts
+  c.fillStyle = "#ffe2b0"; c.fillRect(roadL + 3 * S, -40, 3.5 * S, H + 80); c.fillRect(R - 6.5 * S, -40, 3.5 * S, H + 80);
+  const dash = 80, d0 = Math.floor((dist - (H - carY) / S) / dash) - 1, d1 = Math.ceil((dist + carY / S) / dash) + 1;
+  c.fillStyle = "rgba(255,226,176,.75)";
+  for (let i = d0; i <= d1; i++) { const y = Y(i * dash); for (let l = 1; l < LANES; l++) c.fillRect(roadL + l * laneW - 1.5 * S, y, 3 * S, 34 * S); if (i % 2 === 0) { draw.circle(c, roadL - 5 * S, y, 3 * S, "#ff8a4a"); draw.circle(c, R + 5 * S, y, 3 * S, "#ff8a4a"); } }
+  // checkpoint gantry
+  const cy = Y(cpS);
+  if (cy > -60 * S && cy < H + 40) {
+    const sq = roadW / 16; for (let i = 0; i < 16; i++) for (let j = 0; j < 2; j++) { c.fillStyle = (i + j) % 2 ? "#fff0d6" : "#2a2238"; c.fillRect(roadL + i * sq, cy - sq + j * sq, sq + .5, sq + .5); }
+    draw.rect(c, roadL - 12 * S, cy - sq * 2.2, 10 * S, sq * 3.4, 3 * S, "#ff6b4a"); draw.rect(c, R + 2 * S, cy - sq * 2.2, 10 * S, sq * 3.4, 3 * S, "#ff6b4a");
+    draw.text(c, "CHECKPOINT  +" + cpBonus(stage) + " s", W / 2, cy - sq - 14 * S, { size: 14 * u, color: "#fff0d6", stroke: "rgba(30,15,50,.6)" });
+  }
+  // traffic (far first), then the player
+  cars.sort((a, b) => b.s - a.s);
+  for (const v of cars) {
+    const y = Y(v.s); if (y < -120 * S) continue;
+    const x = X(v.x); drawVeh(c, vehSprite(v.kind, v.col, v.w, v.l), x, y, v.rot, v.w, v.l, night);
+    if (v.chg && v.chg.t < 1.5 && Math.floor(t * 6) % 2 === 0) { const dir = v.chg.to - v.chg.from, bx = x + dir * v.w * laneW * .46; draw.glow(c, bx, y + v.l * S * .42, 13 * S, "#ffb020", .9); draw.circle(c, bx, y + v.l * S * .42, 3.4 * S, "#ffd76a"); draw.glow(c, bx, y - v.l * S * .42, 10 * S, "#ffb020", .8); draw.circle(c, bx, y - v.l * S * .42, 3 * S, "#ffd76a"); }
+  }
+  const px = X(car.x), fastK = Lab.clamp((speed - VMIN) / (1150 - VMIN), 0, 1);
+  if (car.inv <= 0 || Math.floor(car.inv * 14) % 2 === 0 || car.spin > 0) {
+    const sp = vehSprite("player", "#e23b3b", PWU, PLEN), rot = car.yaw + ease.outCubic(1 - car.spin) * TAU * (car.spin > 0 ? 1 : 0), jig = thr ? Math.sin(t * 60) * .5 * fastK * S : 0;
+    drawVeh(c, sp, px + jig, carY, rot, PWU, PLEN, night);
+    if (!thr && alive && speed > VMIN + 20) { c.save(); c.translate(px, carY); c.rotate(rot); for (const sx of [-.3, .3]) draw.glow(c, PWU * laneW * sx, PLEN * S / 2 - 2 * S, 16 * S, "#ff3a2a", .95); c.restore(); }
+  }
+  // speed streaks
+  if (fastK > .45 && !Lab.reducedMotion) { c.strokeStyle = `rgba(255,240,214,${(fastK - .45) * .5})`; c.lineWidth = 2 * S; for (let i = 0; i < 7; i++) { const hx = hash(i + Math.floor(t * 9 + i * .37) * 17), x = hx < .5 ? hx * 2 * roadL : R + (hx - .5) * 2 * roadL, y = hash(i * 3 + Math.floor(t * 9)) * H; c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + (50 + fastK * 90) * S); c.stroke(); } }
+  // light: low sun from the left, then night falling
+  const tg = c.createLinearGradient(0, 0, W, 0); tg.addColorStop(0, C.alpha(sky("tint"), sky("ta") + .12)); tg.addColorStop(1, C.alpha(sky("tint"), 0)); c.fillStyle = tg; c.fillRect(-40, -40, W + 80, H + 80);
+  if (night > .01) { c.fillStyle = `rgba(14,10,44,${night * .5})`; c.fillRect(-40, -40, W + 80, H + 80); }
+  if (night > .2) { // headlight cone, drawn over the darkness
+    c.save(); c.globalAlpha = Math.min(1, night * 1.6) * .42; const g = c.createLinearGradient(0, carY - 40 * S, 0, carY - 330 * S); g.addColorStop(0, "rgba(255,240,190,.75)"); g.addColorStop(1, "rgba(255,240,190,0)"); c.fillStyle = g;
+    c.translate(px, carY); c.rotate(car.yaw); c.beginPath(); c.moveTo(-14 * S, -36 * S); c.lineTo(-70 * S, -330 * S); c.lineTo(70 * S, -330 * S); c.lineTo(14 * S, -36 * S); c.closePath(); c.fill(); c.restore();
+  }
+  draw.vignette(c, .3);
+  if (time < 5 && alive) { c.fillStyle = `rgba(255,60,50,${.1 + .08 * Math.sin(t * 10)})`; c.fillRect(-40, -40, W + 80, H + 80); }
+  // HUD: clock, stage progress, speedo, combo
+  const ty = Lab.play.y + 26 * u, low = time < 5.5, pulse = low ? 1 + .12 * Math.abs(Math.sin(t * 7)) : 1, tw = 104 * u;
+  draw.rect(c, W / 2 - tw / 2, ty - 20 * u, tw, 40 * u, 14 * u, "rgba(30,20,50,.72)", low ? "#ff6b4a" : "rgba(255,240,214,.25)", 1.5);
+  draw.text(c, time.toFixed(1), W / 2, ty - 2 * u, { size: 23 * u * pulse, color: low ? "#ff8a6a" : "#fff0d6", weight: 900 });
+  const prog = Lab.clamp((dist - cpPrev) / (cpS - cpPrev), 0, 1); draw.rect(c, W / 2 - tw / 2 + 10 * u, ty + 13 * u, tw - 20 * u, 3.5 * u, 2, "rgba(255,240,214,.22)"); draw.rect(c, W / 2 - tw / 2 + 10 * u, ty + 13 * u, (tw - 20 * u) * prog, 3.5 * u, 2, "#8dffb0");
+  const gx = 46 * u, gy = H - Lab.safe.bottom - 44 * u, gr = 30 * u, a0 = Math.PI * .8, a1 = Math.PI * 2.2, ak = a0 + (a1 - a0) * Lab.clamp(speed / 1150, 0, 1);
+  draw.circle(c, gx, gy, gr + 7 * u, "rgba(30,20,50,.72)"); c.lineCap = "round"; c.lineWidth = 5 * u; c.strokeStyle = "rgba(255,240,214,.2)"; c.beginPath(); c.arc(gx, gy, gr, a0, a1); c.stroke();
+  c.strokeStyle = fastK > .8 ? "#ff6b4a" : "#ffc15e"; c.beginPath(); c.arc(gx, gy, gr, a0, ak); c.stroke();
+  draw.text(c, Math.round(speed / 5), gx, gy - 2 * u, { size: 17 * u, color: "#fff0d6", weight: 900 }); draw.text(c, "km/h", gx, gy + 13 * u, { size: 8.5 * u, color: "rgba(255,240,214,.7)" });
+  if (combo > 0) { const pw = 92 * u, bx = W - pw - 10 * u, by = H - Lab.safe.bottom - 58 * u; draw.rect(c, bx, by, pw, 28 * u, 14 * u, "rgba(30,20,50,.78)"); c.save(); draw.rr(c, bx, by, pw, 28 * u, 14 * u); c.clip(); c.fillStyle = "#ffc15e"; c.fillRect(bx, by + 24 * u, pw * comboT / 3.6, 4 * u); c.restore(); draw.text(c, "CLOSE ×" + combo, bx + pw / 2, by + 12.5 * u, { size: 13 * u, color: "#ffe08a" }); }
+  if (!steered) { const a = .65 + .35 * Math.sin(t * 5); c.globalAlpha = a; draw.text(c, "HOLD TO GO", W / 2, H * .46, { size: 24 * u, color: "#fff0d6", stroke: "rgba(30,15,50,.7)" }); draw.text(c, "drag to steer · lift to brake", W / 2, H * .46 + 26 * u, { size: 13 * u, color: "#fff0d6", stroke: "rgba(30,15,50,.7)" }); c.globalAlpha = 1; }
+  if (!alive) draw.text(c, "OUT OF TIME", W / 2, H * .4, { size: 30 * u * Math.min(1, ease.outBack(Math.min(1, outT / .35))), color: "#fff0d6", stroke: "rgba(30,15,50,.7)" });
+}
+Lab.boot();
+})();
+</script></body></html>

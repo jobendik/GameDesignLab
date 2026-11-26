@@ -1,65 +1,402 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Scribble Siege</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Space Invaders", instructions:"Drag to move ship. Tap to fire.", restart:start});
-let ship,bullets,aliens,dir,step,score,fireT,ebullets,lives,wave;
-function makeWave(){
-  aliens=[]; const cols=8, rows=4;
-  const mx=24, gap=(Lab.W-mx*2)/cols;
-  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
-    aliens.push({x:mx+gap*c+gap/2,y:120+r*40,r:14,alive:true,kind:r});
-  }
+(function(){ "use strict";
+/* SCRIBBLE SIEGE — a fixed shooter drawn in the margin of a maths notebook.
+ * Identity: ruled paper, wobbly "boiling" ink outlines with highlighter fills, a pencil-rocket, sticky-note bunkers,
+ * marching-band music whose drum is the formation's own footsteps.
+ * Cast: Blots (march), Spikes (wind up and spit aimed ink), Crates (two hits), Flaps (peel off and dive-bomb), and every
+ * fourth wave The Big Smudge, a boss with telegraphed fans, aimed bursts and dive-bombing escorts.
+ * Controls: drag anywhere to slide the rocket (relative, so the thumb never covers it); it fires by itself.
+ * Hook: erased doodles shed pencil-shaving stars. Catching them builds the score multiplier (x1..x5, dropping one costs
+ * a step) and charges the ERASER — one tap rubs out every bullet on the page and takes a hit off every doodle.      */
+Lab.init({
+  title: "Scribble Siege", tagline: "The doodles in the margin are marching. Rub them out.", category: "Arcade & Action",
+  howto: ["Drag to slide the pencil-rocket: it fires by itself", "Catch falling stars to build the multiplier", "Tap ERASE when it is full to wipe the page"],
+  theme: { bg: "#efe7d2", bg2: "#fbf6e8", fg: "#2b2f5e", muted: "#6c7096", accent: "#ef476f", accent2: "#3a86ff", light: true },
+  orient: "portrait", music: { style: "march", key: "G", vol: .4 }, restart: start,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, INK = "#2b2f5e", PAPER = "#fbf6e8", RED = "#d62839";
+const KIND = {
+  blot: { hp: 1, pts: 10, c: "#9ad1ff" }, spike: { hp: 1, pts: 20, c: "#ff9eb5" }, crate: { hp: 2, pts: 30, c: "#b9e58a" }, flap: { hp: 1, pts: 30, c: "#c9a7ff" },
+};
+let S, L, R, py, gx, gy, ship, shots, ebul, foes, stars, drops, notes, boss, wave, lives, score, chain, kills, bestMult, eraser, sweep, form,
+  fireT, efireT, diveT, mode, modeT, stepT, stepN, alive, total, hintT, btn;
+
+function layout() {
+  S = Math.min(Lab.W / 390, Lab.play.h / 700);
+  L = 12 * S; R = Lab.W - 12 * S; py = Lab.H - Lab.safe.bottom - 100 * S; gx = 52 * S; gy = 42 * S;
+  btn = { x: Lab.W - 40 * S, y: Lab.H - Lab.safe.bottom - 40 * S, r: 27 * S };
 }
-function start(){
-  score=0;lives=3;wave=1;
-  ship={x:Lab.W/2,w:50,h:18};
-  bullets=[]; ebullets=[]; makeWave(); dir=1; step=0; fireT=0;
+Lab.onResize(() => {
+  if (!foes) return; const oW = R - L, oL = L, oP = py, oT = Lab.play.y; layout(); const kx = v => L + (v - oL) / oW * (R - L), ky = v => Lab.play.y + (v - oT) / (oP - oT) * (py - Lab.play.y);
+  ship.x = ship.tx = kx(ship.x); form.x = kx(form.x); form.y = ky(form.y); form.ty = ky(form.ty);
+  for (const a of [shots, ebul, stars, drops, foes]) for (const o of a) { o.x = kx(o.x); o.y = ky(o.y); }
+  if (boss) { boss.x = kx(boss.x); boss.y = ky(boss.y); boss.ty = Lab.play.y + 118 * S; boss.r = 44 * S; } placeNotes();
+});
+// engine workaround: Lab.buzz before the first tap makes Chrome log a console error (possible here because the rocket auto-fires)
+const buzz = ms => { const ua = navigator.userActivation; if (!ua || ua.hasBeenActive) Lab.buzz(ms); };
+const mult = () => Math.min(5, 1 + Math.floor(chain / 3));
+const page = () => Math.ceil(wave / 4);
+
+function start() {
+  layout();
+  ship = { x: Lab.W / 2, tx: Lab.W / 2, vx: 0, inv: 1.2, shield: false, twinT: 0, recoil: 0 };
+  shots = []; ebul = []; foes = []; stars = []; drops = []; boss = null; sweep = null;
+  wave = 0; lives = 3; score = 0; chain = 0; kills = 0; bestMult = 1; eraser = 0; fireT = .3; efireT = 2; diveT = 4; stepT = 0; stepN = 0; alive = true; total = 1; hintT = 0;
+  form = { x: Lab.W / 2, y: 0, ty: 0, dir: 1, cols: 6 };
+  notes = [0, 1, 2].map(i => ({ i, hp: 5, x: 0, y: 0, w: 0, h: 0, wob: 0 })); placeNotes();
   Lab.setScore(0);
-  Lab.input.onMove=[x=>{ship.x=Lab.clamp(x,30,Lab.W-30);}];
-  Lab.input.onTap=[()=>{ if(fireT<=0){ bullets.push({x:ship.x,y:Lab.H-70,vy:-500}); fireT=0.18; Lab.beep(800,.04); } }];
-  Lab.loop(dt=>{
-    fireT-=dt;
-    // move aliens
-    step+=dt*(0.6+wave*0.15)*(aliens.filter(a=>a.alive).length<8?2:1);
-    let down=false;
-    if(step>0.5){ step=0;
-      // shift
-      let minX=Infinity,maxX=-Infinity;
-      for(const a of aliens) if(a.alive){minX=Math.min(minX,a.x);maxX=Math.max(maxX,a.x);}
-      const nx=minX+dir*14, nX=maxX+dir*14;
-      if(nx<10||nX>Lab.W-10){ dir*=-1; for(const a of aliens)a.y+=18; }
-      else for(const a of aliens)a.x+=dir*14;
-      // enemy fire
-      const alive=aliens.filter(a=>a.alive);
-      if(alive.length && Math.random()<.4){
-        const e=Lab.choose(alive);
-        ebullets.push({x:e.x,y:e.y,vy:200+wave*20});
+  Lab.input.onDown = [(x, y) => { if (Lab.dist(x, y, btn.x, btn.y) < Math.max(30, btn.r * 1.35) || Lab.input.pointers.length >= 2) erase(); }];
+  Lab.input.onMove = [(x, y, dx) => { if (Lab.input.pointers.length) ship.tx += dx * 1.25; else ship.tx = x; }];
+  Lab.input.onKey = [k => { if (k === " " || k === "e" || k === "E" || k === "Enter" || k === "ArrowUp") erase(); }];
+  Lab.expose({
+    get score() { return score; }, get lives() { return lives; }, get wave() { return wave; }, get mode() { return mode; }, get mult() { return mult(); }, get chain() { return chain; },
+    get eraser() { return eraser; }, get kills() { return kills; }, get ship() { return { x: ship.x, y: py, inv: ship.inv, shield: ship.shield, twin: ship.twinT > 0 }; },
+    get foes() { return foes.map(e => ({ x: e.x, y: e.y, kind: e.kind, hp: e.hp, state: e.state })); }, get boss() { return boss ? { x: boss.x, y: boss.y, hp: boss.hp, max: boss.max } : null; },
+    get ebul() { return ebul.map(b => ({ x: b.x, y: b.y })); }, get stars() { return stars.map(s => ({ x: s.x, y: s.y })); }, get shots() { return shots.length; }, get notes() { return notes.map(n => n.hp); },
+    erase,
+    /* test helpers */
+    setLives(n) { lives = n; }, fillEraser() { eraser = 1; }, skipTo(w) { foes = []; ebul = []; boss = null; startWave(w); }, calm() { ship.inv = 1e9; },
+  });
+  startWave(1);
+  Lab.loop(frame);
+}
+function placeNotes() { if (!notes) return; for (const n of notes) { n.w = 54 * S; n.h = 30 * S; n.x = L + (R - L) * (.18 + n.i * .32) - n.w / 2; n.y = py - 92 * S; } }
+
+/* ---------------------------------------------------------------- waves */
+function startWave(w) {
+  wave = w; mode = "intro"; modeT = 0; foes = []; form.x = Lab.W / 2; form.dir = Lab.chance(.5) ? 1 : -1; form.y = form.ty = Lab.play.y + 78 * S;
+  const p = page(), isBoss = w % 4 === 0;
+  if (w > 1 && w % 4 === 1) for (const n of notes) { n.hp = 5; n.wob = 1; }
+  if (isBoss) {
+    boss = { x: Lab.W / 2, y: -80 * S, ty: Lab.play.y + 118 * S, hp: 34 + 16 * p, max: 34 + 16 * p, t: 0, atk: 2.2, wind: 0, flash: 0, n: 0, half: false, r: 44 * S };
+    Lab.banner("THE BIG SMUDGE", { color: RED, ms: 1500 }); Lab.sfx("warn", { pitch: .7 }); Lab.sfx("boom", { pitch: 1.3 }); total = 1; return;
+  }
+  const k = (w - 1) % 4, rowsDef = [["blot", "blot", "blot"], ["spike", "blot", "blot", "blot"], ["spike", "crate", "blot", "blot"]][k].slice();
+  if (p >= 2) rowsDef.splice(1, 0, k === 0 ? "spike" : "crate"); if (p >= 3 && k > 0) rowsDef[rowsDef.length - 1] = "crate";
+  form.cols = 6;
+  rowsDef.forEach((kind, r) => { for (let c = 0; c < 6; c++) {
+    let kd = kind; if ((k === 2 || p >= 2 && k === 1) && r === 0 && (c === 0 || c === 5)) kd = "flap"; if (p >= 2 && k === 2 && r === 1 && (c === 2 || c === 3)) kd = "flap";
+    foes.push({ kind: kd, hp: KIND[kd].hp, row: r, col: c, x: 0, y: -40 * S, state: "in", k: -(c * .04 + r * .09) / .6, ph: Lab.rand(0, TAU), flash: 0, wind: 0, t: 0, vx: 0, rot: 0, shot: false, aimed: false });
+  } });
+  total = foes.length; efireT = 1.6; diveT = 3.5;
+  Lab.banner("WAVE " + w, { color: INK, ms: 1000 }); Lab.sfx("whistle", { pitch: .9 });
+}
+const slotX = e => form.x + (e.col - (form.cols - 1) / 2) * gx * (page() >= 2 ? 1 + .07 * Math.sin(Lab.now() * 1.3) : 1);
+const slotY = e => form.y + e.row * gy;
+
+/* ---------------------------------------------------------------- actions */
+function erase() {
+  if (!alive || eraser < 1 || sweep || Lab.paused) return false;
+  eraser = 0; sweep = { t: 0, done: false }; ship.inv = Math.max(ship.inv, .9);
+  Lab.sfx("whoosh", { pitch: .8 }); Lab.sfx("swish"); buzz(25); return true;
+}
+function wipe() {
+  Lab.flash("#fff", .25, .55); Lab.shake(8, .3); Lab.sfx("slide", { pitch: .6 }); Lab.sfx("crunch", { pitch: 1.4 });
+  for (const b of ebul) fx.burst(b.x, b.y, { n: 3, colors: ["#f7a8b8", "#ddd"], speed: 80 * S, size: 3 * S, life: .4, shape: "square" });
+  ebul = [];
+  for (const e of foes.slice()) hurt(e, 1, true);
+  if (boss) hurtBoss(10);
+}
+function addScore(n, x, y, big) {
+  const g = n * mult(); score += g; Lab.setScore(score); if (big) Lab.bumpScore();
+  fx.text(x, y, "+" + g, { color: INK, size: (big ? 20 : 13) * Math.max(.85, S), life: .6, outline: "rgba(251,246,232,.9)", weight: 700 });
+}
+function hurt(e, dmg, wiped) {
+  e.hp -= dmg; e.flash = 1;
+  if (e.hp > 0) { Lab.sfx("knock", { pitch: 1.4 }); fx.burst(e.x, e.y, { n: 4, color: INK, speed: 120 * S, size: 2.4 * S, life: .3, shape: "spark" }); return; }
+  const K = KIND[e.kind]; foes.splice(foes.indexOf(e), 1); kills++;
+  addScore(K.pts * (e.state === "dive" ? 2 : 1), e.x, e.y - 14 * S);
+  fx.burst(e.x, e.y, { n: 10, colors: [K.c, INK, "#f7a8b8"], speed: 190 * S, size: 3.2 * S, life: .5, shape: "square", gravity: 500 * S });
+  fx.ring(e.x, e.y, { r0: 6 * S, r1: 26 * S, color: INK, width: 2.5 * S, life: .25 });
+  Lab.sfx("pop", { pitch: { blot: 1, spike: 1.2, crate: .75, flap: 1.4 }[e.kind] }); buzz(6);
+  if (drops.length < 1 && !wiped && kills > 5 && Lab.chance(.1)) drops.push({ x: e.x, y: e.y, type: lives < 3 && Lab.chance(.3) ? "heart" : Lab.chance(.5) ? "twin" : "shield", t: 0 });
+  else if (stars.length < 26 && Lab.chance(wiped ? .5 : .72)) stars.push({ x: e.x, y: e.y, vy: -90 * S, vx: Lab.rand(-30, 30) * S, t: Lab.rand(0, 6) });
+  if (!foes.length && !boss && mode === "fight") waveClear();
+}
+function hurtBoss(dmg) {
+  if (!boss || boss.dead) return; boss.hp -= dmg; boss.flash = 1; Lab.sfx("knock", { pitch: .7 + .5 * (1 - boss.hp / boss.max) });
+  if (boss.hp > 0) return;
+  boss.dead = true; const bx = boss.x, by = boss.y, p = page();
+  Lab.slowmo(.3, .7); Lab.hitstop(.1); Lab.shake(18, .7); Lab.flash("#fff", .4, .7); Lab.sfx("boom"); Lab.sfx("glass"); buzz(80);
+  fx.burst(bx, by, { n: 60, colors: ["#ffb86b", INK, "#f7a8b8", "#fff"], speed: 420 * S, size: 5 * S, life: 1, shape: "square", gravity: 300 * S });
+  for (let i = 0; i < 3; i++) fx.ring(bx, by, { r0: 10 * S, r1: (70 + i * 40) * S, color: INK, width: 4 * S, life: .4 + i * .15 });
+  for (let i = 0; i < 9; i++) stars.push({ x: bx + Lab.rand(-40, 40) * S, y: by + Lab.rand(-20, 20) * S, vy: Lab.rand(-240, -80) * S, vx: Lab.rand(-90, 90) * S, t: i });
+  addScore(400 * p, bx, by, true); kills++; boss = null; ebul = [];
+  for (const e of foes.slice()) hurt(e, 9, true);
+  if (mode === "fight") waveClear();
+}
+function waveClear() {
+  mode = "clear"; modeT = 0; const bonus = 40 * wave; score += bonus; Lab.setScore(score); Lab.bumpScore(); Lab.sfx("levelup");
+  fx.text(Lab.W / 2, py - 150 * S, (wave % 4 === 0 ? "page " + page() + " rubbed out!  +" : "wave clear  +") + bonus, { color: "#3a86ff", size: 18 * Math.max(.85, S), life: 1.2, outline: "rgba(251,246,232,.95)" });
+  const w = wave; Lab.after(1.15, () => { if (alive) startWave(w + 1); });
+}
+function hitShip(x, y) {
+  if (ship.inv > 0 || !alive) return;
+  if (ship.shield) { ship.shield = false; ship.inv = .8; Lab.sfx("glass", { pitch: .8 }); fx.ring(ship.x, py, { r0: 20 * S, r1: 60 * S, color: "#3a86ff", width: 4 * S }); Lab.shake(5, .2); return; }
+  lives--; chain = 0; ship.twinT = 0; ship.inv = 2; Lab.shake(12, .4); Lab.hitstop(.09); Lab.flash(RED, .25, .3); Lab.sfx("hurt"); Lab.sfx("explode", { pitch: 1.3 }); buzz(60);
+  fx.burst(ship.x, py, { n: 26, colors: [RED, INK, "#ffd166"], speed: 300 * S, size: 4 * S, life: .8, shape: "shard" });
+  for (const b of ebul) fx.puff(b.x, b.y, { n: 2, color: "rgba(214,40,57,.5)" }); ebul = [];
+  if (lives <= 0) end("Inked out");
+}
+function end(title) {
+  alive = false; Lab.gameover({ title, score, stats: [["Wave", wave], ["Best multiplier", "×" + bestMult], ["Doodles erased", kills]] });
+}
+function shoot(x, y, vx, vy, aimed) { if (ebul.length < 70) ebul.push({ x, y, vx, vy, t: Lab.rand(0, 6), aimed }); }
+function aimAt(x, y, sp, spread) { const a = Math.atan2(py - y, ship.x - x) + (spread || 0); shoot(x, y, Math.cos(a) * sp, Math.sin(a) * sp, true); }
+const bulletSpeed = () => Math.min(310, 172 + 9 * wave) * S;
+
+/* ---------------------------------------------------------------- frame */
+function frame(dt, t) {
+  modeT += dt; hintT += dt; if (mode === "intro" && modeT > 1.05) mode = "fight";
+  // rocket
+  const k = Lab.input.axisX(); if (k) ship.tx += k * 360 * S * dt;
+  ship.tx = Lab.clamp(ship.tx, L + 14 * S, R - 14 * S); const ox = ship.x; ship.x = Lab.damp(ship.x, ship.tx, 30, dt);
+  if (dt > 1e-4) ship.vx = Lab.damp(ship.vx, (ship.x - ox) / dt, 14, dt);
+  ship.inv = Math.max(0, ship.inv - dt); ship.recoil = Lab.damp(ship.recoil, 0, 18, dt); if (ship.twinT > 0) ship.twinT -= dt;
+  fireT -= dt;
+  if (fireT <= 0 && alive) {
+    fireT += .29; ship.recoil = 1;
+    if (ship.twinT > 0) { shots.push({ x: ship.x - 9 * S, y: py - 20 * S }, { x: ship.x + 9 * S, y: py - 20 * S }); } else shots.push({ x: ship.x, y: py - 24 * S });
+    Lab.audio.tone({ f: 980, f2: 520, dur: .045, type: "triangle", vol: .05 });
+  }
+  // formation march
+  if (foes.length) {
+    let mn = 1e9, mx = -1e9, low = -1e9, slotted = 0; for (const e of foes) { const x = slotX(e); if (x < mn) mn = x; if (x > mx) mx = x; if (e.state !== "dive") { low = Math.max(low, slotY(e)); slotted++; } }
+    const v = (20 + 4.5 * Math.min(wave, 14)) * S * (1 + 2.1 * Math.pow(1 - foes.length / total, 1.4));
+    if (mode !== "intro") { form.x += form.dir * v * dt; if (form.dir > 0 && mx + 17 * S > R) { form.dir = -1; form.ty += 15 * S; } else if (form.dir < 0 && mn - 17 * S < L) { form.dir = 1; form.ty += 15 * S; } }
+    form.y = Lab.damp(form.y, form.ty, 6, dt);
+    stepT -= dt * v / (20 * S); if (stepT <= 0 && mode === "fight") { stepT = .62; stepN++; Lab.audio.tone({ f: stepN % 2 ? 92 : 78, f2: 55, dur: .09, vol: .22 }); }
+    if (low + 16 * S > notes[0].y - 6 * S) for (const n of notes) if (n.hp > 0) { n.hp = 0; fx.burst(n.x + n.w / 2, n.y + n.h / 2, { n: 12, color: "#ffe66d", speed: 160 * S, shape: "square", size: 4 * S }); Lab.sfx("crunch"); }
+    if (low + 14 * S > py - 28 * S && alive) { Lab.shake(10, .4); Lab.sfx("explode"); end("Page overrun"); return; }
+    // enemy fire: the lowest doodle of a random column winds up, then spits
+    if (mode === "fight") {
+      efireT -= dt;
+      if (efireT <= 0) {
+        efireT = Math.max(.4, 1.55 - wave * .075) * Lab.rand(.6, 1.4);
+        const cols = {}; for (const e of foes) if (e.state === "slot" && (!cols[e.col] || cols[e.col].row < e.row)) cols[e.col] = e;
+        let c = Object.values(cols); const sp = foes.filter(e => e.kind === "spike" && e.state === "slot" && e.wind <= 0);
+        const sh = sp.length && Lab.chance(.45) ? Lab.choose(sp) : c.length ? Lab.choose(c) : null;
+        if (sh && sh.wind <= 0) { sh.wind = .32; sh.aimed = sh.kind === "spike"; }
+      }
+      diveT -= dt;
+      if (diveT <= 0) {
+        diveT = Math.max(1.5, 3.6 - page() * .4) * Lab.rand(.7, 1.3);
+        const c = foes.filter(e => e.state === "slot" && (e.kind === "flap" || page() >= 2 && e.kind === "blot" && Lab.chance(.25)));
+        if (c.length && foes.filter(e => e.state === "dive").length < 2) { const e = Lab.choose(c); e.state = "dive"; e.t = 0; e.vx = 0; e.shot = false; Lab.sfx("whistle", { pitch: 1.5 }); }
       }
     }
-    // bullets
-    for(const b of bullets){ b.y+=b.vy*dt; }
-    for(const b of bullets){
-      for(const a of aliens) if(a.alive && Lab.dist(a.x,a.y,b.x,b.y)<a.r+4){a.alive=false;b.dead=true;score+=10;Lab.setScore(score);Lab.beep(1200,.05);}
+  }
+  for (const e of foes) {
+    e.flash = Math.max(0, e.flash - dt * 6);
+    if (e.wind > 0) { e.wind -= dt; if (e.wind <= 0 && e.state === "slot") { if (e.aimed) aimAt(e.x, e.y + 12 * S, bulletSpeed() * 1.08); else shoot(e.x, e.y + 12 * S, 0, bulletSpeed()); Lab.sfx(e.aimed ? "zap" : "drop", { pitch: e.aimed ? .7 : 1.3 }); } }
+    if (e.state === "in" || e.state === "back") { e.k += dt / (e.state === "in" ? .6 : .7); const u = Lab.clamp(e.k, 0, 1); e.x = slotX(e); e.y = Lab.lerp(-40 * S, slotY(e), Lab.ease.outBack(u)); if (e.k >= 1) e.state = "slot"; }
+    else if (e.state === "slot") { e.x = slotX(e) + Math.sin(t * 2 + e.ph) * 2 * S; e.y = slotY(e) + Math.cos(t * 2.4 + e.ph) * 2 * S; e.rot = Lab.damp(e.rot, 0, 8, dt); }
+    else { // dive-bomb
+      e.t += dt;
+      if (e.t < .4) { e.y -= 60 * S * dt; e.rot += dt * 14; }
+      else { e.y += Math.min(330, 232 + 10 * wave) * S * dt; e.vx = Lab.damp(e.vx, Lab.clamp((ship.x - e.x) * 2.2, -170 * S, 170 * S), 3, dt); e.x += (e.vx + Math.cos(e.t * 7) * 46 * S) * dt; e.rot = Lab.damp(e.rot, Lab.clamp(e.vx / (300 * S), -.5, .5), 8, dt);
+        if (!e.shot && e.y > py - 300 * S) { e.shot = true; shoot(e.x, e.y + 10 * S, 0, bulletSpeed() * 1.15); } }
+      if (e.y > Lab.H + 30 * S) { e.state = "back"; e.k = 0; e.rot = 0; }
     }
-    for(const b of ebullets){ b.y+=b.vy*dt;
-      if(Math.abs(b.x-ship.x)<28 && b.y>Lab.H-70 && b.y<Lab.H-30){ b.dead=true; lives--; Lab.beep(120,.2,'sawtooth'); if(lives<=0){ Lab.gameover({title:"Defeated",message:"Score: "+score}); return; }}
+    if (alive && Lab.dist(e.x, e.y, ship.x, py) < 23 * S && ship.inv <= 0) { hitShip(); hurt(e, 9, true); break; }
+  }
+  // boss
+  if (boss) {
+    const b = boss, p = page(); b.t += dt; b.flash = Math.max(0, b.flash - dt * 5); b.y = Lab.damp(b.y, b.ty, 2.5, dt);
+    b.x = Lab.W / 2 + Math.sin(b.t * (.55 + p * .08)) * (R - L - 2 * b.r - 10 * S) / 2;
+    if (mode === "fight") {
+      if (b.wind > 0) { b.wind -= dt; if (b.wind <= 0) bossAttack(b, p); }
+      else { b.atk -= dt; if (b.atk <= 0) { b.wind = .55; b.atk = Math.max(1.25, 2.3 - p * .2) + (b.hp < b.max / 2 ? -.3 : 0); Lab.sfx("warn", { pitch: .8 }); } }
+      if (!b.half && b.hp < b.max / 2) { b.half = true; Lab.shake(6, .3); fx.text(b.x, b.y + b.r + 16 * S, "GRRR!", { color: RED, size: 22 * S, outline: "rgba(251,246,232,.9)" }); Lab.sfx("error", { pitch: .7 }); }
     }
-    bullets=bullets.filter(b=>b.y>0 && !b.dead);
-    ebullets=ebullets.filter(b=>b.y<Lab.H && !b.dead);
-    if(!aliens.some(a=>a.alive)){ wave++; makeWave(); Lab.toast("Wave "+wave); }
-    if(aliens.some(a=>a.alive && a.y>Lab.H-90)){ Lab.gameover({title:"Invaded!",message:"Score: "+score}); return; }
-    const c=Lab.ctx; c.fillStyle="#05060b"; c.fillRect(0,0,Lab.W,Lab.H);
-    for(const a of aliens) if(a.alive){
-      c.fillStyle=["#3df58a","#5af","#f5a","#ffd35a"][a.kind%4];
-      c.fillRect(a.x-12,a.y-8,24,16);
+  }
+  // rocket shots
+  const vy = 640 * S;
+  for (const s of shots) {
+    s.y -= vy * dt; if (s.y < Lab.play.y - 20) { s.dead = true; continue; }
+    if (boss && !boss.dead && Lab.dist(s.x, s.y, boss.x, boss.y) < boss.r) { s.dead = true; fx.sparks(s.x, s.y, Math.PI / 2, { n: 3, color: INK, speed: 140 * S }); hurtBoss(1); continue; }
+    for (const e of foes) if (Math.abs(e.x - s.x) < 17 * S && Math.abs(e.y - s.y) < 17 * S) { s.dead = true; hurt(e, 1); break; }
+  }
+  if (shots.some(s => s.dead)) shots = shots.filter(s => !s.dead);
+  // ink spit
+  for (const b of ebul) {
+    b.x += b.vx * dt; b.y += b.vy * dt; b.t += dt;
+    if (b.y > Lab.H + 12 || b.x < -12 || b.x > Lab.W + 12) { b.dead = true; continue; }
+    for (const n of notes) if (n.hp > 0 && b.x > n.x && b.x < n.x + n.w && b.y > n.y && b.y < n.y + n.h) { b.dead = true; n.hp--; n.wob = 1; Lab.sfx("flip", { pitch: .8 }); fx.burst(b.x, n.y, { n: 5, colors: ["#ffe66d", RED], speed: 110 * S, size: 3 * S, life: .4, shape: "square" }); break; }
+    if (!b.dead && alive && Lab.dist(b.x, b.y, ship.x, py - 2 * S) < 12.5 * S) { if (ship.inv <= 0) b.dead = true; hitShip(); if (!alive) return; }
+  }
+  if (ebul.some(b => b.dead)) ebul = ebul.filter(b => !b.dead);
+  // stars + pick-ups
+  for (const s of stars) {
+    s.t += dt; s.vy = Math.min(s.vy + 300 * S * dt, 118 * S); const d = Lab.dist(s.x, s.y, ship.x, py);
+    if (d < 78 * S && d > 1 && alive) { s.x += (ship.x - s.x) / d * 260 * S * dt; s.y += (py - s.y) / d * 260 * S * dt; } else { s.x += s.vx * dt; s.vx *= Math.exp(-2 * dt); s.y += s.vy * dt; }
+    if (d < 26 * S && alive) { s.dead = true; const m0 = mult(), e0 = eraser; chain++; eraser = Math.min(1, eraser + 1 / 11); score += 5 * mult(); Lab.setScore(score);
+      Lab.audio.combo(Math.min(chain, 14), { vol: .16 }); fx.burst(s.x, s.y, { n: 5, color: "#ffc300", speed: 120 * S, size: 3 * S, life: .35, shape: "star" });
+      if (mult() > m0) { bestMult = Math.max(bestMult, mult()); fx.text(ship.x, py - 44 * S, "×" + mult(), { color: "#e09f00", size: 24 * S, outline: "rgba(251,246,232,.95)" }); Lab.sfx("pickup", { pitch: 1 + mult() * .08 }); }
+      if (eraser >= 1 && e0 < 1) { Lab.sfx("unlock"); fx.text(btn.x - 30 * S, btn.y - 44 * S, "eraser ready!", { color: "#ef476f", size: 14 * Math.max(.85, S), outline: "rgba(251,246,232,.95)" }); } }
+    else if (s.y > Lab.H + 14) { s.dead = true; if (chain >= 3) { chain = (mult() - 2) * 3; fx.text(Lab.clamp(s.x, 50, Lab.W - 50), Lab.H - 30 * S, "dropped  ×" + mult(), { color: "#6c7096", size: 12 * Math.max(.85, S), life: .7, outline: "rgba(251,246,232,.9)" }); Lab.sfx("tick", { pitch: .5 }); } else chain = 0; }
+  }
+  if (stars.some(s => s.dead)) stars = stars.filter(s => !s.dead);
+  for (const d of drops) {
+    d.t += dt; d.y += 100 * S * dt;
+    if (alive && Lab.dist(d.x, d.y, ship.x, py) < 30 * S) { d.dead = true; Lab.sfx("powerup"); buzz(14); fx.ring(ship.x, py, { r0: 10 * S, r1: 60 * S, color: "#3a86ff", width: 4 * S });
+      if (d.type === "twin") ship.twinT = 10; else if (d.type === "shield") ship.shield = true; else lives = Math.min(4, lives + 1);
+      fx.text(ship.x, py - 46 * S, { twin: "TWIN LEADS", shield: "INK SHIELD", heart: "EXTRA LIFE" }[d.type], { color: "#3a86ff", size: 16 * Math.max(.85, S), outline: "rgba(251,246,232,.95)" }); }
+    else if (d.y > Lab.H + 20) d.dead = true;
+  }
+  if (drops.some(d => d.dead)) drops = drops.filter(d => !d.dead);
+  for (const n of notes) n.wob = Math.max(0, n.wob - dt * 4);
+  if (sweep) { sweep.t += dt / .5; if (!sweep.done && sweep.t > .45) { sweep.done = true; wipe(); } if (sweep.t >= 1) sweep = null; }
+  Lab.music.intensity(Lab.clamp(.3 + (boss ? .5 : .55 * (1 - foes.length / total)) + (lives === 1 ? .15 : 0), 0, 1));
+  render(t);
+}
+function bossAttack(b, p) {
+  const sp = bulletSpeed(), my = b.y + b.r * .5, kind = b.n++ % (b.half ? 3 : 2);
+  if (kind === 0) { const n = p >= 2 ? 7 : 5; for (let i = 0; i < n; i++) { const a = Math.PI / 2 + (i - (n - 1) / 2) * .26; shoot(b.x, my, Math.cos(a) * sp, Math.sin(a) * sp); } Lab.sfx("splash", { pitch: .8 }); }
+  else if (kind === 1) { for (let i = 0; i < 3; i++) Lab.after(i * .17, () => { if (boss === b && alive) { aimAt(b.x, my, sp * 1.2); Lab.sfx("zap", { pitch: .7 }); } }); }
+  else { for (const s of [-1, 1]) foes.push({ kind: "flap", hp: 1, row: 0, col: s < 0 ? 0 : 5, x: b.x + s * b.r, y: b.y, state: "dive", k: 0, ph: 0, flash: 0, wind: 0, t: .2, vx: s * 120 * S, rot: 0, shot: false, aimed: false }); form.y = form.ty = Lab.play.y + 60 * S; total = Math.max(total, foes.length); Lab.sfx("whistle", { pitch: 1.5 }); }
+}
+
+/* ---------------------------------------------------------------- drawing (everything is baked "boiling" line art) */
+function pen(g, seed, lw) {
+  const rnd = Lab.rng(seed), j = a => (rnd() - .5) * a * S; g.strokeStyle = INK; g.lineWidth = Math.max(1.5, (lw || 2) * S); g.lineJoin = g.lineCap = "round";
+  const path = (cx, cy, rx, ry, n, jit, r0) => { // smooth closed wobble: quadratic curves through the midpoints of jittered points
+    const P = []; for (let i = 0; i < n; i++) { const a = (r0 || 0) + i / n * TAU, k = 1 + j(jit) / (rx + ry) * 2; P.push([cx + Math.cos(a) * rx * k, cy + Math.sin(a) * ry * k]); }
+    g.beginPath(); for (let i = 0; i <= n; i++) { const p0 = P[i % n], p1 = P[(i + 1) % n], mx = (p0[0] + p1[0]) / 2, my = (p0[1] + p1[1]) / 2; if (!i) g.moveTo(mx, my); else g.quadraticCurveTo(p0[0], p0[1], mx, my); } g.closePath(); };
+  return {
+    j, blob(cx, cy, rx, ry, fill, n, jit) { if (fill) { path(cx + j(2), cy + j(2), rx * .96, ry * .96, n || 14, jit || 3); g.fillStyle = fill; g.fill(); } path(cx, cy, rx, ry, n || 14, jit || 3); g.stroke(); },
+    poly(pts, fill) { const p = () => { g.beginPath(); pts.forEach(([x, y], i) => g[i ? "lineTo" : "moveTo"](x + j(1.6), y + j(1.6))); g.closePath(); }; if (fill) { p(); g.fillStyle = fill; g.fill(); } p(); g.stroke(); },
+    line(x1, y1, x2, y2) { g.beginPath(); g.moveTo(x1 + j(1.2), y1 + j(1.2)); g.quadraticCurveTo((x1 + x2) / 2 + j(3), (y1 + y2) / 2 + j(3), x2 + j(1.2), y2 + j(1.2)); g.stroke(); },
+    eye(x, y, r, lx) { g.fillStyle = "#fff"; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); g.stroke(); g.fillStyle = INK; g.beginPath(); g.arc(x + (lx || 0), y + r * .25, r * .45, 0, TAU); g.fill(); },
+  };
+}
+function foeSprite(kind, f, hurtState, wind) {
+  const sz = 50 * S;
+  return Lab.sprite("f" + kind + f + (hurtState ? "h" : "") + (wind ? "w" : "") + ":" + Math.round(S * 100), sz, sz, g => {
+    const c = sz / 2, s = S, p = pen(g, Lab.hash(kind) % 97 + f * 13 + 1), col = KIND[kind].c, wd = wind ? 1.15 : 1;
+    if (kind === "blot") {
+      for (const dx of [-8, 0, 8]) p.line(c + dx * s, c + 10 * s, c + (dx + (f ? 2.5 : -2.5)) * s, c + 19 * s);
+      p.blob(c, c - 1 * s, 15.5 * s * wd, 13.5 * s / wd, col, 11, 4); p.eye(c - 5.5 * s, c - 3 * s, 4.2 * s); p.eye(c + 5.5 * s, c - 3 * s, 4.2 * s);
+      if (wind) { g.fillStyle = INK; g.beginPath(); g.arc(c, c + 6 * s, 3 * s, 0, TAU); g.fill(); } else p.line(c - 4 * s, c + 6 * s, c + 4 * s, c + 6 * s);
+    } else if (kind === "spike") {
+      const pts = []; for (let i = 0; i < 16; i++) { const a = i / 16 * TAU + f * .2, r = (i % 2 ? 10.5 : 18 * wd) * s; pts.push([c + Math.cos(a) * r, c + Math.sin(a) * r]); }
+      p.poly(pts, col); p.eye(c, c - 1 * s, 6 * s, 0); if (wind) { g.fillStyle = RED; g.beginPath(); g.arc(c, c + 7.5 * s, 2.6 * s, 0, TAU); g.fill(); }
+    } else if (kind === "crate") {
+      p.poly([[c - 15 * s, c - 13 * s], [c + 15 * s, c - 13 * s], [c + 15 * s, c + 12 * s], [c - 15 * s, c + 12 * s]], hurtState ? "#e4f3cf" : col);
+      g.lineWidth = Math.max(1, 1.2 * s); if (!hurtState) for (let i = -2; i <= 2; i++) p.line(c + i * 6 * s - 4 * s, c + 11 * s, c + i * 6 * s + 4 * s, c + 3 * s);
+      else { p.line(c - 12 * s, c - 4 * s, c - 2 * s, c + 2 * s); p.line(c - 2 * s, c + 2 * s, c + 4 * s, c - 5 * s); p.line(c + 4 * s, c - 5 * s, c + 12 * s, c + 3 * s); }
+      g.lineWidth = Math.max(1.5, 2 * s); p.line(c - 9 * s, c - 9 * s, c - 3 * s, c - 6 * s); p.line(c + 9 * s, c - 9 * s, c + 3 * s, c - 6 * s);
+      p.eye(c - 5 * s, c - 3 * s, 3 * s); p.eye(c + 5 * s, c - 3 * s, 3 * s);
+      for (const dx of [-8, 8]) p.line(c + dx * s, c + 12 * s, c + (dx + (f ? 2 : -2)) * s, c + 18 * s);
+    } else {
+      const wy = f ? -9 : 5;
+      for (const sd of [-1, 1]) p.poly([[c + sd * 8 * s, c - 3 * s], [c + sd * 22 * s, c + wy * s], [c + sd * 17 * s, c + (wy + 9) * s], [c + sd * 8 * s, c + 6 * s]], Lab.color.shade(col, .25));
+      p.blob(c, c, 11 * s, 12 * s, col, 10, 2.5); p.eye(c - 4.2 * s, c - 2 * s, 3.4 * s); p.eye(c + 4.2 * s, c - 2 * s, 3.4 * s);
+      p.line(c - 3 * s, c + 5 * s, c - 1.5 * s, c + 8 * s); p.line(c + 3 * s, c + 5 * s, c + 1.5 * s, c + 8 * s);
     }
-    c.fillStyle="#5af"; c.fillRect(ship.x-25,Lab.H-50,50,16);
-    c.fillRect(ship.x-3,Lab.H-58,6,8);
-    c.fillStyle="#ffd35a"; for(const b of bullets) c.fillRect(b.x-2,b.y-8,4,12);
-    c.fillStyle="#ff5577"; for(const b of ebullets) c.fillRect(b.x-2,b.y,4,12);
-    c.fillStyle="#7e89b3"; c.font="14px sans-serif"; c.textAlign="center";
-    c.fillText("❤️ "+lives+"  •  Wave "+wave, Lab.W/2, 70);
   });
 }
-start();
+function bossSprite(f, open) {
+  const sz = 124 * S;
+  return Lab.sprite("boss" + f + (open ? "o" : "") + ":" + Math.round(S * 100), sz, sz, g => {
+    const c = sz / 2, s = S, p = pen(g, 40 + f * 7, 2.6);
+    for (let i = 0; i < 5; i++) { const x = c + (i - 2) * 17 * s; p.line(x, c + 34 * s, x + (f ? 5 : -5) * s, c + 54 * s); }
+    p.blob(c, c, 46 * s, 40 * s, "#ffb86b", 22, 7);
+    p.poly([[c - 20 * s, c - 36 * s], [c - 22 * s, c - 56 * s], [c - 9 * s, c - 44 * s], [c, c - 58 * s], [c + 9 * s, c - 44 * s], [c + 22 * s, c - 56 * s], [c + 20 * s, c - 36 * s]], "#ffd166");
+    p.eye(c - 19 * s, c - 9 * s, 8 * s); p.eye(c + 19 * s, c - 9 * s, 8 * s); p.eye(c, c - 17 * s, 6 * s);
+    p.line(c - 30 * s, c - 22 * s, c - 12 * s, c - 16 * s); p.line(c + 30 * s, c - 22 * s, c + 12 * s, c - 16 * s);
+    if (open) { p.blob(c, c + 16 * s, 17 * s, 13 * s, "#7a1020", 12, 3); g.fillStyle = "#fff"; for (let i = -2; i <= 2; i++) { g.beginPath(); g.moveTo(c + i * 6 * s - 3 * s, c + 5 * s); g.lineTo(c + i * 6 * s, c + 11 * s); g.lineTo(c + i * 6 * s + 3 * s, c + 5 * s); g.fill(); } }
+    else { g.beginPath(); for (let i = 0; i <= 8; i++) g[i ? "lineTo" : "moveTo"](c + (i - 4) * 6 * s, c + (14 + (i % 2 ? 6 : 0)) * s); g.stroke(); }
+  });
+}
+function shipSprite(f) {
+  const w = 40 * S, h = 56 * S;
+  return Lab.sprite("ship" + f + ":" + Math.round(S * 100), w, h, g => {
+    const c = w / 2, s = S, p = pen(g, 70 + f * 5);
+    p.poly([[c - 6 * s, 44 * s], [c, (f ? 55 : 51) * s], [c + 6 * s, 44 * s]], "#ffd166");
+    p.poly([[c - 8 * s, 30 * s], [c - 17 * s, 46 * s], [c - 8 * s, 42 * s]], "#9ad1ff"); p.poly([[c + 8 * s, 30 * s], [c + 17 * s, 46 * s], [c + 8 * s, 42 * s]], "#9ad1ff");
+    p.poly([[c - 8 * s, 18 * s], [c + 8 * s, 18 * s], [c + 8 * s, 44 * s], [c - 8 * s, 44 * s]], "#ef476f");
+    p.poly([[c - 8 * s, 18 * s], [c, 3 * s], [c + 8 * s, 18 * s]], "#f3d9b1"); g.fillStyle = INK; g.beginPath(); g.moveTo(c - 3 * s, 9 * s); g.lineTo(c, 3 * s); g.lineTo(c + 3 * s, 9 * s); g.fill();
+    g.lineWidth = Math.max(1, 1.2 * s); p.line(c - 3 * s, 20 * s, c - 3 * s, 42 * s); p.line(c + 3 * s, 20 * s, c + 3 * s, 42 * s);
+  });
+}
+function paper() {
+  return Lab.sprite("paper:" + Lab.W + "x" + Lab.H, Lab.W, Lab.H, (g, w, h) => {
+    g.fillStyle = PAPER; g.fillRect(0, 0, w, h); const sp = 27 * S;
+    g.strokeStyle = "rgba(96,150,214,.33)"; g.lineWidth = 1; for (let y = Lab.play.y + 14 * S; y < h; y += sp) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+    g.strokeStyle = "rgba(239,71,111,.38)"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(30 * S, 0); g.lineTo(30 * S, h); g.stroke();
+    g.fillStyle = "rgba(43,47,94,.1)"; for (const fy of [.2, .5, .8]) { g.beginPath(); g.arc(13 * S, h * fy, 6 * S, 0, TAU); g.fill(); }
+    // idle margin doodles
+    const p = pen(g, 9, 1.4); g.globalAlpha = .16;
+    const bx = w * .68, by = h * .47; for (let i = 1; i < 3; i++) { p.line(bx + i * 16 * S, by, bx + i * 16 * S, by + 48 * S); p.line(bx, by + i * 16 * S, bx + 48 * S, by + i * 16 * S); }
+    p.blob(bx + 8 * S, by + 8 * S, 5 * S, 5 * S, null, 10, 1); p.line(bx + 20 * S, by + 20 * S, bx + 28 * S, by + 28 * S); p.line(bx + 28 * S, by + 20 * S, bx + 20 * S, by + 28 * S);
+    g.beginPath(); for (let a = 0; a < 16; a += .3) g.lineTo(w * .2 + Math.cos(a) * a * 1.6 * S, h * .62 + Math.sin(a) * a * 1.6 * S); g.stroke();
+    g.font = Lab.font(15 * S, 600); g.fillStyle = INK; g.fillText("x² + y² = r²", w * .5, h * .3); g.fillText("7 × 8 = 56?", w * .13, h * .37);
+    g.globalAlpha = 1;
+  });
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, f = Math.floor(t * 5) % 2, pg = paper();
+  c.drawImage(pg, 0, 0, pg.w, pg.h);
+  // sticky-note bunkers
+  for (const n of notes) {
+    if (n.hp <= 0) continue; const k = 1 + n.wob * .08 * Math.sin(n.wob * 16);
+    c.save(); c.translate(n.x + n.w / 2, n.y + n.h / 2); c.rotate((n.i - 1) * .05); c.scale(k, k);
+    c.fillStyle = "rgba(43,47,94,.14)"; c.fillRect(-n.w / 2 + 2 * S, -n.h / 2 + 3 * S, n.w, n.h); c.fillStyle = "#ffe66d"; c.fillRect(-n.w / 2, -n.h / 2, n.w, n.h); c.fillStyle = "#f4d03f"; c.fillRect(-n.w / 2, -n.h / 2, n.w, 6 * S);
+    const rnd = Lab.rng(n.i * 31 + 3); c.fillStyle = PAPER; for (let i = 0; i < 5 - n.hp; i++) { c.beginPath(); c.ellipse((rnd() - .5) * n.w * .8, (rnd() - .2) * n.h * .7, (5 + rnd() * 5) * S, (4 + rnd() * 4) * S, rnd() * 3, 0, TAU); c.fill(); }
+    c.restore();
+  }
+  // doodles
+  for (const e of foes) {
+    const sp = foeSprite(e.kind, f, e.kind === "crate" && e.hp === 1, e.wind > 0);
+    c.save(); c.translate(e.x, e.y); if (e.rot) c.rotate(e.rot); if (e.flash > 0) { const k = 1 + e.flash * .18; c.scale(k, k); }
+    c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore();
+    if (e.wind > 0) { c.globalAlpha = .7; draw.circle(c, e.x, e.y + 13 * S, (1 - e.wind / .32) * 5 * S + 1, RED); c.globalAlpha = 1; }
+  }
+  if (boss) {
+    const b = boss, sp = bossSprite(f, b.wind > 0), k = 1 + b.flash * .05 + (b.wind > 0 ? Math.sin(b.wind * 40) * .03 : 0);
+    c.save(); c.translate(b.x, b.y + Math.sin(b.t * 3) * 3 * S); c.scale(k, k); c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore();
+    if (b.flash > .5) { c.globalAlpha = .35; draw.circle(c, b.x, b.y, b.r * .9, "#fff"); c.globalAlpha = 1; }
+    const bw = W * .56, bx = (W - bw) / 2, bY = Lab.play.y + 40 * Math.max(S, .8); draw.rect(c, bx, bY, bw, 9 * S, 4 * S, "rgba(251,246,232,.9)", INK, 2); draw.rect(c, bx + 2, bY + 2, Math.max(0, (bw - 4) * b.hp / b.max), 9 * S - 4, 3 * S, RED);
+  }
+  // shots, spit, stars, pick-ups
+  c.strokeStyle = INK; c.lineCap = "round"; c.lineWidth = 3.2 * S; c.beginPath(); for (const s of shots) { c.moveTo(s.x, s.y); c.lineTo(s.x + Math.sin(s.y * .3) * S, s.y + 11 * S); } c.stroke();
+  for (const b of ebul) { const a = Math.atan2(b.vy, b.vx), r = (5.4 + Math.sin(b.t * 14) * .7) * S; c.save(); c.translate(b.x, b.y); c.rotate(a); c.fillStyle = b.aimed ? "#9d0208" : RED; c.beginPath(); c.arc(0, 0, r, -Math.PI / 2, Math.PI / 2); c.lineTo(-r * 2.4, 0); c.closePath(); c.fill(); c.fillStyle = "rgba(255,255,255,.6)"; c.fillRect(r * .1, -r * .5, r * .35, r * .35); c.restore(); }
+  for (const s of stars) { c.save(); c.translate(s.x, s.y); c.rotate(Math.sin(s.t * 3) * .5); const r = (8 + Math.sin(s.t * 6) * 1) * S; draw.star(c, 0, 0, r, "#ffc300", 5, .48); c.strokeStyle = INK; c.lineWidth = 1.6 * S; c.lineJoin = "round"; c.stroke(); c.restore(); }
+  for (const d of drops) {
+    const r = 13 * S, wob = Math.sin(d.t * 5) * .15; c.save(); c.translate(d.x, d.y); c.rotate(wob); draw.circle(c, 0, 0, r, "#fff", "#3a86ff", 2.6 * S); c.setLineDash([3 * S, 3 * S]); draw.circle(c, 0, 0, r + 4 * S, null, "#3a86ff", 1.4 * S); c.setLineDash([]);
+    if (d.type === "heart") draw.heart(c, 0, 0, r * .5, "#ef476f"); else if (d.type === "twin") { c.strokeStyle = INK; c.lineWidth = 3 * S; c.beginPath(); c.moveTo(-4 * S, -6 * S); c.lineTo(-4 * S, 6 * S); c.moveTo(4 * S, -6 * S); c.lineTo(4 * S, 6 * S); c.stroke(); } else draw.circle(c, 0, 0, r * .5, null, "#3a86ff", 2.6 * S);
+    c.restore();
+  }
+  // pencil-rocket
+  if (alive) {
+    const sp = shipSprite(f), blink = ship.inv > 0 && ship.inv < 100 && Math.floor(ship.inv * 12) % 2;
+    draw.shadow(c, ship.x + 3 * S, py + 30 * S, 14 * S, 3.5 * S, .12);
+    c.save(); c.translate(ship.x, py + ship.recoil * 2.5 * S); c.rotate(Lab.clamp(ship.vx / (700 * S), -.3, .3)); if (blink) c.globalAlpha = .35;
+    c.drawImage(sp, -sp.w / 2, -sp.h * .52, sp.w, sp.h); c.restore();
+    if (ship.shield) { c.strokeStyle = "#3a86ff"; c.lineWidth = 2.4 * S; c.setLineDash([6 * S, 5 * S]); c.lineDashOffset = -t * 30; c.beginPath(); c.arc(ship.x, py, 30 * S, 0, TAU); c.stroke(); c.setLineDash([]); }
+    if (ship.twinT > 0 && ship.twinT < 10) { draw.rect(c, ship.x - 18 * S, py + 36 * S, 36 * S * ship.twinT / 10, 3 * S, 2, "#3a86ff"); }
+  }
+  // the eraser sweeping the page
+  if (sweep) { const u = Lab.ease.inOutQuad(Lab.clamp(sweep.t, 0, 1)), ex = -80 * S + (W + 160 * S) * u, top = Lab.play.y; c.fillStyle = "rgba(251,246,232,.55)"; c.fillRect(0, top, Math.max(0, ex - 30 * S), py - 40 * S - top);
+    c.save(); c.translate(ex, (top + py) / 2 - 20 * S); c.rotate(.12 + Math.sin(sweep.t * 30) * .05); const eh = (py - top) * .8; draw.rect(c, -34 * S, -eh / 2, 68 * S, eh, 12 * S, "#f7a8b8", INK, 2.5 * S); draw.rect(c, -34 * S, -eh / 2, 68 * S, eh * .18, 12 * S, "#8ecae6", INK, 2.5 * S); c.restore(); }
+  // status strip
+  const sy = Lab.play.y + 14 * Math.max(S, .8), ts = Math.max(S, .82);
+  for (let i = 0; i < lives; i++) { draw.heart(c, 22 * ts + i * 20 * ts, sy, 7 * ts, "#ef476f"); c.strokeStyle = INK; c.lineWidth = 1.6; c.stroke(); }
+  draw.text(c, wave % 4 === 0 ? "BOSS · PAGE " + page() : "WAVE " + wave, W - 14 * ts, sy, { size: 13 * ts, color: INK, align: "right", weight: 700 });
+  const m = mult(); draw.text(c, "×" + m, W / 2 - 16 * ts, sy, { size: (15 + m * 1.5) * ts, color: m > 1 ? "#e09f00" : "#6c7096", weight: 700, stroke: PAPER });
+  for (let i = 0; i < 3; i++) { draw.star(c, W / 2 + (6 + i * 13) * ts, sy, 5 * ts, m >= 5 || i < chain % 3 ? "#ffc300" : "rgba(43,47,94,.16)", 5, .48); }
+  // eraser button
+  const full = eraser >= 1, pr = btn.r * (full ? 1 + .06 * Math.sin(t * 8) : 1);
+  draw.circle(c, btn.x, btn.y, pr, full ? "#f7a8b8" : "rgba(251,246,232,.9)", INK, 2.4 * S);
+  c.strokeStyle = "#ef476f"; c.lineWidth = 5 * S; c.lineCap = "round"; c.beginPath(); c.arc(btn.x, btn.y, pr - 6 * S, -Math.PI / 2, -Math.PI / 2 + TAU * Lab.clamp(eraser, 0.001, 1)); c.stroke();
+  draw.text(c, full ? "ERASE" : "eraser", btn.x, btn.y, { size: (full ? 11.5 : 10) * Math.max(.9, S), color: full ? INK : "#6c7096", weight: 700 });
+  if (hintT < 5 && wave === 1 && alive) { c.globalAlpha = Math.min(1, (5 - hintT)) * (.6 + .3 * Math.sin(t * 4)); draw.text(c, "drag anywhere to slide", W / 2, py + 56 * S, { size: 14 * Math.max(.85, S), color: INK, weight: 600 }); c.globalAlpha = 1; }
+}
+Lab.boot();
+})();
 </script></body></html>

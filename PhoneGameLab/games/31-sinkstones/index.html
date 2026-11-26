@@ -1,41 +1,271 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Sinkstones</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Vanishing Tiles", instructions:"Tap a tile to step there. Avoid empty squares and fading ones!", restart:start});
-let grid,cols,rows,cell,ox,oy,p,score,timer,t;
-function start(){
-  cols=4; rows=6; cell=Math.min((Lab.W-40)/cols,(Lab.H-200)/rows);
-  ox=(Lab.W-cell*cols)/2; oy=110;
-  grid=Array.from({length:cols*rows},()=>({life:Lab.rand(1.2,3), max:3, alive:Math.random()<0.85}));
-  p={x:1,y:rows-1}; score=0; t=0; Lab.setScore(0);
-  Lab.input.onTap=[(x,y)=>{
-    const cx=Math.floor((x-ox)/cell), cy=Math.floor((y-oy)/cell);
-    if(cx<0||cy<0||cx>=cols||cy>=rows) return;
-    if(Math.abs(cx-p.x)+Math.abs(cy-p.y)!==1) return;
-    const g=grid[cy*cols+cx];
-    if(!g.alive){ Lab.gameover({title:"Fell!",message:"Steps: "+score}); return; }
-    p.x=cx; p.y=cy; score++; Lab.setScore(score); Lab.beep(800,.04);
+(function(){ "use strict";
+/* SINKSTONES — a little flame crosses a night pond on stepping stones that only show themselves for a moment.
+ * Watch the path rise (each stone sings a note), watch it sink, then hop it from memory before the stone under
+ * you goes down too. Identity: moonlit teal water, mossy stones, one warm light; kalimba notes replay the path.
+ * Depth: streak multiplier, optional firefly side-stones (three rekindle a flame), cracked decoys later on,
+ * shrinking reveal + patience per pond.                                                                     */
+Lab.init({
+  title: "Sinkstones", tagline: "Remember the stones. Cross before they sink.", category: "Runner & Movement",
+  howto: ["Watch the stones rise, then sink", "Tap, swipe or use arrows to hop from memory", "Keep moving: your stone sinks too"],
+  theme: { bg: "#06111d", bg2: "#123247", accent: "#ffb347", accent2: "#8fe3c0" },
+  orient: "portrait", music: { style: "chill", key: "E", vol: .36 }, restart: start,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, PI = Math.PI;
+const GRIDS = [[3, 4], [4, 4], [4, 5], [4, 5], [5, 5], [5, 6], [5, 6], [5, 7]];
+let S, cell, gx, gy, gw, gh, cols, rows, cells, path, seq, cfg;
+let round, score, lives, streak, bestStreak, flies, flyBank, crossed, misses, mode, modeT, roundT, par;
+let pos, hop, buf, pT, wisp, usedDown, ripples, pads, scrollY, lampTop, shownN, fizz;
+
+function spec(n) {
+  const g = GRIDS[Math.min(n - 1, GRIDS.length - 1)];
+  return { cols: g[0], rows: g[1], lat: Math.min(.8, .3 + n * .07), run: n < 3 ? 1 : n < 6 ? 2 : 3, step: Math.max(.17, .37 - n * .022), hold: Math.max(.55, 1.25 - n * .07),
+    patience: Math.max(1.5, 3.5 - n * .2), side: n < 2 ? 0 : n < 6 ? 1 : 2, decoy: n < 5 ? 0 : n < 8 ? 1 : 2 };
+}
+function start() {
+  round = 1; score = 0; lives = 3; streak = 0; bestStreak = 0; flies = 0; flyBank = 0; crossed = 0; scrollY = 0; lampTop = 0; usedDown = false; fizz = 0;
+  wisp = { x: 0, y: 0, z: 0, sq: 0, s: 1, vx: 0, vy: 0 };
+  ripples = Array.from({ length: 9 }, () => ({ x: Lab.rand(0, 1), y: Lab.rand(0, 1), t: Lab.rand(0, 1), v: Lab.rand(.12, .25) }));
+  pads = Array.from({ length: 7 }, () => ({ x: Lab.rand(0, 1), y: Lab.rand(0, 1), r: Lab.rand(.5, 1), a: Lab.rand(0, TAU) }));
+  Lab.setScore(0);
+  Lab.input.swipeEarly = true;
+  Lab.input.onDown = [(x, y) => { // touching the neighbouring stone itself hops at once; anything else waits to become a tap or a swipe
+    usedDown = false; if (!pos || hop) return; const c = Math.floor((x - gx) / cell), r = y < gy ? -1 : y > gy + gh ? rows : Math.floor((y - gy) / cell);
+    const dc = c - pos.c, dr = r - pos.r; if (c >= 0 && c < cols && Math.abs(dc) + Math.abs(dr) === 1) { usedDown = true; tryHop(dc, dr); }
   }];
-  Lab.loop(dt=>{
-    t+=dt;
-    for(const g of grid){ if(g.alive){ g.life-=dt; if(g.life<=0){ g.alive=false; g.respawn=Lab.rand(1.0,2.5);}}
-      else { g.respawn-=dt; if(g.respawn<=0){ g.alive=true; g.life=Lab.rand(1.5,3); g.max=g.life;}}
-    }
-    if(!grid[p.y*cols+p.x].alive){ Lab.gameover({title:"Tile gone!",message:"Steps: "+score}); return; }
-    const c=Lab.ctx; c.fillStyle="#0b0f1a"; c.fillRect(0,0,Lab.W,Lab.H);
-    for(let yy=0;yy<rows;yy++)for(let xx=0;xx<cols;xx++){
-      const g=grid[yy*cols+xx];
-      const x=ox+xx*cell, y=oy+yy*cell;
-      if(g.alive){
-        const a=Math.min(1,g.life/g.max*1.5);
-        c.fillStyle=`hsla(200,60%,55%,${a})`;
-        c.fillRect(x+4,y+4,cell-8,cell-8);
-      } else {
-        c.strokeStyle="#222"; c.strokeRect(x+4,y+4,cell-8,cell-8);
-      }
-    }
-    c.fillStyle="#ffd35a"; c.fillRect(ox+p.x*cell+cell*0.25, oy+p.y*cell+cell*0.2, cell*0.5, cell*0.6);
+  Lab.input.onTap = [(x, y) => { if (usedDown || !pos) return; const dx = x - wisp.x, dy = y - wisp.y; if (Math.hypot(dx, dy) < cell * .3) return; Math.abs(dx) > Math.abs(dy) ? tryHop(Math.sign(dx), 0) : tryHop(0, Math.sign(dy)); }];
+  Lab.input.onSwipe = [(dx, dy) => { if (usedDown) return; usedDown = true; Math.abs(dx) > Math.abs(dy) ? tryHop(Math.sign(dx), 0) : tryHop(0, Math.sign(dy)); }];
+  Lab.input.onKey = [k => { const m = { ArrowLeft: [-1, 0], a: [-1, 0], A: [-1, 0], ArrowRight: [1, 0], d: [1, 0], D: [1, 0], ArrowUp: [0, -1], w: [0, -1], W: [0, -1], ArrowDown: [0, 1], s: [0, 1], S: [0, 1] }[k]; if (m) tryHop(m[0], m[1]); }];
+  Lab.expose({
+    get mode() { return mode; }, get round() { return round; }, get lives() { return lives; }, get score() { return score; }, get streak() { return streak; }, get flies() { return flies; },
+    get pos() { return { c: pos.c, r: pos.r }; }, get grid() { return { cols, rows }; }, get path() { return path.map(p => p.slice()); }, get hopping() { return !!hop; },
+    get patience() { return pT; }, get cfg() { return cfg; },
+    type(c, r) { return c < 0 || c >= cols || r < 0 || r >= rows ? -1 : cells[r * cols + c].type; },   // 0 water, 1 path, 2 firefly stone, 3 cracked decoy
+    xy(c, r) { return [CX(c), CY(r)]; }, hop: tryHop,
+  });
+  build(); pos = { c: Math.min(cols - 1, cols >> 1), r: rows }; hop = null; buf = null; wisp.x = CX(pos.c); wisp.y = CY(rows);
+  beginShow(.7);
+  Lab.loop(frame);
+}
+Lab.onResize(() => { if (cells) { layout(); if (!hop && pos) { wisp.x = CX(pos.c); wisp.y = CY(pos.r); } } });
+
+/* ------------------------------------------------------------------ pond generation */
+function build() {
+  cfg = spec(round); cols = cfg.cols; rows = cfg.rows; misses = 0; shownN = 0;
+  cells = Array.from({ length: cols * rows }, (_, i) => ({ c: i % cols, r: (i / cols) | 0, type: 0, idx: -1, h: 0, th: 0, lit: 0, seen: false, fly: false, glint: 0, pop: 0, v: Lab.randInt(0, 3), rot: Lab.rand(-.4, .4) }));
+  const at = (c, r) => c < 0 || r < 0 || c >= cols || r >= rows ? null : cells[r * cols + c];
+  path = []; let c = Lab.randInt(0, cols - 1), lats = 0;
+  for (let r = rows - 1; r >= 0; r--) {
+    path.push([c, r]);
+    if (r > 0 && (Lab.chance(cfg.lat) || (r === 1 && !lats))) { const dir = c === 0 ? 1 : c === cols - 1 ? -1 : Lab.chance(.5) ? 1 : -1, run = Lab.randInt(1, Math.min(cfg.run, dir > 0 ? cols - 1 - c : c)); for (let k = 0; k < run; k++) { c += dir; path.push([c, r]); lats++; } }
+  }
+  path.forEach((p, i) => { const q = at(p[0], p[1]); q.type = 1; q.idx = i; });
+  seq = path.map(p => at(p[0], p[1]));
+  const around = Lab.shuffle(cells.filter(q => q.type === 0 && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(d => { const n = at(q.c + d[0], q.r + d[1]); return n && n.type === 1 && n.idx > 0; })));
+  for (let i = 0; i < cfg.side && around.length; i++) { // firefly stone: a real stone one hop off the route
+    const q = around.pop(); q.type = 2; q.fly = true; let a = -1; for (const d of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const n = at(q.c + d[0], q.r + d[1]); if (n && n.type === 1) a = Math.max(a, n.idx); }
+    q.idx = a; seq.splice(seq.indexOf(at(path[a][0], path[a][1])) + 1, 0, q);
+  }
+  for (let i = 0; i < cfg.decoy && around.length; i++) { const q = around.pop(); q.type = 3; seq.push(q); } // cracked decoys rise last and look different
+  par = 1.5 + path.length * .55;
+  layout();
+}
+function layout() {
+  const P = Lab.play; S = Math.min(Lab.W / 390, P.h / 760);
+  const top = P.y + 108 * S, bot = Lab.H - Lab.safe.bottom - 96 * S;
+  cell = Math.min((Lab.W - 28 * S) / cols, (bot - top) / rows, 98 * S); gw = cols * cell; gh = rows * cell; gx = (Lab.W - gw) / 2; gy = top + (bot - top - gh) / 2;
+}
+const CX = c => gx + (c + .5) * cell, CY = r => r < 0 ? gy - 42 * S : r >= rows ? gy + gh + 44 * S : gy + (r + .5) * cell;
+const cellAt = (c, r) => c < 0 || r < 0 || c >= cols || r >= rows ? null : cells[r * cols + c];
+function note(i, vol, lowpass) { const f = Lab.audio.scaleFreq(i % 13, 57); Lab.audio.tone({ f, dur: .42, vol: vol || .16, type: "sine", a: .004 }); Lab.audio.tone({ f: f * 3, dur: .12, vol: (vol || .16) * .22, type: "sine" }); if (!lowpass) Lab.audio.tone({ f: f * 2, dur: .2, vol: (vol || .16) * .3, type: "triangle" }); }
+
+/* ------------------------------------------------------------------ round flow */
+function beginShow(delay) {
+  mode = "show"; modeT = 0; roundT = 0;
+  seq.forEach((q, i) => Lab.after(delay + i * cfg.step, () => {
+    q.th = 1; q.pop = 1; shownN = i + 1; const x = CX(q.c), y = CY(q.r);
+    if (q.type === 3) { Lab.sfx("knock", { pitch: .6 }); } else note(q.type === 2 ? q.idx + 2 : q.idx, .15);
+    fx.ring(x, y, { r0: cell * .2, r1: cell * .55, color: q.type === 3 ? "rgba(160,170,180,.5)" : "rgba(170,240,230,.7)", width: 3, life: .45 });
+  }));
+  Lab.after(delay + seq.length * cfg.step, () => { mode = "hold"; modeT = 0; });
+  Lab.after(delay + seq.length * cfg.step + cfg.hold, () => { if (mode === "hold") sinkAll(); });
+}
+function sinkAll() {
+  mode = "go"; modeT = 0; let i = 0;
+  for (const q of seq) { if (q.th > 0 && !(pos.r === q.r && pos.c === q.c)) { const d = i++ * .035; Lab.after(d, () => { if (!(pos.c === q.c && pos.r === q.r) && !q.lit) q.th = 0; }); } }
+  Lab.sfx("bubble", { pitch: .5 }); Lab.after(.12, () => Lab.sfx("bubble", { pitch: .38 }));
+}
+function tryHop(dc, dr) {
+  if (Lab.paused || !pos) return;
+  if (mode === "hold") sinkAll();
+  if (mode !== "go") return;
+  if (hop || fizz > 0) { buf = [dc, dr]; return; }
+  let c = pos.c + dc, r = pos.r + dr;
+  if (c < 0 || c >= cols || r > rows) { wisp.sq = .25; Lab.sfx("tick", { pitch: .6 }); return; }
+  hop = { fc: pos.c, fr: pos.r, c, r, t: 0, x0: wisp.x, y0: wisp.y, x1: CX(c), y1: CY(r) };
+  const from = cellAt(pos.c, pos.r); if (from) { from.lit = 0; Lab.after(.7, () => { if (!(pos.c === from.c && pos.r === from.r)) from.th = 0; }); }
+  Lab.sfx("jump", { pitch: 1.5 }); wisp.vx = dc; wisp.vy = dr;
+}
+function land() {
+  const h = hop; hop = null; pos = { c: h.c, r: h.r }; wisp.x = h.x1; wisp.y = h.y1; wisp.z = 0; wisp.sq = .32;
+  if (h.r >= rows) { Lab.sfx("land", { pitch: 1.2 }); return; }
+  if (h.r < 0) { clearRound(); return; }
+  const q = cellAt(h.c, h.r);
+  if (q.type === 1 || q.type === 2) {
+    q.th = 1; q.h = Math.max(q.h, .55); q.lit = 1; q.pop = 1; pT = cfg.patience; Lab.buzz(8);
+    fx.ring(wisp.x, wisp.y, { r0: cell * .2, r1: cell * .62, color: "#ffd28a", width: 4, life: .4 });
+    if (!q.seen) {
+      q.seen = true; streak++; bestStreak = Math.max(bestStreak, streak); const m = mult(), g = 10 * m; score += g; Lab.setScore(score);
+      note(q.type === 2 ? q.idx + 2 : q.idx, .2); fx.text(wisp.x, wisp.y - cell * .55, "+" + g, { color: m > 1 ? "#ffe08a" : "#fff", size: 15 + m * 1.5 });
+      fx.burst(wisp.x, wisp.y, { n: 6, colors: ["#ffd28a", "#fff", "#8fe3c0"], speed: 120, life: .45, size: 2.6, gravity: 120 });
+      if (streak % 5 === 0 && m <= 6) { Lab.bumpScore(); fx.text(wisp.x, wisp.y - cell * .95, "×" + m, { color: "#ffb347", size: 26 }); Lab.sfx("powerup", { pitch: .9 + m * .08 }); }
+      if (q.fly) { q.fly = false; flies++; flyBank++; score += 50 * m; Lab.setScore(score); Lab.sfx("gem"); fx.burst(wisp.x, wisp.y - cell * .4, { n: 14, colors: ["#d8ff7a", "#fff7b0"], speed: 190, life: .7, size: 3, shape: "star", gravity: 60, glow: 6 }); fx.text(wisp.x, wisp.y - cell * .95, "firefly +" + 50 * m, { color: "#d8ff7a", size: 16 });
+        if (flyBank >= 3) { flyBank = 0; if (lives < 3) { lives++; Lab.toast("3 fireflies: flame rekindled", 1300); Lab.sfx("levelup"); } else { score += 150; Lab.setScore(score); Lab.toast("3 fireflies: +150", 1100); Lab.sfx("coin"); } } }
+    } else note(q.type === 2 ? q.idx + 2 : q.idx, .07, true);
+  } else { // open water or a cracked decoy
+    if (q.type === 3) { q.h = .8; q.th = 0; fx.burst(wisp.x, wisp.y, { n: 12, color: "#7d8b93", speed: 200, life: .6, size: 4, shape: "shard" }); Lab.sfx("crunch"); }
+    douse(h.fc, h.fr, q.type === 3 ? "cracked!" : "just water");
+  }
+}
+const mult = () => 1 + Math.min(5, Math.floor(streak / 5));
+function douse(bc, br, why) { // the flame hits water: lose one, come back on the last safe stone, get a hint
+  lives--; misses++; if (streak >= 5) fx.text(wisp.x, wisp.y - cell * .9, "streak lost", { color: "#ff9d8a", size: 14 }); streak = 0; buf = null;
+  Lab.sfx("splash"); Lab.audio.noise({ dur: .45, vol: .16, hp: 3200, a: .01 }); Lab.shake(6, .25); Lab.flash("#9fd8ff", .18, .22); Lab.buzz(40);
+  fx.burst(wisp.x, wisp.y, { n: 14, colors: ["#bfe9ff", "#fff"], speed: 230, spread: PI, angle: -PI / 2, life: .6, size: 3.4, gravity: 700 });
+  fx.puff(wisp.x, wisp.y - 8, { n: 9, color: "rgba(220,235,245,.55)", speed: 50, life: .9, size: 9 });
+  fx.ring(wisp.x, wisp.y, { r0: 6, r1: cell * .8, color: "#bfe9ff", width: 3, life: .6 }); fx.text(wisp.x, wisp.y - cell * .5, why, { color: "#bfe9ff", size: 15 });
+  if (lives <= 0) { mode = "out"; wisp.s = 0; Lab.gameover({ title: "The light went out", score, stats: [["Ponds crossed", crossed], ["Best streak", bestStreak], ["Fireflies", flies]] }); return; }
+  fizz = .5; wisp.s = 0;
+  Lab.after(.5, () => {
+    pos = { c: bc, r: br }; wisp.x = CX(bc); wisp.y = CY(br); wisp.s = 0; fizz = 0; Lab.tween(wisp, { s: 1 }, .25, { ease: "outBack" }); Lab.sfx("pop", { pitch: 1.3 });
+    const q = cellAt(bc, br); if (q) { q.th = 1; q.lit = 1; pT = cfg.patience; }
+    for (const d of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const n = cellAt(bc + d[0], br + d[1]); if (n && (n.type === 1 || n.type === 2) && !n.seen) n.glint = 1; }
   });
 }
-start();
+function clearRound() {
+  mode = "clear"; modeT = 0; crossed++; lampTop = 1;
+  const base = 50 * round, tb = Math.max(0, Math.round((par - roundT) * 20)), lines = [["POND " + round + " +" + base, "#fff"]]; let gain = base;
+  if (!misses) { gain += 100; lines.push(["FLAWLESS +100", "#ffe08a"]); }
+  if (tb) { gain += tb; lines.push(["SWIFT +" + tb, "#8fe3c0"]); }
+  Lab.sfx("chime"); Lab.sfx("levelup"); Lab.buzz(20);
+  fx.burst(Lab.W / 2, gy - 62 * S, { n: 24, colors: ["#ffd28a", "#ffb347", "#fff"], speed: 240, life: .9, size: 4, shape: "star", gravity: 120, glow: 6 });
+  lines.forEach((l, i) => Lab.after(.2 + i * .28, () => { fx.text(Lab.W / 2, gy + gh * .4 + i * 32 * S, l[0], { color: l[1], size: 23, life: 1.3, vy: -18 }); Lab.audio.combo(3 + i * 2, { vol: .16 }); }));
+  Lab.after(.25, () => { score += gain; Lab.setScore(score); Lab.bumpScore(); });
+  for (const q of cells) q.th = 0;
+  Lab.after(1.25 + lines.length * .28, () => {
+    mode = "travel"; modeT = 0; round++; build(); const tc = Math.min(cols - 1, pos.c); pos = { c: tc, r: rows };
+    const y0 = wisp.y, o = { k: 0 }; Lab.sfx("whoosh", { pitch: .6 });
+    Lab.tween(o, { k: 1 }, .8, { ease: "inOutCubic", onUpdate: () => { wisp.y = Lab.lerp(y0, CY(rows), o.k); wisp.x = Lab.lerp(wisp.x, CX(tc), .2); scrollY = o.k; lampTop = 1 - o.k; }, onDone: () => { scrollY = 0; lampTop = 0; wisp.x = CX(tc); wisp.y = CY(rows); Lab.banner("POND " + round, { color: "#ffd28a", ms: 800 }); beginShow(.45); } });
+  });
+}
+
+/* ------------------------------------------------------------------ frame */
+function frame(dt, t) {
+  modeT += dt;
+  if (mode === "go") {
+    roundT += dt;
+    if (hop) { hop.t += dt / .16; const u = Math.min(1, hop.t), e = Lab.ease.inOutQuad(u); wisp.x = Lab.lerp(hop.x0, hop.x1, e); wisp.y = Lab.lerp(hop.y0, hop.y1, e); wisp.z = Math.sin(u * PI) * cell * .36; if (u >= 1) land(); }
+    else if (fizz <= 0) {
+      if (buf) { const b = buf; buf = null; tryHop(b[0], b[1]); }
+      else if (pos.r >= 0 && pos.r < rows) { // the stone you stand on runs out of patience
+        const before = pT; pT -= dt; const q = cellAt(pos.c, pos.r), k = pT / cfg.patience;
+        if (k < .4 && Math.floor(before * 5) !== Math.floor(pT * 5)) Lab.sfx("tick", { pitch: 1.6 - k * 1.5 });
+        if (pT <= 0) { q.th = 0; q.lit = 0; douse(pos.c, pos.r, "too slow"); }
+      }
+    }
+  }
+  if (fizz > 0) fizz -= dt;
+  for (const q of cells) { q.h = Lab.damp(q.h, q.th, q.th ? 16 : 9, dt); if (q.pop > 0) q.pop = Math.max(0, q.pop - dt * 3.5); if (q.glint > 0) q.glint = Math.max(0, q.glint - dt * .9); if (!q.lit) q.litV = Lab.damp(q.litV || 0, 0, 6, dt); else q.litV = Lab.damp(q.litV || 0, 1, 14, dt); }
+  wisp.sq = Lab.damp(wisp.sq, 0, 12, dt);
+  for (const r of ripples) { r.t += dt * r.v; if (r.t > 1) { r.t = 0; r.x = Lab.rand(0, 1); r.y = Lab.rand(0, 1); } }
+  const press = mode === "go" && pos.r >= 0 && pos.r < rows ? 1 - Lab.clamp(pT / cfg.patience, 0, 1) : 0;
+  Lab.music.intensity(.25 + Math.min(.35, round * .05) + press * .4);
+  render(t, press);
+}
+
+/* ------------------------------------------------------------------ rendering */
+function stoneSprite(v, kind) {
+  const sz = Math.ceil(cell);
+  return Lab.sprite("st" + v + kind + ":" + sz, sz, sz, g => {
+    const rnd = Lab.rng(v * 31 + 5), R = sz * .37, n = 9, pts = [];
+    for (let i = 0; i < n; i++) { const a = i / n * TAU, rr = R * (.86 + rnd() * .2); pts.push([sz / 2 + Math.cos(a) * rr * 1.06, sz * .47 + Math.sin(a) * rr * .92]); }
+    const blob = oy => { g.beginPath(); for (let i = 0; i <= n; i++) { const p = pts[i % n], q = pts[(i + 1) % n], mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2 + oy; i ? g.quadraticCurveTo(p[0], p[1] + oy, mx, my) : g.moveTo(mx, my); } g.closePath(); };
+    g.fillStyle = "rgba(3,12,20,.45)"; blob(sz * .1); g.fill();
+    g.fillStyle = kind ? "#2c343b" : "#31454d"; blob(sz * .065); g.fill();
+    const gr = g.createLinearGradient(0, sz * .1, 0, sz * .85); gr.addColorStop(0, kind ? "#7f8a90" : "#a9bcbd"); gr.addColorStop(1, kind ? "#565f66" : "#6f8a8e"); g.fillStyle = gr; blob(0); g.fill();
+    g.save(); blob(0); g.clip();
+    if (kind) { g.strokeStyle = "rgba(20,26,32,.75)"; g.lineWidth = Math.max(1.5, sz * .03); g.lineJoin = "round"; g.beginPath(); g.moveTo(sz * .3, sz * .2); g.lineTo(sz * .46, sz * .4); g.lineTo(sz * .4, sz * .52); g.lineTo(sz * .58, sz * .74); g.moveTo(sz * .46, sz * .4); g.lineTo(sz * .68, sz * .34); g.stroke(); }
+    else for (let i = 0; i < 4; i++) { g.fillStyle = `rgba(${90 + rnd() * 30},${165 + rnd() * 30},${120},${.5 + rnd() * .3})`; g.beginPath(); g.ellipse(sz * (.25 + rnd() * .5), sz * (.25 + rnd() * .45), sz * (.07 + rnd() * .1), sz * (.05 + rnd() * .07), rnd() * 3, 0, TAU); g.fill(); }
+    g.fillStyle = "rgba(255,255,255,.16)"; g.beginPath(); g.ellipse(sz * .42, sz * .3, sz * .2, sz * .09, -.3, 0, TAU); g.fill();
+    g.restore();
+  });
+}
+function lantern(c, x, y, lit, t) {
+  const u = S; c.fillStyle = "#1c2a2c"; c.fillRect(x - 5 * u, y - 4 * u, 10 * u, 22 * u); draw.rect(c, x - 13 * u, y + 16 * u, 26 * u, 7 * u, 2, "#1c2a2c");
+  if (lit > .02) draw.glow(c, x, y - 14 * u, 70 * u * (1 + Math.sin(t * 5) * .04), "#ffb347", .5 * lit);
+  draw.rect(c, x - 11 * u, y - 25 * u, 22 * u, 22 * u, 3 * u, "#24363a"); draw.rect(c, x - 7 * u, y - 21 * u, 14 * u, 14 * u, 2 * u, Lab.color.mix("#0d1a1f", "#ffd98a", lit));
+  c.fillStyle = "#1c2a2c"; c.beginPath(); c.moveTo(x - 18 * u, y - 24 * u); c.quadraticCurveTo(x, y - 46 * u, x + 18 * u, y - 24 * u); c.fill();
+}
+function bank(c, yEdge, up, t, lit) {
+  const W = Lab.W, far = up ? -40 : Lab.H + 40;
+  for (const [col, off] of [["#0d2a22", 0], ["#123a2c", up ? -9 * S : 9 * S]]) { c.fillStyle = col; c.beginPath(); c.moveTo(-20, far); for (let x = -20; x <= W + 20; x += 20) c.lineTo(x, yEdge + off + Math.sin(x * .021 + (up ? 1 : 4)) * 7 * S + Math.sin(x * .05) * 3 * S); c.lineTo(W + 20, far); c.fill(); }
+  c.lineCap = "round"; const rnd = Lab.rng(up ? 3 : 9);
+  for (let i = 0; i < 9; i++) { const x = rnd() * W, h = (22 + rnd() * 26) * S * (up ? -1 : -1), by = yEdge + (up ? -14 : 16) * S, sw = Math.sin(t * 1.3 + i) * 3 * S; if (Math.abs(x - W / 2) < 46 * S) continue; c.strokeStyle = "#1f5a3d"; c.lineWidth = 2.4 * S; c.beginPath(); c.moveTo(x, by); c.quadraticCurveTo(x, by + h * .6, x + sw, by + h); c.stroke(); if (i % 2) { c.fillStyle = "#5a4630"; c.beginPath(); c.ellipse(x + sw, by + h, 3 * S, 8 * S, sw * .03, 0, TAU); c.fill(); } }
+  lantern(c, W / 2 + (up ? 0 : -cell * 0) , yEdge + (up ? -30 : 34) * S + (up ? 0 : 26 * S), lit, t);
+}
+function render(t, press) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, P = Lab.play;
+  draw.bg(c, "#0b2236", "#050d18", "#0c2c40");
+  draw.glow(c, W * .78, P.y + P.h * .2, 220 * S, "#bfe6ff", .16); // moonlight on the water
+  c.fillStyle = "rgba(200,235,255,.05)"; for (let i = 0; i < 7; i++) { const y = P.y + P.h * (.16 + i * .07), w = (70 - i * 7) * S * (1 + .15 * Math.sin(t * 1.4 + i)); c.fillRect(W * .78 - w / 2 + Math.sin(t + i * 1.7) * 6 * S, y, w, 3 * S); }
+  const sc = scrollY * (gh + 90 * S);
+  for (const p of pads) { const y = ((p.y * H + sc) % H + H) % H, x = p.x * W, r = 15 * S * p.r; if (x > gx - r && x < gx + gw + r && y > gy - r && y < gy + gh + r) continue; c.fillStyle = "rgba(40,110,80,.5)"; c.beginPath(); c.moveTo(x, y); c.arc(x, y, r, p.a, p.a + TAU * .9); c.fill(); }
+  for (const r of ripples) { const y = ((r.y * H + sc) % H + H) % H; c.strokeStyle = `rgba(170,225,240,${.16 * (1 - r.t)})`; c.lineWidth = 1.5; c.beginPath(); c.ellipse(r.x * W, y, r.t * 46 * S + 4, (r.t * 46 * S + 4) * .45, 0, 0, TAU); c.stroke(); }
+  // grid: every cell has the same faint ring, so sunk stones and open water look identical
+  const fade = mode === "travel" ? Lab.clamp(modeT / .8, 0, 1) : 1;
+  for (const q of cells) {
+    const x = CX(q.c), y = CY(q.r);
+    c.strokeStyle = `rgba(150,215,230,${.13 * fade})`; c.lineWidth = 1.5; c.beginPath(); c.ellipse(x, y, cell * .3, cell * .25, 0, 0, TAU); c.stroke();
+    const near = Math.abs(q.c - pos.c) + Math.abs(q.r - pos.r) === 1 || (pos.r === rows && q.r === rows - 1 && q.c === pos.c);
+    const hintA = Math.max(q.glint * (.5 + .5 * Math.sin(t * 14)) * .6, round === 1 && mode === "go" && near && (q.type === 1 || q.type === 2) && !q.seen ? .2 + .08 * Math.sin(t * 5) : 0);
+    if (hintA > .01 && q.h < .5) { c.globalAlpha = hintA; const sp = stoneSprite(q.v, 0); c.drawImage(sp, x - sp.w / 2, y - sp.h / 2, sp.w, sp.h); c.globalAlpha = 1; }
+    if (q.h > .02) {
+      const k = Math.min(1, q.h), sp = stoneSprite(q.v, q.type === 3 ? 1 : 0), here = pos.c === q.c && pos.r === q.r && !hop, wob = here && press > .6 ? Math.sin(t * 34) * 2.2 * S * (press - .6) / .4 : 0, s = (.62 + .38 * k) * (1 + Lab.ease.pulse(q.pop) * .12);
+      c.strokeStyle = `rgba(190,235,245,${.3 * (1 - Math.abs(k - .5) * 2)})`; c.lineWidth = 2; c.beginPath(); c.ellipse(x, y + cell * .06, cell * .46, cell * .36, 0, 0, TAU); c.stroke();
+      c.save(); c.translate(x + wob, y + (1 - k) * cell * .1 + (here ? press * cell * .05 : 0)); c.scale(s, s); c.globalAlpha = Math.min(1, k * 1.4);
+      c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h);
+      if (q.litV > .02) { c.globalCompositeOperation = "lighter"; draw.glow(c, 0, -cell * .03, cell * .5, "#ffb347", .32 * q.litV); c.globalCompositeOperation = "source-over"; }
+      c.restore(); c.globalAlpha = 1;
+      if (here && mode === "go" && fizz <= 0) { const f = 1 - press; c.strokeStyle = press > .6 ? "#ff7a5c" : press > .35 ? "#ffc56a" : "rgba(255,255,255,.75)"; c.lineWidth = 3.5 * S; c.lineCap = "round"; c.beginPath(); c.ellipse(x, y + cell * .02, cell * .45, cell * .4, 0, -PI / 2, -PI / 2 + TAU * f); c.stroke(); }
+    }
+    if (q.fly) { const fy = y - cell * .34 + Math.sin(t * 3 + q.c) * 4 * S, fxx = x + Math.sin(t * 2.1 + q.r) * 6 * S, a = (.55 + .45 * Math.sin(t * 6 + q.c * 2)) * (shownN ? 1 : 0) * fade; if (a > 0) { draw.glow(c, fxx, fy, 20 * S, "#d8ff7a", .55 * a); draw.circle(c, fxx, fy, 3.2 * S, `rgba(240,255,170,${a})`); } }
+  }
+  bank(c, gy - 14 * S, true, t, lampTop); bank(c, gy + gh + 14 * S, false, t, 1);
+  // the flame
+  if (wisp.s > .02) {
+    const r = cell * .17 * wisp.s, x = wisp.x, y = wisp.y - wisp.z - cell * .08, fl = Math.sin(t * 11) * .08 + Math.sin(t * 23) * .04, hurry = press > .6 ? Math.sin(t * 40) * .06 : 0;
+    draw.shadow(c, wisp.x, wisp.y + cell * .05, r * (1.1 - wisp.z / cell), r * .35, .3);
+    c.globalCompositeOperation = "lighter"; draw.glow(c, x, y, cell * (1.05 + fl), "#ff9a3c", .34); draw.glow(c, x, y, cell * .45, "#ffd98a", .4); c.globalCompositeOperation = "source-over";
+    c.save(); c.translate(x, y); c.scale(1 + wisp.sq * .5, 1 - wisp.sq * .55 + (hop ? .18 * Math.sin(Math.min(1, hop.t) * PI) : 0));
+    const tipx = (hop ? -wisp.vx * r * .9 : 0) + Math.sin(t * 9) * r * .22, tipy = -r * (2 + fl * 2 + hurry * 3) + (hop ? wisp.vy * -r * .5 : 0);
+    const gr = c.createRadialGradient(0, r * .25, r * .1, 0, 0, r * 1.7); gr.addColorStop(0, "#fffbe0"); gr.addColorStop(.45, "#ffc24a"); gr.addColorStop(1, "#ff6f3a"); c.fillStyle = gr;
+    c.beginPath(); c.moveTo(tipx, tipy); c.bezierCurveTo(r * .75, -r * .9, r * 1.2, .2 * r, 0, r); c.bezierCurveTo(-r * 1.2, .2 * r, -r * .75, -r * .9, tipx, tipy); c.fill();
+    c.fillStyle = "#5a2a10"; const ex = wisp.vx * r * .12; for (const sd of [-1, 1]) { c.beginPath(); c.ellipse(sd * r * .36 + ex, r * .12, r * .13, r * (press > .6 ? .22 : .17), 0, 0, TAU); c.fill(); }
+    c.restore();
+  }
+  // HUD strip: flames, pond number, firefly pips, streak multiplier
+  const hy = P.y + 20 * S + 2, m = mult();
+  for (let i = 0; i < 3; i++) { const x = 20 + i * 22, on = i < lives; c.globalAlpha = on ? 1 : .22; c.fillStyle = on ? "#ffb347" : "#9fb6c2"; c.beginPath(); c.moveTo(x, hy - 11); c.bezierCurveTo(x + 6, hy - 4, x + 9, hy + 2, x, hy + 8); c.bezierCurveTo(x - 9, hy + 2, x - 6, hy - 4, x, hy - 11); c.fill(); if (on) draw.circle(c, x, hy + 2, 3, "#fff3c4"); } c.globalAlpha = 1;
+  draw.text(c, "POND " + round, W / 2, hy - 1, { size: 14, color: "#dff3f0", shadow: true });
+  for (let i = 0; i < 3; i++) { const x = W - 20 - i * 15; draw.circle(c, x, hy, 4.5, i < flyBank ? "#d8ff7a" : "rgba(216,255,122,.16)", "rgba(216,255,122,.5)", 1.2); }
+  if (m > 1 || streak > 0) { const x = W / 2, y = hy + 22 * S + 4; draw.text(c, m > 1 ? "×" + m + "  streak " + streak : "streak " + streak, x, y, { size: 12 + Math.min(4, m), color: m > 1 ? "#ffcf7a" : "rgba(223,243,240,.7)", shadow: true }); }
+  if (mode === "show" || mode === "hold") draw.text(c, mode === "hold" ? "go!" : "remember…", W / 2, gy + gh + 44 * S - 46 * S, { size: 15 * S, color: `rgba(223,243,240,${.6 + .3 * Math.sin(t * 6)})`, shadow: true });
+  if (press > .35) draw.vignette(c, .35);
+}
+Lab.boot();
+})();
 </script></body></html>

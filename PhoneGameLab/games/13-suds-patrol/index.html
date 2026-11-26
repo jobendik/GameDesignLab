@@ -11,7 +11,7 @@
  * draft, five grime species with readable telegraphs, a boss every fifth wave.                                     */
 Lab.init({
   title: "Suds Patrol", tagline: "One bar of soap. One very dirty floor.", category: "Arcade & Action",
-  howto: ["Left thumb moves, right thumb aims and fires", "Desktop: WASD + mouse. Rest the aim and it auto-aims, slower", "Scoop sparkles for combo, pick an upgrade each wave"],
+  howto: ["Left thumb moves, right thumb aims", "Desktop: WASD + mouse (hold to fire)", "Grab sparkles for combo, then upgrade"],
   theme: { bg: "#bfe3ee", bg2: "#eefafd", fg: "#16324f", muted: "#5f7f99", accent: "#12a4cf", accent2: "#ff7d5c", light: true },
   orient: "any", music: { style: "bounce", key: "F", vol: .5 }, restart: start,
 });
@@ -25,9 +25,9 @@ const ET = {
   boss:   { r: 50, hp: 70, sp: 34,  col: "#43365c", pts: 500, gems: 14 },
 };
 const UPS = [
-  { k: "rapid",  n: "Lather Up",      d: "Fire 25% faster",                 max: 4, c: "#12a4cf" },
+  { k: "rapid",  n: "Lather Up",      d: "Fire 20% faster",                 max: 4, c: "#12a4cf" },
   { k: "twin",   n: "Double Bubble",  d: "One more bubble stream",          max: 2, c: "#5b8def" },
-  { k: "big",    n: "Big Bubbles",    d: "Bigger bubbles, +50% damage",     max: 3, c: "#2bb5a0" },
+  { k: "big",    n: "Big Bubbles",    d: "Bigger bubbles, +40% damage",     max: 3, c: "#2bb5a0" },
   { k: "pierce", n: "Slippery",       d: "Bubbles slip through +1 grime",   max: 3, c: "#8a6fe8" },
   { k: "bounce", n: "Ricochet",       d: "Bubbles bounce off the walls",    max: 2, c: "#e5884a" },
   { k: "zip",    n: "Slick Soles",    d: "Glide 12% faster",                max: 3, c: "#e0a92a" },
@@ -76,7 +76,7 @@ function start() {
   Lab.input.onMove = []; Lab.input.onTap = []; Lab.input.onSwipe = [];
   Lab.input.onKey = [k => { if (phase === "draft" && phaseT > .3 && cards) { const i = "123".indexOf(k); if (i >= 0 && i < cards.length) choose(i); } }];
   Lab.expose({
-    get player() { return P; }, get enemies() { return enemies; }, get shots() { return shots; }, get gems() { return gems; }, get score() { return score; },
+    get player() { return P; }, get enemies() { return enemies; }, get shots() { return shots; }, get goo() { return eshots; }, get gems() { return gems; }, get score() { return score; },
     get wave() { return wave; }, get phase() { return phase; }, get up() { return up; }, get cards() { return cards; }, get arena() { return A; }, get combo() { return combo; },
     get sticks() { return sticks; }, cardRects, spawn(type, x, y) { const e = mkEnemy(type, x, y); enemies.push(e); return e; },
   });
@@ -94,8 +94,8 @@ function buildWave(n) {
   if (n === 1) return [{ gap: 0, list: ["blob", "blob"] }, { gap: 5, list: ["blob", "blob", "blob"] }];
   const b = Math.floor(n / 5), g = [];
   if (n % 5 === 0) { g.push({ gap: 0, list: ["boss"] }); for (let i = 0; i < 2 + b; i++) g.push({ gap: 6, list: Array(2 + b * 2).fill(i % 2 ? "skit" : b > 1 ? "spit" : "blob") }); return g; }
-  const pool = [["blob", 1, 5]]; if (n >= 2) pool.push(["skit", 1, 4]); if (n >= 3) pool.push(["spit", 3, 2.4]); if (n >= 4) pool.push(["charge", 4, 2]); if (n >= 7) pool.push(["gunk", 5, 1.6]);
-  let budget = 5 + n * 3.8 + Math.max(0, n - 5) * 2.2;
+  const pool = [["blob", 1, 5]]; if (n >= 2) pool.push(["skit", 1, 4]); if (n >= 3) pool.push(["spit", 3, 2.2 + n * .15]); if (n >= 4) pool.push(["charge", 4, 1.8 + n * .12]); if (n >= 7) pool.push(["gunk", 5, 1.6]);
+  let budget = 6 + n * 4.4 + Math.max(0, n - 5) * 3;
   const debut = { 2: ["skit", "skit", "skit", "skit"], 3: ["spit", "blob", "blob"], 4: ["charge", "blob", "blob"], 7: ["gunk", "skit", "skit"] }[n];
   if (debut) { g.push({ gap: 0, list: debut }); budget -= debut.length + 2; }
   const tot = pool.reduce((a, p) => a + p[2], 0);
@@ -119,19 +119,19 @@ function pend(type, x, y, t) { pends.push({ type, x, y, t: t || .95, t0: t || .9
 function mkEnemy(type, x, y) {
   const d = ET[type], k = 1 + Math.min(.85, Math.max(0, wave - 1) * .055);
   const e = { type, x, y, vx: 0, vy: 0, kx: 0, ky: 0, r: d.r * S, hp: d.hp, max: d.hp, sp: d.sp * S * k, age: 0, flash: 0, sq: 0, st: 0, tm: Lab.rand(.9, 1.8), ang: 0, seed: Lab.rand(0, TAU), dead: false, n: 0 };
-  if (type === "boss") { e.hp = e.max = 30 + Math.floor(wave / 5) * 70; boss = e; } else if (wave > 5) e.hp = e.max = Math.ceil(d.hp * (1 + (wave - 5) * .1));
+  if (type === "boss") { e.hp = e.max = Math.floor(wave / 5) * 115 - 30; boss = e; } else if (wave > 3) e.hp = e.max = d.hp * (1 + (wave - 3) * .16);
   return e;
 }
 
 /* ------------------------------------------------------------------ combat */
 function fire(ang, manual) {
-  const lvl = up.twin, sp = 540 * S, r = (5.5 + 1.6 * up.big) * S, dmg = 1 + .5 * up.big, off = P.r + 9 * S;
+  const lvl = up.twin, sp = 540 * S, r = (5.5 + 1.6 * up.big) * S, dmg = 1 + .4 * up.big, off = P.r + 9 * S;
   const lanes = lvl === 0 ? [[0, 0]] : lvl === 1 ? [[-7, 0], [7, 0]] : [[0, 0], [-9, -.16], [9, .16]];
   for (const [o, da] of lanes) {
     const a = ang + da, px = -Math.sin(ang) * o * S, py = Math.cos(ang) * o * S;
     if (shots.length < 160) shots.push({ x: P.x + Math.cos(ang) * off + px, y: P.y + Math.sin(ang) * off + py, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r, dmg, life: .95, pierce: up.pierce, bounce: up.bounce, hit: null, wob: Lab.rand(0, TAU) });
   }
-  P.kick = 1; P.fire = 1 / (5.2 * (1 + .25 * up.rapid)) / (manual ? 1 : .62);
+  P.kick = 1; P.fire = 1 / (5.2 * (1 + .2 * up.rapid)) / (manual ? 1 : .62);
   Lab.audio.tone({ f: 480 + Lab.rand(0, 90) + up.big * -40, f2: 880, dur: .05, vol: .045, type: "sine" });
 }
 function damage(e, dmg, ang) {
@@ -149,7 +149,7 @@ function kill(e, ang) {
   Lab.sfx("splash", { pitch: 1.7 - e.r / (40 * S) }); Lab.audio.combo(Math.min(14, combo - 1), { vol: .1 });
   if (decals.length > 34) decals.shift(); decals.push({ x: e.x, y: e.y, r: e.r * 1.25, col: d.col, t: 0, rot: Lab.rand(0, TAU) });
   for (let i = 0; i < d.gems && gems.length < 90; i++) { const a = Lab.rand(0, TAU), v = Lab.rand(40, 150) * S; gems.push({ x: e.x, y: e.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, heart: false, ph: Lab.rand(0, TAU) }); }
-  if (P.hp < P.max && e.type !== "boss" && Lab.chance(big ? .14 : .035)) gems.push({ x: e.x, y: e.y, vx: 0, vy: -50 * S, t: 0, heart: true, ph: 0 });
+  if (P.hp < P.max && e.type !== "boss" && Lab.chance(big ? .09 : .02)) gems.push({ x: e.x, y: e.y, vx: 0, vy: -50 * S, t: 0, heart: true, ph: 0 });
   if (big) { Lab.shake(4 + e.r * .1, .2); Lab.hitstop(.035); Lab.buzz(12); }
   if (e.type === "gunk") for (let i = 0; i < 3; i++) { const a = ang + (i - 1) * 1.5 + Lab.rand(-.3, .3), c = mkEnemy("blob", e.x + Math.cos(a) * 10 * S, e.y + Math.sin(a) * 10 * S); c.kx = Math.cos(a) * 260 * S; c.ky = Math.sin(a) * 260 * S; c.age = .1; enemies.push(c); }
   if (e.type === "boss") {

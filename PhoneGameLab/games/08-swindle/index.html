@@ -1,0 +1,269 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Swindle</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* SWINDLE — a fairground swindler hides a pearl under enamel cups and shuffles. Keep your eye on it, then pick.
+ * Identity: dusk carnival booth — string lights, crimson awning, striped cloth, a moustachioed swindler who
+ *           announces each new trick and whose eyes follow his hands. Funk bassline that tightens with the tempo.
+ * Shuffles are a queue of readable moves: swaps along depth arcs (one cup passes in front, one behind), tempo
+ *           changes and hesitations, feints that turn back, double swaps, three-cup carousels and the "sneak",
+ *           where two cups tilt and the pearl visibly rolls across (or the tilt is a bluff).
+ * Stakes: three coins of credit. The pot grows each round, a win streak multiplies it and a quick pick is worth up
+ *           to double — hesitate and the bonus drains.                                                            */
+Lab.init({
+  title: "Swindle", tagline: "Eyes on the pearl. The cups cheat.", category: "Reflex & Taps",
+  howto: ["Watch which cup hides the pearl", "Follow it through the shuffle, then tap that cup", "Pick fast for up to double; three misses and you're swindled"],
+  theme: { bg: "#241640", bg2: "#6a2c5c", accent: "#f2a03d", accent2: "#e2506a" },
+  orient: "any", music: { style: "funk", key: "E", vol: .45 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp;
+const INK = "#1d1533";
+const cupsFor = r => r < 3 ? 3 : r < 9 ? 4 : 5, movesFor = r => Math.min(14, 3 + Math.floor(r * .8)), durFor = r => Math.max(.26, .62 - r * .028);
+let S = 1, sp = 100, cupW = 80, cupH = 88, tableY = 400, midX = 200;
+let cups = [], N = 3, ball = null, queue = [], cur = null, gapT = 0, phase, round, wins, lives, score, streak, bestStreak, pickT, fastest, line, lineT, pearl, cursor, lookX, taught, livePop, lastGain, chosen;
+
+function layout() {
+  const P = Lab.play; S = clamp(Math.min(Lab.W / 390, P.h / 700), .62, 1.45); midX = P.x + P.w / 2;
+  sp = Math.min((P.w - 14 * S) / (N + .1), 150 * S, P.h * .36); cupW = sp * .8; cupH = cupW * 1.08;
+  tableY = P.y + P.h * (P.h > P.w ? .66 : .74);
+}
+Lab.onResize(layout);
+const slotX = s => midX + (s - (N - 1) / 2) * sp, cupAt = s => cups.find(c => c.slot === s);
+const mkCup = slot => ({ slot, x: slotX(slot), z: 0, lift: 0, tilt: 0, sq: 0, busy: false, pop: 0 });
+function say(t, hold) { line = t; lineT = hold || 2.4; }
+
+function start() {
+  N = 3; layout(); round = 0; wins = 0; lives = 3; score = 0; streak = 0; bestStreak = 0; fastest = 99; queue = []; cur = null; gapT = 0; cursor = -1; taught = {}; livePop = 0; lastGain = 0; chosen = null;
+  cups = [0, 1, 2].map(mkCup); for (const c of cups) c.pop = 1; ball = Lab.choose(cups); pearl = { roll: false, x: 0 }; lookX = 0; phase = "show";
+  Lab.setScore(0); say("Step right up! Watch the pearl…", 3);
+  Lab.after(.45, () => { raise(ball); Lab.sfx("chime", { pitch: .8 }); });
+  Lab.after(1.5, () => lower(ball)); Lab.after(1.95, beginShuffle);
+  Lab.input.onDown = [(x, y) => { cursor = -1; pick(hit(x, y)); }];
+  Lab.input.onKey = [k => {
+    if (phase !== "pick") return;
+    if (/^[1-9]$/.test(k)) { pick(cups.indexOf(cupAt(+k - 1))); return; }
+    if (cursor < 0) { if (/^Arrow|^ $|^Enter$/.test(k)) cursor = Math.floor(N / 2); return; }
+    if (k === "ArrowLeft") cursor = (cursor + N - 1) % N; else if (k === "ArrowRight") cursor = (cursor + 1) % N;
+    else if (k === " " || k === "Enter") pick(cups.indexOf(cupAt(cursor)));
+  }];
+  Lab.expose({
+    get phase() { return phase; }, get round() { return round; }, get wins() { return wins; }, get lives() { return lives; }, get score() { return score; }, get streak() { return streak; },
+    get n() { return N; }, get ballIndex() { return cups.indexOf(ball); }, get ballSlot() { return ball.slot; }, get pending() { return queue.length + (cur ? 1 : 0); }, get lastGain() { return lastGain; },
+    get quick() { return quickMult(); }, get cursor() { return cursor; }, get move() { return cur ? cur.type : null; }, get planned() { return queue.map(m => m.type); },
+    pos(i) { const c = cups[i]; return { x: c.x, y: tableY - cupH * .5, slot: c.slot }; }, slots() { return cups.map(c => c.slot); },
+    setRound(v) { round = v; }, setLives(v) { lives = v; }, pick,
+  });
+  Lab.loop(frame);
+}
+function raise(c) { c.busy = true; Lab.tween(c, { lift: 1 }, .3, { ease: "outBack" }); Lab.sfx("whoosh", { pitch: 1.5 }); }
+function lower(c) { Lab.tween(c, { lift: 0 }, .2, { ease: "inQuad", onDone() { c.busy = false; c.sq = .16; Lab.sfx("knock", { pitch: .8 }); } }); }
+
+/* ---------- the shuffle: a queue of moves, each a small animation that ends by committing slot changes */
+function plan() {
+  const r = round, n = movesFor(r), base = durFor(r), list = []; let b = ball.slot;
+  const other = a => { let o; do { o = Lab.randInt(0, N - 1); } while (o === a); return o; };
+  const teach = (k, text) => { if (!taught[k]) { taught[k] = 1; say(text, 3.2); } };
+  for (let i = 0; i < n; i++) {
+    const roll = Lab.random(), a = Lab.chance(.65) ? b : Lab.randInt(0, N - 1), o = other(a), tempo = r >= 3 ? Lab.choose([1, 1, 1, .75, 1.35]) : 1;
+    const gap = r >= 3 && Lab.chance(.14) ? .34 : Lab.rand(0, .07);
+    if (r >= 8 && roll < .12 && i < n - 1) { const s = clamp(a, 0, N - 2); list.push({ type: "sneak", a: s, b: s + 1, dur: Math.max(.5, base * 1.5), gap: .1 }); teach("sneak", "Mind the gap… pearls do roll."); b = -1; /* unknown until run */ }
+    else if (r >= 6 && roll < .3 && N >= 3) { const c = [a, o, [0, 1, 2, 3, 4].filter(s => s < N && s !== a && s !== o)[Lab.randInt(0, N - 3)]]; list.push({ type: "cycle", perm: [[c[0], c[1], 1], [c[1], c[2], -1], [c[2], c[0], .4]], dur: base * 1.25 * tempo, gap }); teach("cycle", "Three at once. The carousel!"); if (b === c[0]) b = c[1]; else if (b === c[1]) b = c[2]; else if (b === c[2]) b = c[0]; }
+    else if (r >= 4 && roll < .48 && N >= 4) { const rest = [0, 1, 2, 3, 4].filter(s => s < N && s !== a && s !== o), p = rest[0], q = rest[rest.length - 1]; list.push({ type: "double", perm: [[a, o, 1], [o, a, -1], [p, q, -1], [q, p, 1]], dur: base * 1.1 * tempo, gap }); teach("double", "Both hands now…"); if (b === a) b = o; else if (b === o) b = a; else if (b === p) b = q; else if (b === q) b = p; }
+    else if (r >= 2 && roll > .84) { list.push({ type: "feint", perm: [[a, o, 1], [o, a, -1]], dur: base * .9, gap }); teach("feint", "Or do I? A little feint."); }
+    else { const f = Lab.chance(.5) ? 1 : -1; list.push({ type: "swap", perm: [[a, o, f], [o, a, -f]], dur: base * tempo, gap }); if (b === a) b = o; else if (b === o) b = a; }
+    if (b < 0) b = Lab.randInt(0, N - 1);
+  }
+  return list;
+}
+function beginShuffle() {
+  for (const c of cups) c.busy = false;
+  queue = plan(); cur = null; gapT = .15; phase = "shuffle"; chosen = null;
+  if (lineT <= 0 || round === 0) say(Lab.choose(["Round and round…", "Eyes on the pearl.", "Watch closely…", "Nothing up my sleeve."]), 2);
+}
+function beginMove(m) {
+  m.t = 0;
+  if (m.type === "sneak") {
+    m.ca = cupAt(m.a); m.cb = cupAt(m.b); m.real = (ball === m.ca || ball === m.cb) && Lab.chance(.75); m.from = ball === m.cb ? m.cb : m.ca; m.to = m.from === m.ca ? m.cb : m.ca;
+    Lab.sfx("slide", { pitch: .7 }); lookX = (m.ca.x + m.cb.x) / 2;
+  } else {
+    m.parts = m.perm.map(([a, b, zs]) => ({ cup: cupAt(a), x0: slotX(a), x1: slotX(b), to: b, zs: zs * Math.min(1.15, .6 + Math.abs(a - b) * .22) }));
+    for (const p of m.parts) p.cup.busy = true;
+    Lab.sfx(m.dur < .4 ? "swish" : "whoosh", { pitch: clamp(.55 / m.dur, .8, 2) }); lookX = m.parts[0].x1;
+  }
+}
+function stepMove(m, dt) {
+  m.t += dt; const u = Math.min(1, m.t / m.dur);
+  if (m.type === "sneak") {
+    const k = ease.pulse(u); m.ca.tilt = k * .34; m.cb.tilt = -k * .34;
+    if (m.real) { pearl.roll = u > .15 && u < .85; pearl.x = lerp(m.from.x, m.to.x, ease.inOutQuad(clamp((u - .15) / .7, 0, 1))); if (u > .3 && !m.tick) { m.tick = 1; Lab.sfx("tick", { pitch: 1.4 }); Lab.sfx("slide", { pitch: 1.6 }); } }
+    if (u >= 1) { m.ca.tilt = m.cb.tilt = 0; pearl.roll = false; if (m.real) ball = m.to; m.ca.sq = m.cb.sq = .1; Lab.sfx("knock", { pitch: 1.1 }); return true; }
+    return false;
+  }
+  const e = m.type === "feint" ? Math.sin(u * Math.PI) * .42 : ease.sine(u);
+  for (const p of m.parts) { p.cup.x = lerp(p.x0, p.x1, e); p.cup.z = Math.sin(u * Math.PI) * p.zs * (m.type === "feint" ? .6 : 1); }
+  if (u >= 1) { for (const p of m.parts) { if (m.type !== "feint") p.cup.slot = p.to; p.cup.busy = false; p.cup.z = 0; p.cup.sq = .1; } Lab.sfx("knock", { pitch: 1 + Lab.rand(-.1, .1) }); return true; }
+  return false;
+}
+const quickMult = () => phase === "pick" ? 1 + clamp(1 - (pickT - .35) / 2.6, 0, 1) : 1;
+function hit(x, y) {
+  if (y < tableY - cupH * 1.9 || y > tableY + cupH * .9) return -1;
+  let best = -1, bd = 1e9; for (let i = 0; i < cups.length; i++) { const d = Math.abs(x - cups[i].x); if (d < bd) { bd = d; best = i; } }
+  return bd < Math.max(sp * .56, 30) ? best : -1;
+}
+function pick(i) {
+  if (phase !== "pick" || Lab.paused || i < 0 || i >= cups.length) return;
+  const c = cups[i], q = quickMult(), px = c.x, py = tableY - cupH * .2; phase = "reveal"; chosen = c; raise(c); Lab.buzz(10);
+  if (c === ball) {
+    const pot = 10 + round * 5, sm = 1 + Math.min(streak, 8) * .25, gain = Math.round(pot * q * sm);
+    lastGain = gain; score += gain; streak++; wins++; bestStreak = Math.max(bestStreak, streak); fastest = Math.min(fastest, pickT); Lab.setScore(score); Lab.bumpScore();
+    Lab.after(.22, () => {
+      fx.burst(px, py, { n: 16, colors: ["#ffd76a", "#fff3c4", "#f2a03d"], speed: 260, life: .7, size: 4, gravity: 420, shape: "star" });
+      fx.ring(px, py, { r0: 8, r1: cupW * 1.1, color: "#ffe9a8", width: 5, life: .45 });
+      fx.text(px, tableY - cupH * 1.95, "+" + gain, { color: "#ffe066", size: (22 + Math.min(10, q * 4)) * S });
+      if (q > 1.5) fx.text(px, tableY - cupH * 2.35, "quick ×" + q.toFixed(1), { color: "#ffb3c1", size: 14 * S, life: 1 });
+      Lab.sfx("coin", { pitch: .9 + Math.min(streak, 8) * .05 }); Lab.audio.combo(Math.min(streak - 1, 10), { vol: .16 });
+      say(Lab.choose(["Sharp eyes!", "Hmph. Beginner's luck.", "You've done this before.", "Again! Double or… never mind."]), 2);
+    });
+    Lab.after(1.05, () => lower(c)); Lab.after(1.45, () => { round++; nextRound(); });
+  } else {
+    lives--; streak = 0; livePop = -1; lastGain = 0;
+    Lab.after(.25, () => { Lab.sfx("error"); Lab.sfx("thud"); Lab.shake(8, .25); Lab.flash("#e2506a", .16, .2); Lab.buzz(45); fx.puff(px, py, { n: 8 }); say(Lab.choose(["Too slow, friend.", "The hand is quicker…", "Gotcha.", "So close. Not really."]), 2.4); });
+    Lab.after(.7, () => { raise(ball); Lab.sfx("chime", { pitch: .7 }); });
+    Lab.after(1.9, () => {
+      if (lives <= 0) { Lab.gameover({ title: "Swindled!", score, stats: [["Rounds won", wins], ["Best streak", bestStreak], ["Fastest pick", fastest < 99 ? fastest.toFixed(1) + "s" : "–"]] }); return; }
+      lower(c); lower(ball); Lab.after(.4, nextRound);
+    });
+  }
+}
+function nextRound() {
+  const n = cupsFor(round);
+  if (n !== N) { // a new cup joins on the right; everything slides to its new spacing
+    N = n; layout(); while (cups.length < N) { const c = mkCup(cups.length); c.pop = 0; cups.push(c); } Lab.sfx("pop"); Lab.banner(N + " cups", { color: "#ffd76a", ms: 900 }); say(N === 4 ? "Let's add a cup, shall we?" : "Five cups. Good luck.", 2.6);
+    Lab.after(.7, beginShuffle); return;
+  }
+  if (round > 0 && round % 5 === 0 && wins) Lab.sfx("levelup");
+  beginShuffle();
+}
+
+function frame(dt, t) {
+  if (phase === "shuffle") {
+    if (cur) { if (stepMove(cur, dt)) { gapT = cur.gap; cur = null; } }
+    else if ((gapT -= dt) <= 0) {
+      if (queue.length) { cur = queue.shift(); beginMove(cur); }
+      else { phase = "pick"; pickT = 0; say("Where is it?", 9); Lab.sfx("tap", { pitch: 1.3 }); if (cursor >= 0) cursor = Math.floor(N / 2); }
+    }
+  } else if (phase === "pick") pickT += dt;
+  if (lineT > 0) lineT -= dt;
+  livePop = Lab.damp(livePop, 0, 5, dt);
+  for (const c of cups) {
+    if (!c.busy || phase !== "shuffle") { c.x = Lab.damp(c.x, slotX(c.slot), 12, dt); if (phase !== "shuffle") c.z = Lab.damp(c.z, 0, 12, dt); }
+    c.sq = Lab.damp(c.sq, 0, 10, dt); if (c.pop < 1) c.pop = Math.min(1, c.pop + dt / .3);
+  }
+  Lab.music.intensity(clamp(.3 + round * .04 + (phase === "shuffle" ? .2 : 0) + (lives === 1 ? .15 : 0), 0, 1));
+  render(t);
+}
+
+/* ---------- art */
+const cupSprite = () => Lab.sprite("cup:" + Math.round(cupW), cupW, cupH, (g, w, h) => {
+  const body = () => { g.beginPath(); g.moveTo(w * .03, h * .9); g.lineTo(w * .17, h * .16); g.quadraticCurveTo(w * .19, h * .03, w * .33, h * .03); g.lineTo(w * .67, h * .03); g.quadraticCurveTo(w * .81, h * .03, w * .83, h * .16); g.lineTo(w * .97, h * .9); g.closePath(); };
+  const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, "#efe2c8"); gr.addColorStop(.28, "#fffaf0"); gr.addColorStop(.62, "#f1e4cb"); gr.addColorStop(1, "#bda98a");
+  body(); g.fillStyle = gr; g.fill();
+  g.save(); body(); g.clip();
+  g.fillStyle = "#2a3a66"; g.fillRect(0, h * .17, w, h * .07);
+  g.fillStyle = "rgba(255,255,255,.55)"; g.beginPath(); g.ellipse(w * .3, h * .5, w * .045, h * .3, .12, 0, TAU); g.fill();
+  g.fillStyle = "rgba(60,40,30,.1)"; g.fillRect(w * .78, 0, w * .3, h);
+  g.restore();
+  draw.star(g, w * .5, h * .56, w * .15, "#d9453d"); draw.star(g, w * .5, h * .56, w * .07, "#f7b7a3");
+  g.lineJoin = "round"; body(); g.strokeStyle = INK; g.lineWidth = Math.max(1.5, w * .03); g.stroke();
+  draw.rect(g, w * .01, h * .86, w * .98, h * .13, h * .06, "#2a3a66", INK, Math.max(1.5, w * .03));
+  draw.rect(g, w * .08, h * .885, w * .5, h * .03, h * .015, "rgba(255,255,255,.35)");
+});
+const pearlSprite = r => Lab.sprite("pearl:" + Math.round(r), r * 2.6, r * 2.6, (g, w) => {
+  const c = w / 2; draw.glow(g, c, c, w / 2, "#ffe9a8", .55);
+  const gr = g.createRadialGradient(c - r * .35, c - r * .4, r * .1, c, c, r); gr.addColorStop(0, "#fffdf2"); gr.addColorStop(.5, "#ffd76a"); gr.addColorStop(1, "#c98a2b");
+  g.fillStyle = gr; g.beginPath(); g.arc(c, c, r, 0, TAU); g.fill(); g.strokeStyle = "rgba(90,50,10,.6)"; g.lineWidth = 1.2; g.stroke();
+});
+function drawCup(c, cup, t) {
+  const pop = ease.outBack(clamp(cup.pop, 0, 1)), sc = (1 + cup.z * .1) * pop; if (sc <= .01) return;
+  const y = tableY + cup.z * cupH * .2, lift = cup.lift * cupH * .95, s = cupSprite();
+  draw.shadow(c, cup.x, y - 1, cupW * .56 * sc * (1 - cup.lift * .25), cupW * .13 * sc, .3 - cup.lift * .14);
+  c.save(); c.translate(cup.x, y - lift); c.rotate(cup.tilt + cup.lift * .14); c.scale(sc * (1 + cup.sq), sc * (1 - cup.sq));
+  c.drawImage(s, -cupW / 2, -cupH, cupW, cupH); c.restore();
+}
+function backdrop(c, t) {
+  const W = Lab.W, H = Lab.H, P = Lab.play;
+  draw.bg(c, "#2a1a52", "#f39a5c", "#a9457a");
+  draw.glow(c, W / 2, tableY - cupH * .4, Math.max(W, H) * .55, "#ffd9a0", .28);
+  // string lights
+  const y0 = P.y + 26 * S, sag = 30 * S, cols = ["#ffd76a", "#ff9bb3", "#7fe0d0", "#fff3c4"], n = Math.max(7, Math.round(W / 60));
+  c.strokeStyle = "rgba(20,10,40,.7)"; c.lineWidth = 1.6; c.beginPath(); c.moveTo(-10, y0); c.quadraticCurveTo(W / 2, y0 + sag * 2, W + 10, y0); c.stroke();
+  for (let i = 0; i < n; i++) { const u = (i + .5) / n, x = u * W, y = y0 + sag * 4 * u * (1 - u) + 5 * S, tw = .65 + .35 * Math.sin(t * 2.2 + i * 1.9), col = cols[i % 4]; draw.glow(c, x, y, 20 * S, col, .5 * tw); draw.circle(c, x, y, 4.2 * S, col); }
+  // awning
+  const ah = P.y + 6 * S, sw = Math.max(34, W / Math.round(W / 46));
+  for (let i = 0, x = 0; x < W; i++, x += sw) { c.fillStyle = i % 2 ? "#8a2a3c" : "#a8384b"; c.fillRect(x, -40, sw + 1, ah + 40); c.beginPath(); c.arc(x + sw / 2, ah, sw / 2, 0, Math.PI); c.fill(); }
+  c.fillStyle = "rgba(0,0,0,.18)"; c.fillRect(0, -40, W, ah + 34);
+}
+function figure() { // swindler geometry (shared with the speech bubble); u = 0 when there is no room for him
+  const top = Lab.play.y + 96 * Math.max(S, .82), base = tableY - cupH * .5, hgt = base - top;
+  const u = hgt < 70 ? 0 : Math.min(hgt / 2.6, 84 * S); return { u, base, hy: base - u * 1.75, hat: base - u * 2.85 };
+}
+function swindler(c, t) {
+  const f = figure(); if (!f.u) return;
+  const u = f.u, base = f.base, x = midX, hy = f.hy + Math.sin(t * 1.6) * u * .02, look = clamp((lookX - midX) / (sp * 2.2), -1, 1) * (phase === "shuffle" ? 1 : 0);
+  c.lineJoin = "round"; c.lineCap = "round";
+  c.fillStyle = "#2d2147"; c.beginPath(); c.moveTo(x - u * 1.7, base + u * .6); c.quadraticCurveTo(x - u * 1.6, hy + u * .75, x - u * .5, hy + u * .7); c.lineTo(x + u * .5, hy + u * .7); c.quadraticCurveTo(x + u * 1.6, hy + u * .75, x + u * 1.7, base + u * .6); c.closePath(); c.fill();
+  c.fillStyle = "#f6ecd8"; c.beginPath(); c.moveTo(x - u * .32, hy + u * .7); c.lineTo(x, base + u * .2); c.lineTo(x + u * .32, hy + u * .7); c.closePath(); c.fill();
+  c.fillStyle = "#e2506a"; for (const s of [-1, 1]) { c.beginPath(); c.moveTo(x, hy + u * .95); c.lineTo(x + s * u * .36, hy + u * .78); c.lineTo(x + s * u * .36, hy + u * 1.12); c.closePath(); c.fill(); }
+  draw.circle(c, x, hy, u * .72, "#f2c9a2");
+  // straw boater
+  draw.rect(c, x - u * .62, hy - u * 1.08, u * 1.24, u * .62, u * .08, "#f3e2b6", INK, u * .05); c.fillStyle = "#e2506a"; c.fillRect(x - u * .6, hy - u * .74, u * 1.2, u * .2); c.fillStyle = "#2a3a66"; c.fillRect(x - u * .6, hy - u * .68, u * 1.2, u * .07);
+  draw.rect(c, x - u * 1.02, hy - u * .56, u * 2.04, u * .15, u * .075, "#f3e2b6", INK, u * .05);
+  for (const s of [-1, 1]) { draw.circle(c, x + s * u * .27, hy - u * .08, u * .13, "#fff"); draw.circle(c, x + s * u * .27 + look * u * .06, hy - u * .06, u * .07, INK); c.strokeStyle = INK; c.lineWidth = u * .07; c.beginPath(); c.moveTo(x + s * u * .12, hy - u * (phase === "pick" ? .3 : .26)); c.lineTo(x + s * u * .42, hy - u * (phase === "pick" ? .26 : .32)); c.stroke(); }
+  c.strokeStyle = INK; c.lineWidth = u * .13; for (const s of [-1, 1]) { c.beginPath(); c.moveTo(x, hy + u * .26); c.quadraticCurveTo(x + s * u * .3, hy + u * .42, x + s * u * .52, hy + u * .16); c.stroke(); }
+}
+function table(c) {
+  const W = Lab.W, H = Lab.H, back = tableY - cupH * .62, front = tableY + cupH * .42;
+  draw.vgrad(c, -40, back, W + 80, front - back, ["#a8733f", "#c48a52"]);
+  c.strokeStyle = "rgba(80,45,20,.22)"; c.lineWidth = 1.2; for (let i = 1; i < 4; i++) { const y = back + (front - back) * i / 4; c.beginPath(); c.moveTo(-40, y); c.lineTo(W + 40, y + (i % 2 ? 3 : -2)); c.stroke(); }
+  c.fillStyle = "rgba(255,230,190,.35)"; c.fillRect(-40, back, W + 80, 2.5);
+  const sw = 30 * Math.max(S, .8); for (let i = 0, x = midX - Math.ceil(midX / sw + 1) * sw; x < W + 40; i++, x += sw) { c.fillStyle = i % 2 ? "#f1e0c0" : "#c8443c"; c.fillRect(x, front, sw + 1, H - front + 40); }
+  draw.vgrad(c, -40, front, W + 80, H - front + 40, ["rgba(30,10,30,.05)", "rgba(30,10,40,.55)"]);
+  c.fillStyle = "#7d5028"; c.fillRect(-40, front - 1, W + 80, 7 * S); c.fillStyle = "rgba(0,0,0,.25)"; c.fillRect(-40, front + 6 * S, W + 80, 5 * S);
+}
+function hud(c, t) {
+  const P = Lab.play, U = Math.max(S, .82), y = P.y + 62 * U;
+  for (let i = 0; i < 3; i++) { const on = i < lives, k = i === lives && livePop < 0 ? 1 - livePop * .6 : 1, x = P.x + 22 * U + i * 24 * U; draw.circle(c, x, y, 9.5 * U * k, on ? "#f2b84a" : "rgba(20,10,40,.35)", on ? "#7a5210" : null, 1.5); if (on) { draw.circle(c, x, y, 6 * U, null, "rgba(122,82,16,.6)", 1.2); draw.circle(c, x - 3 * U, y - 3.5 * U, 2 * U, "rgba(255,255,255,.7)"); } }
+  draw.text(c, "ROUND " + (round + 1), P.x + P.w - 14 * U, y - 7 * U, { size: Math.max(11, 12 * U), color: "rgba(255,255,255,.8)", align: "right", weight: 700, shadow: "rgba(20,10,40,.5)" });
+  draw.text(c, streak > 0 ? "streak ×" + (1 + Math.min(streak, 8) * .25).toFixed(2).replace(/0$/, "") : "pot " + (10 + round * 5), P.x + P.w - 14 * U, y + 9 * U, { size: Math.max(11, 12.5 * U), color: "#ffd76a", align: "right", weight: 700, shadow: "rgba(20,10,40,.5)" });
+  if (lineT > 0 && line) { // the swindler's patter
+    const a = clamp(lineT * 3, 0, 1), fs = Math.max(13, 15.5 * U); c.font = Lab.font(fs, 700); const f = figure(), wide = f.u && f.hat - 44 * U > P.y + 84 * U, w = Math.min(P.w - (wide ? 24 : 150) * U, c.measureText(line).width + 26 * U), side = !wide && f.u && P.w > 560, x = side ? midX + f.u * 1.25 + w / 2 : midX, by = wide ? f.hat - 40 * U : side ? f.hy - f.u * .5 : P.y + 62 * U;
+    c.globalAlpha = a; draw.rect(c, x - w / 2, by - 16 * U, w, 32 * U, 16 * U, "#fff6e4", "rgba(29,21,51,.85)", 2);
+    c.fillStyle = "#fff6e4"; c.beginPath(); if (side) { c.moveTo(x - w / 2 + 2, by - 7 * U); c.lineTo(x - w / 2 - 11 * U, by + 2 * U); c.lineTo(x - w / 2 + 2, by + 8 * U); } else { c.moveTo(x - 9 * U, by + 15 * U); c.lineTo(x, by + 27 * U); c.lineTo(x + 9 * U, by + 15 * U); } c.closePath(); c.fill();
+    draw.text(c, line, x, by + 1, { size: fs, color: INK, weight: 700, maxWidth: w - 16 * U }); c.globalAlpha = 1;
+  }
+  if (phase === "pick") { // quick-pick bonus drains while you hesitate
+    const q = quickMult(), w = Math.min(190 * U, P.w * .5), x = midX - w / 2, by = Math.min(tableY + cupH * .42 + 30 * U, Lab.H - 40 * U);
+    draw.rect(c, x, by, w, 9 * U, 4.5 * U, "rgba(20,10,40,.6)"); if (q > 1.01) draw.rect(c, x + 1.5, by + 1.5, Math.max(6, (w - 3) * (q - 1)), 9 * U - 3, 3 * U, "#ffd76a");
+    draw.text(c, q > 1.01 ? "QUICK PICK ×" + q.toFixed(1) : "take your time", midX, by + 23 * U, { size: Math.max(11, 12.5 * U), color: "#fff6e4", weight: 700, shadow: "rgba(20,10,40,.7)" });
+  }
+}
+function render(t) {
+  const c = Lab.ctx; backdrop(c, t); swindler(c, t); table(c); hud(c, t);
+  const r = cupW * .17, ps = pearlSprite(r), order = cups.slice().sort((a, b) => a.z - b.z);
+  if (ball && ball.lift > .05) { c.globalAlpha = clamp(ball.lift * 3, 0, 1); c.drawImage(ps, ball.x - ps.w / 2, tableY - r - ps.h / 2 - 1, ps.w, ps.h); c.globalAlpha = 1; if (phase !== "show" && ball.lift > .8 && Math.sin(t * 9) > .4) draw.star(c, ball.x + r * .9, tableY - r * 2, r * .35, "#fff"); }
+  for (const cup of order) drawCup(c, cup, t);
+  if (pearl.roll) c.drawImage(ps, pearl.x - ps.w / 2, tableY + cupH * .1 - r - ps.h / 2, ps.w, ps.h);
+  if (phase === "pick") for (const cup of cups) { const b = .5 + .5 * Math.sin(t * 5 + cup.slot); c.fillStyle = `rgba(255,246,228,${.5 + b * .4})`; c.beginPath(); c.moveTo(cup.x - 7 * S, tableY - cupH - (14 + b * 5) * S); c.lineTo(cup.x + 7 * S, tableY - cupH - (14 + b * 5) * S); c.lineTo(cup.x, tableY - cupH - (5 + b * 5) * S); c.closePath(); c.fill(); }
+  if (cursor >= 0 && phase === "pick") { const cup = cupAt(cursor); if (cup) { draw.rr(c, cup.x - cupW * .58, tableY - cupH * 1.1, cupW * 1.16, cupH * 1.2, 12); c.strokeStyle = "#fff"; c.lineWidth = 3; c.setLineDash([8, 6]); c.lineDashOffset = -t * 22; c.stroke(); c.setLineDash([]); } }
+}
+/* splash backdrop: the booth, waiting */
+function attract(dt, t) {
+  N = 3; layout(); phase = "idle"; lookX = midX; lineT = 0; lives = 3; round = 0; streak = 0;
+  const c = Lab.ctx; backdrop(c, t); swindler(c, t); table(c);
+  for (let i = 0; i < 3; i++) drawCup(c, { x: slotX(i), z: 0, lift: i === 1 ? .5 + .5 * Math.sin(t * 1.5) : 0, tilt: 0, sq: 0, pop: 1 }, t);
+}
+Lab.boot();
+})();
+</script></body></html>
