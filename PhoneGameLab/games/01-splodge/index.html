@@ -1,0 +1,337 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Splodge</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* SPLODGE — pop blobs of wet paint before they dry; every pop buys a little time, every miss spills some.
+ * Identity: a sheet of cream paper taped to a craft mat. Each paint has its own colour AND silhouette; pops leave real
+ * splats on the sheet, chains of the same colour are joined by finger-painted strokes, so every run ends as a painting.
+ * Depth: the clock is a bank (pops pay in, dried blobs and stray taps pay out); popping the same colour in a row builds a
+ * chain multiplier (×6 cap), so the skill is choosing WHICH wet blob to pop next without letting the others dry.
+ * Escalation by "layers": more colours, big 3-tap blobs, dripping blobs, rarer time refunds.                              */
+Lab.init({
+  title: "Splodge", tagline: "Pop the paint before the clock runs dry.", category: "Reflex & Taps",
+  howto: ["Tap wet blobs before they dry out", "Same colour in a row: chain up to ×6", "Pops buy time, stray taps spill it"],
+  theme: { bg: "#cfdcd8", bg2: "#e6efec", fg: "#2b2d42", accent: "#ef5b5b", accent2: "#f6a821", muted: "#6c728a", light: true },
+  orient: "any", music: { style: "funk", key: "F", vol: .4 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, INK = "#2b2d42", PAPER = "#fbf5e6";
+const PAINT = [
+  { n: "Coral", c: "#ef5b5b", lobes: 0, amp: 0, rot: 0 },
+  { n: "Cobalt", c: "#3d6fd9", lobes: 4, amp: .12, rot: Math.PI / 4 },
+  { n: "Sunflower", c: "#f4ac12", lobes: 3, amp: .15, rot: -Math.PI / 2 },
+  { n: "Leaf", c: "#22ad69", lobes: 6, amp: .12, rot: 0 },
+  { n: "Plum", c: "#8f58d6", lobes: 5, amp: .21, rot: -Math.PI / 2 },
+];
+const TIME0 = 20, TIMEMAX = 30, MAXB = 9;
+const NEWS = { 2: "A fourth paint joins in", 3: "Big blobs take three taps", 4: "Careful — some blobs drip", 5: "Five paints now. Chain them!", 7: "Drying faster…", 10: "Masterpiece pace" };
+let S, sheet, pg, pgc, marks = [], blobs = [], ghosts, timeLeft, shownTime, score, chain, chainCol, bestChain, pops, level, lvPops, lvNeed,
+  spawnT, alive, started, lastPop, toRainbow, auto, ribbon, barBump, barHurt, tickT, uid, lastCol, dried, chainPulse;
+
+/* ------------------------------------------------------------------ layout + paper */
+function layout() {
+  const p = Lab.play, m = 12, barH = 42;
+  const availW = p.w - m * 2, availH = p.h - barH - m;
+  const w = Math.min(availW, 980), h = Math.min(availH, 700);
+  sheet = { x: p.x + (p.w - w) / 2, y: p.y + barH + (availH - h) / 2, w, h };
+  S = Lab.clamp(Math.min(w, h) / 366, .8, 1.45);
+  pg = document.createElement("canvas"); pg.width = Math.ceil(w * Lab.dpr); pg.height = Math.ceil(h * Lab.dpr);
+  pgc = pg.getContext("2d"); pgc.scale(Lab.dpr, Lab.dpr);
+  const g = pgc, rnd = Lab.rng(11);
+  g.fillStyle = PAPER; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < w * h / 260; i++) { g.fillStyle = rnd() < .5 ? "rgba(120,95,60,.05)" : "rgba(255,255,255,.5)"; g.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 1.6, 1 + rnd() * 1.6); }
+  g.strokeStyle = "rgba(120,95,60,.06)"; g.lineWidth = 1;
+  for (let i = 0; i < 40; i++) { const x = rnd() * w, y = rnd() * h, a = rnd() * TAU, l = 8 + rnd() * 22; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+  for (const mk of marks) paintMark(mk);
+}
+Lab.onResize(() => {
+  if (!sheet) return; const o = sheet, oS = S; layout();
+  const rx = x => sheet.x + (x - o.x) / o.w * sheet.w, ry = y => sheet.y + (y - o.y) / o.h * sheet.h;
+  for (const b of blobs) { b.x = rx(b.x); b.y = ry(b.y); b.y0 = ry(b.y0); b.r = b.r / oS * S; b.vy = b.vy / oS * S; }
+  if (lastPop) { lastPop.x = rx(lastPop.x); lastPop.y = ry(lastPop.y); }
+});
+function addMark(mk) { marks.push(mk); if (marks.length > 320) marks.shift(); paintMark(mk); }
+function paintMark(m) {
+  const g = pgc, w = sheet.w, h = sheet.h, x = m.u * w, y = m.v * h, r = m.r * S, rnd = Lab.rng(m.seed);
+  g.save(); g.globalCompositeOperation = "multiply";
+  if (m.k === "splat") {
+    g.fillStyle = m.c; g.globalAlpha = .84;
+    const N = 30, h1 = rnd() * TAU, h2 = rnd() * TAU, h3 = rnd() * TAU;
+    g.beginPath();
+    for (let i = 0; i <= N; i++) { const a = i / N * TAU, rr = r * (1 + .15 * Math.sin(3 * a + h1) + .1 * Math.sin(5 * a + h2) + .07 * Math.sin(9 * a + h3)); g[i ? "lineTo" : "moveTo"](x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+    g.fill();
+    const n = 6 + (rnd() * 7 | 0);
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * TAU, d = r * (1.15 + rnd() * 1.25), dr = r * (.06 + rnd() * .15);
+      g.beginPath(); g.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, dr, 0, TAU); g.fill();
+      if (rnd() < .3) { g.beginPath(); g.moveTo(x + Math.cos(a - .09) * r * .85, y + Math.sin(a - .09) * r * .85); g.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d); g.lineTo(x + Math.cos(a + .09) * r * .85, y + Math.sin(a + .09) * r * .85); g.fill(); }
+    }
+    g.globalCompositeOperation = "source-over"; g.globalAlpha = .22; g.fillStyle = "#fff";
+    g.beginPath(); g.ellipse(x - r * .3, y - r * .32, r * .28, r * .16, -.6, 0, TAU); g.fill();
+  } else if (m.k === "stroke") {
+    const x2 = m.u2 * w, y2 = m.v2 * h, dx = x2 - x, dy = y2 - y, d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d, bow = (rnd() - .5) * d * .35;
+    g.strokeStyle = m.c; g.lineCap = "round";
+    for (let i = -2; i <= 2; i++) {
+      g.globalAlpha = .2 + rnd() * .22; g.lineWidth = r * (.2 + rnd() * .16);
+      const o = i * r * .2; g.beginPath(); g.moveTo(x + nx * o, y + ny * o);
+      g.quadraticCurveTo((x + x2) / 2 + nx * (bow + o * 1.3), (y + y2) / 2 + ny * (bow + o * 1.3), x2 + nx * o, y2 + ny * o); g.stroke();
+    }
+  } else if (m.k === "dry") {
+    g.strokeStyle = "#8d8474"; g.globalAlpha = .55; g.lineWidth = Math.max(2, r * .13); g.setLineDash([r * .32, r * .2]);
+    g.beginPath(); g.arc(x, y, r * .7, rnd() * TAU, rnd() * TAU + TAU); g.stroke(); g.setLineDash([]);
+    g.globalAlpha = .16; g.fillStyle = m.c; g.beginPath(); g.arc(x, y, r * .7, 0, TAU); g.fill();
+  } else if (m.k === "veil") {
+    g.globalCompositeOperation = "source-over"; g.globalAlpha = .56; g.fillStyle = PAPER; g.fillRect(0, 0, w, h);
+  } else if (m.k === "drip") {
+    g.strokeStyle = m.c; g.globalAlpha = .5; g.lineWidth = r * .55; g.lineCap = "round"; g.beginPath(); g.moveTo(x, y); g.lineTo(x, m.v2 * h); g.stroke();
+  }
+  g.restore();
+}
+const U = x => (x - sheet.x) / sheet.w, V = y => (y - sheet.y) / sheet.h;
+
+/* ------------------------------------------------------------------ difficulty curve */
+const nCol = () => level < 2 ? 3 : level < 5 ? 4 : 5;
+const interval = () => Math.max(.36, .95 - .055 * (level - 1));
+const lifeFor = () => Math.max(1.15, 2.6 - .13 * (level - 1));
+const refund = () => interval() * Lab.clamp(1.18 - .055 * (level - 1), .58, 1.18); // seconds paid back per pop
+
+function start() {
+  marks = []; blobs = []; ghosts = []; layout();
+  timeLeft = shownTime = TIME0; score = 0; chain = 0; chainCol = -1; bestChain = 0; pops = 0; dried = 0; level = 1; lvPops = 0; lvNeed = 10;
+  spawnT = 0; alive = true; started = false; lastPop = null; toRainbow = 16; auto = true; ribbon = null; barBump = 0; barHurt = 0; tickT = 0; uid = 0; lastCol = -1; chainPulse = 0;
+  Lab.setScore(0);
+  const first = spawn("plain", 0, sheet.x + sheet.w / 2, sheet.y + sheet.h * .46); first.evergreen = true; first.r = 42 * S;
+  Lab.input.onDown = [(x, y) => tap(x, y)];
+  Lab.expose({
+    get score() { return score; }, get time() { return timeLeft; }, get chain() { return chain; }, get level() { return level; }, get pops() { return pops; },
+    get alive() { return alive; }, get started() { return started; }, get marks() { return marks.length; },
+    get blobs() { return blobs.map(b => ({ id: b.id, x: b.x, y: b.y, r: b.r, col: b.col, kind: b.kind, hp: b.hp, left: b.life - b.age })); },
+    setTime(v) { timeLeft = v; }, setAuto(v) { auto = v; }, clear() { blobs = []; },
+    spawn(kind, col, u, v, life) { const b = spawn(kind, col, sheet.x + u * sheet.w, sheet.y + v * sheet.h); if (life) b.life = life; return b.id; },
+  });
+  Lab.loop(frame);
+}
+
+/* ------------------------------------------------------------------ blobs */
+function spawn(kind, col, x, y) {
+  if (!kind) {
+    kind = "plain";
+    if (level >= 2 && --toRainbow <= 0) { kind = "rainbow"; toRainbow = Lab.randInt(15, 22); }
+    else if (level >= 3 && Lab.chance(.11) && !blobs.some(b => b.kind === "big")) kind = "big";
+  }
+  if (col == null) { col = (lastCol >= 0 && lastCol < nCol() && Lab.chance(.3)) ? lastCol : Lab.randInt(0, nCol() - 1); }
+  lastCol = col;
+  const r = (kind === "big" ? 56 : kind === "rainbow" ? 31 : Lab.rand(32, 43) - Math.min(5, (level - 1) * .5)) * S;
+  if (x == null) {
+    let bestD = -1;
+    for (let i = 0; i < 18; i++) {
+      const tx = Lab.rand(sheet.x + r + 12, sheet.x + sheet.w - r - 12), ty = Lab.rand(sheet.y + 40 * S + r, sheet.y + sheet.h - r - 14);
+      let d = 1e9; for (const o of blobs) d = Math.min(d, Lab.dist(tx, ty, o.x, o.y) - o.r - r);
+      if (d > bestD) { bestD = d; x = tx; y = ty; } if (d > 14 * S) break;
+    }
+  }
+  const drift = kind === "plain" && level >= 4 && Lab.chance(.3);
+  const b = { id: ++uid, kind, col, x, y, y0: y, r, age: 0, life: lifeFor() * (kind === "big" ? 1.7 : kind === "rainbow" ? .85 : drift ? 1.15 : 1), in: 0, hp: kind === "big" ? 3 : 1, hit: 0, vy: drift ? Lab.rand(34, 62) * S : 0, ph: Lab.rand(0, TAU), evergreen: false, dead: false };
+  blobs.push(b);
+  if (started) Lab.audio.tone({ f: 240 + col * 46, f2: 420 + col * 60, dur: .05, vol: .045 });
+  return b;
+}
+function tap(x, y) {
+  if (!alive || Lab.paused) return;
+  let best = null, bd = 1;
+  for (const b of blobs) { const rr = Math.max(b.r + 15 * S, 32), d = Lab.dist(x, y, b.x, b.y) / rr; if (d < bd) { bd = d; best = b; } }
+  if (best) return hit(best);
+  for (const g of ghosts) if (Lab.dist(x, y, g.x, g.y) < g.r + 18 * S) return;      // forgive a tap that lands just after a pop / dry
+  // stray tap: spills time, breaks the chain
+  if (!started) return;
+  breakChain(x, y); timeLeft -= .5; barHurt = 1;
+  fx.ring(x, y, { r0: 4, r1: 26 * S, color: "rgba(43,45,66,.5)", width: 3, life: .3 });
+  fx.text(x, y - 22 * S, "−0.5s", { color: "#c2413f", size: 15 * S, outline: "rgba(251,245,230,.9)" });
+  Lab.audio.tone({ f: 150, f2: 110, dur: .09, type: "triangle", vol: .16 }); Lab.shake(2.5, .12);
+}
+function breakChain(x, y) {
+  if (chain >= 3) fx.text(x, y + 26 * S, "chain lost", { color: INK, size: 13 * S, outline: "rgba(251,245,230,.9)", life: .7 });
+  chain = 0; chainCol = -1; lastPop = null;
+}
+function hit(b) {
+  const P = PAINT[b.col];
+  if (b.hp > 1) {                                                                    // big blob: squish it down
+    b.hp--; b.hit = 1; b.r *= .84; score += 5; timeLeft = Math.min(TIMEMAX, timeLeft + .12); Lab.setScore(score);
+    fx.burst(b.x, b.y, { n: 7, color: P.c, speed: 240 * S, life: .4, size: 4 * S, gravity: 900 });
+    Lab.sfx("boing", { pitch: 1.5 - b.hp * .22 }); Lab.buzz(8); return;
+  }
+  b.dead = true; ghosts.push({ x: b.x, y: b.y, r: b.r, t: .2 });
+  const wild = b.kind === "rainbow", col = wild ? (chainCol >= 0 ? chainCol : b.col) : b.col, C = wild && chainCol < 0 ? "#ef5b5b" : PAINT[col].c;
+  if (wild) { chain = Math.max(1, chain + 1); chainCol = col; } else if (col === chainCol) chain++; else { chain = 1; chainCol = col; }
+  bestChain = Math.max(bestChain, chain);
+  const mult = Math.min(chain, 6), fresh = b.evergreen ? 1 : Lab.clamp(1 - b.age / b.life, 0, 1);
+  const base = b.kind === "big" ? 40 : wild ? 30 : 10 + Math.round(10 * fresh), gain = base * mult;
+  score += gain; Lab.setScore(score); if (mult >= 3 || b.kind !== "plain") Lab.bumpScore();
+  const back = wild ? 2.5 : refund() * (b.kind === "big" ? 2 : 1);
+  if (started) timeLeft = Math.min(TIMEMAX, timeLeft + back); barBump = 1; chainPulse = 1;
+  // feedback: droplets, ring, popup, splat on the paper, stroke joining a chain
+  const big = b.kind === "big" ? 1.5 : 1;
+  fx.burst(b.x, b.y, { n: Math.round(11 * big) + mult, colors: wild ? PAINT.map(p => p.c) : [C, C, Lab.color.shade(C, .3)], speed: 300 * S * big, life: .5, size: 5 * S, gravity: 1000, drag: 2.2 });
+  fx.ring(b.x, b.y, { r0: b.r * .5, r1: b.r * 1.7, color: C, width: 4 * S, life: .3 });
+  fx.text(b.x, b.y - b.r - 6, "+" + gain, { color: mult > 1 ? Lab.color.shade(C, -.32) : INK, size: (15 + Math.min(12, mult * 2)) * S, outline: "rgba(255,255,255,.95)" });
+  if (wild) fx.text(b.x, b.y + b.r + 14 * S, "+2.5s", { color: "#1f8f57", size: 16 * S, outline: "rgba(251,245,230,.95)" });
+  if (b.vy) addMark({ k: "drip", u: U(b.x), v: V(b.y0), v2: V(b.y), r: b.r / S, c: C, seed: b.id });
+  addMark({ k: "splat", u: U(b.x), v: V(b.y), r: b.r / S * (wild ? 1.25 : 1.05), c: C, seed: b.id * 7 + 3 });
+  if (chain >= 2 && lastPop) addMark({ k: "stroke", u: U(lastPop.x), v: V(lastPop.y), u2: U(b.x), v2: V(b.y), r: 34, c: C, seed: b.id * 13 + 1 });
+  lastPop = { x: b.x, y: b.y };
+  Lab.sfx("pop", { pitch: (1.25 - col * .07) * (b.kind === "big" ? .7 : 1) }); Lab.buzz(6);
+  if (chain >= 2) Lab.audio.combo(Math.min(chain, 12) - 2, { vol: .16 });
+  if (wild) { Lab.sfx("gem"); Lab.flash("#fff", .18, .25); }
+  if (b.kind === "big") { Lab.sfx("splash"); Lab.shake(5, .18); Lab.hitstop(.035); }
+  pops++;
+  if (!started) { started = true; spawnT = .25; return; }
+  if (++lvPops >= lvNeed) levelUp();
+}
+function dry(b) {
+  b.dead = true; dried++; ghosts.push({ x: b.x, y: b.y, r: b.r, t: .22 });
+  breakChain(b.x, b.y); timeLeft -= 1.5; barHurt = 1;
+  addMark({ k: "dry", u: U(b.x), v: V(b.y), r: b.r / S, c: PAINT[b.col].c, seed: b.id });
+  fx.puff(b.x, b.y, { n: 7, color: "rgba(141,132,116,.6)", size: 7 * S });
+  fx.text(b.x, b.y - 10, "−1.5s", { color: "#c2413f", size: 17 * S, outline: "rgba(251,245,230,.95)" });
+  Lab.sfx("crunch", { pitch: .7 }); Lab.shake(4, .18); Lab.flash("#c2413f", .16, .12);
+}
+function levelUp() {
+  level++; lvPops = 0; lvNeed = 8 + level * 2;
+  addMark({ k: "veil", u: 0, v: 0, r: 0, seed: level });       // the old layer sinks back so wet paint stays readable
+  ribbon = { t: 0, text: "LAYER " + level, sub: NEWS[level] || "", c: PAINT[(level + 1) % 5].c };
+  Lab.sfx("levelup", { pitch: 1 + Math.min(level, 8) * .03 }); Lab.bumpScore();
+  for (let i = 0; i < 5; i++) fx.burst(sheet.x + sheet.w * (i + .5) / 5, sheet.y + 20, { n: 5, color: PAINT[i].c, speed: 200 * S, angle: Math.PI / 2, spread: 1.6, life: .7, size: 5 * S, gravity: 700 });
+}
+function end() {
+  alive = false;
+  for (const b of blobs) { addMark({ k: "dry", u: U(b.x), v: V(b.y), r: b.r / S, c: PAINT[b.col].c, seed: b.id }); fx.puff(b.x, b.y, { n: 6, color: "rgba(141,132,116,.6)", size: 7 * S }); }
+  blobs = []; Lab.shake(7, .35);
+  Lab.gameover({ title: "Paint's dry!", message: level >= 6 ? "That one belongs on the fridge." : "Chain same colours to score big.", score, stats: [["Pops", pops], ["Best chain", "×" + Math.min(bestChain, 6) + (bestChain > 6 ? " (" + bestChain + ")" : "")], ["Layer", level]] });
+}
+
+/* ------------------------------------------------------------------ frame */
+function frame(dt, t) {
+  if (alive) {
+    if (started) {
+      timeLeft -= dt;
+      if (auto) { spawnT -= dt; if (spawnT <= 0) { if (blobs.length < MAXB) spawn(); spawnT = interval() * Lab.rand(.8, 1.2); } }
+      if (timeLeft < 6) { tickT -= dt; if (tickT <= 0) { Lab.sfx("tick", { pitch: .8 + (6 - timeLeft) * .09 }); tickT = timeLeft < 3 ? .25 : .5; } }
+    }
+    for (const b of blobs) {
+      b.in = Math.min(1, b.in + dt / .22); b.hit = Lab.damp(b.hit, 0, 9, dt);
+      if (started && !b.evergreen) b.age += dt;
+      if (b.vy) b.y = Math.min(b.y + b.vy * dt, sheet.y + sheet.h - b.r - 10);
+      if (!b.dead && b.age >= b.life) dry(b);
+    }
+    if (blobs.some(b => b.dead)) blobs = blobs.filter(b => !b.dead);
+    for (const g of ghosts) g.t -= dt; if (ghosts.length && ghosts[0].t <= 0) ghosts.shift();
+    if (timeLeft <= 0) { timeLeft = 0; end(); }
+  }
+  shownTime = Lab.damp(shownTime, timeLeft, 14, dt); barBump = Lab.damp(barBump, 0, 8, dt); barHurt = Lab.damp(barHurt, 0, 6, dt); chainPulse = Lab.damp(chainPulse, 0, 7, dt);
+  if (ribbon) { ribbon.t += dt; if (ribbon.t > 1.9) ribbon = null; }
+  Lab.music.intensity(Lab.clamp(.22 + level * .07 + (started && timeLeft < 6 ? .3 : 0), 0, 1));
+  render(t);
+}
+
+/* ------------------------------------------------------------------ drawing */
+function blobPath(c, x, y, r, P, wob, t) {
+  c.beginPath();
+  for (let i = 0; i <= 40; i++) { const a = i / 40 * TAU, rr = r * (1 + P.amp * Math.cos(P.lobes * (a - P.rot)) + wob * Math.sin(2 * a + t)); c[i ? "lineTo" : "moveTo"](x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+  c.closePath();
+}
+function drawBlob(c, b, t) {
+  const P = PAINT[b.col], f = b.evergreen ? 1 : Lab.clamp(1 - b.age / b.life, 0, 1), born = ease.outBack(b.in);
+  const squash = b.hit * Math.sin(b.hit * 9) * .16, pulse = b.evergreen ? Math.sin(t * 5) * .05 : 0;
+  const r = b.r * born * (.76 + .24 * f + pulse), late = f < .28 && !Lab.reducedMotion ? Math.sin(t * 46 + b.ph) * 1.6 * S : 0;
+  const x = b.x + late, y = b.y;
+  c.save(); c.translate(x, y); c.scale(1 + squash, 1 - squash);
+  draw.shadow(c, 0, r * .98, r * .86, r * .2, .13);
+  if (b.kind === "rainbow") {
+    draw.circle(c, 0, r * .04, r * 1.03, null, "rgba(255,252,243,.92)", 5 * S);
+    c.fillStyle = Lab.color.shade(INK, .1); c.beginPath(); c.arc(0, r * .08, r * 1.03, 0, TAU); c.fill();
+    for (let i = 0; i < 5; i++) { c.fillStyle = PAINT[i].c; c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, r, t * 2.4 + i * TAU / 5, t * 2.4 + (i + 1) * TAU / 5 + .02); c.closePath(); c.fill(); }
+    draw.circle(c, 0, 0, r * .46, PAPER); draw.star(c, 0, 0, r * .34, "#f4ac12", 5, .5);
+  } else {
+    const col = f < .5 ? Lab.color.mix(P.c, "#a59c8c", (.5 - f) * .9) : P.c;
+    c.strokeStyle = "rgba(255,252,243,.92)"; c.lineWidth = 5 * S; c.lineJoin = "round"; blobPath(c, 0, r * .05, r * 1.03, P, .03, t * 3 + b.ph); c.stroke();
+    c.fillStyle = Lab.color.shade(col, -.3); blobPath(c, 0, r * .1, r * 1.02, P, .03, t * 3 + b.ph); c.fill();
+    c.fillStyle = col; blobPath(c, 0, 0, r, P, .03, t * 3 + b.ph); c.fill();
+    c.fillStyle = "rgba(255,255,255,.5)"; c.beginPath(); c.ellipse(-r * .3, -r * .34, r * .2, r * .11, -.6, 0, TAU); c.fill();
+    c.fillStyle = "rgba(255,255,255,.28)"; c.beginPath(); c.arc(r * .28, r * .34, r * .07, 0, TAU); c.fill();
+    if (b.kind === "big") for (let i = 0; i < 3; i++) draw.circle(c, (i - 1) * r * .26, r * .02, r * .085, i < b.hp ? "rgba(255,255,255,.92)" : "rgba(0,0,0,.18)");
+  }
+  c.restore();
+  // drying ring: how long is left (shape, not colour, carries the urgency)
+  if (!b.evergreen) {
+    const rr = b.r * born + 7 * S;
+    c.lineCap = "round"; c.lineWidth = 3.2 * S; c.strokeStyle = "rgba(43,45,66,.13)"; c.beginPath(); c.arc(x, y, rr, 0, TAU); c.stroke();
+    c.strokeStyle = f < .28 ? "#c2413f" : "rgba(43,45,66,.62)"; c.beginPath(); c.arc(x, y, rr, -Math.PI / 2, -Math.PI / 2 + TAU * f); c.stroke();
+  } else {
+    const k = (t * 1.1) % 1; c.lineWidth = 3 * S; c.strokeStyle = `rgba(43,45,66,${.5 * (1 - k)})`; c.beginPath(); c.arc(x, y, b.r * (1.05 + k * .55), 0, TAU); c.stroke();
+    draw.text(c, "tap!", x, y + b.r + 30 * S, { size: 19 * S, color: INK });
+  }
+}
+function backdrop(c) {
+  const W = Lab.W, H = Lab.H, sh = sheet;
+  const mat = Lab.sprite("mat" + W + "x" + H, W, H, g => {                     // craft mat
+    g.fillStyle = "#c5d5d0"; g.fillRect(0, 0, W, H); g.strokeStyle = "rgba(255,255,255,.35)"; g.lineWidth = 1;
+    for (let x = (W / 2) % 26; x < W; x += 26) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+    for (let y = 8; y < H; y += 26) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+    g.strokeStyle = "rgba(255,255,255,.5)"; g.lineWidth = 1.5; for (let x = (W / 2) % 130; x < W; x += 130) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  });
+  c.drawImage(mat, -40, -40, W + 80, H + 80);
+  c.fillStyle = "rgba(40,60,60,.16)"; c.fillRect(sh.x + 3, sh.y + 5, sh.w, sh.h);  // sheet + painting
+  c.drawImage(pg, sh.x, sh.y, sh.w, sh.h);
+  for (const s of [-1, 1]) { c.save(); c.translate(s < 0 ? sh.x + 8 : sh.x + sh.w - 8, sh.y + 2); c.rotate(s * -.6); c.fillStyle = "rgba(246,220,150,.82)"; c.fillRect(-26 * S, -8 * S, 52 * S, 16 * S); c.fillStyle = "rgba(255,255,255,.25)"; c.fillRect(-26 * S, -8 * S, 52 * S, 4 * S); c.restore(); }
+}
+function attract() {                                                             // splash backdrop: a finished painting
+  if (!sheet) {
+    const rnd = Lab.rng(5); marks = [];
+    for (let i = 0; i < 16; i++) { const col = PAINT[(rnd() * 5) | 0].c, u = .1 + rnd() * .8, v = .08 + rnd() * .84; if (i % 3 === 2) marks.push({ k: "stroke", u: marks[marks.length - 1].u, v: marks[marks.length - 1].v, u2: u, v2: v, r: 34, c: marks[marks.length - 1].c, seed: i * 31 }); marks.push({ k: "splat", u, v, r: 30 + rnd() * 16, c: col, seed: i * 17 + 2 }); }
+    layout();
+  }
+  backdrop(Lab.ctx);
+}
+function render(t) {
+  const c = Lab.ctx, sh = sheet;
+  backdrop(c);
+  // low-time warning seeps in from the sheet edges
+  if (alive && started && timeLeft < 6) { const k = (1 - timeLeft / 6) * (.5 + .5 * Math.sin(t * (timeLeft < 3 ? 14 : 8))); c.strokeStyle = `rgba(194,65,63,${.5 * k})`; c.lineWidth = 10 * S; c.strokeRect(sh.x + 5 * S, sh.y + 5 * S, sh.w - 10 * S, sh.h - 10 * S); }
+  // pencilled notes on the sheet: chain + layer progress
+  const ny = sh.y + 22 * S;
+  if (chain >= 1 && chainCol >= 0) {
+    const P = PAINT[chainCol], m = Math.min(chain, 6), k = 1 + chainPulse * .25;
+    c.save(); c.translate(sh.x + 24 * S, ny); c.scale(k, k);
+    c.fillStyle = P.c; blobPath(c, 0, 0, 10 * S, P, 0, 0); c.fill(); c.restore();
+    draw.text(c, "×" + m, sh.x + 40 * S, ny + 1, { size: (17 + (m > 1 ? 3 : 0)) * S * (1 + chainPulse * .18), color: m > 1 ? Lab.color.shade(P.c, -.25) : "rgba(43,45,66,.5)", align: "left" });
+    if (m >= 6) draw.text(c, "MAX", sh.x + 74 * S, ny + 1, { size: 11 * S, color: Lab.color.shade(P.c, -.25), align: "left" });
+  } else draw.text(c, "chain ×1", sh.x + 16 * S, ny + 1, { size: 13 * S, color: "rgba(43,45,66,.32)", align: "left", weight: 700 });
+  const pipW = Math.min(9 * S, 120 * S / lvNeed), px0 = sh.x + sh.w - 16 * S - lvNeed * pipW;
+  draw.text(c, "LAYER " + level, px0 - 8 * S, ny + 1, { size: 12 * S, color: "rgba(43,45,66,.55)", align: "right" });
+  for (let i = 0; i < lvNeed; i++) draw.rect(c, px0 + i * pipW, ny - 5 * S, pipW - 2, 10 * S, 2, i < lvPops ? "rgba(43,45,66,.6)" : "rgba(43,45,66,.13)");
+  // layer ribbon (under the blobs so it never hides one)
+  if (ribbon) {
+    const u = ribbon.t, a = u < .25 ? ease.outBack(u / .25) : u > 1.6 ? Math.max(0, 1 - (u - 1.6) / .3) : 1, cy = sh.y + sh.h * .3, hh = 62 * S;
+    c.save(); c.translate(sh.x + sh.w / 2, cy); c.rotate(-.045); c.globalAlpha = Math.min(1, a) * .93; c.scale(Lab.clamp(a, 0, 1.1), 1);
+    draw.rect(c, -sh.w * .46, -hh / 2, sh.w * .92, hh, hh / 2, ribbon.c);
+    c.fillStyle = "rgba(255,255,255,.16)"; c.fillRect(-sh.w * .4, -hh * .34, sh.w * .8, hh * .12);
+    draw.text(c, ribbon.text, 0, ribbon.sub ? -9 * S : 0, { size: 27 * S, color: "#fff", shadow: "rgba(0,0,0,.2)" });
+    if (ribbon.sub) draw.text(c, ribbon.sub, 0, 16 * S, { size: 13 * S, color: "rgba(255,255,255,.95)", weight: 700 });
+    c.restore(); c.globalAlpha = 1;
+  }
+  for (const b of blobs) drawBlob(c, b, t);
+  // time bank: a brush stroke that runs dry
+  const p = Lab.play, bx = sh.x, bw = sh.w, by = p.y + 10, bh = 22, f = Lab.clamp(shownTime / TIMEMAX, 0, 1), low = started && timeLeft < 6;
+  const hx = barHurt > .05 && !Lab.reducedMotion ? Math.sin(t * 70) * barHurt * 4 : 0;
+  draw.rect(c, bx, by, bw, bh, bh / 2, "rgba(43,45,66,.14)");
+  const fw = Math.max(bh, bw * f), col = low ? (Math.sin(t * 12) > 0 ? "#c2413f" : "#e06a5f") : barHurt > .2 ? "#c2413f" : chainCol >= 0 && chain > 1 ? PAINT[chainCol].c : INK;
+  c.save(); c.translate(bx + hx, by + bh / 2); c.scale(1, 1 + barBump * .35);
+  draw.rect(c, 0, -bh / 2, fw, bh, bh / 2, col);
+  c.fillStyle = "rgba(255,255,255,.22)"; c.fillRect(bh * .4, -bh * .3, Math.max(0, fw - bh * .9), bh * .16);
+  c.restore();
+  draw.text(c, shownTime.toFixed(1) + "s", bx + bw / 2, by + bh / 2 + .5, { size: 14, color: "#fff", stroke: "rgba(43,45,66,.6)", strokeW: 3.5 });
+}
+Lab.boot();
+})();
+</script></body></html>

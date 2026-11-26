@@ -1,0 +1,326 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Goat Up</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* GOAT UP — hop a zig-zag stairway of crags, left thumb / right thumb, before the puff bar runs dry.
+ * Identity: sunny paper-cut alpine climb. A woolly kid with a cowbell, chunky turf-topped slabs, mountains that sink
+ * below you as the sky runs from meadow blue through sunset to starfields. Bouncy music that thickens with flow.
+ * Depth: FLOW — quick consecutive hops build a ×1…×5 multiplier (and a rising note ladder); a wrong hop or a pause
+ * drops it. One resource: PUFF. It drains faster at every camp, refills a little per hop, and a wrong hop costs a chunk.
+ * Cowbells on ledges pay 5×flow and a gulp of puff; camps (every 50 ledges) refill the bar and raise the pace.        */
+Lab.init({
+  title: "Goat Up", tagline: "Hop the zig-zag crags before you run out of puff.", category: "Runner & Movement",
+  howto: ["Tap the LEFT or RIGHT side to hop to the next ledge", "Keep a quick rhythm to build your flow multiplier", "Wrong hops and dawdling drain the puff bar"],
+  theme: { bg: "#6db9ea", bg2: "#d9f1ff", fg: "#243352", accent: "#ff8a3d", accent2: "#ffd24a", light: true },
+  orient: "portrait", music: { style: "bounce", key: "G", vol: .5 }, restart: start, attract: (dt, t) => { if (!cols) setup(); tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, mix = Lab.color.mix;
+const CAMP = 50, REFILL = .045, LEVELS = [0, 8, 20, 36, 56];
+const ZONES = [
+  { n: "Meadow", sky: ["#6fc3f5", "#e3f6ff"], top: "#7fd35c", hi: "#b4ea86", rock: "#c2935f", lo: "#93683f" },
+  { n: "Pine Ridge", sky: ["#5aa9e2", "#fbe9c6"], top: "#3fa173", hi: "#74c79a", rock: "#978477", lo: "#6b5c53" },
+  { n: "Snowline", sky: ["#6d9fe0", "#eef4fc"], top: "#ffffff", hi: "#dcebff", rock: "#8796b3", lo: "#5d6b88" },
+  { n: "Cloud Sea", sky: ["#7a68d8", "#ffb98c"], top: "#ffe9c2", hi: "#fff6e2", rock: "#d08a78", lo: "#9c5d58" },
+  { n: "Starfields", sky: ["#131943", "#51419a"], top: "#9be7ff", hi: "#dcf8ff", rock: "#5357a0", lo: "#32366e" },
+  { n: "Aurora", sky: ["#06162c", "#0f5f63"], top: "#b7ffd8", hi: "#e6fff2", rock: "#2f6577", lo: "#1c4354" },
+];
+let S, stepW, stepH, baseY;
+let cols, kind, runDir, runLeft, bellIn, pos, streak, mult, bestMult, score, puff, started, alive, lock, buffered, sinceStep,
+  camX, camY, goat, bells, stage, press, campHold, warnT, fall, clouds, stars, stumbles, darkHud = null;
+
+function layout() { S = Math.min(Lab.W / 390, Lab.play.h / 700); stepW = 56 * S; stepH = 42 * S; baseY = Lab.play.y + Lab.play.h * .66; }
+Lab.onResize(layout);
+
+function setup() {
+  layout();
+  cols = [0]; kind = [0]; runDir = Lab.chance(.5) ? 1 : -1; runLeft = 0; bellIn = 9;
+  pos = 0; streak = 0; mult = 1; bestMult = 1; score = 0; puff = 1; started = false; alive = true; lock = 0; buffered = 0; sinceStep = 0;
+  bells = 0; stage = 0; press = [0, 0]; campHold = 0; warnT = 0; fall = null; stumbles = 0;
+  gen(40);
+  camX = lookX(); camY = 0;
+  goat = { x: 0, y: 0, hop: 0, sq: 0, face: cols[1] - cols[0], blink: 2, ear: 0, lean: 0, rot: 0, oy: 0 };
+  clouds = Array.from({ length: 9 }, (_, i) => ({ x: Math.random(), y: i / 9 + Lab.rand(-.04, .04), s: Lab.rand(.6, 1.3), v: Lab.rand(.004, .012), k: Lab.randInt(0, 2) }));
+  stars = Array.from({ length: 60 }, () => ({ x: Math.random(), y: Math.random(), s: Lab.rand(.8, 2.2), p: Lab.rand(0, TAU) }));
+}
+function start() {
+  setup(); Lab.setScore(0);
+  Lab.input.onDown = [x => hop(x < Lab.W / 2 ? -1 : 1)];
+  Lab.input.onKey = [k => { if (k === "ArrowLeft" || k === "a" || k === "A") hop(-1); else if (k === "ArrowRight" || k === "d" || k === "D") hop(1); }];
+  Lab.expose({
+    get pos() { return pos; }, get score() { return score; }, get puff() { return puff; }, get mult() { return mult; }, get streak() { return streak; },
+    get alive() { return alive; }, get stage() { return stage; }, get bells() { return bells; }, get stumbles() { return stumbles; },
+    need() { gen(pos + 3); return cols[pos + 1] - cols[pos]; }, hop, setPuff(v) { puff = v; }, CAMP,
+  });
+  Lab.loop(frame);
+}
+/* fair generation: everything is visible ahead; runs get shorter and more irregular with altitude */
+function gen(n) {
+  while (cols.length < n) {
+    const i = cols.length, st = Math.floor(i / CAMP);
+    if (runLeft <= 0) {
+      runDir = -runDir;
+      const r = st === 0 ? [3, 6] : st === 1 ? [2, 5] : st === 2 ? [1, 5] : [1, 4];
+      runLeft = st >= 3 && Lab.chance(.3) ? 1 : Lab.randInt(r[0], r[1]);
+      if (i < 6) runLeft = Math.max(runLeft, 5);
+    }
+    cols.push(cols[i - 1] + runDir); runLeft--;
+    kind.push(i % CAMP === 0 ? 2 : (--bellIn <= 0 ? (bellIn = Lab.randInt(7, 13), 1) : 0));
+  }
+}
+const lookX = () => (cols[pos] + cols[Math.min(cols.length - 1, pos + 5)]) / 2;
+const zoneOf = st => ZONES[Math.min(st, ZONES.length - 1)];
+const levelOf = s => { let l = 1; for (let i = 1; i < LEVELS.length; i++) if (s >= LEVELS[i]) l = i + 1; return l; };
+const needRate = () => Math.min(6, 1.5 + .42 * stage);           // hops per second needed to hold the bar level
+const flowWin = () => Math.max(.46, .72 - .03 * stage);
+const sx = c => Lab.W / 2 + (c - camX) * stepW, sy = r => baseY - (r - camY) * stepH;
+
+function hop(side) {
+  if (!alive || Lab.paused || !cols) return;
+  press[side < 0 ? 0 : 1] = 1;
+  if (lock > 0) { if (lock < .14) buffered = side; return; }
+  gen(pos + 40);
+  if (side === cols[pos + 1] - cols[pos]) advance(side); else stumble(side);
+}
+function advance(side) {
+  const x0 = sx(cols[pos]), y0 = sy(pos);
+  pos++; started = true; streak++; sinceStep = 0; goat.face = side; goat.hop = 1; goat.ear = 1;
+  const m = levelOf(streak);
+  let gain = m;
+  if (m > mult) {
+    Lab.sfx("powerup", { pitch: .8 + m * .12 }); Lab.bumpScore();
+    fx.text(Lab.W / 2, Lab.play.y + 150 * S, m >= 5 ? "FLOW ×5 — FEVER!" : "FLOW ×" + m, { color: m >= 5 ? "#ff6a3d" : "#ff9d2e", size: 24 * S + m * 2, outline: "rgba(255,255,255,.9)" });
+    fx.ring(sx(cols[pos]), sy(pos) - 20 * S, { r0: 10, r1: 90 * S, color: "#ffd24a", width: 6 });
+  }
+  mult = m; bestMult = Math.max(bestMult, m);
+  puff = Math.min(1, puff + REFILL * (m >= 5 ? 1.2 : 1));
+  // hoof note: a pentatonic ladder that climbs with the streak, an octave of "level" per flow tier
+  Lab.audio.tone({ f: Lab.audio.scaleFreq((streak - 1) % 5 + (m - 1) * 2, 60), dur: .085, type: "triangle", vol: .17 });
+  Lab.audio.noise({ dur: .018, vol: .06, bp: 2400 });
+  fx.burst(x0, y0, { n: 3, color: "rgba(255,255,255,.75)", speed: 60, life: .3, size: 4 * S, gravity: 120, spread: Math.PI, angle: -Math.PI / 2 - side * .8 });
+  const tx = sx(cols[pos]), ty = sy(pos), k = kind[pos];
+  if (k === 1) {
+    kind[pos] = 0; bells++; gain += 5 * m; puff = Math.min(1, puff + .09);
+    Lab.sfx("chime", { pitch: .8 + m * .1 }); Lab.sfx("coin", { pitch: .9 + m * .08 }); Lab.buzz(10);
+    fx.burst(tx, ty - 34 * S, { n: 12, colors: ["#ffd24a", "#fff3b0", "#ff9d2e"], speed: 190, life: .5, size: 4 * S, shape: "star", gravity: 300 });
+    fx.text(tx, ty - 58 * S, "+" + 5 * m, { color: "#e98a00", size: 20 * S, outline: "rgba(255,255,255,.9)" });
+  }
+  if (k === 2) {
+    stage = Math.floor(pos / CAMP); puff = 1; campHold = 1.4; gain += 10 * stage; kind[pos] = 3;
+    const z = zoneOf(stage);
+    Lab.banner("CAMP " + stage, { color: "#fff", ms: 1200 }); Lab.sfx("levelup"); Lab.buzz(20); Lab.bumpScore();
+    fx.text(Lab.W / 2, Lab.play.y + Lab.play.h * .46, z.n + " — the air gets thinner", { color: "#fff", size: 15 * S, life: 1.5, outline: "rgba(20,40,80,.5)" });
+    fx.burst(tx, ty - 30 * S, { n: 26, colors: ["#ff6a3d", "#ffd24a", "#fff", z.top], speed: 300, life: .9, size: 5 * S, shape: "square", gravity: 500 });
+  }
+  score += gain; Lab.setScore(score);
+}
+function stumble(side) {
+  stumbles++; puff -= .18; lock = .3; buffered = 0; goat.lean = side;
+  if (mult > 1) fx.text(Lab.W / 2, Lab.play.y + 150 * S, "flow lost", { color: "#d94b4b", size: 17 * S, outline: "rgba(255,255,255,.85)" });
+  streak = 0; mult = 1; started = true;
+  Lab.sfx("error", { pitch: 1.2 }); Lab.sfx("thud", { pitch: 1.5 }); Lab.shake(5, .18); Lab.buzz(30);
+  fx.burst(sx(cols[pos]) + side * 14 * S, sy(pos) - 4 * S, { n: 7, color: "rgba(255,255,255,.8)", speed: 110, life: .4, size: 5 * S, gravity: 100 });
+  fx.text(sx(cols[pos]), sy(pos) - 64 * S, "−puff", { color: "#d94b4b", size: 15 * S, outline: "rgba(255,255,255,.85)" });
+}
+function die() {
+  alive = false; puff = 0; fall = { vy: -260 * S, vx: -goat.face * 60 * S, x: 0, y: 0 };
+  Lab.audio.tone({ f: 620, f2: 430, dur: .28, type: "sawtooth", vol: .13, lp: 1800 }); Lab.audio.tone({ f: 700, f2: 110, dur: .7, type: "triangle", vol: .16, delay: .12 });
+  Lab.shake(8, .3); Lab.buzz(60);
+  Lab.after(.85, () => Lab.gameover({ title: "Out of puff!", score, stats: [["Ledges", pos], ["Top flow", "×" + bestMult], ["Camps", stage]] }));
+}
+
+/* animation-only state (also runs behind the splash) */
+function tick(dt) {
+  camX = Lab.damp(camX, lookX(), 7, dt); camY = Lab.damp(camY, pos, 12, dt);
+  goat.x = Lab.damp(goat.x, cols[pos], 34, dt); goat.y = Lab.damp(goat.y, pos, 34, dt);
+  if (goat.hop > 0) { goat.hop -= dt / .13; if (goat.hop <= 0) { goat.hop = 0; goat.sq = .3; if (alive && cols[pos + 1] != null) goat.face = cols[pos + 1] - cols[pos]; } }
+  goat.sq = Lab.damp(goat.sq, 0, 14, dt); goat.ear = Lab.damp(goat.ear, 0, 7, dt); goat.lean = Lab.damp(goat.lean, 0, 9, dt);
+  goat.blink -= dt; if (goat.blink < -.12) goat.blink = Lab.rand(1.5, 4.5);
+  press[0] = Lab.damp(press[0], 0, 12, dt); press[1] = Lab.damp(press[1], 0, 12, dt);
+  for (const c of clouds) { c.x += c.v * dt; if (c.x > 1.3) c.x = -.3; }
+  const dk = camY / CAMP > 3.85; if (dk !== darkHud) { darkHud = dk; document.documentElement.style.setProperty("--fg", dk ? "#f2f5ff" : "#243352"); }
+}
+function frame(dt, t) {
+  if (alive) {
+    if (lock > 0) { lock -= dt; if (lock <= 0 && buffered) { const b = buffered; buffered = 0; hop(b); } }
+    sinceStep += dt;
+    if (campHold > 0) campHold -= dt;
+    else if (started) {
+      puff -= needRate() * REFILL * dt;
+      if (streak > 0 && sinceStep > flowWin()) { if (mult > 1) { Lab.sfx("slide", { pitch: .6 }); fx.text(Lab.W / 2, Lab.play.y + 150 * S, "flow lost", { color: "#d94b4b", size: 17 * S, outline: "rgba(255,255,255,.85)" }); } streak = 0; mult = 1; }
+    }
+    if (puff < .28 && started) { warnT -= dt; if (warnT <= 0) { Lab.sfx("heartbeat", { pitch: 1.1 + (.28 - puff) * 2 }); warnT = .32 + puff; } }
+    if (puff <= 0) die();
+    Lab.music.intensity(.3 + (mult - 1) * .14 + (puff < .3 ? .2 : 0));
+    if (mult >= 5 && Lab.chance(dt * 18)) fx.burst(sx(goat.x) + Lab.rand(-14, 14) * S, sy(goat.y) - Lab.rand(8, 40) * S, { n: 1, color: "#ffd24a", speed: 30, life: .45, size: 3.5 * S, shape: "star", gravity: -60 });
+  } else if (fall) { fall.vy += 1500 * S * dt; fall.x += fall.vx * dt; fall.y += fall.vy * dt; goat.rot += dt * 7 * -goat.face; }
+  tick(dt); render(t);
+}
+
+/* ---------------------------------------------------------------- art */
+function slab(zi, camp) {
+  const w = stepW * (camp ? 2.5 : 1.16), h = 30 * S, z = ZONES[zi];
+  return Lab.sprite("slab" + zi + (camp ? "c" : "") + ":" + Math.round(w), w + 4, h + 10, g => {
+    const r = Lab.rng(zi * 13 + (camp ? 7 : 1));
+    g.fillStyle = "rgba(20,40,70,.16)"; draw.rr(g, 4, 8 * S, w - 2, h, 9 * S); g.fill();           // soft drop shadow
+    draw.rect(g, 2, 3 * S, w, h - 3 * S, 9 * S, z.rock);
+    g.save(); draw.rr(g, 2, 3 * S, w, h - 3 * S, 9 * S); g.clip();
+    g.fillStyle = z.lo; g.fillRect(0, h * .62, w + 4, h);
+    g.fillStyle = Lab.color.shade(z.rock, .16); for (let i = 0; i < (camp ? 7 : 3); i++) { g.beginPath(); g.ellipse(6 + r() * (w - 8), h * (.5 + r() * .3), 5 * S + r() * 5 * S, 2.4 * S, 0, 0, TAU); g.fill(); }
+    g.restore();
+    draw.rect(g, 0, 0, w + 4, 11 * S, 6 * S, z.top);                                                // turf / snow cap
+    g.fillStyle = z.top; for (let i = 0; i < (camp ? 9 : 4); i++) { const x = 6 + (w - 8) * (i + .5) / (camp ? 9 : 4); g.beginPath(); g.arc(x, 10 * S, 5.5 * S, 0, Math.PI); g.fill(); }
+    draw.rect(g, 5, 2 * S, w - 6, 3.2 * S, 2 * S, z.hi);
+  });
+}
+function drawGoat(c, x, y, t) {
+  const u = S * 1.14, air = goat.hop > 0 ? Math.sin(goat.hop * Math.PI) : 0, f = goat.face || 1;
+  const st = air * .2, sq = goat.sq, idle = Math.sin(t * 4) * .02;
+  if (alive) draw.shadow(c, x, y + 1 * u, 20 * u * (1 - air * .4), 5 * u * (1 - air * .4), .18);
+  c.save(); c.translate(x, y - air * 20 * u); c.rotate(goat.rot + goat.lean * .3 * Math.sin(Math.min(1, lock / .3) * Math.PI));
+  c.scale(f * (1 + sq * .5 - st * .5), 1 - sq * .6 + st + idle);
+  const wool = "#fffaf0", shade = "#eadfcd", dark = "#4a3a36";
+  // legs (tucked in the air, planted on the ground)
+  c.strokeStyle = dark; c.lineCap = "round"; c.lineWidth = 4.2 * u;
+  const tuck = air * 7 * u;
+  for (const [lx, ph] of [[-11, 0], [-5, 1], [7, 0], [13, 1]]) { c.beginPath(); c.moveTo(lx * u, -11 * u); c.lineTo((lx + (air ? (ph ? 4 : -4) * air : 0)) * u, -2 * u - tuck * (ph ? 1 : .6)); c.stroke(); }
+  // tail
+  draw.circle(c, -20 * u, -24 * u + Math.sin(t * 9) * 1.5 * u, 4.5 * u, wool);
+  // body
+  c.fillStyle = shade; c.beginPath(); c.ellipse(0, -19 * u, 21 * u, 13.5 * u, 0, 0, TAU); c.fill();
+  c.fillStyle = wool; c.beginPath(); c.ellipse(0, -21 * u, 21 * u, 12.5 * u, 0, 0, TAU); c.fill();
+  for (const [wx, wy, wr] of [[-13, -29, 7], [-3, -32, 8], [8, -30, 7]]) draw.circle(c, wx * u, wy * u, wr * u, wool);
+  // horns
+  c.strokeStyle = "#c9a36a"; c.lineWidth = 3.4 * u; c.beginPath(); c.arc(11 * u, -47 * u, 7 * u, .5, 2.4); c.stroke();
+  // head + snout
+  draw.circle(c, 17 * u, -36 * u, 10 * u, wool);
+  c.fillStyle = "#f7cdbb"; c.beginPath(); c.ellipse(25 * u, -32 * u, 6.5 * u, 5 * u, .25, 0, TAU); c.fill();
+  draw.circle(c, 29 * u, -33.5 * u, 1.5 * u, dark);
+  c.fillStyle = wool; c.beginPath(); c.moveTo(21 * u, -27 * u); c.lineTo(24 * u, -20 * u); c.lineTo(26 * u, -27.5 * u); c.fill();   // beard
+  // ear (flops with every hop)
+  c.save(); c.translate(10 * u, -40 * u); c.rotate(-.5 - goat.ear * .9 + Math.sin(t * 3) * .05); c.fillStyle = "#f3bfae"; c.beginPath(); c.ellipse(-5 * u, 0, 7 * u, 3.4 * u, 0, 0, TAU); c.fill(); c.restore();
+  // eye
+  if (lock > 0 || !alive) { c.strokeStyle = dark; c.lineWidth = 1.8 * u; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(16 * u, (-38 - 2.5 * d) * u); c.lineTo(21 * u, (-38 + 2.5 * d) * u); c.stroke(); } }
+  else if (goat.blink < 0) { c.fillStyle = dark; c.fillRect(16 * u, -38.6 * u, 5 * u, 1.6 * u); }
+  else { draw.circle(c, 18.5 * u, -38 * u, 2.5 * u, dark); draw.circle(c, 19.3 * u, -38.9 * u, .9 * u, "#fff"); }
+  // collar + cowbell
+  c.strokeStyle = "#e0513b"; c.lineWidth = 3 * u; c.beginPath(); c.moveTo(9 * u, -30 * u); c.lineTo(16 * u, -24 * u); c.stroke();
+  draw.circle(c, 14 * u, -22 * u + air * 3 * u, 3.6 * u, "#ffcf3f", "#b9861c", 1);
+  c.restore();
+  if (lock > 0 && alive) for (let i = 0; i < 3; i++) { const a = t * 9 + i * TAU / 3; draw.star(c, x + f * 16 * u + Math.cos(a) * 14 * u, y - 52 * u + Math.sin(a) * 5 * u, 4 * u, "#ffcf3f"); }
+}
+function drawBell(c, x, y, t) {
+  const b = Math.sin(t * 4 + x * .05) * 3 * S, sw = Math.sin(t * 6 + x) * .18;
+  draw.glow(c, x, y + b, 20 * S, "#fff2a8", .55);
+  c.save(); c.translate(x, y + b - 9 * S); c.rotate(sw);
+  c.fillStyle = "#ffcf3f"; c.strokeStyle = "#b9861c"; c.lineWidth = 1.6 * S;
+  c.beginPath(); c.moveTo(-5 * S, 0); c.lineTo(5 * S, 0); c.lineTo(9 * S, 14 * S); c.lineTo(-9 * S, 14 * S); c.closePath(); c.fill(); c.stroke();
+  draw.circle(c, 0, 16 * S, 2.6 * S, "#b9861c"); draw.rect(c, -3 * S, -4 * S, 6 * S, 4 * S, 1.5 * S, "#e0513b");
+  c.fillStyle = "rgba(255,255,255,.7)"; c.fillRect(-4 * S, 3 * S, 2.4 * S, 8 * S);
+  c.restore();
+}
+function ridge(key, col, seed, amp, kind) {
+  const w = Math.ceil(Lab.W * 1.5), h = Math.ceil(Lab.H * .5);
+  return Lab.sprite(key + ":" + w + "x" + h, w, h, g => {
+    const r = Lab.rng(seed), Y = [];
+    if (kind === "peaks") {                       // jagged far range with snow caps
+      const n = 6, pts = [];
+      for (let i = 0; i <= n * 2; i++) pts.push([w * i / (n * 2), h * (1 - amp * (i % 2 ? .55 + r() * .45 : .22 + r() * .2))]);
+      pts[n * 2][1] = pts[0][1];
+      g.fillStyle = col; g.beginPath(); g.moveTo(0, h); for (const p of pts) g.lineTo(p[0], p[1]); g.lineTo(w, h); g.fill();
+      g.fillStyle = Lab.color.shade(col, -.12); for (let i = 1; i < n * 2; i += 2) { const [px, py] = pts[i], [qx, qy] = pts[i + 1]; g.beginPath(); g.moveTo(px, py); g.lineTo(qx, qy); g.lineTo(qx, h); g.lineTo(px - (qx - px) * .25, h); g.fill(); }
+      g.fillStyle = "rgba(255,255,255,.92)"; for (let i = 1; i < n * 2; i += 2) { const [px, py] = pts[i], d = h * .06; g.beginPath(); g.moveTo(px, py); g.lineTo(px - d * 1.2, py + d * 1.5); g.lineTo(px - d * .4, py + d * 1.1); g.lineTo(px + d * .15, py + d * 1.7); g.lineTo(px + d * .7, py + d * 1.2); g.lineTo(px + d * 1.2, py + d * 1.6); g.fill(); }
+      return;
+    }
+    const p1 = r() * TAU, p2 = r() * TAU;        // rolling hills (tileable: whole sine periods)
+    for (let x = 0; x <= w; x += 4) Y.push(h * (1 - amp * (.62 + .25 * Math.sin(x / w * TAU * 2 + p1) + .13 * Math.sin(x / w * TAU * 5 + p2))));
+    g.fillStyle = col; g.beginPath(); g.moveTo(0, h); Y.forEach((y, i) => g.lineTo(i * 4, y)); g.lineTo(w, h); g.fill();
+    g.strokeStyle = Lab.color.shade(col, .22); g.lineWidth = 5; g.beginPath(); Y.forEach((y, i) => i ? g.lineTo(i * 4, y + 3) : g.moveTo(0, y + 3)); g.stroke();
+    if (kind === "pines") { g.fillStyle = Lab.color.shade(col, -.3); for (let i = 0; i < 26; i++) { const x = r() * w, y = Y[Math.floor(x / 4)] + 6, s = 9 + r() * 12; g.beginPath(); g.moveTo(x, y - s * 2.2); g.lineTo(x - s * .55, y); g.lineTo(x + s * .55, y); g.fill(); } }
+  });
+}
+function cloud(k) {
+  return Lab.sprite("cloud" + k, 150, 60, g => { g.fillStyle = "#fff"; const r = Lab.rng(k + 3); for (let i = 0; i < 6; i++) { g.beginPath(); g.ellipse(25 + i * 20, 36 - r() * 10, 22 + r() * 8, 14 + r() * 8, 0, 0, TAU); g.fill(); } g.fillRect(20, 36, 110, 14); draw.rect(g, 12, 34, 126, 22, 11, "#fff"); });
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, P = Lab.play;
+  // sky: blends from one zone to the next over the last stretch before each camp
+  const zf = camY / CAMP, zi = Math.min(Math.floor(zf), ZONES.length - 1), zn = Math.min(zi + 1, ZONES.length - 1), bl = Lab.clamp((zf - Math.floor(zf) - .8) / .2, 0, 1);
+  const A = ZONES[zi].sky, B = ZONES[zn].sky;
+  draw.bg(c, mix(A[0], B[0], bl), mix(A[1], B[1], bl));
+  const night = Lab.clamp(zf - 3.2, 0, 1);
+  if (night > 0) { c.fillStyle = "#fff"; for (const s of stars) { c.globalAlpha = night * (.4 + .6 * Math.abs(Math.sin(t * 1.3 + s.p))); c.fillRect(s.x * W, ((s.y * H + camY * 1.5) % H), s.s, s.s); } c.globalAlpha = 1; }
+  const sunY = P.y + P.h * .17 + zf * 26 * S;
+  draw.glow(c, W * .78, sunY, 120 * S, night > .5 ? "#cfd8ff" : "#fff6c9", .55); draw.circle(c, W * .78, sunY, 30 * S, night > .5 ? "#eef1ff" : "#fff3b8");
+  if (zi >= 5) { c.globalAlpha = .22; for (let i = 0; i < 3; i++) { c.strokeStyle = ["#7dffb6", "#6fe3ff", "#c9a2ff"][i]; c.lineWidth = 26 * S; c.beginPath(); for (let x = -20; x <= W + 20; x += 20) { const y = P.y + P.h * (.2 + i * .09) + Math.sin(x * .012 + t * .5 + i * 2) * 26 * S; x < 0 ? c.moveTo(x, y) : c.lineTo(x, y); } c.stroke(); } c.globalAlpha = 1; }
+  // mountains sink below as you climb
+  const rise = camY * stepH, px = camX * stepW;
+  const far = ridge("far", "#8fb0dd", 5, .86, "peaks"), near = ridge("near", "#6fbf86", 11, .62, "pines"), hill = ridge("hill", "#4aa868", 23, .36, "hills");
+  for (const [sp, f, fx_, a] of [[far, .035, .04, 1], [near, .075, .09, 1], [hill, .13, .16, 1]]) {
+    const y = H - sp.h + rise * f + (sp === far ? -H * .06 : 0); if (y > H) continue;
+    const x0 = -(((px * fx_) % sp.w) + sp.w) % sp.w; c.globalAlpha = a;
+    c.drawImage(sp, x0, y, sp.w, sp.h); c.drawImage(sp, x0 + sp.w, y, sp.w, sp.h);
+  }
+  c.globalAlpha = 1;
+  const span = H * 1.5;
+  for (const cl of clouds) {
+    const sp = cloud(cl.k), y = ((cl.y * span + rise * .22 * cl.s) % span) - 80, x = cl.x * W - px * .12 * cl.s;
+    const xx = ((x % (W + 200)) + W + 200) % (W + 200) - 150;
+    c.globalAlpha = (.55 + cl.s * .25) * (1 - night * .5); c.drawImage(sp, xx, y, 150 * cl.s * S * 1.2, 60 * cl.s * S * 1.2);
+  }
+  c.globalAlpha = 1;
+  // stairs (far ones first so nearer slabs overlap them)
+  const top = Math.min(cols.length - 1, pos + Math.ceil((baseY - P.y) / stepH) + 2);
+  for (let i = top; i >= Math.max(0, pos - 5); i--) {
+    const below = Math.max(0, goat.y - i - .6), k = kind[i], camp = k >= 2;
+    const sp = slab(Math.min(ZONES.length - 1, camp ? Math.floor(i / CAMP) : Math.floor(Math.max(0, i - 1) / CAMP)), camp);
+    const x = sx(cols[i]), y = sy(i) + below * below * 5 * S;
+    const al = Lab.clamp(1 - below * .28, 0, 1); if (al <= 0) continue; c.globalAlpha = al;
+    c.drawImage(sp, x - sp.w / 2, y - 3 * S, sp.w, sp.h);
+    if (i === pos + 1 && alive) { c.globalAlpha = .35 + .25 * Math.sin(t * 8); draw.rect(c, x - sp.w / 2 + 2, y - 3 * S, sp.w - 4, 11 * S, 6 * S, null, "#fff", 2.5); }
+    c.globalAlpha = 1;
+    if (k === 1) drawBell(c, x, y - 30 * S, t);
+    if (camp) {
+      const fy = y - 62 * S, wv = Math.sin(t * 5 + i) * 3 * S, fxp = x + stepW * .85;
+      draw.line(c, fxp, y, fxp, fy, "#6b4a2f", 3 * S);
+      c.fillStyle = k === 3 ? "#ff6a3d" : "#ffffff"; c.beginPath(); c.moveTo(fxp, fy); c.quadraticCurveTo(fxp + 12 * S, fy + 2 * S + wv, fxp + 26 * S, fy + 8 * S); c.quadraticCurveTo(fxp + 12 * S, fy + 12 * S - wv, fxp, fy + 16 * S); c.fill();
+      draw.text(c, "CAMP " + Math.floor(i / CAMP), x - stepW * .35, y + 15 * S, { size: 10 * S, color: "rgba(255,255,255,.85)" });
+    }
+  }
+  // goat
+  if (fall) { c.globalAlpha = Lab.clamp(1 - fall.y / (H * .5), 0, 1); drawGoat(c, sx(goat.x) + fall.x, sy(goat.y) + fall.y, t); c.globalAlpha = 1; }
+  else drawGoat(c, sx(goat.x), sy(goat.y), t);
+  hud(c, t);
+}
+function hud(c, t) {
+  const W = Lab.W, P = Lab.play, bx = 16, bw = W - 32, bh = 15 * S, by = P.y + 8 * S, low = puff < .28;
+  // puff bar
+  draw.rect(c, bx - 3, by - 3, bw + 6, bh + 6, bh, "rgba(255,255,255,.55)");
+  draw.rect(c, bx, by, bw, bh, bh / 2, "rgba(30,50,90,.28)");
+  const col = puff > .5 ? "#4fcf6a" : puff > .28 ? "#ffb347" : "#ff5a4f", pw = Math.max(bh, bw * Lab.clamp(puff, 0, 1));
+  if (puff > 0) { draw.rect(c, bx, by, pw, bh, bh / 2, low && Math.sin(t * 16) > 0 ? "#ff9a8f" : col); draw.rect(c, bx + 4, by + 2.5 * S, pw - 8, bh * .28, bh, "rgba(255,255,255,.4)"); }
+  draw.text(c, "PUFF", bx + 9 * S, by + bh / 2 + .5, { size: 9.5 * S, align: "left", color: "rgba(20,40,70,.6)" });
+  // flow badge + ledge counter
+  const fy = by + bh + 26 * S, lv = mult, nextAt = LEVELS[lv] || 0, prevAt = LEVELS[lv - 1], prog = lv >= 5 ? 1 : (streak - prevAt) / (nextAt - prevAt);
+  const fcol = ["#5a6b8c", "#2f9bd6", "#3fb56b", "#ff9d2e", "#ff5a3d"][lv - 1];
+  draw.rect(c, 14, fy - 17 * S, 92 * S, 34 * S, 17 * S, "rgba(255,255,255,.82)");
+  draw.text(c, "×" + lv, 14 + 24 * S, fy + 1, { size: (20 + (lv >= 5 ? Math.sin(t * 12) * 1.5 : 0)) * S, color: fcol, weight: 900 });
+  draw.rect(c, 14 + 44 * S, fy - 4 * S, 38 * S, 8 * S, 4 * S, "rgba(30,50,90,.16)");
+  if (prog > 0) draw.rect(c, 14 + 44 * S, fy - 4 * S, Math.max(8 * S, 38 * S * prog), 8 * S, 4 * S, fcol);
+  if (streak > 0 && alive && campHold <= 0) { const k = Lab.clamp(1 - sinceStep / flowWin(), 0, 1); c.strokeStyle = fcol; c.globalAlpha = .7; c.lineWidth = 2.5 * S; c.beginPath(); c.arc(14 + 24 * S, fy, 15 * S, -Math.PI / 2, -Math.PI / 2 + TAU * k); c.stroke(); c.globalAlpha = 1; }
+  draw.rect(c, W - 14 - 92 * S, fy - 17 * S, 92 * S, 34 * S, 17 * S, "rgba(255,255,255,.82)");
+  draw.text(c, pos + " m", W - 14 - 46 * S, fy + 1, { size: 16 * S, color: "#33415e", weight: 900 });
+  // thumb zones
+  const yb = Lab.H - Lab.safe.bottom - 62 * S, need = alive && cols[pos + 1] != null ? cols[pos + 1] - cols[pos] : 0, teach = pos < 8 || lock > 0;
+  for (const s of [-1, 1]) {
+    const i = s < 0 ? 0 : 1, x = W / 2 + s * Math.min(W * .32, 150 * S), pr = press[i], r = 34 * S * (1 - pr * .12), hot = teach && need === s;
+    if (hot) draw.circle(c, x, yb, r + (6 + Math.sin(t * 8) * 4) * S, "rgba(255,210,74,.5)");
+    draw.circle(c, x, yb, r, pr > .05 ? "rgba(255,255,255,.95)" : "rgba(255,255,255,.6)", "rgba(40,60,100,.25)", 2);
+    c.fillStyle = hot ? "#ff8a3d" : "#44557a"; c.beginPath(); c.moveTo(x + s * 14 * S, yb); c.lineTo(x - s * 8 * S, yb - 14 * S); c.lineTo(x - s * 3 * S, yb); c.lineTo(x - s * 8 * S, yb + 14 * S); c.closePath(); c.fill();
+  }
+  if (!started && alive) draw.text(c, "tap the side the next ledge is on", W / 2, yb - 56 * S, { size: 14 * S, color: "#fff", stroke: "rgba(30,60,110,.55)" });
+}
+Lab.boot();
+})();
+</script></body></html>

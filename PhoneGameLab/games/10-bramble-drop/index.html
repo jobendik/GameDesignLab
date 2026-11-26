@@ -1,0 +1,328 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Bramble Drop</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* BRAMBLE DROP — a match-3 berry slinger under a bramble that never stops growing downward.
+ * Identity: dusk garden. A dark, leafy bramble heavy with six kinds of berry (each with its own marking, so colour is
+ * never the only cue) creeps toward the hedge; a twig catapult flings berries up into it; fireflies; lo-fi music.
+ * Core: hex grid, drag-to-aim with a full bounce preview and landing ghost, clusters of 3+ pop, anything left hanging
+ * from nothing tumbles into the hedge for doubling points.
+ * Hooks: (1) the bramble creeps in real time and faster with every row it grows — but every pop and especially every
+ * dropped berry shoves it back up; (2) a streak multiplier (x1..x5) for consecutive shots that pop, while a wasted
+ * shot makes the bramble lunge; (3) swap between two berries in hand.                                            */
+Lab.init({
+  title: "Bramble Drop", tagline: "Pick the bramble clean before it reaches the hedge.", category: "Puzzle & Match",
+  howto: ["Drag to aim, let go to fling a berry", "Match 3+ and everything hanging below drops too", "Tap the nest to swap berries"],
+  theme: { bg: "#1a1330", bg2: "#5e3370", accent: "#ff9a3c", accent2: "#ff4f6d" },
+  orient: "portrait", music: { style: "chill", key: "A", vol: .5 }, restart: start,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, COLS = 10;
+const BERRY = [
+  { n: "Raspberry", c: "#ff4f6d" }, { n: "Blueberry", c: "#5b8cff" }, { n: "Lemon drop", c: "#ffd23f" },
+  { n: "Gooseberry", c: "#7bd65a" }, { n: "Plum", c: "#b56bff" }, { n: "Kumquat", c: "#ff9a3c" },
+];
+let S, L, R, Rb, rowH, fieldTop, shootX, shootY, deadY, groundY, oy, cells, minRow, rows, shot, cur, next, aim, falling, pops, score, streak, bestStreak,
+  popped, dropped, pend, overT, alive, reloadT, recoil, queued, flies, low, danger, beatT, swapT, lungeT, nColors, frozen, bestDrop, shots, aimHint;
+
+const key = (r, c) => (r + 4096) * 16 + c;
+const odd = r => ((r % 2) + 2) % 2;
+const colsIn = r => odd(r) ? COLS - 1 : COLS;
+const cx = (r, c) => L + Rb + c * 2 * Rb + (odd(r) ? Rb : 0);
+const cy = r => oy + r * rowH;
+const get = (r, c) => cells.get(key(r, c));
+function neigh(r, c) { const o = odd(r) ? 0 : -1; return [[r, c - 1], [r, c + 1], [r - 1, c + o], [r - 1, c + o + 1], [r + 1, c + o], [r + 1, c + o + 1]]; }
+
+function layout() {
+  S = Math.min(Lab.W / 390, Lab.play.h / 700);
+  L = Math.round(5 * S); R = Lab.W - L; Rb = (R - L) / (COLS * 2); rowH = Rb * 1.732;
+  fieldTop = Lab.play.y + 2; shootX = Lab.W / 2; shootY = Lab.H - Lab.safe.bottom - 74 * S; deadY = shootY - 62 * S; groundY = shootY + 6 * S;
+}
+Lab.onResize(() => {
+  if (!cells) return; const oT = fieldTop, oH = rowH, oL = L; layout(); const k = rowH / oH;
+  oy = fieldTop + (oy - oT) * k; pend *= k; falling.length = 0; pops.length = 0;
+  if (shot) { shot.x = L + (shot.x - oL) * k; shot.y = fieldTop + (shot.y - oT) * k; }
+});
+
+function start() {
+  layout();
+  cells = new Map(); minRow = 0; rows = 0; oy = fieldTop - Rb - 7 * rowH; shot = null; falling = []; pops = [];
+  score = 0; streak = 0; bestStreak = 0; popped = 0; dropped = 0; pend = 0; overT = 0; alive = true; reloadT = 1; recoil = 0; queued = null;
+  low = fieldTop; danger = 0; beatT = 0; swapT = 0; lungeT = 0; nColors = 4; frozen = false; bestDrop = 0; shots = 0; aimHint = 0;
+  aim = { a: 0, show: false, valid: false, key: false };
+  for (let r = 6; r >= 0; r--) fillRow(r); minRow = 0; rows = 0;
+  cur = pickColor(); next = pickColor();
+  flies = Array.from({ length: 14 }, () => ({ x: Math.random(), y: Math.random(), p: Lab.rand(0, TAU), v: Lab.rand(.3, .9), s: Lab.rand(1, 2.2) }));
+  Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => { aim.key = false; setAim(x, y); aim.show = aim.valid; }];
+  Lab.input.onMove = [(x, y) => { aim.key = false; setAim(x, y); aim.show = aim.valid; }];
+  Lab.input.onUp = [(x, y) => {
+    const tap = Lab.dist(x, y, Lab.input.startX, Lab.input.startY) < 14 * Math.max(1, S);
+    if (tap && y > deadY + 8 * S) { swap(); aim.show = false; return; }
+    setAim(x, y); if (aim.valid) fire(aim.a); aim.show = false;
+  }];
+  Lab.input.onKey = [k => { if (k === " " || k === "ArrowUp" || k === "Enter") fire(aim.a); else if (k === "ArrowDown" || k === "x" || k === "X" || k === "Shift") swap(); }];
+  Lab.expose({
+    get score() { return score; }, get streak() { return streak; }, get cur() { return cur; }, get next() { return next; }, get count() { return cells.size; },
+    get low() { return low; }, get deadY() { return deadY; }, get rows() { return rows; }, get overT() { return overT; }, get flying() { return !!shot; },
+    get shooter() { return { x: shootX, y: shootY }; }, get dropped() { return dropped; }, get popped() { return popped; }, get falling() { return falling.length; },
+    get cells() { return [...cells.values()].map(b => ({ row: b.row, col: b.col, color: b.color, x: cx(b.row, b.col), y: cy(b.row) })); },
+    trace(a) { const t = trace(a); return t.cell ? { row: t.cell[0], col: t.cell[1], x: cx(t.cell[0], t.cell[1]), y: cy(t.cell[0]), bounces: t.pts.length / 2 - 2, group: groupSize(t.cell[0], t.cell[1], cur) } : null; },
+    fire, swap,
+    /* test helper: replace the bramble with a hand-made one ("0".."5" berries, "." gaps), top row first; freezes the creep */
+    setup(lines, c, n, drop) { cells = new Map(); minRow = 0; oy = fieldTop + Rb + (drop || 0) * rowH; lines.forEach((ln, r) => { for (let i = 0; i < colsIn(r); i++) if (ln[i] && ln[i] !== ".") cells.set(key(r, i), mk(r, i, +ln[i])); }); frozen = true; pend = 0; if (c != null) cur = c; if (n != null) next = n; },
+    thaw() { frozen = false; },
+  });
+  Lab.loop(frame);
+}
+function mk(row, col, color) { return { row, col, color, ox: 0, oy: 0, born: 0, h: Lab.hash(row + ":" + col) }; }
+function fillRow(r) {
+  for (let c = 0; c < colsIn(r); c++) {
+    let color = Lab.randInt(0, nColors - 1); const u = Math.random();
+    const l = c > 0 && get(r, c - 1), below = get(r + 1, c + (odd(r) ? 0 : -1)) || get(r + 1, c + (odd(r) ? 1 : 0));
+    if (u < .2 && l) color = l.color; else if (u < .36 && below) color = below.color;
+    cells.set(key(r, c), mk(r, c, color));
+  }
+}
+function growRow() {
+  minRow--; rows++; fillRow(minRow);
+  const nc = rows >= 34 ? 6 : rows >= 12 ? 5 : 4;
+  if (nc > nColors) { nColors = nc; Lab.banner(BERRY[nc - 1].n + "s ripen", { color: BERRY[nc - 1].c, ms: 1300 }); Lab.sfx("chime"); }
+  else if (rows % 10 === 0) { fx.text(Lab.W / 2, deadY - 26 * S, "row " + rows + "  ·  growing faster", { color: "#ffe2b8", size: 15 * Math.max(.85, S), life: 1.4 }); Lab.sfx("whistle", { pitch: .7 }); }
+}
+function pickColor() {
+  const seen = new Set(); for (const b of cells.values()) if (cy(b.row) > fieldTop - rowH) seen.add(b.color);
+  const arr = seen.size ? [...seen] : [0, 1, 2, 3]; return Lab.choose(arr);
+}
+function group(r, c, color) { // connected same-colour set, pretending (r,c) holds `color`
+  const seen = new Set([key(r, c)]), out = [[r, c, 0]];
+  for (let i = 0; i < out.length; i++) for (const [nr, nc] of neigh(out[i][0], out[i][1])) { const k = key(nr, nc), b = cells.get(k); if (b && b.color === color && !seen.has(k)) { seen.add(k); out.push([nr, nc, out[i][2] + 1]); } }
+  return out;
+}
+const groupSize = (r, c, color) => group(r, c, color).length;
+function orphans() {
+  const seen = new Set(), st = [];
+  for (let c = 0; c < colsIn(minRow); c++) if (get(minRow, c)) { seen.add(key(minRow, c)); st.push([minRow, c]); }
+  while (st.length) { const [r, c] = st.pop(); for (const [nr, nc] of neigh(r, c)) { const k = key(nr, nc); if (cells.has(k) && !seen.has(k)) { seen.add(k); st.push([nr, nc]); } } }
+  const out = []; for (const [k, b] of cells) if (!seen.has(k)) out.push(b); return out;
+}
+
+/* ---------------------------------------------------------------- aiming + flight */
+function setAim(x, y) {
+  const dx = x - shootX, dy = y - shootY;
+  aim.valid = dy < -26 * S && Math.hypot(dx, dy) > 30 * S;
+  if (aim.valid) aim.a = Lab.clamp(Math.atan2(dx, -dy), -1.38, 1.38);
+}
+function hits(x, y) {
+  if (y <= cy(minRow)) return true;
+  const r0 = Math.round((y - oy) / rowH), lim = (2 * Rb * .83) ** 2;
+  for (let r = r0 - 1; r <= r0 + 1; r++) { const c0 = Math.round((x - L - Rb - (odd(r) ? Rb : 0)) / (2 * Rb)); for (let c = c0 - 1; c <= c0 + 1; c++) { if (!get(r, c)) continue; const dx = cx(r, c) - x, dy = cy(r) - y; if (dx * dx + dy * dy < lim) return true; } }
+  return false;
+}
+function snap(x, y) {
+  const r0 = Math.round((y - oy) / rowH); let best = null, bd = 1e9, fall = null, fd = 1e9;
+  for (let r = Math.max(minRow, r0 - 1); r <= r0 + 1; r++) { const c0 = Math.round((x - L - Rb - (odd(r) ? Rb : 0)) / (2 * Rb)); for (let c = c0 - 1; c <= c0 + 1; c++) {
+    if (c < 0 || c >= colsIn(r) || get(r, c)) continue; const d = (cx(r, c) - x) ** 2 + (cy(r) - y) ** 2;
+    if (d < fd) { fd = d; fall = [r, c]; }
+    if (d < bd && (r === minRow || neigh(r, c).some(([a, b]) => get(a, b)))) { bd = d; best = [r, c]; }
+  } }
+  return best || fall;
+}
+function stepPath(p, dist, onWall) { // advances p {x,y,dx,dy}; returns true when it touches the bramble
+  const st = Rb * .42; let rem = dist;
+  while (rem > 0) {
+    const s = Math.min(st, rem); rem -= s; p.x += p.dx * s; p.y += p.dy * s;
+    if (p.x < L + Rb) { p.x = 2 * (L + Rb) - p.x; p.dx = -p.dx; if (onWall) onWall(L, p.y); }
+    else if (p.x > R - Rb) { p.x = 2 * (R - Rb) - p.x; p.dx = -p.dx; if (onWall) onWall(R, p.y); }
+    if (hits(p.x, p.y)) return true;
+  }
+  return false;
+}
+function trace(a) {
+  const p = { x: shootX, y: shootY, dx: Math.sin(a), dy: -Math.cos(a) }, pts = [p.x, p.y];
+  let hit = false; for (let i = 0; i < 400 && !hit; i++) hit = stepPath(p, Rb * .42, (wx, wy) => pts.push(wx < Lab.W / 2 ? L + Rb : R - Rb, wy));
+  pts.push(p.x, p.y); return { pts, cell: hit ? snap(p.x, p.y) : null };
+}
+function fire(a) {
+  if (!alive || Lab.paused) return false;
+  if (shot || reloadT < .55) { queued = a; return false; }
+  shot = { x: shootX, y: shootY, dx: Math.sin(a), dy: -Math.cos(a), color: cur, t: 0 };
+  cur = next; next = pickColor(); reloadT = 0; recoil = 1; shots++; queued = null;
+  Lab.sfx("spring", { pitch: 1.15 }); Lab.sfx("swish"); Lab.buzz(8); return true;
+}
+function swap() {
+  if (!alive || shot && reloadT < .3) return; const t = cur; cur = next; next = t; swapT = 1; Lab.sfx("flip", { pitch: 1.1 });
+}
+function land() {
+  const cell = snap(shot.x, shot.y); const color = shot.color, sx = shot.x, sy = shot.y; shot = null;
+  if (!cell) return;
+  const [r, c] = cell, b = mk(r, c, color); b.ox = sx - cx(r, c); b.oy = sy - cy(r); b.born = 1; cells.set(key(r, c), b);
+  for (const [nr, nc] of neigh(r, c)) { const n = get(nr, nc); if (n) { const dx = cx(nr, nc) - cx(r, c), dy = cy(nr) - cy(r), d = Math.hypot(dx, dy) || 1; n.ox += dx / d * 5 * S; n.oy += dy / d * 5 * S; } }
+  const g = group(r, c, color);
+  if (g.length < 3) {
+    Lab.sfx("knock", { pitch: 1.3 }); fx.sparks(sx, sy, Math.PI / 2, { n: 4, color: BERRY[color].c, speed: 120 * S });
+    if (streak >= 2) fx.text(shootX + 96 * S, shootY - 30 * S, "streak lost", { color: "#ffb4a2", size: 13 * Math.max(.85, S), life: .8 });
+    streak = 0; if (shots > 2) { pend += rowH * .3; lungeT = 1; Lab.sfx("thud", { pitch: 1.2 }); Lab.shake(3, .15); }
+    return;
+  }
+  streak++; bestStreak = Math.max(bestStreak, streak); const mult = Math.min(5, streak);
+  g.sort((a, b2) => a[2] - b2[2]);
+  let gain = (g.length * 10 + (g.length - 3) * 10) * mult; popped += g.length;
+  g.forEach(([gr, gc, d], i) => { const k = key(gr, gc), cb = cells.get(k); cells.delete(k); pops.push({ x: cx(gr, gc) + cb.ox, y: cy(gr) + cb.oy, r0: gr, color, delay: d * .045, t: 0, i, go: false }); });
+  const orph = orphans(); let dropPts = 0;
+  orph.sort((a, b2) => a.row - b2.row);
+  orph.forEach((o, i) => { cells.delete(key(o.row, o.col)); const val = Math.min(20 + i * 20, 200) * mult; dropPts += val;
+    falling.push({ x: cx(o.row, o.col), y: cy(o.row), vx: Lab.rand(-50, 50) * S, vy: Lab.rand(-120, -30) * S, rot: 0, vr: Lab.rand(-7, 7), color: o.color, delay: .12 + i * .035 + g.length * .03, val, i }); });
+  dropped += orph.length; bestDrop = Math.max(bestDrop, orph.length);
+  gain += dropPts; score += gain; Lab.setScore(score); Lab.bumpScore();
+  pend -= g.length * 2.2 * S + orph.length * 6.5 * S;
+  const mx = cx(r, c), my = cy(r);
+  fx.text(mx, my - Rb * 1.4, "+" + (gain - dropPts) + (mult > 1 ? "  ×" + mult : ""), { color: mult > 1 ? "#ffe066" : "#fff", size: (16 + Math.min(12, g.length * 1.5)) * Math.max(.85, S) });
+  if (g.length >= 6 || orph.length >= 4) { Lab.shake(4 + Math.min(8, orph.length), .25); Lab.hitstop(.04); }
+  if (orph.length >= 6) Lab.banner(orph.length >= 12 ? "AVALANCHE!" : "BIG DROP!", { color: "#ffd23f", ms: 900 });
+  Lab.buzz(12 + orph.length * 2);
+}
+
+/* ---------------------------------------------------------------- frame */
+function frame(dt, t) {
+  reloadT += dt * 3.2; recoil = Lab.damp(recoil, 0, 10, dt); swapT = Math.max(0, swapT - dt * 5); lungeT = Math.max(0, lungeT - dt * 2.5);
+  const k = Lab.input.axisX(); if (k) { aim.a = Lab.clamp(aim.a + k * 1.5 * dt, -1.38, 1.38); aim.key = true; aim.show = true; aim.valid = true; }
+  if (queued != null && !shot && reloadT >= .55) fire(queued);
+  if (shot) { shot.t += dt; if (stepPath(shot, 1150 * S * dt, (wx, wy) => { Lab.sfx("tick", { pitch: .8 }); fx.sparks(wx, wy, wx < Lab.W / 2 ? 0 : Math.PI, { n: 4, color: BERRY[shot.color].c, speed: 140 * S }); }) || shot.y < fieldTop - 3 * rowH) land(); }
+  // the bramble: creep, surge when picked nearly clean, shove back / lunge
+  low = -1e9; for (const b of cells.values()) { const y = cy(b.row) + Rb; if (y > low) low = y; b.ox = Lab.damp(b.ox, 0, 16, dt); b.oy = Lab.damp(b.oy, 0, 16, dt); if (b.born > 0) b.born = Math.max(0, b.born - dt * 6); }
+  if (!cells.size) low = fieldTop;
+  const over = low > deadY;
+  if (!frozen) {
+    let v = Math.min(10.5, 2.3 + rows * .115) * S; const want = fieldTop + 6.6 * rowH;
+    if (low < want) v = Math.max(v, 170 * S * Lab.clamp((want - low) / (2.5 * rowH), .12, 1));
+    if (over) { v = 0; if (pend > 0) pend = 0; }
+    oy += v * dt; const st = pend * (1 - Math.exp(-7 * dt)); oy += st; pend -= st;
+    let guard = 0; while (cy(minRow) > fieldTop - rowH && guard++ < 4) growRow();
+  }
+  if (alive) {
+    overT = over ? overT + dt : Math.max(0, overT - dt * 1.5);
+    danger = Lab.clamp(1 - (deadY - low) / (4.5 * rowH), 0, 1);
+    Lab.music.intensity(.22 + danger * .78);
+    if (danger > .45) { beatT -= dt; if (beatT <= 0) { Lab.sfx(over ? "warn" : "heartbeat", { pitch: 1 + danger * .3 }); beatT = over ? .45 : 1.1 - danger * .5; } }
+    if (overT > 2.6) { alive = false; end(); }
+  }
+  // pops + falling fruit
+  for (const p of pops) {
+    if (p.delay > 0) { p.delay -= dt; continue; }
+    if (!p.go) { p.go = true; const col = BERRY[p.color].c; Lab.audio.combo(p.i + Math.min(5, streak) - 1, { vol: .17 }); Lab.sfx("pop", { pitch: 1 + p.i * .04 });
+      fx.burst(p.x, p.y, { n: 9, colors: [col, Lab.color.shade(col, .4), "#fff"], speed: 190 * S, size: 3.4 * S, life: .5, gravity: 500 * S }); fx.ring(p.x, p.y, { r0: Rb * .5, r1: Rb * 1.8, color: col, width: 3 * S, life: .3 }); }
+    p.t += dt * 6;
+  }
+  if (pops.length && pops[0].t >= 1 || pops.some(p => p.t >= 1)) pops = pops.filter(p => p.t < 1);
+  for (const f of falling) {
+    if (f.delay > 0) { f.delay -= dt; continue; }
+    f.vy += 1900 * S * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.rot += f.vr * dt;
+    if (f.x < L + Rb || f.x > R - Rb) { f.vx = -f.vx; f.x = Lab.clamp(f.x, L + Rb, R - Rb); }
+    if (f.y > groundY) { f.dead = true; const col = BERRY[f.color].c;
+      fx.burst(f.x, groundY, { n: 7, colors: [col, "#2f6b4f", "#8fd694"], speed: 210 * S, size: 3.2 * S, life: .5, angle: -Math.PI / 2, spread: 2.2, gravity: 900 * S });
+      fx.text(f.x, groundY - 16 * S, "+" + f.val, { color: "#ffe066", size: (12 + Math.min(10, f.i * 1.6)) * Math.max(.85, S), life: .7 });
+      Lab.audio.combo(4 + Math.min(f.i, 10), { vol: .15, type: "sine" }); Lab.sfx("drop", { pitch: .8 + Math.min(f.i, 10) * .07 }); }
+  }
+  if (falling.some(f => f.dead)) falling = falling.filter(f => !f.dead);
+  render(t);
+}
+function end() {
+  Lab.shake(12, .5); Lab.flash("#ff4f6d", .3, .3); Lab.sfx("crunch", { pitch: .6 });
+  for (const b of cells.values()) if (cy(b.row) > deadY - rowH * 3) fx.burst(cx(b.row, b.col), cy(b.row), { n: 4, color: BERRY[b.color].c, speed: 200 * S, life: .7 });
+  Lab.gameover({ title: "Overgrown!", score, stats: [["Rows grown", rows], ["Best streak", "×" + Math.min(5, bestStreak) + " (" + bestStreak + ")"], ["Biggest drop", bestDrop]] });
+}
+
+/* ---------------------------------------------------------------- drawing */
+function bgSprite() {
+  return Lab.sprite("bg:" + Lab.W + "x" + Lab.H, Lab.W, Lab.H, (g, w, h) => {
+    draw.vgrad(g, 0, 0, w, h, [[0, "#1c1436"], [.38, "#472a62"], [.72, "#a04a68"], [.86, "#e08a5b"], [1, "#f2b56b"]]);
+    const rnd = Lab.rng(5); g.fillStyle = "#fff"; for (let i = 0; i < 46; i++) { g.globalAlpha = .15 + rnd() * .5; g.fillRect(rnd() * w, rnd() * h * .55, 1.3, 1.3); } g.globalAlpha = 1;
+    draw.glow(g, w * .78, deadY - 40 * S, w * .5, "#ffd9a0", .35);
+    // far tree line, then the hedge the berries fall into
+    g.fillStyle = "rgba(60,30,70,.55)"; g.beginPath(); g.moveTo(0, h); for (let x = 0; x <= w; x += 16 * S) g.lineTo(x, deadY + 4 * S - (Math.sin(x * .05) * 9 + rnd() * 16) * S); g.lineTo(w, h); g.fill();
+    const hy = deadY + 22 * S; g.fillStyle = "#1b2a2f"; g.beginPath(); g.moveTo(0, h); g.lineTo(0, hy); const n = 13, sw = w / n; for (let i = 0; i < n; i++) g.arc(sw * (i + .5), hy + (i % 2) * 4 * S, sw * .56, Math.PI, 0); g.lineTo(w, h); g.fill();
+    g.fillStyle = "#223b3a"; for (let i = 0; i < 70; i++) { const x = rnd() * w, y = hy + rnd() * (h - hy); g.beginPath(); g.ellipse(x, y, 7 * S, 3.4 * S, rnd() * 3, 0, TAU); g.fill(); }
+    g.fillStyle = "rgba(10,14,22,.35)"; g.fillRect(0, h - 30 * S, w, 30 * S);
+  });
+}
+function berrySprite(i) {
+  const sz = Rb * 2 + 6;
+  return Lab.sprite("berry" + i + ":" + Math.round(Rb * 8), sz, sz, g => {
+    const c = sz / 2, r = Rb - 1.2, col = BERRY[i].c, dk = Lab.color.shade(col, -.45), lt = Lab.color.shade(col, .45);
+    const gr = g.createRadialGradient(c - r * .35, c - r * .4, r * .1, c, c, r); gr.addColorStop(0, lt); gr.addColorStop(.5, col); gr.addColorStop(1, Lab.color.shade(col, -.35));
+    g.fillStyle = gr; g.beginPath(); g.arc(c, c, r, 0, TAU); g.fill(); g.strokeStyle = "rgba(20,10,35,.7)"; g.lineWidth = 1.4; g.stroke();
+    g.save(); g.beginPath(); g.arc(c, c, r - 1, 0, TAU); g.clip(); g.strokeStyle = dk; g.fillStyle = dk; g.lineWidth = Math.max(1.3, r * .11); g.lineCap = "round"; g.globalAlpha = .62;
+    if (i === 0) { for (let a = 0; a < 3; a++) for (let b = 0; b < 4; b++) { g.beginPath(); g.arc(c + (b - 1.5 + (a % 2) * .5) * r * .48, c + (a - .7) * r * .46, r * .17, 0, TAU); g.stroke(); } }
+    else if (i === 1) { draw.star(g, c, c + r * .12, r * .46, dk, 5, .45); }
+    else if (i === 2) { for (const s of [-1, 0, 1]) { g.beginPath(); g.moveTo(c - r * .7, c + s * r * .08); g.quadraticCurveTo(c, c + s * r * .75, c + r * .7, c + s * r * .08); g.stroke(); } }
+    else if (i === 3) { for (const s of [-.55, -.2, .2, .55]) { g.beginPath(); g.ellipse(c, c, Math.abs(s) * r * 1.5 + .5, r * .95, 0, s < 0 ? Math.PI * .5 : -Math.PI * .5, s < 0 ? Math.PI * 1.5 : Math.PI * .5); g.stroke(); } }
+    else if (i === 4) { g.beginPath(); g.arc(c + r * .15, c + r * .1, r * .55, .2, Math.PI * 1.1); g.stroke(); g.beginPath(); g.ellipse(c + r * .2, c - r * .5, r * .3, r * .14, -.6, 0, TAU); g.fill(); }
+    else { g.beginPath(); g.arc(c, c + r * .08, r * .42, 0, TAU); g.stroke(); for (let a = 0; a < 6; a++) { g.beginPath(); g.moveTo(c, c + r * .08); g.lineTo(c + Math.cos(a * TAU / 6) * r * .42, c + r * .08 + Math.sin(a * TAU / 6) * r * .42); g.stroke(); } }
+    g.restore();
+    g.fillStyle = "rgba(255,255,255,.78)"; g.beginPath(); g.ellipse(c - r * .36, c - r * .44, r * .22, r * .13, -.6, 0, TAU); g.fill();
+  });
+}
+function leafSprite() {
+  const w = Rb * 1.7, h = Rb * 1.0;
+  return Lab.sprite("leaf:" + Math.round(Rb * 8), w, h, g => { g.fillStyle = "#2f6b4f"; g.beginPath(); g.moveTo(0, h / 2); g.quadraticCurveTo(w * .45, -h * .25, w, h / 2); g.quadraticCurveTo(w * .45, h * 1.25, 0, h / 2); g.fill(); g.strokeStyle = "#1d4a39"; g.lineWidth = 1.2; g.beginPath(); g.moveTo(w * .08, h / 2); g.lineTo(w * .9, h / 2); g.stroke(); });
+}
+function drawBerry(c, color, x, y, sc, rot) {
+  const sp = berrySprite(color); if (sc === 1 && !rot) { c.drawImage(sp, x - sp.w / 2, y - sp.h / 2, sp.w, sp.h); return; }
+  c.save(); c.translate(x, y); if (rot) c.rotate(rot); c.scale(sc, sc); c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, bg = bgSprite();
+  c.drawImage(bg, 0, 0, bg.w, bg.h);
+  for (const f of flies) { const x = (f.x + Math.sin(t * f.v + f.p) * .06) * W, y = deadY - 30 * S - f.y * (deadY - fieldTop) * .5 + Math.cos(t * f.v * 1.3 + f.p) * 14 * S; c.globalAlpha = .25 + .55 * Math.abs(Math.sin(t * 1.7 * f.v + f.p)); draw.circle(c, x, y, f.s * S, "#ffe9a8"); } c.globalAlpha = 1;
+  // bramble body: one merged dark silhouette behind every berry, leaves poking out
+  const jig = lungeT > 0 ? Math.sin(lungeT * 30) * 2.5 * S * lungeT : 0, vis = [];
+  c.fillStyle = "rgba(22,14,40,.86)"; c.beginPath();
+  for (const b of cells.values()) { const y = cy(b.row); if (y < -Rb * 2) continue; const x = cx(b.row, b.col) + jig; vis.push(b); c.moveTo(x + Rb * 1.2, y); c.arc(x, y, Rb * 1.2, 0, TAU); }
+  c.rect(0, -10, W, Math.max(0, cy(minRow) + 10)); c.fill();
+  const lf = leafSprite();
+  for (const b of vis) { if (b.h % 4) continue; const a = (b.h % 628) / 100, x = cx(b.row, b.col) + jig + Math.cos(a) * Rb * .9, y = cy(b.row) + Math.sin(a) * Rb * .9; c.save(); c.translate(x, y); c.rotate(a + Math.sin(t * 1.5 + b.h) * .08); c.drawImage(lf, 0, -lf.h / 2, lf.w, lf.h); c.restore(); }
+  for (const b of vis) drawBerry(c, b.color, cx(b.row, b.col) + b.ox + jig, cy(b.row) + b.oy, 1 + b.born * .16, 0);
+  // hedge line (deadline)
+  const dz = danger > .45 ? .5 + .5 * Math.sin(t * (6 + danger * 8)) : 0;
+  c.setLineDash([3 * S, 9 * S]); c.lineCap = "round"; c.lineDashOffset = -t * 14; c.lineWidth = (2 + dz * 1.5) * S;
+  c.strokeStyle = danger > .45 ? `rgba(255,${120 - dz * 50},${120 - dz * 30},${.55 + dz * .45})` : "rgba(255,236,200,.4)";
+  c.beginPath(); c.moveTo(L + 4, deadY); c.lineTo(R - 4, deadY); c.stroke(); c.setLineDash([]);
+  if (overT > 0) { c.fillStyle = `rgba(255,60,90,${Math.min(.28, overT * .11)})`; c.fillRect(0, 0, W, H); draw.text(c, Math.max(0, 2.6 - overT).toFixed(1), W / 2, deadY + 16 * S, { size: 17 * Math.max(.85, S), color: "#ffb4a2", stroke: "rgba(20,10,30,.6)" }); }
+  // aim guide
+  if (alive && aim.show && aim.valid) {
+    const tr = trace(aim.a), col = BERRY[cur].c, p = tr.pts; let off = (t * 60 * S) % (16 * S);
+    c.fillStyle = col;
+    for (let i = 0; i + 3 < p.length; i += 2) { const dx = p[i + 2] - p[i], dy = p[i + 3] - p[i + 1], len = Math.hypot(dx, dy); for (let d = off; d < len; d += 16 * S) { c.globalAlpha = .9; draw.circle(c, p[i] + dx / len * d, p[i + 1] + dy / len * d, 2.6 * S, col); } off = (off - len % (16 * S) + 16 * S) % (16 * S); }
+    if (tr.cell) { const gx = cx(tr.cell[0], tr.cell[1]), gy = cy(tr.cell[0]), n = groupSize(tr.cell[0], tr.cell[1], cur), hot = n >= 3; c.globalAlpha = .55 + .25 * Math.sin(t * 9); draw.circle(c, gx, gy, Rb - 2, Lab.color.alpha(col, hot ? .45 : .18), hot ? "#fff" : col, (hot ? 2.6 : 1.6) * S); }
+    c.globalAlpha = 1;
+  }
+  // falling, popping, flying
+  for (const f of falling) drawBerry(c, f.color, f.x, f.y, 1, f.rot);
+  for (const p of pops) { if (p.go && p.t >= 1) continue; const u = Math.max(0, p.t); c.globalAlpha = 1 - u; drawBerry(c, p.color, p.x, p.y, 1 + u * .45, 0); c.globalAlpha = 1; }
+  if (shot) { const col = BERRY[shot.color].c; for (let i = 1; i <= 4; i++) { c.globalAlpha = .22 - i * .045; draw.circle(c, shot.x - shot.dx * i * 11 * S, shot.y - shot.dy * i * 11 * S, Rb * (1 - i * .14), col); } c.globalAlpha = 1; drawBerry(c, shot.color, shot.x, shot.y, 1, shot.t * 9); }
+  // catapult + berries in hand
+  const pull = aim.show && aim.valid && Lab.input.down ? 9 * S : 0, ax = Math.sin(aim.a), ay = -Math.cos(aim.a), rl = Lab.clamp(reloadT, 0, 1);
+  const bx = shootX - ax * (pull - recoil * 10 * S), by = shootY - ay * (pull - recoil * 10 * S), fork = 21 * S;
+  c.strokeStyle = "#6b4630"; c.lineWidth = 6 * S; c.lineCap = "round"; c.lineJoin = "round"; c.beginPath(); c.moveTo(shootX, shootY + 46 * S); c.lineTo(shootX, shootY + 16 * S); c.moveTo(shootX - fork, shootY - 8 * S); c.quadraticCurveTo(shootX - fork, shootY + 14 * S, shootX, shootY + 18 * S); c.quadraticCurveTo(shootX + fork, shootY + 14 * S, shootX + fork, shootY - 8 * S); c.stroke();
+  c.strokeStyle = "#8f6242"; c.lineWidth = 2 * S; c.beginPath(); c.moveTo(shootX - 1.5 * S, shootY + 44 * S); c.lineTo(shootX - 1.5 * S, shootY + 20 * S); c.stroke();
+  c.strokeStyle = "#f2d7b6"; c.lineWidth = 2.2 * S; c.beginPath(); c.moveTo(shootX - fork, shootY - 7 * S); c.lineTo(bx, by + Rb * .2); c.lineTo(shootX + fork, shootY - 7 * S); c.stroke();
+  const nx = shootX - 86 * S, ny = shootY + 20 * S;
+  c.fillStyle = "#5a3d2b"; c.beginPath(); c.ellipse(nx, ny + Rb * .55, Rb * 1.25, Rb * .62, 0, 0, TAU); c.fill(); c.strokeStyle = "#8f6242"; c.lineWidth = 1.5 * S; for (let i = -2; i <= 2; i++) { c.beginPath(); c.arc(nx + i * Rb * .35, ny + Rb * .5, Rb * .5, .1, Math.PI - .1); c.stroke(); }
+  if (alive) {
+    const sw = Lab.ease.outCubic(1 - swapT);
+    drawBerry(c, next, Lab.lerp(shootX, nx, swapT > 0 ? sw : 1), Lab.lerp(shootY, ny, swapT > 0 ? sw : 1) - Math.sin(sw * Math.PI) * 14 * S * (swapT > 0 ? 1 : 0), .78, 0);
+    if (!shot || rl > .2) drawBerry(c, cur, swapT > 0 ? Lab.lerp(nx, bx, sw) : Lab.lerp(nx, bx, Lab.ease.outBack(rl)), (swapT > 0 ? Lab.lerp(ny, by, sw) : Lab.lerp(ny, by, Lab.ease.outCubic(rl))) - Math.sin((swapT > 0 ? sw : rl) * Math.PI) * 16 * S, .8 + .2 * rl, 0);
+    c.globalAlpha = .7; draw.text(c, "swap", nx, ny + Rb * 1.55, { size: 10.5 * Math.max(.9, S), color: "#f2d7b6", weight: 800 }); c.globalAlpha = 1;
+  }
+  // streak + rows read-out
+  const sx = shootX + 92 * S, m = Math.min(5, Math.max(1, streak));
+  for (let i = 0; i < 5; i++) draw.circle(c, sx - 24 * S + i * 12 * S, shootY + 34 * S, 3.6 * S, i < Math.min(5, streak) ? "#ffd23f" : "rgba(255,255,255,.18)");
+  draw.text(c, "×" + m, sx, shootY + 12 * S, { size: (22 + (streak > 1 ? 4 : 0)) * Math.max(.85, S), color: streak > 1 ? "#ffd23f" : "rgba(255,255,255,.55)", stroke: "rgba(20,10,30,.5)" });
+  draw.text(c, "STREAK", sx, shootY + 50 * S, { size: 9.5 * Math.max(.9, S), color: "rgba(255,236,200,.7)", weight: 800 });
+  if (shots < 2 && alive && !aim.show && !shot) { c.globalAlpha = .55 + .3 * Math.sin(t * 4); draw.text(c, "drag up to aim  ·  let go to fling", W / 2, deadY - 22 * S, { size: 14 * Math.max(.85, S), color: "#fff", stroke: "rgba(20,10,30,.55)" }); c.globalAlpha = 1; }
+}
+Lab.boot();
+})();
+</script></body></html>

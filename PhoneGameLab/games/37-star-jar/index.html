@@ -1,0 +1,208 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Star Jar</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* STAR JAR — drop star-stuff into the jar; matching bodies fuse into bigger ones.
+ * Identity: cozy deep-space toy. Soft pastel bodies with sleepy faces, dreamy generative music
+ * whose intensity follows how full the jar is, pentatonic chime ladder for fusion chains.
+ * Depth: chain multiplier (fusions within 1s, capped ×8), nudging piles with heavy drops, supernova
+ * when two suns meet (clears the neighbourhood, big bonus).                                  */
+Lab.init({
+  title: "Star Jar", tagline: "Fuse star-stuff. Don't overflow the jar.", category: "Physics & Merge",
+  howto: ["Drag to aim, release to drop", "Two of a kind fuse into something bigger", "Chain fusions quickly for a multiplier"],
+  theme: { bg: "#0d0b24", bg2: "#2a1f5c", accent: "#9b8cff", accent2: "#ff8fc7" },
+  orient: "portrait", music: { style: "dream", key: "D", vol: .55 }, restart: start,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU;
+const TIERS = [
+  { n: "Dust", c: "#b8c0ff", r: 13 }, { n: "Pebble", c: "#ffd6a5", r: 18 }, { n: "Moonlet", c: "#caffbf", r: 24 },
+  { n: "Comet", c: "#9bf6ff", r: 31 }, { n: "Rosette", c: "#ffadad", r: 39 }, { n: "Lemon Moon", c: "#fdf3a0", r: 48 },
+  { n: "Blue Dwarf", c: "#a0c4ff", r: 58 }, { n: "Nebula", c: "#ffc6ff", r: 69 }, { n: "Ocean World", c: "#72efdd", r: 81 },
+  { n: "Giant", c: "#ffb35c", r: 94 }, { n: "Sun", c: "#ffe066", r: 108 },
+];
+const VAL = TIERS.map((_, i) => (i + 1) * (i + 2) / 2);
+const G = 1900, STEP = 1 / 120;
+let S, L, R, F, lineY, dropY, bodies, held, nextTier, aimX, aimShown, cool, score, chain, chainT, overT, acc, stars, best, alive, pileTop, discovered, warnT;
+
+function start() {
+  layout();
+  bodies = []; score = 0; chain = 0; chainT = 0; overT = 0; acc = 0; cool = 0; alive = true; warnT = 0; discovered = 0;
+  aimX = aimShown = Lab.W / 2; pileTop = F;
+  held = pickTier(); nextTier = pickTier();
+  stars = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), s: Lab.rand(.5, 1.8), p: Lab.rand(0, TAU), v: Lab.rand(.6, 2) }));
+  Lab.setScore(0);
+  Lab.input.onDown = [x => { aimX = x; }];
+  Lab.input.onMove = [x => { if (Lab.input.down) aimX = x; }];
+  Lab.input.onUp = [x => { aimX = x; drop(); }];
+  Lab.input.onKey = [k => { if (k === " " || k === "ArrowDown" || k === "Enter") drop(); }];
+  Lab.expose({ get bodies() { return bodies; }, get score() { return score; }, get held() { return held; }, drop, setAim(x) { aimX = x; aimShown = x; }, spawn(tier, x, y) { bodies.push(mk(x, y, tier, 0, 0)); }, TIERS });
+  Lab.loop(frame);
+}
+function layout() {
+  S = Math.min(Lab.W / 390, Lab.play.h / 700);
+  L = 12; R = Lab.W - 12; F = Lab.H - 22 - Lab.safe.bottom;
+  dropY = Lab.play.y + 58 * S; lineY = Lab.play.y + 112 * S;
+}
+Lab.onResize(() => { if (bodies) { layout(); for (const b of bodies) { b.x = Lab.clamp(b.x, L + b.r, R - b.r); b.y = Math.min(b.y, F - b.r); } } });
+const rad = t => TIERS[t].r * S;
+function pickTier() { const max = score > 600 ? 4 : 3; const w = [5, 4, 3, 2, 1].slice(0, max + 1); let x = Lab.rand(0, w.reduce((a, b) => a + b, 0)); for (let i = 0; i < w.length; i++) { if ((x -= w[i]) < 0) return i; } return 0; }
+
+function drop() {
+  if (!alive || cool > 0 || Lab.paused) return;
+  const r = rad(held), x = Lab.clamp(aimX, L + r + 1, R - r - 1);
+  bodies.push(mk(x, dropY, held, 0, 60));
+  Lab.sfx("drop", { pitch: 1.5 - held * .09 }); Lab.buzz(8);
+  held = nextTier; nextTier = pickTier(); cool = .42;
+}
+function mk(x, y, tier, vx, vy) { return { x, y, vx, vy, tier, r: rad(tier), age: 0, sq: 0, pop: 0, ang: Lab.rand(-.3, .3), blink: Lab.rand(1, 5), dead: false, face: Lab.rand(0, 1) }; }
+
+function physics(h) {
+  for (const b of bodies) {
+    b.vy += G * h; b.x += b.vx * h; b.y += b.vy * h; b.ang += (b.vx / b.r) * h;
+    if (b.x < L + b.r) { b.x = L + b.r; if (b.vx < 0) b.vx *= -.25; }
+    if (b.x > R - b.r) { b.x = R - b.r; if (b.vx > 0) b.vx *= -.25; }
+    if (b.y > F - b.r) { b.y = F - b.r; if (b.vy > 0) { impact(b, b.vy); b.vy *= -.12; } b.vx *= .985; }
+  }
+  for (let it = 0; it < 3; it++) for (let i = 0; i < bodies.length; i++) {
+    const a = bodies[i]; if (a.dead) continue;
+    for (let j = i + 1; j < bodies.length; j++) {
+      const b = bodies[j]; if (b.dead) continue;
+      const dx = b.x - a.x, dy = b.y - a.y, rr = a.r + b.r, d2 = dx * dx + dy * dy;
+      if (d2 >= rr * rr) continue;
+      const d = Math.sqrt(d2) || .01, nx = dx / d, ny = dy / d, ov = rr - d;
+      if (it === 0 && a.tier === b.tier && a.age > .04 && b.age > .04) { fuse(a, b); if (a.dead) break; continue; }
+      const ma = a.r * a.r, mb = b.r * b.r, t = ma + mb;
+      a.x -= nx * ov * (mb / t); a.y -= ny * ov * (mb / t); b.x += nx * ov * (ma / t); b.y += ny * ov * (ma / t);
+      const rvx = b.vx - a.vx, rvy = b.vy - a.vy, vn = rvx * nx + rvy * ny;
+      if (vn < 0) {
+        const jn = -(1.08) * vn / (1 / ma + 1 / mb);
+        a.vx -= jn * nx / ma; a.vy -= jn * ny / ma; b.vx += jn * nx / mb; b.vy += jn * ny / mb;
+        const tx = -ny, ty = nx, vt = (rvx * tx + rvy * ty) * .06 / (1 / ma + 1 / mb);
+        a.vx += vt * tx / ma; a.vy += vt * ty / ma; b.vx -= vt * tx / mb; b.vy -= vt * ty / mb;
+        if (it === 0 && vn < -160) { impact(a, -vn * mb / t); impact(b, -vn * ma / t); }
+      }
+    }
+  }
+}
+function impact(b, v) { if (v < 140) return; b.sq = Math.max(b.sq, Math.min(.3, v / 2600)); if (v > 420 && b.age > .05) Lab.sfx("knock", { pitch: 1.5 - b.tier * .09 }); }
+
+function fuse(a, b) {
+  const x = (a.x * 1 + b.x) / 2, y = (a.y + b.y) / 2, t = a.tier;
+  a.dead = b.dead = true;
+  chain = chainT > 0 ? Math.min(chain + 1, 8) : 1; chainT = 1.0;
+  const gain = VAL[Math.min(t + 1, 10)] * chain * (t === 10 ? 10 : 1);
+  score += gain; Lab.setScore(score); if (chain > 1 || t > 4) Lab.bumpScore();
+  const col = TIERS[Math.min(t + 1, 10)].c;
+  fx.burst(x, y, { n: 10 + t * 3, colors: [TIERS[t].c, col, "#fff"], speed: 160 + t * 28, life: .55, size: 3 + t * .5, gravity: 220, glow: 8 });
+  fx.ring(x, y, { r0: a.r * .6, r1: a.r * 2.4 + 20, color: col, width: 5 });
+  fx.text(x, y - a.r - 8, "+" + gain + (chain > 1 ? "  ×" + chain : ""), { color: chain > 1 ? "#ffe066" : "#fff", size: 17 + Math.min(14, chain * 3 + t) });
+  Lab.audio.combo(t + chain - 1, { vol: .2 }); Lab.sfx("pop", { pitch: 1.3 - t * .07 });
+  if (t >= 4) { Lab.shake(3 + t, .25); Lab.hitstop(.03 + t * .006); Lab.buzz(14); }
+  if (t === 10) { supernova(x, y); return; }
+  const n = mk(x, y, t + 1, (a.vx + b.vx) / 2, (a.vy + b.vy) / 2 - 90); n.pop = 1; n.age = .05; bodies.push(n);
+  if (t + 1 > discovered) { discovered = t + 1; if (t + 1 >= 5) Lab.banner(TIERS[t + 1].n + "!", { color: col, ms: 1000 }); }
+  for (const o of bodies) { if (o.dead || o === n) continue; const dx = o.x - x, dy = o.y - y, d = Math.hypot(dx, dy) || 1; if (d < n.r * 2.2) { const k = (1 - d / (n.r * 2.2)) * 260; o.vx += dx / d * k; o.vy += dy / d * k; } }
+}
+function supernova(x, y) {
+  Lab.flash("#fff7c2", .5, .8); Lab.shake(22, .7); Lab.slowmo(.35, .7); Lab.sfx("boom"); Lab.sfx("chime"); Lab.banner("SUPERNOVA", { color: "#ffe066", ms: 1500 });
+  fx.burst(x, y, { n: 80, colors: ["#ffe066", "#ff9f1c", "#fff", "#ff8fc7"], speed: 620, life: 1.1, size: 6, gravity: 120, shape: "star", glow: 12 });
+  for (const o of bodies) { if (o.dead) continue; const d = Lab.dist(o.x, o.y, x, y); if (d < 230 * S) { o.dead = true; score += VAL[o.tier] * 5; fx.burst(o.x, o.y, { n: 8, color: TIERS[o.tier].c, speed: 260 }); } else { o.vx += (o.x - x) / d * 700; o.vy += (o.y - y) / d * 700; } }
+  Lab.setScore(score); Lab.bumpScore();
+}
+
+function frame(dt, t) {
+  cool -= dt; if (chainT > 0) { chainT -= dt; if (chainT <= 0) chain = 0; }
+  const k = Lab.input.axisX(); if (k) aimX = Lab.clamp(aimX + k * 420 * dt, L, R);
+  aimShown = Lab.damp(aimShown, Lab.clamp(aimX, L + rad(held) + 1, R - rad(held) - 1), 22, dt);
+  acc = Math.min(acc + dt, .05);
+  while (acc >= STEP) { physics(STEP); acc -= STEP; if (bodies.some(b => b.dead)) bodies = bodies.filter(b => !b.dead); }
+  pileTop = F; let danger = false;
+  for (const b of bodies) {
+    b.age += dt; b.sq = Lab.damp(b.sq, 0, 9, dt); if (b.pop > 0) b.pop = Math.max(0, b.pop - dt * 3.2);
+    b.blink -= dt; if (b.blink < -.12) b.blink = Lab.rand(1.5, 6);
+    if (b.age > .9) { pileTop = Math.min(pileTop, b.y - b.r); if (b.y - b.r < lineY) danger = true; }
+  }
+  const fill = Lab.clamp((F - pileTop) / (F - lineY), 0, 1);
+  Lab.music.intensity(.25 + fill * .75);
+  if (alive) {
+    overT = danger ? overT + dt : Math.max(0, overT - dt * 2);
+    if (danger) { warnT -= dt; if (warnT <= 0) { Lab.sfx("warn", { pitch: 1 + overT * .2 }); warnT = .5; } }
+    if (overT > 2.2) { alive = false; end(); }
+  }
+  render(t, fill);
+}
+function end() {
+  Lab.shake(10, .5);
+  for (const b of bodies) fx.burst(b.x, b.y, { n: 5, color: TIERS[b.tier].c, speed: 180, life: .7 });
+  Lab.gameover({ title: "Jar overflowed", score, stats: [["Biggest", TIERS[discovered].n], ["Bodies", bodies.length]] });
+}
+
+function bodySprite(tier, r) {
+  const pad = 6, sz = r * 2 + pad * 2;
+  return Lab.sprite("b" + tier + ":" + Math.round(r), sz, sz, g => {
+    const c = TIERS[tier].c, cx = sz / 2;
+    if (tier === 10) draw.glow(g, cx, cx, r + pad, "#ffe066", .7);
+    const gr = g.createRadialGradient(cx - r * .35, cx - r * .4, r * .1, cx, cx, r);
+    gr.addColorStop(0, Lab.color.shade(c, .55)); gr.addColorStop(.55, c); gr.addColorStop(1, Lab.color.shade(c, -.32));
+    g.fillStyle = gr; g.beginPath(); g.arc(cx, cx, r, 0, TAU); g.fill();
+    g.save(); g.beginPath(); g.arc(cx, cx, r, 0, TAU); g.clip();
+    const rnd = Lab.rng(tier * 97 + 5);
+    g.globalAlpha = .16; g.fillStyle = Lab.color.shade(c, -.55);
+    if (tier % 3 === 0) for (let i = 0; i < 3 + tier; i++) { g.beginPath(); g.arc(cx + (rnd() - .5) * r * 1.6, cx + (rnd() - .5) * r * 1.6, r * (.08 + rnd() * .14), 0, TAU); g.fill(); }
+    else if (tier % 3 === 1) for (let i = 0; i < 4; i++) { g.beginPath(); g.ellipse(cx, cx - r + (i + .7) * r * .5, r * 1.2, r * (.05 + rnd() * .07), -.25, 0, TAU); g.fill(); }
+    else for (let i = 0; i < 5; i++) { g.beginPath(); g.ellipse(cx + (rnd() - .5) * r * 1.5, cx + (rnd() - .5) * r * 1.5, r * (.2 + rnd() * .25), r * (.12 + rnd() * .12), rnd() * 3, 0, TAU); g.fill(); }
+    g.restore(); g.globalAlpha = 1;
+    g.strokeStyle = "rgba(255,255,255,.35)"; g.lineWidth = Math.max(1.2, r * .05); g.beginPath(); g.arc(cx, cx, r - g.lineWidth, Math.PI * 1.05, Math.PI * 1.55); g.stroke();
+  });
+}
+function drawBody(c, b, alpha) {
+  const pop = b.pop > 0 ? 1 + ease.pulse(b.pop) * .22 - (1 - b.pop) * 0 : 1, r = b.r * pop;
+  const sp = bodySprite(b.tier, b.r), sx = 1 + b.sq, sy = 1 - b.sq;
+  c.save(); c.translate(b.x, b.y + b.r * b.sq * .8); c.scale(sx * pop, sy * pop); if (alpha != null) c.globalAlpha = alpha;
+  c.save(); c.rotate(b.ang); c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore();
+  // face: stays upright; eyes follow motion, blink, and widen while falling
+  const e = b.r * .13, ex = b.r * .3, ey = -b.r * .08, look = Lab.clamp(b.vx / 300, -1, 1) * e * .5, fall = Math.abs(b.vy) > 420;
+  c.fillStyle = "#2b2350";
+  if (b.blink < 0 && !fall) { c.fillRect(-ex - e, ey - 1, e * 2, 2.2); c.fillRect(ex - e, ey - 1, e * 2, 2.2); }
+  else { for (const s of [-1, 1]) { c.beginPath(); c.ellipse(s * ex + look, ey, e * .85, e * (fall ? 1.25 : 1), 0, 0, TAU); c.fill(); c.fillStyle = "#fff"; c.beginPath(); c.arc(s * ex + look - e * .25, ey - e * .35, e * .3, 0, TAU); c.fill(); c.fillStyle = "#2b2350"; } }
+  c.strokeStyle = "#2b2350"; c.lineWidth = Math.max(1.4, b.r * .05); c.lineCap = "round"; c.beginPath();
+  if (fall) c.arc(look, ey + b.r * .3, e * .55, 0, TAU); else c.arc(look, ey + b.r * .16, b.r * .16, .15 * Math.PI, .85 * Math.PI);
+  c.stroke();
+  c.fillStyle = "rgba(255,120,150,.28)"; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(s * b.r * .5, ey + b.r * .2, e * 1.1, e * .6, 0, 0, TAU); c.fill(); }
+  c.restore();
+}
+function render(t, fill) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H;
+  draw.bg(c, "#2a1f5c", "#0d0b24", "#1a1442");
+  for (const s of stars) { c.globalAlpha = .35 + .65 * Math.abs(Math.sin(t * s.v + s.p)); c.fillStyle = "#fff"; c.fillRect(s.x * W, s.y * H, s.s, s.s); } c.globalAlpha = 1;
+  draw.glow(c, W * .8, H * .22, W * .7, "#7b5cff", .16); draw.glow(c, W * .15, H * .75, W * .6, "#ff6fb5", .1);
+  // jar
+  draw.rect(c, L - 4, lineY - 30 * S, R - L + 8, F - lineY + 34 * S, 26, "rgba(255,255,255,.045)", "rgba(190,180,255,.32)", 2.5);
+  c.strokeStyle = "rgba(255,255,255,.12)"; c.lineWidth = 6; c.lineCap = "round"; c.beginPath(); c.moveTo(L + 14, lineY + 10); c.lineTo(L + 14, F - 60); c.stroke();
+  // overflow line
+  const dz = overT > 0 ? .5 + .5 * Math.sin(t * 14) : 0;
+  c.setLineDash([8, 10]); c.lineDashOffset = -t * 20; c.strokeStyle = overT > 0 ? `rgba(255,${90 + dz * 60},${120 + dz * 40},${.6 + dz * .4})` : "rgba(255,255,255,.22)"; c.lineWidth = overT > 0 ? 3 : 2;
+  c.beginPath(); c.moveTo(L + 8, lineY); c.lineTo(R - 8, lineY); c.stroke(); c.setLineDash([]);
+  if (overT > 0) { c.fillStyle = `rgba(255,70,110,${Math.min(.3, overT * .13)})`; c.fillRect(0, 0, W, H); draw.text(c, Math.max(0, 2.2 - overT).toFixed(1), W / 2, lineY - 14, { size: 15, color: "#ff8aa5" }); }
+  // aim guide + held piece
+  if (alive) {
+    const r = rad(held), ready = cool <= 0, bob = Math.sin(t * 3) * 3;
+    c.strokeStyle = "rgba(255,255,255,.16)"; c.lineWidth = 2; c.setLineDash([3, 9]); c.beginPath(); c.moveTo(aimShown, dropY + r); c.lineTo(aimShown, F); c.stroke(); c.setLineDash([]);
+    drawBody(c, { x: aimShown, y: dropY + bob, r, tier: held, sq: 0, pop: 0, ang: 0, blink: 1, vx: (aimX - aimShown) * 4, vy: 0 }, ready ? 1 : .35);
+    const nr = Math.min(rad(nextTier), 15 * S);
+    draw.rect(c, W - 62, Lab.play.y + 4, 50, 58, 14, "rgba(10,8,30,.5)", "rgba(255,255,255,.12)", 1);
+    draw.text(c, "NEXT", W - 37, Lab.play.y + 15, { size: 9.5, color: "rgba(255,255,255,.6)" });
+    drawBody(c, { x: W - 37, y: Lab.play.y + 40, r: nr, tier: nextTier, sq: 0, pop: 0, ang: 0, blink: 1, vx: 0, vy: 0 });
+  }
+  for (const b of bodies) draw.shadow(c, b.x, Math.min(F, b.y + b.r + 2), b.r * .8, b.r * .12, .18 * Lab.clamp(1 - (F - b.y - b.r) / 120, 0, 1));
+  for (const b of bodies) drawBody(c, b);
+  if (chain > 1) draw.text(c, "CHAIN ×" + chain, 16, Lab.play.y + 16, { size: 14 + Math.min(8, chain), color: "#ffe066", stroke: "rgba(0,0,0,.35)", align: "left" });
+  // evolution strip
+  const n = Math.max(4, Math.min(11, discovered + 2)), gap = Math.min(22, (W - 40) / n), x0 = W / 2 - (n - 1) * gap / 2;
+  for (let i = 0; i < n; i++) { c.globalAlpha = i <= discovered ? 1 : .25; draw.circle(c, x0 + i * gap, F + 11, 5 + i * .35, TIERS[i].c); } c.globalAlpha = 1;
+}
+Lab.boot();
+})();
+</script></body></html>

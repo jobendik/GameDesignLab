@@ -1,0 +1,379 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Tiltwood</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* TILTWOOD — a wooden tilt-labyrinth toy. Drag anywhere to tip the board; a steel marble rolls with real inertia.
+ * Identity: birch board, walnut frame, brass inlays on a green felt table; woody knocks and a soft rolling rumble.
+ * Depth: brass stars double as checkpoints (they sit down risky side passages), holes sit against a wall so the
+ * skill is hugging the opposite wall, par times reward clean fast lines. Generated boards grow level by level.
+ * All physics runs in cell units on a canonical portrait grid; landscape simply transposes the view.            */
+Lab.init({
+  title: "Tiltwood", tagline: "Tip the board. Roll the marble home.", category: "Runner & Movement",
+  howto: ["Drag anywhere to tilt the board (or arrow keys)", "Brass stars score — and act as checkpoints", "Hug the far wall to slip past a hole"],
+  theme: { bg: "#102720", bg2: "#245646", accent: "#f0b54a", accent2: "#e9cf9f" },
+  orient: "any", music: { style: "puzzle", key: "F", vol: .5 }, restart: start,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU;
+const WT = .07, BR = .2, HR = .19, G = 11, DRAG = 1.0, VMAX = 6.5, STEP = 1 / 120, FRK = .22;
+const DIRS = [[0, -1, 1, 4], [1, 0, 2, 8], [0, 1, 4, 1], [-1, 0, 8, 2]]; // dx, dy, wall bit, opposite bit
+const SIZES = [[4, 5], [4, 6], [5, 6], [5, 7], [5, 8], [6, 8], [6, 9]];
+let C, R, wl, cellWalls, allWalls, startC, goal, stars, holes, par, path;
+let level, score, marbles, mode, modeT, lt, moved, ball, tilt, acc, check, fell, totalStars, underPar, cleared, fallHole, steer;
+let flip, cell, ox, oy, bw, bh, FR, U, baseCv, topCv, marks, rollT, knockT, anim, everMoved;
+
+function start() {
+  level = 1; score = 0; marbles = 3; totalStars = 0; underPar = 0; cleared = 0; steer = null; everMoved = false;
+  tilt = { u: 0, v: 0 }; acc = 0; rollT = 0; knockT = 0; anim = { boardIn: 0 };
+  marks = Array.from({ length: 7 }, () => { const a = Lab.rand(0, TAU), z = Lab.rand(-1, 1), s = Math.sqrt(1 - z * z); return [Math.cos(a) * s, Math.sin(a) * s, z]; });
+  Lab.setScore(0);
+  Lab.expose({
+    get level() { return level; }, get score() { return score; }, get marbles() { return marbles; }, get mode() { return mode; },
+    get ball() { return { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy }; }, get tilt() { return { u: tilt.u, v: tilt.v }; },
+    get stars() { return stars.map(s => ({ u: s.u, v: s.v, got: s.got })); }, get holes() { return holes.map(h => ({ u: h.u, v: h.v })); },
+    get goal() { return { u: goal.u, v: goal.v }; }, get par() { return par; }, get time() { return lt; }, get flip() { return flip; },
+    get grid() { return { C, R }; }, get checkpoint() { return { u: check.u, v: check.v }; },
+    steer(u, v) { steer = u == null ? null : { u: Lab.clamp(u, -1, 1), v: Lab.clamp(v, -1, 1) }; },   // canonical tilt override (tests)
+    route(tu, tv) { return route(tu, tv); },
+  });
+  buildLevel();
+  Lab.loop(frame);
+}
+Lab.onResize(() => { if (wl) layout(); });
+
+/* ------------------------------------------------------------------ level generation */
+function spec(l) {
+  const [c, r] = SIZES[Math.min(l - 1, SIZES.length - 1)];
+  return { C: c, R: r, branch: l < 2 ? 0 : l < 6 ? Math.min(2, l - 1) : 3, main: l < 4 ? 0 : Math.min(7, l - 3), braid: l < 3 ? .07 : .13 };
+}
+function bfs(from) {
+  const dist = new Int16Array(C * R).fill(-1), prev = new Int16Array(C * R).fill(-1), q = [from]; dist[from] = 0;
+  for (let h = 0; h < q.length; h++) { const i = q[h], x = i % C, y = (i / C) | 0; for (const d of DIRS) { if (wl[i] & d[2]) continue; const j = (y + d[1]) * C + x + d[0]; if (dist[j] < 0) { dist[j] = dist[i] + 1; prev[j] = i; q.push(j); } } }
+  return { dist, prev };
+}
+function trace(prev, to) { const p = []; for (let i = to; i >= 0; i = prev[i]) p.push(i); return p.reverse(); }
+const cu = i => i % C + .5, cv = i => ((i / C) | 0) + .5;
+function genLevel(l) {
+  const sp = spec(l); C = sp.C; R = sp.R; const n = C * R; wl = new Uint8Array(n).fill(15);
+  const seen = new Uint8Array(n), st = [0]; seen[0] = 1;
+  while (st.length) {
+    const i = st[st.length - 1], x = i % C, y = (i / C) | 0, o = [];
+    for (const d of DIRS) { const nx = x + d[0], ny = y + d[1]; if (nx >= 0 && ny >= 0 && nx < C && ny < R && !seen[ny * C + nx]) o.push(d); }
+    if (!o.length) { st.pop(); continue; }
+    const d = Lab.choose(o), j = (y + d[1]) * C + x + d[0]; wl[i] &= ~d[2]; wl[j] &= ~d[3]; seen[j] = 1; st.push(j);
+  }
+  for (let i = 0; i < n; i++) { // braid: a few loops make routes a choice instead of a corridor
+    const x = i % C, y = (i / C) | 0;
+    for (const d of [DIRS[1], DIRS[2]]) { const nx = x + d[0], ny = y + d[1]; if (nx < C && ny < R && (wl[i] & d[2]) && Lab.chance(sp.braid)) { wl[i] &= ~d[2]; wl[ny * C + nx] &= ~d[3]; } }
+  }
+  startC = Lab.choose([0, C - 1]);
+  const d0 = bfs(startC); let gi = 0; for (let i = 0; i < n; i++) if (d0.dist[i] > d0.dist[gi]) gi = i;
+  goal = { i: gi, u: cu(gi), v: cv(gi) }; path = trace(d0.prev, gi);
+  const onPath = new Set(path), used = new Set([startC, gi]);
+  // stars: dead ends first (they are the detours), then off-path cells, then anything
+  const dead = [], off = [], rest = [];
+  for (let i = 0; i < n; i++) { if (used.has(i)) continue; const walls = (wl[i] & 1) + (wl[i] >> 1 & 1) + (wl[i] >> 2 & 1) + (wl[i] >> 3 & 1); (walls === 3 && !onPath.has(i) ? dead : !onPath.has(i) ? off : rest).push(i); }
+  const pool = Lab.shuffle(dead).concat(Lab.shuffle(off), Lab.shuffle(rest));
+  stars = pool.slice(0, 3).map(i => { used.add(i); return { i, u: cu(i), v: cv(i), got: false, pop: 0, ph: Lab.rand(0, TAU) }; });
+  // holes sit against a wall of their cell, so the opposite side is always a safe lane
+  holes = []; const holeCells = new Set();
+  const addHole = i => {
+    const x = i % C, y = (i / C) | 0, sides = DIRS.filter(d => wl[i] & d[2]); let du, dv;
+    if (sides.length) { const d = Lab.choose(sides); du = d[0] * .24; dv = d[1] * .24; } else { du = Lab.choose([-.2, .2]); dv = Lab.choose([-.2, .2]); }
+    holes.push({ i, u: x + .5 + du, v: y + .5 + dv }); holeCells.add(i);
+  };
+  let nb = sp.branch;
+  for (const s of Lab.shuffle(stars.slice())) { // on the side passage leading to a star: optional risk
+    if (nb <= 0) break;
+    const bs = bfs(s.i); let jn = -1; for (const p of path) if (jn < 0 || bs.dist[p] < bs.dist[jn]) jn = p;
+    const br = trace(bs.prev, jn).slice(1, -1).filter(i => !used.has(i) && !holeCells.has(i));
+    if (br.length) { addHole(Lab.choose(br)); nb--; }
+  }
+  let nm = sp.main + nb, tries = 0; const mainIdx = [];
+  while (nm > 0 && tries++ < 80) { // on the main route: mandatory, never two in a row, never near the start
+    const k = Lab.randInt(2, path.length - 3), i = path[k];
+    if (k < 2 || k > path.length - 3 || used.has(i) || holeCells.has(i) || mainIdx.some(m => Math.abs(m - k) < 2)) continue;
+    addHole(i); mainIdx.push(k); nm--;
+  }
+  // par: greedy tour start → stars → goal
+  let cur = startC, tour = 0; const left = stars.map(s => s.i);
+  while (left.length) { const b = bfs(cur); left.sort((a, c) => b.dist[a] - b.dist[c]); tour += b.dist[left[0]]; cur = left.shift(); }
+  tour += bfs(cur).dist[gi]; par = Math.round(4 + tour * .5);
+  // collision rectangles (cell units)
+  cellWalls = []; allWalls = [];
+  for (let i = 0; i < n; i++) {
+    const x = i % C, y = (i / C) | 0, list = [], add = (x0, y0, x1, y1) => { const w = { x0, y0, x1, y1 }; list.push(w); allWalls.push(w); };
+    if (wl[i] & 1) add(x - WT, y - WT, x + 1 + WT, y + WT);
+    if (wl[i] & 8) add(x - WT, y - WT, x + WT, y + 1 + WT);
+    if (x === C - 1) add(C - WT, y - WT, C + WT, y + 1 + WT);
+    if (y === R - 1) add(x - WT, R - WT, x + 1 + WT, R + WT);
+    cellWalls.push(list);
+  }
+}
+function route(tu, tv) { // shortest cell route from the marble to a target cell (default: goal) — used by tests
+  const from = Lab.clamp(Math.floor(ball.x), 0, C - 1) + Lab.clamp(Math.floor(ball.y), 0, R - 1) * C;
+  const to = tu == null ? goal.i : Lab.clamp(Math.floor(tu), 0, C - 1) + Lab.clamp(Math.floor(tv), 0, R - 1) * C;
+  return trace(bfs(from).prev, to).map(i => [cu(i), cv(i)]);
+}
+function buildLevel() {
+  genLevel(level); layout();
+  check = { u: cu(startC), v: cv(startC) }; fell = false; lt = 0; moved = false;
+  ball = { x: check.u, y: check.v, vx: 0, vy: 0, s: 1 };
+  mode = "drop"; modeT = 0; anim.boardIn = 0; Lab.tween(anim, { boardIn: 1 }, .5, { ease: "outBack" });
+  if (level > 1) { Lab.banner("LEVEL " + level, { color: "#f6d9a0", ms: 900 }); Lab.sfx("whoosh", { pitch: .8 }); }
+}
+
+/* ------------------------------------------------------------------ layout + baked board art */
+function layout() {
+  const P = Lab.play, top = 46, bot = 12;
+  flip = Lab.W > P.h;
+  const cols = flip ? R : C, rows = flip ? C : R;
+  cell = Math.min((Lab.W - 16) / (cols + 2 * FRK), (P.h - top - bot) / (rows + 2 * FRK + .02));
+  FR = cell * FRK; bw = cols * cell; bh = rows * cell; U = Lab.clamp(Math.min(Lab.W, P.h) / 390, .8, 1.5);
+  ox = (Lab.W - bw) / 2; oy = P.y + top + FR + Math.max(0, (P.h - top - bot - bh - 2 * FR) / 2);
+  bake();
+}
+const PX = (u, v) => flip ? [v * cell, u * cell] : [u * cell, v * cell];
+const RX = w => flip ? [w.y0 * cell, w.x0 * cell, (w.y1 - w.y0) * cell, (w.x1 - w.x0) * cell] : [w.x0 * cell, w.y0 * cell, (w.x1 - w.x0) * cell, (w.y1 - w.y0) * cell];
+function mkCv(cv, w, h) { cv = cv || document.createElement("canvas"); const d = Lab.dpr; cv.width = Math.ceil(w * d); cv.height = Math.ceil(h * d); cv.w = w; cv.h = h; const g = cv.getContext("2d"); g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, w, h); return [cv, g]; }
+function bake() {
+  const m = FR + 8, w = bw + 2 * m, h = bh + 2 * m, k = cell / 60; let g;
+  [baseCv, g] = mkCv(baseCv, w, h); g.translate(m, m);
+  const fg = g.createLinearGradient(0, -FR, 0, bh + FR); fg.addColorStop(0, "#a0683c"); fg.addColorStop(1, "#6a3d20");
+  draw.rect(g, -FR, -FR, bw + 2 * FR, bh + 2 * FR, FR * 1.15, fg);
+  draw.rect(g, -FR + 1.5, -FR + 1.5, bw + 2 * FR - 3, bh + 2 * FR - 3, FR * 1.05, null, "rgba(255,225,180,.28)", 1.5);
+  g.save(); draw.rr(g, 0, 0, bw, bh, 3); g.clip();
+  g.fillStyle = "#ecd3a2"; g.fillRect(0, 0, bw, bh);
+  const rnd = Lab.rng(level * 131 + 7);
+  for (let i = 0; i < 54; i++) { // wood grain
+    const y = rnd() * bh, amp = 2 + rnd() * 6, ph = rnd() * 6, kk = .006 + rnd() * .012;
+    g.strokeStyle = `rgba(150,100,50,${.05 + rnd() * .11})`; g.lineWidth = .6 + rnd() * 1.8; g.beginPath();
+    for (let x = 0; x <= bw + 12; x += 12) { const yy = y + Math.sin(x * kk + ph) * amp; x ? g.lineTo(x, yy) : g.moveTo(x, yy); } g.stroke();
+  }
+  for (let i = 0; i < 3; i++) { const x = rnd() * bw, y = rnd() * bh; for (let r = 3; r < 16 * k; r += 3.2) { g.strokeStyle = "rgba(140,90,45,.1)"; g.lineWidth = 1; g.beginPath(); g.ellipse(x, y, r * 1.8, r, 0, 0, TAU); g.stroke(); } }
+  const sh = 12 * k; // the frame shades the playfield edge
+  for (const [x0, y0, x1, y1, rx, ry, rw, rh] of [[0, 0, 0, sh, 0, 0, bw, sh], [0, bh, 0, bh - sh, 0, bh - sh, bw, sh], [0, 0, sh, 0, 0, 0, sh, bh], [bw, 0, bw - sh, 0, bw - sh, 0, sh, bh]]) {
+    const gr = g.createLinearGradient(x0, y0, x1, y1); gr.addColorStop(0, "rgba(70,35,10,.3)"); gr.addColorStop(1, "rgba(70,35,10,0)"); g.fillStyle = gr; g.fillRect(rx, ry, rw, rh);
+  }
+  g.restore();
+  { const [x, y] = PX(cu(startC), cv(startC)); draw.circle(g, x, y, cell * .3, null, "rgba(130,85,40,.4)", 2 * k); draw.circle(g, x, y, cell * .22, null, "rgba(130,85,40,.22)", 1.5 * k); }
+  { // goal cup: brass ring around green felt
+    const [x, y] = PX(goal.u, goal.v), r = cell * .31;
+    draw.circle(g, x, y + 1.5 * k, r, "rgba(70,40,10,.35)");
+    const br = g.createLinearGradient(x, y - r, x, y + r); br.addColorStop(0, "#ffe08a"); br.addColorStop(1, "#b9781f"); draw.circle(g, x, y, r, br);
+    const gg = g.createRadialGradient(x, y + r * .25, r * .1, x, y, r * .78); gg.addColorStop(0, "#0e3a2a"); gg.addColorStop(1, "#2f8f6a"); draw.circle(g, x, y, r * .78, gg);
+    g.strokeStyle = "rgba(0,0,0,.35)"; g.lineWidth = 2 * k; g.beginPath(); g.arc(x, y, r * .76, Math.PI * 1.1, Math.PI * 1.9); g.stroke();
+  }
+  for (const hl of holes) {
+    const [x, y] = PX(hl.u, hl.v), r = HR * cell;
+    const gr = g.createRadialGradient(x, y + r * .3, r * .1, x, y, r); gr.addColorStop(0, "#000"); gr.addColorStop(.75, "#1b0f07"); gr.addColorStop(1, "#3b2413"); draw.circle(g, x, y, r, gr);
+    g.strokeStyle = "rgba(40,20,5,.7)"; g.lineWidth = 2.2 * k; g.beginPath(); g.arc(x, y, r - k, Math.PI * 1.08, Math.PI * 1.92); g.stroke();
+    g.strokeStyle = "rgba(255,244,215,.65)"; g.lineWidth = 1.6 * k; g.beginPath(); g.arc(x, y, r + .5 * k, Math.PI * .12, Math.PI * .88); g.stroke();
+  }
+  g.shadowColor = "rgba(50,25,5,.5)"; g.shadowBlur = 7 * k * Lab.dpr; g.shadowOffsetY = 4 * k * Lab.dpr; g.fillStyle = "#6f4320";
+  for (const wr of allWalls) { const [x, y, ww, hh] = RX(wr); draw.rr(g, x, y, ww, hh, WT * cell); g.fill(); }
+  g.shadowColor = "transparent";
+  [topCv, g] = mkCv(topCv, w, h); g.translate(m, m);
+  g.strokeStyle = "rgba(96,56,22,.55)"; g.lineWidth = 2; for (const wr of allWalls) { const [x, y, ww, hh] = RX(wr); draw.rr(g, x, y, ww, hh, WT * cell); g.stroke(); }
+  g.fillStyle = "#cf9d5f"; for (const wr of allWalls) { const [x, y, ww, hh] = RX(wr); draw.rr(g, x, y, ww, hh, WT * cell); g.fill(); }
+  g.globalCompositeOperation = "source-atop"; // grain + bevel only where the tops are
+  const tg = g.createLinearGradient(0, 0, 0, bh); tg.addColorStop(0, "rgba(255,240,205,.22)"); tg.addColorStop(1, "rgba(120,70,25,.18)"); g.fillStyle = tg; g.fillRect(-FR, -FR, bw + 2 * FR, bh + 2 * FR);
+  for (let i = 0; i < 40; i++) { const y = rnd() * bh; g.strokeStyle = `rgba(120,75,30,${.08 + rnd() * .1})`; g.lineWidth = .7 + rnd(); g.beginPath(); g.moveTo(-FR, y); g.lineTo(bw + FR, y + (rnd() - .5) * 14); g.stroke(); }
+  g.globalCompositeOperation = "source-over";
+}
+
+/* ------------------------------------------------------------------ physics (cell units, fixed step) */
+function step(h) {
+  const b = ball, flat = Math.hypot(tilt.u, tilt.v) < .05;
+  b.vx += G * tilt.u * h; b.vy += G * tilt.v * h;
+  for (const hl of holes) { // the rim tugs a marble whose centre is over the hole
+    const dx = hl.u - b.x, dy = hl.v - b.y, d = Math.hypot(dx, dy);
+    if (d < .1) { fallIn(hl); return; }
+    if (d < HR) { const k = 30 * (1 - d / HR) + 6; b.vx += dx / d * k * h; b.vy += dy / d * k * h; }
+  }
+  const dr = Math.exp(-(flat ? DRAG + 1.6 : DRAG) * h); b.vx *= dr; b.vy *= dr;
+  const sp = Math.hypot(b.vx, b.vy); if (sp > VMAX) { b.vx *= VMAX / sp; b.vy *= VMAX / sp; }
+  const mx = b.vx * h, my = b.vy * h; b.x += mx; b.y += my;
+  const dist = Math.hypot(mx, my);
+  if (dist > 1e-7) { // roll the surface marks: rotate about the in-plane axis perpendicular to travel
+    const ax = -my / dist, ay = mx / dist, a = dist / BR, ca = Math.cos(a), sa = Math.sin(a);
+    for (const p of marks) { const dot = p[0] * ax + p[1] * ay, cx = ay * p[2], cy = -ax * p[2], cz = ax * p[1] - ay * p[0]; p[0] = p[0] * ca + cx * sa + ax * dot * (1 - ca); p[1] = p[1] * ca + cy * sa + ay * dot * (1 - ca); p[2] = p[2] * ca + cz * sa; }
+  }
+  let hit = 0, hnx = 0, hny = 0;
+  const c0 = Math.floor(b.x), r0 = Math.floor(b.y);
+  for (let r = r0 - 1; r <= r0 + 1; r++) for (let c = c0 - 1; c <= c0 + 1; c++) {
+    if (r < 0 || c < 0 || r >= R || c >= C) continue;
+    for (const w of cellWalls[r * C + c]) {
+      const px = Lab.clamp(b.x, w.x0, w.x1), py = Lab.clamp(b.y, w.y0, w.y1), dx = b.x - px, dy = b.y - py, d2 = dx * dx + dy * dy;
+      if (d2 >= BR * BR) continue;
+      let nx, ny, pen;
+      if (d2 > 1e-10) { const d = Math.sqrt(d2); nx = dx / d; ny = dy / d; pen = BR - d; }
+      else { const l = b.x - w.x0, rr = w.x1 - b.x, t = b.y - w.y0, bb = w.y1 - b.y, mn = Math.min(l, rr, t, bb); nx = mn === l ? -1 : mn === rr ? 1 : 0; ny = mn === t ? -1 : mn === bb ? 1 : 0; if (nx) ny = 0; pen = mn + BR; }
+      b.x += nx * pen; b.y += ny * pen;
+      const vn = b.vx * nx + b.vy * ny;
+      if (vn < 0) { const e = vn < -.7 ? .34 : 0; b.vx -= (1 + e) * vn * nx; b.vy -= (1 + e) * vn * ny; if (-vn > hit) { hit = -vn; hnx = nx; hny = ny; } }
+    }
+  }
+  b.x = Lab.clamp(b.x, BR, C - BR); b.y = Lab.clamp(b.y, BR, R - BR);
+  if (hit > 1.1 && knockT <= 0) {
+    knockT = .07; Lab.sfx("knock", { pitch: .75 + Math.min(.6, hit * .09) });
+    const [x, y] = SP(b.x - hnx * BR, b.y - hny * BR); if (hit > 2.6) { fx.burst(x, y, { n: 4, color: "#f3dcae", speed: 60 + hit * 14, life: .3, size: 2.2, gravity: 0 }); Lab.buzz(6); b.sq = Math.min(.22, hit * .035); b.sqa = Math.atan2(flip ? hnx : hny, flip ? hny : hnx); }
+    if (hit > 4.5) Lab.shake(2.5, .12);
+  }
+  for (const s of stars) if (!s.got && Math.hypot(s.u - b.x, s.v - b.y) < .36) grab(s);
+  if (Math.hypot(goal.u - b.x, goal.v - b.y) < .2) reachGoal();
+}
+function grab(s) {
+  s.got = true; s.pop = 1; totalStars++; const n = stars.filter(q => q.got).length;
+  score += 50; Lab.setScore(score); Lab.bumpScore(); check = { u: s.u, v: s.v };
+  const [x, y] = SP(s.u, s.v);
+  Lab.sfx("star", { pitch: .85 + n * .14 }); Lab.buzz(10);
+  fx.burst(x, y, { n: 12, colors: ["#ffd76a", "#fff3c4", "#f0b54a"], speed: 170, life: .55, size: 3.4, shape: "star", gravity: 80 });
+  fx.ring(x, y, { r0: cell * .15, r1: cell * .6, color: "#ffd76a", width: 4 });
+  fx.text(x, y - cell * .45, "+50", { color: "#ffe9a8", size: 18 });
+}
+function fallIn(hl) {
+  mode = "fall"; modeT = 0; fallHole = hl; fell = true;
+  Lab.sfx("drop", { pitch: .8 }); Lab.shake(5, .2); Lab.buzz(30);
+}
+function afterFall() {
+  marbles--; Lab.sfx("thud"); Lab.audio.tone({ f: 210, f2: 90, dur: .32, type: "triangle", vol: .18 });
+  if (marbles <= 0) { mode = "out"; Lab.gameover({ title: "Out of marbles", score, stats: [["Level", level], ["Stars", totalStars], ["Under par", underPar]] }); return; }
+  ball.x = check.u; ball.y = check.v; ball.vx = ball.vy = 0; mode = "drop"; modeT = 0;
+  const [x, y] = SP(check.u, check.v); fx.text(x, y - cell * .5, marbles === 1 ? "last marble!" : marbles + " marbles left", { color: marbles === 1 ? "#ffb39a" : "#fff", size: 15, life: 1.2 });
+}
+function reachGoal() {
+  mode = "goal"; modeT = 0; cleared++;
+  const [gx, gy] = SP(goal.u, goal.v), got = stars.filter(s => s.got).length, tb = Math.max(0, Math.round((par - lt) * 20)), base = 100 + level * 20;
+  Lab.sfx("levelup"); Lab.buzz(20); Lab.hitstop(.05);
+  fx.ring(gx, gy, { r0: cell * .2, r1: cell * 1.3, color: "#ffe08a", width: 6, life: .6 });
+  fx.burst(gx, gy, { n: 22, colors: ["#ffe08a", "#fff", "#7fe0b6"], speed: 260, life: .8, size: 4, shape: "star", gravity: 160 });
+  const lines = [["CLEAR +" + base, "#ffffff"]]; let gain = base;
+  if (got === 3) { gain += 100; lines.push(["ALL STARS +100", "#ffd76a"]); }
+  if (tb > 0) { gain += tb; underPar++; lines.push(["UNDER PAR +" + tb, "#a6f2cf"]); }
+  if (!fell) { gain += 50; lines.push(["NO SLIPS +50", "#bfe3ff"]); }
+  const cy = oy + bh / 2 - lines.length * 17;
+  lines.forEach((l, i) => Lab.after(.3 + i * .3, () => { fx.text(Lab.W / 2, cy + i * 36, l[0], { color: l[1], size: 24, life: 1.5, vy: -14 }); Lab.audio.combo(2 + i * 2, { vol: .18 }); }));
+  Lab.after(.3, () => { score += gain; Lab.setScore(score); Lab.bumpScore(); });
+  if (level % 3 === 0 && marbles < 5) Lab.after(.5 + lines.length * .3, () => { marbles++; Lab.sfx("powerup"); Lab.toast("+1 marble", 900); });
+  Lab.after(1.5 + lines.length * .3, () => { level++; buildLevel(); });
+}
+
+/* ------------------------------------------------------------------ frame */
+const SP = (u, v) => { const p = PX(u, v); return [ox + p[0], oy + p[1]]; };
+function frame(dt, t) {
+  modeT += dt; knockT -= dt;
+  // tilt target: test override → touch/mouse drag from where the finger went down → keys
+  let tx = 0, ty = 0;
+  if (steer) { tx = flip ? steer.v : steer.u; ty = flip ? steer.u : steer.v; }
+  else if (Lab.input.down) { const r = 62 * U; tx = (Lab.input.x - Lab.input.startX) / r; ty = (Lab.input.y - Lab.input.startY) / r; const m = Math.hypot(tx, ty); if (m > 1) { tx /= m; ty /= m; } else if (m < .07) tx = ty = 0; }
+  else { tx = Lab.input.axisX(); ty = Lab.input.axisY(); if (tx && ty) { tx *= .707; ty *= .707; } }
+  const live = mode === "play" || mode === "drop";
+  tilt.u = Lab.damp(tilt.u, live ? (flip ? ty : tx) : 0, 15, dt); tilt.v = Lab.damp(tilt.v, live ? (flip ? tx : ty) : 0, 15, dt);
+  if (ball.sq) ball.sq = Lab.damp(ball.sq, 0, 14, dt);
+  if (mode === "drop") {
+    if (modeT > .42) { mode = "play"; Lab.sfx("land", { pitch: 1.3 }); const [x, y] = SP(ball.x, ball.y); fx.ring(x, y, { r0: cell * .15, r1: cell * .45, color: "rgba(255,255,255,.7)", width: 3, life: .3 }); ball.sq = .2; ball.sqa = Math.PI / 2; }
+  } else if (mode === "play") {
+    if (!moved && Math.hypot(tilt.u, tilt.v) > .08) { moved = true; everMoved = true; }
+    if (moved) lt += dt;
+    acc = Math.min(acc + dt, .05);
+    while (acc >= STEP && mode === "play") { step(STEP); acc -= STEP; }
+    const sp = Math.hypot(ball.vx, ball.vy); rollT -= dt;
+    if (sp > .7 && rollT <= 0 && mode === "play") { Lab.audio.noise({ dur: .09, vol: Math.min(.06, .011 * sp), bp: 210 + sp * 70, q: 1.6 }); rollT = .075; }
+  } else if (mode === "fall") {
+    ball.x = Lab.damp(ball.x, fallHole.u, 16, dt); ball.y = Lab.damp(ball.y, fallHole.v, 16, dt); if (modeT > .55) afterFall();
+  } else if (mode === "goal") { ball.x = Lab.damp(ball.x, goal.u, 14, dt); ball.y = Lab.damp(ball.y, goal.v, 14, dt); }
+  for (const s of stars) if (s.pop > 0) s.pop = Math.max(0, s.pop - dt * 2.5);
+  Lab.music.intensity(.3 + stars.filter(s => s.got).length * .12 + (marbles === 1 ? .28 : 0));
+  render(dt, t);
+}
+
+/* ------------------------------------------------------------------ rendering */
+function marbleSprite(r) {
+  const pad = 2, sz = r * 2 + pad * 2;
+  return Lab.sprite("mb" + Math.round(r * 4), sz, sz, g => {
+    const cx = sz / 2, gr = g.createRadialGradient(cx - r * .38, cx - r * .42, r * .08, cx, cx, r);
+    gr.addColorStop(0, "#ffffff"); gr.addColorStop(.3, "#d5dde6"); gr.addColorStop(.72, "#8794a4"); gr.addColorStop(1, "#465160");
+    g.fillStyle = gr; g.beginPath(); g.arc(cx, cx, r, 0, TAU); g.fill();
+    g.strokeStyle = "rgba(244,196,120,.5)"; g.lineWidth = r * .14; g.beginPath(); g.arc(cx, cx, r * .82, Math.PI * .2, Math.PI * .8); g.stroke(); // wood reflected underneath
+  });
+}
+function render(dt, t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, k = cell / 60, P = Lab.play;
+  const tsx = flip ? tilt.v : tilt.u, tsy = flip ? tilt.u : tilt.v, tm = Math.hypot(tsx, tsy);
+  draw.bg(c, "#2a6351", "#102720", "#1c4638");
+  draw.glow(c, W * .5, oy + bh * .45, Math.max(bw, bh) * .9, "#8fd6b4", .12);
+  draw.vignette(c, .45);
+  // board: shifts a little with the tilt, its shadow goes the other way, the low side darkens
+  const bi = anim.boardIn, shx = tsx * 5 * k, shy = tsy * 5 * k;
+  c.save();
+  c.translate(W / 2, oy + bh / 2); c.scale(.9 + .1 * bi, .9 + .1 * bi); c.translate(-W / 2, -(oy + bh / 2)); c.globalAlpha = Math.min(1, bi * 1.6);
+  draw.rect(c, ox - FR - tsx * 9 * k, oy - FR + 9 * k - tsy * 9 * k, bw + 2 * FR, bh + 2 * FR, FR * 1.2, "rgba(0,0,0,.34)");
+  c.translate(ox + shx, oy + shy);
+  const m = FR + 8; c.drawImage(baseCv, -m, -m, baseCv.w, baseCv.h);
+  { const [x, y] = PX(goal.u, goal.v), pu = .5 + .5 * Math.sin(t * 3.2); c.globalAlpha = (.25 + pu * .35) * Math.min(1, bi); draw.circle(c, x, y, cell * (.36 + pu * .05), null, "#ffe08a", 2.5 * k); c.globalAlpha = Math.min(1, bi * 1.6); }
+  if (check.u !== cu(startC) || check.v !== cv(startC)) { const [x, y] = PX(check.u, check.v); draw.circle(c, x, y, cell * .26, null, "rgba(240,181,74,.55)", 2 * k); }
+  for (const s of stars) {
+    const [x, y] = PX(s.u, s.v);
+    if (s.got) { if (s.pop > 0) { c.globalAlpha = s.pop; draw.star(c, x, y - (1 - s.pop) * cell * .5, cell * .2 * (1 + (1 - s.pop)), "#fff3c4"); c.globalAlpha = 1; } continue; }
+    const bob = Math.sin(t * 2.4 + s.ph), r = cell * (.19 + bob * .012);
+    draw.shadow(c, x + tsx * 3 * k, y + cell * .2, r * .8, r * .22, .2);
+    c.save(); c.translate(x, y - 2 * k + bob * 1.5 * k); c.rotate(Math.sin(t * 1.3 + s.ph) * .14);
+    draw.star(c, 0, 1.6 * k, r, "#a9711c"); draw.star(c, 0, 0, r, "#f6c453"); draw.star(c, -r * .08, -r * .1, r * .55, "#ffe69a");
+    c.restore();
+  }
+  // marble
+  const [bx, by] = PX(ball.x, ball.y), br = BR * cell; let sc = 1, al = 1, lift = 0;
+  if (mode === "drop") { const u = Math.min(1, modeT / .42); sc = 1 + (1 - Lab.ease.outCubic(u)) * 1.1; al = Math.min(1, u * 3); lift = (1 - u) * cell * .5; }
+  if (mode === "fall") { const u = Math.min(1, modeT / .45); sc = 1 - u * .62; al = 1 - Math.max(0, u - .55) / .45; }
+  if (mode === "goal") { const u = Math.min(1, modeT / .4); sc = 1 - u * .3; }
+  if (mode !== "out") {
+    c.globalAlpha = al * Math.min(1, bi * 1.6);
+    if (mode !== "fall") draw.shadow(c, bx + tsx * 6 * k + lift * .3, by + br * .62 + tsy * 4 * k + lift * .6, br * sc * .95, br * .42, mode === "drop" ? .14 : .3);
+  }
+  c.drawImage(topCv, -m + tsx * cell * .055, -m + tsy * cell * .055 - cell * .04, topCv.w, topCv.h);
+  if (tm > .02) { // light the high side, shade the low side
+    const a = Math.min(.2, tm * .2), L = Math.max(bw, bh) * .6, g = c.createLinearGradient(bw / 2 - tsx / tm * L, bh / 2 - tsy / tm * L, bw / 2 + tsx / tm * L, bh / 2 + tsy / tm * L);
+    g.addColorStop(0, `rgba(255,246,220,${a})`); g.addColorStop(.5, "rgba(0,0,0,0)"); g.addColorStop(1, `rgba(30,12,0,${a * 1.25})`);
+    draw.rr(c, -FR, -FR, bw + 2 * FR, bh + 2 * FR, FR * 1.15); c.fillStyle = g; c.fill();
+  }
+  if (mode !== "out") {
+    c.save(); c.translate(bx, by - lift); c.globalAlpha = al * Math.min(1, bi * 1.6);
+    if (ball.sq > .01) { c.rotate(ball.sqa); c.scale(1 - ball.sq, 1 + ball.sq * .6); c.rotate(-ball.sqa); }
+    c.scale(sc, sc);
+    const sp = marbleSprite(br); c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h);
+    for (const p of marks) { // dimples roll with the ball
+      if (p[2] < .08) continue; const mx = (flip ? p[1] : p[0]) * br * .86, my = (flip ? p[0] : p[1]) * br * .86;
+      c.fillStyle = `rgba(40,52,68,${.34 * p[2]})`; c.beginPath(); c.ellipse(mx, my, br * .17 * p[2] + .4, br * .17, Math.atan2(my, mx) + Math.PI / 2, 0, TAU); c.fill();
+    }
+    c.fillStyle = "rgba(255,255,255,.9)"; c.beginPath(); c.ellipse(-br * .36 - tsx * br * .12, -br * .42 - tsy * br * .12, br * .2, br * .13, -.6, 0, TAU); c.fill();
+    if (mode === "fall") { c.fillStyle = `rgba(0,0,0,${Math.min(.75, modeT * 2)})`; c.beginPath(); c.arc(0, 0, br, 0, TAU); c.fill(); }
+    c.restore();
+  }
+  c.restore(); c.globalAlpha = 1;
+  // HUD strip above the board
+  const hy = oy - FR - 23, fs = 13 * Math.min(1.25, U), lx = Math.max(14, ox - FR + 4), rx = Math.min(W - 14, ox + bw + FR - 4);
+  const ngot = stars.filter(s => s.got).length;
+  draw.text(c, "LEVEL " + level, lx, hy - 8, { size: fs, color: "#f6e4bd", align: "left", shadow: true });
+  for (let i = 0; i < 3; i++) { const got = i < ngot, x = lx + 8 + i * 19, y = hy + 11; draw.star(c, x, y, 8, got ? "#f6c453" : "rgba(0,0,0,.28)"); if (!got) { c.strokeStyle = "rgba(246,228,189,.45)"; c.lineWidth = 1.2; c.stroke(); } }
+  const over = lt > par, tcol = over ? "#f3c9a0" : "#ffffff";
+  draw.text(c, Lab.fmtTime(lt), W / 2, hy - 6, { size: fs * 1.5, color: tcol, shadow: true });
+  draw.text(c, "PAR " + Lab.fmtTime(par).replace(/\.0$/, ""), W / 2, hy + 13, { size: fs * .78, color: over ? "rgba(246,228,189,.55)" : "#a6f2cf", weight: 700 });
+  for (let i = 0; i < Math.max(3, marbles); i++) { const x = rx - 9 - i * 20, on = i < marbles; c.globalAlpha = on ? 1 : .25; const sp = marbleSprite(8); c.drawImage(sp, x - sp.w / 2, hy + 2 - sp.h / 2, sp.w, sp.h); } c.globalAlpha = 1;
+  // drag ring: the finger's anchor and how far the board is tipped
+  if (Lab.input.down && !steer) {
+    const r = 62 * U, x0 = Lab.input.startX, y0 = Lab.input.startY;
+    draw.circle(c, x0, y0, r, "rgba(255,255,255,.07)", "rgba(255,255,255,.3)", 2);
+    draw.line(c, x0, y0, x0 + tsx * r, y0 + tsy * r, "rgba(255,255,255,.35)", 3);
+    draw.circle(c, x0 + tsx * r, y0 + tsy * r, 15 * U, "rgba(255,255,255,.85)", "rgba(60,40,20,.4)", 2);
+  } else if (level === 1 && !everMoved && mode === "play") { // first-run coaching: a ghost drag
+    const u = (t * .7) % 1, r = 44 * U, x0 = W / 2, y0 = Math.min(H - r - 26, oy + bh * .72), a = Lab.ease.inOutQuad(Math.min(1, u * 2)) * (u > .85 ? (1 - u) / .15 : 1);
+    const [sx, sy] = SP(ball.x, ball.y), [gx, gy] = SP(goal.u, goal.v), d = Math.hypot(gx - sx, gy - sy) || 1;
+    c.globalAlpha = .85; draw.circle(c, x0, y0, r, "rgba(20,40,30,.35)", "rgba(255,255,255,.55)", 2); draw.circle(c, x0 + (gx - sx) / d * r * a * .8, y0 + (gy - sy) / d * r * a * .8, 13 * U, "#fff");
+    draw.text(c, "drag to tilt", x0, y0 + r + 14, { size: 14, color: "#fff", shadow: true }); c.globalAlpha = 1;
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

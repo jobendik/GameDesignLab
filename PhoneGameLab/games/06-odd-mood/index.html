@@ -1,0 +1,315 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Odd Mood</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* ODD MOOD — a crowd of blob folk all share one mood... except one. Tap the odd one before the fuse runs out.
+ * Identity: sticker-bright characters on a teal photo-booth backdrop, bouncy music. Everything is drawn in code:
+ *           five body shapes, eight colours, five accessories, thirteen expressions built from brows/lids/pupils/mouth.
+ * Skill: reading faces. Distractors grow (mixed colours → costumes → a crowd that swaps places) while the mood
+ *        difference shrinks from happy-vs-sad to a wink, a raised brow or a sideways glance.
+ * Pressure: three hearts and a short fuse per crowd (not a global clock). A wrong tap or a burnt fuse costs a heart;
+ *           six in a row wins one back. Faster spots and longer streaks score more.                                */
+Lab.init({
+  title: "Odd Mood", tagline: "Everyone feels the same. Except one. Find them.", category: "Reflex & Taps",
+  howto: ["Tap the one whose face doesn't match the crowd", "Beat the fuse: a wrong tap or a time-out costs a heart", "Six in a row wins a heart back"],
+  theme: { bg: "#0e3b4a", bg2: "#1b6d78", accent: "#ff9f43", accent2: "#ff6f91" },
+  orient: "any", music: { style: "bounce", key: "G", vol: .45 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp;
+const INK = "#2b1b3d";
+const BODY = ["#ffb3c1", "#ffd166", "#9be7c4", "#8ecae6", "#cdb4fb", "#ffa987", "#c3ee8c", "#f7aef8"];
+const TRIM = ["#ff5d8f", "#3ec1d3", "#ffca3a", "#8ac926", "#ff7b54"];
+const SHAPES = ["round", "squircle", "egg", "wide", "pear"], ACCS = ["none", "tuft", "ears", "antenna", "cap", "bow"];
+/* expression = mouth curve m, open o, eye openness e (0 closed · 1 · >1 wide), brow tilt bt (+angry −sad), brow lift by,
+ * right-brow lift br, pupil offset lx/ly, mouth asymmetry as, wink, arc (closed eyes smile ^ ^) */
+const EX = {
+  happy: { m: .9, e: 1, adj: "cheerful" }, grin: { m: 1, o: 1, e: 1, by: .2, adj: "laughing" }, beam: { m: .9, e: 0, arc: 1, by: .1, adj: "beaming" },
+  sad: { m: -.9, e: 1, bt: -.8, ly: .5, adj: "gloomy" }, angry: { m: -.6, e: .78, bt: .95, by: -.4, adj: "grumpy" },
+  shock: { m: 0, o: 1, e: 1.5, by: .7, adj: "shocked" }, sleepy: { m: .1, e: .36, by: -.15, adj: "sleepy" }, calm: { m: 0, e: 1, adj: "calm" },
+  smug: { m: .5, as: 1, e: .68, br: .7, adj: "smug" }, wink: { m: .9, e: 1, wink: 1, adj: "cheerful" }, worried: { m: -.35, e: 1.15, bt: -.9, by: .35, adj: "worried" },
+  shifty: { m: 0, e: 1, lx: 1, adj: "calm" }, pout: { m: -.5, e: 1, adj: "calm" },
+};
+const PAIRS = [
+  [["happy", "sad"], ["happy", "angry"], ["shock", "sleepy"], ["grin", "sad"], ["beam", "angry"], ["calm", "shock"], ["sleepy", "grin"]],
+  [["happy", "calm"], ["sad", "angry"], ["calm", "sleepy"], ["shock", "worried"], ["happy", "grin"], ["sad", "calm"], ["beam", "sleepy"], ["angry", "calm"], ["happy", "beam"]],
+  [["happy", "wink"], ["calm", "smug"], ["sad", "worried"], ["calm", "shifty"], ["calm", "pout"], ["happy", "smug"], ["angry", "pout"], ["sleepy", "smug"]],
+];
+const SIZES = [[2, 2], [2, 3], [3, 3], [3, 4], [4, 4], [4, 5], [5, 5], [5, 6]];
+const sizeFor = n => n < 2 ? 0 : n < 4 ? 1 : n < 7 ? 2 : n < 11 ? 3 : n < 16 ? 4 : n < 22 ? 5 : n < 32 ? 6 : 7;
+const fuseFor = n => clamp(9.5 - n * .18, 4.6, 9.5);
+let S = 1, A = { x: 0, y: 0, w: 0, h: 0 }, cols = 2, rows = 2, cw = 0, ch = 0, R = 30, band = 0;
+let folk = [], old = [], odd = -1, cleared, score, streak, bestStreak, hearts, fuse, fuseMax, settle, phase, pair, mode, cursor, fastest, tickT, swapT, heartPop, spot, misses, lastPair, seenRestless;
+
+function layout() {
+  const P = Lab.play; S = clamp(Math.min(Lab.W / 390, P.h / 700), .62, 1.4);
+  band = 70 * S;
+  let w = P.w - 16 * S, h = P.h - band - 18 * S; const k = folk.length ? SIZES[sizeFor(cleared)] : [3, 3];
+  // pick the orientation of the grid that gives the biggest characters
+  const a = Math.min(w / k[0], h / k[1]), b = Math.min(w / k[1], h / k[0]);
+  if (a >= b) { cols = k[0]; rows = k[1]; } else { cols = k[1]; rows = k[0]; }
+  const m = Math.min(w / cols, h / rows); cw = Math.min(w / cols, m * 1.3); ch = Math.min(h / rows, m * 1.22);
+  R = Math.min(cw * .37, ch * .33, 78 * S); cw = Math.min(cw, R * 3.1); ch = Math.min(ch, R * 3.2); // keep the crowd together on big screens
+  A.w = cw * cols; A.h = ch * rows; A.x = P.x + (P.w - A.w) / 2; A.y = P.y + band + (h - A.h) * .5 + 6 * S;
+}
+Lab.onResize(layout);
+function slotXY(s, f) { return { x: A.x + (s % cols + .5 + (f ? f.jx : 0)) * cw, y: A.y + (Math.floor(s / cols) + .56 + (f ? f.jy : 0)) * ch }; }
+
+function start() {
+  folk = []; old = []; odd = -1; cleared = 0; score = 0; streak = 0; bestStreak = 0; hearts = 3; phase = "play"; cursor = -1; fastest = 99; tickT = 0; swapT = 0; heartPop = 0; spot = 0; misses = 0; lastPair = ""; seenRestless = false;
+  Lab.setScore(0); makeRound();
+  Lab.input.onDown = [(x, y) => { cursor = -1; const i = hit(x, y); if (i >= 0) pick(i); }];
+  Lab.input.onKey = [k => {
+    if (phase !== "play") return;
+    if (cursor < 0) { if (/^Arrow|^ $|^Enter$/.test(k)) cursor = Math.floor(rows / 2) * cols + Math.floor(cols / 2); return; }
+    const cx = cursor % cols, cy = Math.floor(cursor / cols);
+    if (k === "ArrowLeft") cursor = cy * cols + (cx + cols - 1) % cols; else if (k === "ArrowRight") cursor = cy * cols + (cx + 1) % cols;
+    else if (k === "ArrowUp") cursor = ((cy + rows - 1) % rows) * cols + cx; else if (k === "ArrowDown") cursor = ((cy + 1) % rows) * cols + cx;
+    else if (k === " " || k === "Enter") pick(folk.findIndex(f => f.slot === cursor));
+  }];
+  Lab.expose({
+    get odd() { return odd; }, get count() { return folk.length; }, get cleared() { return cleared; }, get score() { return score; }, get hearts() { return hearts; },
+    get streak() { return streak; }, get fuse() { return fuse; }, get fuseMax() { return fuseMax; }, get phase() { return phase; }, get pair() { return pair; }, get mode() { return mode; },
+    get ready() { return phase === "play" && settle <= 0; }, get cursor() { return cursor; }, get grid() { return [cols, rows]; },
+    pos(i) { const f = folk[i]; return { x: f.x, y: f.y - R * .9, r: R, slot: f.slot }; }, moods(i) { return folk[i].mood; },
+    setFuse(v) { fuse = v; }, setCleared(v) { cleared = v; }, setHearts(v) { hearts = v; }, pick,
+  });
+  Lab.loop(frame);
+}
+
+function makeRound() {
+  const n = cleared, k = SIZES[sizeFor(n)], count = k[0] * k[1];
+  const tier = n < 4 ? 0 : n < 9 ? (Lab.chance(.6) ? 1 : 0) : n < 15 ? (Lab.chance(.45) ? 2 : 1) : (Lab.chance(.7) ? 2 : 1);
+  let p; do { p = Lab.choose(PAIRS[tier]); } while (p.join() === lastPair); lastPair = p.join();
+  pair = Lab.chance(.5) ? [p[0], p[1]] : [p[1], p[0]];
+  if (n === 0) pair = ["happy", "sad"];
+  mode = n >= 12 && Lab.chance(.4) ? "restless" : "still";
+  const oneCol = Lab.choose(BODY), oneShape = Lab.choose(SHAPES);
+  old = folk.filter(f => f.out < 1); for (const f of old) f.out = Math.max(f.out, .001);
+  folk = []; odd = Lab.randInt(0, count - 1);
+  for (let i = 0; i < count; i++) {
+    const col = n < 3 ? oneCol : Lab.choose(BODY), mood = i === odd ? pair[1] : pair[0];
+    folk.push({
+      slot: i, x: 0, y: 0, px: -1, py: -1, jx: Lab.rand(-.1, .1), jy: Lab.rand(-.08, .08), sz: Lab.rand(.92, 1.06), col, lid: Lab.color.shade(col, -.14),
+      shape: n < 6 ? oneShape : Lab.choose(SHAPES), acc: n < 6 ? "none" : Lab.chance(.6) ? Lab.choose(ACCS) : "none", trim: Lab.choose(TRIM),
+      mood, ex: EX[mood], ph: Lab.rand(0, TAU), bobV: Lab.rand(2.2, 3.4), inn: -Lab.rand(0, .22) - .12, out: 0, hop: 0, shake: 0, dim: 0, sq: 0,
+    });
+  }
+  layout();
+  fuseMax = fuse = fuseFor(n); settle = .62; swapT = 1.4; phase = "play"; spot = 0;
+  if (cursor >= 0) cursor = Math.min(cursor, count - 1);
+  if (n > 0) Lab.sfx("bubble", { pitch: .8 + Math.min(n, 20) * .02 });
+}
+function hit(x, y) {
+  let best = -1, bd = 1e9;
+  for (let i = 0; i < folk.length; i++) { const f = folk[i], d = Math.hypot(x - f.x, y - (f.y - R * .9 * f.sz)); if (d < bd) { bd = d; best = i; } }
+  return bd < Math.max(R * 1.35, 26) ? best : -1;
+}
+
+function pick(i) {
+  if (phase !== "play" || settle > 0 || Lab.paused || i < 0 || i >= folk.length) return;
+  const f = folk[i], hx = f.x, hy = f.y - R;
+  if (i === odd) {
+    const took = fuseMax - fuse, frac = clamp(fuse / fuseMax, 0, 1); fastest = Math.min(fastest, took);
+    streak++; bestStreak = Math.max(bestStreak, streak); cleared++;
+    const mult = 1 + Math.min(streak - 1, 15) * .1, gain = Math.round((50 + 100 * frac) * mult / 5) * 5;
+    score += gain; Lab.setScore(score); if (streak > 2) Lab.bumpScore();
+    f.hop = 1; f.sq = .25; phase = "cheer";
+    fx.burst(hx, hy, { n: 16, colors: [f.col, "#fff", "#ffe066", f.trim], speed: 260, life: .6, size: 4.5, gravity: 500, shape: "star" });
+    fx.ring(hx, hy, { r0: R * .7, r1: R * 1.9, color: "#fff", width: 5, life: .35 });
+    fx.text(hx, hy - R * 1.5, "+" + gain, { color: frac > .7 ? "#ffe066" : "#fff", size: (frac > .7 ? 25 : 20) * S });
+    Lab.audio.combo(Math.min(streak - 1, 14), { vol: .2 }); Lab.sfx("boing", { pitch: 1.2 }); Lab.buzz(12);
+    if (streak % 6 === 0 && hearts < 3) { hearts++; heartPop = 1; Lab.sfx("powerup"); fx.text(hx, hy + R * .2, "+1 heart", { color: "#ff8fab", size: 16 * S, life: 1.1 }); }
+    const was = sizeFor(cleared - 1);
+    Lab.after(.5, () => {
+      makeRound();
+      if (sizeFor(cleared) !== was) { Lab.banner("Bigger crowd!", { color: "#ffd166", ms: 900 }); Lab.sfx("levelup"); }
+      else if (cleared === 3) Lab.banner("Mixed crowd", { color: "#9be7c4", ms: 900 });
+      else if (cleared === 6) Lab.banner("Costume day", { color: "#cdb4fb", ms: 900 });
+      else if (cleared === 9) Lab.banner("Subtle moods", { color: "#ffb3c1", ms: 900 });
+      else if (mode === "restless" && !seenRestless) { seenRestless = true; Lab.banner("They won't sit still", { color: "#8ecae6", ms: 1000 }); }
+    });
+  } else {
+    if (f.dim) { Lab.sfx("tick"); return; }
+    f.dim = 1; f.shake = 1; fx.text(hx, hy - R * 1.3, "nope", { color: "#ff8fab", size: 17 * S });
+    loseHeart(false);
+  }
+}
+function loseHeart(timeout) {
+  hearts--; streak = 0; misses++; heartPop = -1;
+  Lab.sfx("hurt"); Lab.shake(7, .22); Lab.flash("#ff4d6d", .16, .22); Lab.buzz(40);
+  if (hearts <= 0 || timeout) {
+    phase = "miss"; spot = 0; const f = folk[odd]; f.hop = 1; Lab.sfx("whistle", { pitch: .7 });
+    Lab.after(1.25, () => {
+      if (hearts <= 0) Lab.gameover({ title: "Lost in the crowd", score, stats: [["Crowds read", cleared], ["Best streak", bestStreak], ["Fastest spot", fastest < 99 ? fastest.toFixed(1) + "s" : "–"]] });
+      else makeRound();
+    });
+  }
+}
+
+function frame(dt, t) {
+  if (phase === "play") {
+    if (settle > 0) settle -= dt;
+    else {
+      fuse -= dt;
+      if (fuse < 2.5) { tickT -= dt; if (tickT <= 0) { Lab.sfx("tick", { pitch: 1 + (2.5 - fuse) * .25 }); tickT = fuse < 1 ? .14 : .28; } }
+      if (mode === "restless") { swapT -= dt; if (swapT <= 0) { swapT = Lab.rand(1.1, 1.7); const a = Lab.choose(folk), b = Lab.choose(folk); if (a !== b) { const s = a.slot; a.slot = b.slot; b.slot = s; Lab.sfx("swish", { pitch: 1.2 }); } } }
+      if (fuse <= 0) { fuse = 0; loseHeart(true); }
+    }
+    Lab.music.intensity(.3 + .5 * clamp(1 - fuse / fuseMax, 0, 1) + (hearts === 1 ? .2 : 0));
+  }
+  if (phase === "miss") spot = Math.min(1, spot + dt * 3);
+  heartPop = Lab.damp(heartPop, 0, 5, dt);
+  for (const list of [folk, old]) for (const f of list) {
+    if (f.inn < 1) f.inn = Math.min(1, f.inn + dt / .3);
+    if (f.out > 0) f.out = Math.min(1, f.out + dt / .22);
+    if (list === folk) { // leavers keep their last spot; the new crowd follows its (possibly swapping) slots
+      const p = slotXY(f.slot, f);
+      if (f.px < 0) { f.px = p.x; f.py = p.y; } else { f.px = Lab.damp(f.px, p.x, 7, dt); f.py = Lab.damp(f.py, p.y, 7, dt); }
+      f.x = f.px; f.y = f.py + R * f.sz;
+    }
+    f.hop = Math.max(0, f.hop - dt * 2.2); f.shake = Math.max(0, f.shake - dt * 2.4); f.sq = Lab.damp(f.sq, 0, 8, dt);
+  }
+  old = old.filter(f => f.out < 1);
+  render(t);
+}
+
+/* ---------- character drawing (origin at the feet so squash/stretch stays grounded) */
+function bodyPath(c, shape, r) {
+  c.beginPath();
+  if (shape === "round") c.arc(0, 0, r, 0, TAU);
+  else if (shape === "squircle") draw.rr(c, -r * .94, -r * .92, r * 1.88, r * 1.86, r * .62);
+  else if (shape === "egg") c.ellipse(0, 0, r * .84, r * 1.02, 0, 0, TAU);
+  else if (shape === "wide") c.ellipse(0, r * .08, r * 1.04, r * .88, 0, 0, TAU);
+  else { c.moveTo(0, -r); c.bezierCurveTo(r * .78, -r, r * 1.08, r * .1, r * .95, r * .55); c.bezierCurveTo(r * .8, r * 1.08, -r * .8, r * 1.08, -r * .95, r * .55); c.bezierCurveTo(-r * 1.08, r * .1, -r * .78, -r, 0, -r); c.closePath(); }
+}
+function drawFace(c, f, r, look) {
+  const e = f.ex, er = r * .2, exx = r * .37, ey = -r * .1, lw = Math.max(1.5, r * .078);
+  c.lineCap = "round"; c.lineJoin = "round";
+  for (const s of [-1, 1]) {
+    const cx = s * exx, open = e.wink && s === 1 ? 0 : e.e;
+    if (open <= .05) {
+      c.strokeStyle = INK; c.lineWidth = lw; c.beginPath(); c.arc(cx, ey + er * .45, er * .85, Math.PI * 1.15, Math.PI * 1.85); c.stroke();
+    } else {
+      const rr = er * (open > 1 ? Math.sqrt(open) * 1.04 : 1), pr = rr * (open > 1 ? .4 : .56), lx = look ? look.x : (e.lx || 0), ly = look ? look.y : (e.ly || 0);
+      const px = cx + lx * (rr - pr) * .92, py = ey + ly * (rr - pr) * .92;
+      c.fillStyle = "#fff"; c.beginPath(); c.arc(cx, ey, rr, 0, TAU); c.fill();
+      c.fillStyle = INK; c.beginPath(); c.arc(px, py, pr, 0, TAU); c.fill();
+      c.fillStyle = "#fff"; c.beginPath(); c.arc(px - pr * .3, py - pr * .35, pr * .3, 0, TAU); c.fill();
+      if (open < 1) { // heavy upper lid
+        const lidY = ey - rr + 2 * rr * (1 - open);
+        c.save(); c.beginPath(); c.arc(cx, ey, rr + .5, 0, TAU); c.clip();
+        c.fillStyle = f.lid; c.fillRect(cx - rr - 2, ey - rr - 2, rr * 2 + 4, lidY - (ey - rr - 2));
+        c.strokeStyle = INK; c.lineWidth = lw * .8; c.beginPath(); c.moveTo(cx - rr - 2, lidY); c.lineTo(cx + rr + 2, lidY); c.stroke(); c.restore();
+      }
+      c.strokeStyle = INK; c.lineWidth = lw * .7; c.beginPath(); c.arc(cx, ey, rr, 0, TAU); c.stroke();
+    }
+    const by = ey - er * 1.8 - (e.by || 0) * er * .8 - (s === 1 ? (e.br || 0) * er : 0), bl = er * .85, tilt = (e.bt || 0) * bl * .6;
+    c.strokeStyle = INK; c.lineWidth = lw * 1.15; c.beginPath(); c.moveTo(cx - s * bl, by + tilt); c.lineTo(cx + s * bl, by - tilt); c.stroke();
+  }
+  const my = r * .42, mw = r * .34, m = e.m || 0, as = e.as || 0;
+  if (e.o && Math.abs(m) < .3) { c.fillStyle = INK; c.beginPath(); c.ellipse(0, my + r * .05, r * .13, r * .17, 0, 0, TAU); c.fill(); }
+  else if (e.o) {
+    c.beginPath(); c.moveTo(-mw, my - r * .08); c.quadraticCurveTo(0, my + m * mw * 1.75, mw, my - r * .08); c.closePath();
+    c.fillStyle = INK; c.fill(); c.strokeStyle = INK; c.lineWidth = lw; c.stroke();
+    c.fillStyle = "#ff8fa3"; c.beginPath(); c.ellipse(0, my + m * mw * .5, mw * .36, mw * .17, 0, 0, TAU); c.fill();
+  } else {
+    c.strokeStyle = INK; c.lineWidth = lw; c.beginPath(); c.moveTo(-mw, my - m * mw * .32 + as * mw * .25);
+    c.quadraticCurveTo(as * mw * .3, my + m * mw * .95, mw, my - m * mw * .32 - as * mw * .5); c.stroke();
+  }
+  c.fillStyle = "rgba(255,90,120,.26)"; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(s * r * .64, r * .2, r * .15, r * .09, 0, 0, TAU); c.fill(); }
+}
+function drawFolk(c, f, t, look, alpha) {
+  const pop = f.inn < 0 ? 0 : ease.outBack(f.inn), gone = f.out > 0 ? 1 - ease.inCubic(f.out) : 1, sc = f.sz * pop * gone; if (sc <= .01) return;
+  const r = R, lw = Math.max(1.6, r * .075), bob = Math.sin(t * f.bobV + f.ph), hopU = f.hop > 0 ? 1 - f.hop : 1, hopH = f.hop > 0 ? ease.pulse(hopU) * r * .9 : 0;
+  const st = 1 + bob * .028 + (f.hop > 0 ? Math.sin(hopU * Math.PI * 2) * .12 : 0) - f.sq, rot = Math.sin(t * f.bobV * .5 + f.ph * 2) * .045 + (f.shake > 0 ? Math.sin(f.shake * 26) * f.shake * .22 : 0);
+  draw.shadow(c, f.x, f.y, r * .78 * sc * (1 - hopH / (r * 3)), r * .16 * sc, .22 * (alpha == null ? 1 : alpha));
+  c.save(); c.translate(f.x, f.y - hopH); c.rotate(rot); c.scale(sc / st, sc * st); c.translate(0, -r);
+  if (alpha != null) c.globalAlpha = alpha;
+  c.lineJoin = "round"; c.lineCap = "round"; c.strokeStyle = INK; c.lineWidth = lw;
+  // behind-body bits
+  if (f.acc === "ears") for (const s of [-1, 1]) { c.fillStyle = f.col; c.beginPath(); c.arc(s * r * .62, -r * .76, r * .3, 0, TAU); c.fill(); c.stroke(); c.fillStyle = f.trim; c.beginPath(); c.arc(s * r * .62, -r * .76, r * .14, 0, TAU); c.fill(); }
+  if (f.acc === "antenna") for (const s of [-1, 1]) { c.beginPath(); c.moveTo(s * r * .28, -r * .8); c.quadraticCurveTo(s * r * .3, -r * 1.2, s * r * .5, -r * 1.36); c.stroke(); c.fillStyle = f.trim; c.beginPath(); c.arc(s * r * .5, -r * 1.36, r * .12, 0, TAU); c.fill(); c.stroke(); }
+  if (f.acc === "tuft") { c.lineWidth = lw * 1.3; for (const [dx, dy] of [[-.24, -1.26], [0, -1.4], [.26, -1.24]]) { c.beginPath(); c.moveTo(dx * r * .3, -r * .9); c.quadraticCurveTo(dx * r * .6, -r * 1.15, dx * r, dy * r); c.stroke(); } c.lineWidth = lw; }
+  c.fillStyle = INK; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(s * r * .4, r * .98, r * .24, r * .12, 0, 0, TAU); c.fill(); }
+  bodyPath(c, f.shape, r); c.fillStyle = f.col; c.fill(); c.stroke();
+  c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = lw * 1.1; c.beginPath(); c.arc(0, 0, r * .74, Math.PI * 1.12, Math.PI * 1.42); c.stroke(); c.strokeStyle = INK; c.lineWidth = lw;
+  if (f.acc === "cap") {
+    c.fillStyle = f.trim; c.beginPath(); c.arc(0, -r * .56, r * .7, Math.PI * 1.02, Math.PI * 1.98); c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = "#fff"; c.beginPath(); c.arc(0, -r * 1.28, r * .15, 0, TAU); c.fill(); c.stroke();
+  }
+  if (f.acc === "bow") {
+    const bx = r * .5, by = -r * .86; c.fillStyle = f.trim;
+    for (const s of [-1, 1]) { c.beginPath(); c.moveTo(bx, by); c.lineTo(bx + s * r * .36, by - r * .22); c.lineTo(bx + s * r * .36, by + r * .22); c.closePath(); c.fill(); c.stroke(); }
+    c.beginPath(); c.arc(bx, by, r * .1, 0, TAU); c.fill(); c.stroke();
+  }
+  drawFace(c, f, r, look);
+  c.restore();
+}
+function backdrop(c, t) {
+  draw.bg(c, "#1f7a82", "#0c3443", "#145868");
+  const pat = Lab.sprite("memphis", 220, 220, g => {
+    const r = Lab.rng(5); g.lineCap = "round";
+    for (let i = 0; i < 16; i++) {
+      const x = 14 + r() * 192, y = 14 + r() * 192, k = i % 4; g.strokeStyle = g.fillStyle = `rgba(255,255,255,${.045 + r() * .04})`; g.lineWidth = 3;
+      if (k === 0) { g.beginPath(); g.arc(x, y, 5 + r() * 5, 0, TAU); g.fill(); }
+      else if (k === 1) { g.beginPath(); g.moveTo(x - 7, y); g.lineTo(x + 7, y); g.moveTo(x, y - 7); g.lineTo(x, y + 7); g.stroke(); }
+      else if (k === 2) { g.beginPath(); g.arc(x, y, 8, 0, TAU); g.stroke(); }
+      else { g.beginPath(); g.moveTo(x - 9, y + 3); g.quadraticCurveTo(x - 4, y - 6, x, y + 3); g.quadraticCurveTo(x + 4, y + 12, x + 9, y + 3); g.stroke(); }
+    }
+  });
+  const off = (t * 6) % 220;
+  for (let y = -220 + off; y < Lab.H; y += 220) for (let x = -220 + off; x < Lab.W; x += 220) c.drawImage(pat, x, y, 220, 220);
+  draw.glow(c, Lab.W / 2, Lab.play.y + Lab.play.h * .5, Math.max(Lab.W, Lab.H) * .6, "#5fd0c8", .2);
+}
+function hud(c, t) {
+  const P = Lab.play, U = Math.max(S, .85), cx = P.x + P.w / 2, y0 = P.y + 16 * S, bw = Math.min(P.w - 156 * U, 420 * S), fr = clamp(fuse / fuseMax, 0, 1), low = fuse < 2.5 && phase === "play" && settle <= 0;
+  for (let i = 0; i < 3; i++) {
+    const on = i < hearts, pop = i === hearts - 1 && heartPop > 0 ? 1 + heartPop * .5 : i === hearts && heartPop < 0 ? 1 - heartPop * .4 : 1;
+    draw.heart(c, P.x + 20 * U + i * 23 * U, y0, 8.5 * U * pop, on ? "#ff5d7d" : "rgba(255,255,255,.16)");
+    if (on) draw.circle(c, P.x + 17 * U + i * 23 * U, y0 - 3 * U, 2 * U, "rgba(255,255,255,.7)");
+  }
+  // fuse: burns in from both ends toward the middle
+  draw.rect(c, cx - bw / 2, y0 - 6 * S, bw, 12 * S, 6 * S, "rgba(4,26,36,.5)");
+  if (fr > .005) {
+    const w = Math.max(10 * S, (bw - 4) * fr), col = low ? Lab.color.mix("#ff4d6d", "#ffd166", .5 + .5 * Math.sin(t * 16)) : Lab.color.mix("#ff9f43", "#ffe066", fr);
+    draw.rect(c, cx - w / 2, y0 - 4 * S, w, 8 * S, 4 * S, col);
+    if (phase === "play" && settle <= 0) for (const s of [-1, 1]) { draw.circle(c, cx + s * w / 2, y0, (4 + Math.sin(t * 30 + s) * 1.5) * S, "#fff8d6"); draw.glow(c, cx + s * w / 2, y0, 12 * S, "#ffb347", .7); }
+  }
+  if (streak > 1) draw.text(c, "×" + (1 + Math.min(streak - 1, 15) * .1).toFixed(1), P.x + P.w - 12 * S, y0, { size: Math.max(13, 17 * S), color: "#ffe066", align: "right", weight: 900, stroke: "rgba(4,26,36,.5)" });
+  else draw.text(c, "ROUND " + (cleared + 1), P.x + P.w - 12 * S, y0, { size: Math.max(10.5, 11.5 * S), color: "rgba(255,255,255,.6)", align: "right", weight: 800 });
+  if (pair) {
+    const adj = EX[pair[0]].adj;
+    draw.text(c, phase === "miss" ? "There! The " + EX[pair[1]].adj + " one" : "A " + adj + " crowd… with one exception", cx, y0 + 30 * S, { size: Math.max(12, 14.5 * S), color: "rgba(255,255,255,.88)", weight: 800, maxWidth: P.w - 20 });
+  }
+}
+function render(t) {
+  const c = Lab.ctx; backdrop(c, t); hud(c, t);
+  const target = phase === "cheer" || phase === "miss" ? folk[odd] : null;
+  const all = old.concat(folk).sort((a, b) => a.y - b.y);
+  for (const f of all) {
+    if (phase === "miss" && f === target) continue;
+    let look = null;
+    if (target && f !== target && f.out === 0) { const dx = target.x - f.x, dy = target.y - f.y, d = Math.hypot(dx, dy) || 1; look = { x: dx / d, y: dy / d }; }
+    drawFolk(c, f, t, look, f.dim ? .38 : null);
+  }
+  if (phase === "miss" && target) {
+    c.fillStyle = `rgba(4,20,30,${.62 * spot})`; c.fillRect(-40, -40, Lab.W + 80, Lab.H + 80);
+    draw.glow(c, target.x, target.y - R, R * 3, "#fff3c4", .5 * spot);
+    drawFolk(c, target, t, null, null);
+    c.strokeStyle = `rgba(255,224,102,${spot})`; c.lineWidth = 4 * S; c.setLineDash([10 * S, 8 * S]); c.lineDashOffset = -t * 40; c.beginPath(); c.arc(target.x, target.y - R, R * 1.55, 0, TAU); c.stroke(); c.setLineDash([]);
+  }
+  if (cursor >= 0 && phase === "play") { const f = folk.find(q => q.slot === cursor); if (f) { c.strokeStyle = "#fff"; c.lineWidth = 3; c.setLineDash([7, 6]); c.lineDashOffset = -t * 24; c.beginPath(); c.arc(f.x, f.y - R, R * 1.4, 0, TAU); c.stroke(); c.setLineDash([]); } }
+}
+/* splash backdrop: a small cheerful crowd hiding one grump */
+let demo = null;
+function attract(dt, t) {
+  const c = Lab.ctx; backdrop(c, t);
+  if (!demo) { const r = Lab.rng(21); demo = Array.from({ length: 9 }, (_, i) => ({ slot: i, jx: 0, jy: 0, sz: 1, col: BODY[(i * 3 + 1) % 8], lid: "#999", shape: SHAPES[i % 5], acc: ACCS[(i * 2) % 6], trim: TRIM[i % 5], ex: EX[i === 5 ? "angry" : "happy"], ph: r() * 6, bobV: 2.4 + r(), inn: 1, out: 0, hop: 0, shake: 0, dim: 0, sq: 0 })); }
+  const keep = folk; folk = []; layout(); folk = keep;
+  for (const f of demo) { const p = slotXY(f.slot, f); f.x = p.x; f.y = p.y + R; drawFolk(c, f, t, null, null); }
+}
+Lab.boot();
+})();
+</script></body></html>

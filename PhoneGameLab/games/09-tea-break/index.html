@@ -1,0 +1,372 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Tea Break</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* TEA BREAK — a paddle-and-ball game played on a tea tray: knock a gobstopper through a tin of biscuits.
+ * Identity: warm gingham tablecloth, baked-biscuit bricks (shortbread, chocolate-dipped, jammy, popping candy),
+ * a teal serving tray for a paddle; bouncy music; crunches climb a pentatonic ladder with the rally.
+ * Depth: rally multiplier (biscuits eaten between two tray touches, x1..x8); six in a row turns the ball PIPING HOT
+ * so it ploughs straight through until it next touches the tray; popping-candy biscuits chain-detonate neighbours;
+ * jammy biscuits drop power-ups (split, wide tray, doily safety net, spare ball).
+ * Fairness: tray angle control + tray-velocity english, minimum vertical speed (no flat loops), and a ball that
+ * starts "following its nose" toward the nearest biscuit after 8 dull seconds.                                    */
+Lab.init({
+  title: "Tea Break", tagline: "Bash through the biscuit tin, one rally at a time.", category: "Arcade & Action",
+  howto: ["Drag to slide the tray, let go to serve", "Biscuits eaten between tray touches build the rally", "Six in a row and the ball goes piping hot"],
+  theme: { bg: "#f3dcb4", bg2: "#ffe9c9", fg: "#4a2c1d", muted: "#8a6a55", accent: "#e2364f", accent2: "#2a9d8f", light: true },
+  orient: "portrait", music: { style: "bounce", key: "F", vol: .42 }, restart: start,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, COLS = 8;
+const INK = "#4a2c1d";
+const LEVELS = [
+  { n: "Shortbread Stack", m: ["........", ".ssssss.", ".sjssjs.", ".ssssss.", "..ssss.."] },
+  { n: "Choc Top", m: ["cccccccc", "ssssssss", "s.sjjs.s", "ssssssss", ".s.bb.s."] },
+  { n: "Jammy Heart", m: [".ss..ss.", "ssssssss", "scsjjscs", ".ssccss.", "..sbbs..", "...ss..."] },
+  { n: "Chequers", m: ["c.c.c.c.", ".s.s.s.s", "s.j.s.j.", ".s.b.b.s", "s.s.s.s.", ".c.c.c.c"] },
+  { n: "Teapot", m: ["...cc...", "..ssss..", ".ssssssc", "csjssjsc", "cssbsssc", ".ssssss.", "..cccc.."] },
+  { n: "Wafer Pillars", m: ["cs.cc.sc", "cs.jj.sc", "cs.cc.sc", "cs.bb.sc", "cs.cc.sc", "cs.ss.sc"] },
+  { n: "Sugar Diamond", m: ["...cc...", "..csjc..", ".csbbsc.", "cssjjssc", ".csbbsc.", "..cssc..", "...cc..."] },
+  { n: "The Full Tin", m: ["cccccccc", "cssjjssc", "csbccbsc", "csc..csc", "csbccbsc", "cssjjssc", "cccccccc"] },
+];
+const POWERS = { multi: { c: "#e2364f", n: "SPLIT!" }, wide: { c: "#2a9d8f", n: "BIG TRAY" }, net: { c: "#7a6ad8", n: "DOILY NET" }, life: { c: "#ff7aa2", n: "SPARE BALL" } };
+const CRUMB = { s: ["#f7d08a", "#e8b565", "#c98d3f"], c: ["#6b3f2a", "#8a5637", "#f2c57c"], j: ["#f7d08a", "#e2364f", "#c98d3f"], b: ["#ff9ec0", "#fff", "#ffd166", "#7ad3ff"] };
+let S, L, R, T, bw, bh, gy0, padY, padH, netY, pad, balls, bricks, grid, rows, left, drops, score, lives, level, combo, bestCombo, eaten,
+  heat, bored, netOn, netA, wideT, mode, modeT, comboPop, keyT, hotT, alive;
+
+function layout() {
+  S = Math.min(Lab.W / 390, Lab.play.h / 700);
+  L = Math.round(8 * S); R = Lab.W - L; T = Lab.play.y + 30 * Math.max(S, .78);
+  bw = (R - L) / COLS; bh = bw * .5; gy0 = T + 10 * S + bh * 1.5;
+  padH = 15 * S; padY = Lab.H - Lab.safe.bottom - 104 * S; netY = padY + 52 * S;
+}
+Lab.onResize(() => {
+  if (!bricks) return; const oL = L, oR = R, oT = T, oP = padY; layout();
+  for (const b of bricks) place(b);
+  const kx = v => L + (v - oL) / (oR - oL) * (R - L), ky = v => T + (v - oT) / (oP - oT) * (padY - T);
+  pad.x = pad.tx = kx(pad.x); pad.w = pad.tw = padW();
+  for (const b of balls) { b.x = kx(b.x); b.y = ky(b.y); b.r = 7.5 * S; b.trail.length = 0; }
+  for (const d of drops) { d.x = kx(d.x); d.y = ky(d.y); }
+});
+const padW = () => (wideT > 0 ? 132 : 88) * S;
+const baseSpeed = () => (345 + 13 * Math.min(level - 1, 12)) * S;
+const speed = () => baseSpeed() * (1 + .36 * heat);
+function place(b) { b.x = L + b.c * bw + 1.5 * S; b.y = gy0 + b.r * bh + 1.5 * S; b.w = bw - 3 * S; b.h = bh - 3 * S; }
+
+function start() {
+  layout();
+  score = 0; lives = 3; level = 1; combo = 0; bestCombo = 0; eaten = 0; heat = 0; bored = 0; netOn = false; netA = 0; wideT = 0;
+  comboPop = 0; keyT = 0; hotT = 0; alive = true; drops = []; balls = [];
+  pad = { x: Lab.W / 2, tx: Lab.W / 2, w: padW(), tw: padW(), vx: 0, sq: 0 };
+  Lab.setScore(0);
+  buildLevel(); serve();
+  Lab.input.onDown = [x => { pad.tx = x; keyT = 0; }];
+  Lab.input.onMove = [x => { pad.tx = x; keyT = 0; }];
+  Lab.input.onUp = [x => { pad.tx = x; launch(); }];
+  Lab.input.onKey = [k => { if (k === " " || k === "ArrowUp" || k === "Enter" || k === "w" || k === "W") launch(); }];
+  Lab.expose({
+    get score() { return score; }, get lives() { return lives; }, get level() { return level; }, get combo() { return combo; }, get bestCombo() { return bestCombo; },
+    get balls() { return balls.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, hot: b.hot, stuck: b.stuck })); }, get left() { return left; }, get mode() { return mode; },
+    get pad() { return { x: pad.x, y: padY, w: pad.w }; }, get drops() { return drops.map(d => ({ x: d.x, y: d.y, type: d.type })); }, get net() { return netOn; }, get wide() { return wideT > 0; },
+    launch, givePower(t) { power(t, pad.x, padY); },
+    /* test helpers: thin the wall (no score) / set lives */
+    keep(n) { let k = 0; for (const b of bricks) { if (!b.alive) continue; if (k++ >= n) { b.alive = false; grid[b.r * COLS + b.c] = null; left--; } } },
+    setLives(n) { lives = n; },
+  });
+  Lab.loop(frame);
+}
+function buildLevel() {
+  const def = LEVELS[(level - 1) % LEVELS.length], loop = Math.floor((level - 1) / LEVELS.length);
+  bricks = []; rows = def.m.length; grid = new Array(rows * COLS).fill(null); left = 0;
+  def.m.forEach((line, r) => { for (let c = 0; c < COLS; c++) {
+    let t = line[c]; if (t === ".") continue;
+    if (t === "s" && loop && Lab.chance(Math.min(.6, .25 * loop))) t = "c";
+    const b = { c, r, type: t, hp: t === "c" ? 2 : 1, alive: true, dy: -(260 + r * 24) * S, flash: 0, wob: 0, delay: .03 * c + .05 * (rows - r) };
+    place(b); bricks.push(b); grid[r * COLS + c] = b; left++;
+    Lab.tween(b, { dy: 0 }, .5, { ease: "outBounce", delay: b.delay });
+  } });
+  Lab.after(.25, () => Lab.sfx("slide", { pitch: .8 }));
+}
+function serve() {
+  mode = "serve"; modeT = 0; combo = 0; bored = 0;
+  balls = [mkBall(pad.x, padY - 7.5 * S, 0, 0)]; balls[0].stuck = true;
+}
+function mkBall(x, y, vx, vy) { return { x, y, vx, vy, r: 7.5 * S, hot: false, stuck: false, dead: false, trail: [], sq: 0 }; }
+function launch() {
+  if (mode !== "serve" || modeT < .3 || !alive || Lab.paused) return;
+  const b = balls[0]; if (!b || !b.stuck) return;
+  const a = Math.abs(pad.vx) > 60 * S ? Lab.clamp(pad.vx / (800 * S), -1, 1) * .55 : (Lab.chance(.5) ? 1 : -1) * Lab.rand(.12, .3);
+  b.stuck = false; b.vx = Math.sin(a) * speed(); b.vy = -Math.cos(a) * speed();
+  mode = "play"; modeT = 0; Lab.sfx("whoosh", { pitch: 1.3 }); Lab.sfx("bounce", { pitch: 1.2 }); pad.sq = .7; Lab.buzz(8);
+}
+
+/* ---------------------------------------------------------------- simulation */
+function moveBall(b, dt) {
+  const sp = speed(); let d = Math.hypot(b.vx, b.vy) || 1; b.vx *= sp / d; b.vy *= sp / d;
+  if (bored > 8 && b.vy < 0 && left > 0) { // follow your nose: bend gently toward the nearest biscuit
+    let best = null, bd = 1e9; for (const k of bricks) if (k.alive) { const q = Lab.dist(b.x, b.y, k.x + k.w / 2, k.y + k.h / 2); if (q < bd) { bd = q; best = k; } }
+    if (best) { const cur = Math.atan2(b.vy, b.vx), want = Math.atan2(best.y + best.h / 2 - b.y, best.x + best.w / 2 - b.x), a = cur + Lab.clamp(Lab.angleDiff(cur, want), -1.6 * dt, 1.6 * dt); b.vx = Math.cos(a) * sp; b.vy = Math.sin(a) * sp; }
+  }
+  let rem = sp * dt; const maxStep = b.r * .7;
+  while (rem > 0 && !b.dead) { const st = Math.min(rem, maxStep); rem -= st; b.x += b.vx / sp * st; b.y += b.vy / sp * st; collide(b, sp); }
+}
+function steepen(b, sp) { // never let the ball settle into a flat, boring loop
+  const min = .3 * sp; if (Math.abs(b.vy) < min) { b.vy = (b.vy < 0 ? -1 : 1) * min; b.vx = (b.vx < 0 ? -1 : 1) * Math.sqrt(sp * sp - min * min); }
+}
+function collide(b, sp) {
+  if (b.x < L + b.r) { b.x = L + b.r; if (b.vx < 0) { b.vx = -b.vx; wall(b, 0); } }
+  else if (b.x > R - b.r) { b.x = R - b.r; if (b.vx > 0) { b.vx = -b.vx; wall(b, Math.PI); } }
+  if (b.y < T + b.r) { b.y = T + b.r; if (b.vy < 0) { b.vy = -b.vy; wall(b, Math.PI / 2); } }
+  // tray
+  if (b.vy > 0 && b.y + b.r >= padY && b.y < padY + padH * .9 && Math.abs(b.x - pad.x) < pad.w / 2 + b.r * .9) {
+    const off = Lab.clamp((b.x - pad.x) / (pad.w / 2), -1, 1);
+    const a = Lab.clamp(off * 1.02 + Lab.clamp(pad.vx / (900 * S), -1, 1) * .22, -1.2, 1.2);
+    b.vx = Math.sin(a) * sp; b.vy = -Math.cos(a) * sp; b.y = padY - b.r; b.sq = 1;
+    if (b.hot) { b.hot = false; Lab.sfx("splash", { pitch: 1.6 }); fx.puff(b.x, b.y, { color: "rgba(255,255,255,.8)", n: 8 }); }
+    combo = 0; pad.sq = 1; Lab.sfx("bounce", { pitch: .85 + Math.abs(off) * .35 }); Lab.buzz(6);
+    fx.sparks(b.x, padY, -Math.PI / 2, { color: "#fff7e0", n: 4, speed: 160 * S, size: 2.4 });
+    return;
+  }
+  if (netOn && b.vy > 0 && b.y + b.r >= netY) {
+    b.y = netY - b.r; b.vy = -Math.abs(b.vy); netOn = false; b.sq = 1; steepen(b, sp);
+    Lab.sfx("boing"); fx.burst(b.x, netY, { n: 14, colors: ["#fff", "#cfc6ff"], speed: 200 * S, size: 3, life: .5, shape: "ring" }); Lab.shake(3, .15);
+    return;
+  }
+  if (b.y - b.r > Lab.H + 10) { b.dead = true; return; }
+  // biscuits: closest overlapping one wins
+  const c0 = Math.max(0, Math.floor((b.x - b.r - L) / bw)), c1 = Math.min(COLS - 1, Math.floor((b.x + b.r - L) / bw));
+  const r0 = Math.max(0, Math.floor((b.y - b.r - gy0) / bh)), r1 = Math.min(rows - 1, Math.floor((b.y + b.r - gy0) / bh));
+  let hit = null, hd = b.r * b.r, hx = 0, hy = 0;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const k = grid[r * COLS + c]; if (!k || !k.alive || k.dy < -4) continue;
+    const dx = b.x - Lab.clamp(b.x, k.x, k.x + k.w), dy = b.y - Lab.clamp(b.y, k.y, k.y + k.h), d2 = dx * dx + dy * dy;
+    if (d2 < hd) { hd = d2; hit = k; hx = dx; hy = dy; }
+  }
+  if (!hit) return;
+  if (b.hot) { hitBrick(hit, b, 2); return; }
+  let d = Math.sqrt(hd), nx, ny;
+  if (d > .001) { nx = hx / d; ny = hy / d; } else { nx = -b.vx / sp; ny = -b.vy / sp; d = 0; }
+  b.x += nx * (b.r - d); b.y += ny * (b.r - d);
+  const vn = b.vx * nx + b.vy * ny; if (vn < 0) { b.vx -= 2 * vn * nx; b.vy -= 2 * vn * ny; }
+  steepen(b, sp); b.sq = 1;
+  hitBrick(hit, b, 1);
+}
+function wall(b, ang) { b.sq = .8; steepen(b, speed()); Lab.sfx("tick", { pitch: .55 + heat * .25 }); fx.sparks(b.x, b.y, ang, { n: 3, color: "#fff7e0", speed: 120 * S, size: 2 }); }
+
+function hitBrick(k, b, dmg) {
+  k.hp -= dmg; k.flash = 1; bored = 0;
+  const cx = k.x + k.w / 2, cy = k.y + k.h / 2;
+  if (k.hp > 0) { // chocolate shell cracks off
+    k.wob = 1; Lab.sfx("knock", { pitch: 1.25 }); Lab.sfx("snap", { pitch: .8 });
+    fx.burst(cx, cy, { n: 7, colors: ["#6b3f2a", "#4f2c1c", "#8a5637"], speed: 150 * S, size: 3 * S, life: .5, shape: "shard", gravity: 700 * S });
+    score += 2; Lab.setScore(score); return;
+  }
+  k.alive = false; grid[k.r * COLS + k.c] = null; left--; eaten++;
+  combo++; if (combo > bestCombo) bestCombo = combo; comboPop = 1;
+  const mult = Math.min(combo, 8), gain = 10 * mult;
+  score += gain; Lab.setScore(score); if (mult >= 4) Lab.bumpScore();
+  heat = Math.min(1, heat + .013);
+  const dir = b ? Math.atan2(b.vy, b.vx) : -Math.PI / 2;
+  fx.burst(cx, cy, { n: 9 + Math.min(8, combo), colors: CRUMB[k.type], speed: (170 + combo * 12) * S, size: 3.4 * S, life: .65, shape: "square", gravity: 900 * S, angle: dir, spread: b ? 2.6 : TAU, drag: 1.2 });
+  fx.burst(cx, cy, { n: 4, color: "rgba(255,244,214,.9)", speed: 60 * S, size: 5 * S, life: .35, gravity: -40, drag: 3 });
+  if (mult >= 2) fx.text(cx, cy, "+" + gain, { color: mult >= 6 ? "#e2364f" : INK, size: (12 + mult * 1.4) * Math.max(.8, S), life: .6, outline: "rgba(255,248,230,.9)" });
+  Lab.audio.combo(Math.min(combo - 1, 14), { vol: .16 }); Lab.sfx("crunch", { pitch: .9 + Math.min(combo, 10) * .05 });
+  if (combo >= 5) Lab.shake(Math.min(4, combo * .4), .1);
+  if (combo === 6) goHot();
+  if (k.type === "j" || (k.type !== "b" && drops.length < 3 && Lab.chance(.06))) dropPower(cx, cy);
+  if (k.type === "b") {
+    Lab.sfx("explode", { pitch: 1.5 }); Lab.shake(6, .22); Lab.hitstop(.04);
+    fx.ring(cx, cy, { r0: 6, r1: bw * 1.7, color: "#ff7aa2", width: 5 * S, life: .35 });
+    fx.burst(cx, cy, { n: 18, colors: CRUMB.b, speed: 320 * S, size: 3 * S, life: .6, shape: "star", gravity: 300 * S });
+    const kc = k.c, kr = k.r;
+    Lab.after(.08, () => { for (let r = kr - 1; r <= kr + 1; r++) for (let c = kc - 1; c <= kc + 1; c++) { if (c < 0 || c >= COLS || r < 0 || r >= rows) continue; const n = grid[r * COLS + c]; if (n && n.alive) hitBrick(n, null, 1); } });
+  }
+  if (left === 0 && mode === "play") levelClear(cx, cy);
+}
+function goHot() {
+  let any = false; for (const b of balls) if (!b.dead && !b.stuck) { b.hot = true; any = true; }
+  if (!any) return; hotT = 1.2;
+  Lab.sfx("powerup", { pitch: 1.2 }); Lab.sfx("whoosh"); Lab.hitstop(.05); Lab.flash("#ffb347", .18, .25);
+  fx.text(Lab.W / 2, (gy0 + rows * bh + padY) / 2 - 62 * S, "PIPING HOT!", { color: "#f25c05", size: 30 * S, life: 1.1, outline: "rgba(255,248,230,.95)" });
+}
+function dropPower(x, y) {
+  const pool = ["multi", "multi", "multi", "wide", "wide", "wide", "net", "net"]; if (lives < 4) pool.push("life");
+  drops.push({ x, y, vy: -120 * S, type: Lab.choose(pool), t: 0 });
+}
+function power(type, x, y) {
+  const P = POWERS[type]; score += 25; Lab.setScore(score); Lab.bumpScore();
+  Lab.sfx(type === "life" ? "unlock" : "powerup", { pitch: type === "multi" ? 1.15 : 1 }); Lab.buzz(12);
+  fx.ring(x, y, { r0: 8, r1: 60 * S, color: P.c, width: 5 * S }); fx.text(x, y - 26 * S, P.n, { color: P.c, size: 17 * Math.max(.8, S), outline: "rgba(255,248,230,.95)" });
+  if (type === "multi") {
+    const live = balls.filter(b => !b.dead && !b.stuck); let room = 7 - balls.length;
+    for (const b of live) for (const da of [-.42, .42]) { if (room-- <= 0) break; const a = Math.atan2(b.vy, b.vx) + da, n = mkBall(b.x, b.y, Math.cos(a) * speed(), Math.sin(a) * speed()); n.hot = b.hot; steepen(n, speed()); balls.push(n); }
+  } else if (type === "wide") { wideT = 12; pad.tw = padW(); }
+  else if (type === "net") { netOn = true; netA = 0; }
+  else if (type === "life") lives = Math.min(5, lives + 1);
+}
+function levelClear(x, y) {
+  mode = "clear"; modeT = 0; const bonus = 100 * level; score += bonus; Lab.setScore(score); Lab.bumpScore();
+  Lab.slowmo(.3, .45); Lab.sfx("levelup"); Lab.sfx("chime"); Lab.flash("#fff7e0", .3, .5); Lab.banner("TIN CLEARED", { color: "#e2364f", ms: 1300 });
+  fx.burst(x, y, { n: 40, colors: ["#e2364f", "#2a9d8f", "#ffd166", "#fff"], speed: 420 * S, size: 4 * S, life: 1, shape: "star", gravity: 400 * S });
+  fx.text(Lab.W / 2, padY - 70 * S, "+" + bonus + " bonus", { color: "#2a9d8f", size: 20 * S, life: 1.3, outline: "rgba(255,248,230,.95)" });
+  for (const b of balls) fx.puff(b.x, b.y, { color: "rgba(226,54,79,.6)" });
+  balls = []; drops = [];
+  Lab.after(1.5, () => { level++; heat *= .35; buildLevel(); serve(); Lab.sfx("whistle", { pitch: .8 }); });
+}
+function loseBall() {
+  lives--; combo = 0; heat *= .35; wideT = 0; pad.tw = padW(); drops = []; netOn = false;
+  Lab.shake(10, .35); Lab.flash("#e2364f", .2, .22); Lab.sfx("hurt"); Lab.sfx("thud"); Lab.buzz(40);
+  if (lives <= 0) {
+    alive = false; fx.burst(pad.x, padY, { n: 26, colors: ["#2a9d8f", "#fff", "#1f7a70"], speed: 300 * S, size: 4 * S, life: .9, shape: "shard" });
+    Lab.gameover({ title: "Tea's gone cold", score, stats: [["Tin", level + " · " + LEVELS[(level - 1) % LEVELS.length].n], ["Best rally", "×" + bestCombo], ["Biscuits", eaten]] });
+  } else serve();
+}
+
+function frame(dt, t) {
+  modeT += dt; comboPop = Math.max(0, comboPop - dt * 4); hotT = Math.max(0, hotT - dt);
+  // tray
+  const k = Lab.input.axisX(); if (k) { keyT = 1; pad.tx += k * 620 * S * dt; }
+  pad.w = Lab.damp(pad.w, pad.tw, 14, dt);
+  pad.tx = Lab.clamp(pad.tx, L + pad.w / 2, R - pad.w / 2);
+  const px = pad.x; pad.x = keyT ? pad.tx : Lab.damp(pad.x, pad.tx, 38, dt); pad.x = Lab.clamp(pad.x, L + pad.w / 2, R - pad.w / 2);
+  if (dt > 1e-4) pad.vx = Lab.damp(pad.vx, (pad.x - px) / dt, 20, dt);
+  pad.sq = Lab.damp(pad.sq, 0, 12, dt);
+  if (wideT > 0) { wideT -= dt; if (wideT <= 0) { pad.tw = padW(); Lab.sfx("slide", { pitch: .7 }); } }
+  if (netOn) netA = Math.min(1, netA + dt * 4);
+  // balls
+  if (mode === "play") {
+    bored += dt;
+    for (const b of balls) { b.trail.push(b.x, b.y); if (b.trail.length > 16) b.trail.splice(0, 2); moveBall(b, dt); b.sq = Lab.damp(b.sq, 0, 14, dt);
+      if (b.hot && Lab.chance(dt * 40)) fx.burst(b.x, b.y, { n: 1, colors: ["#ffb347", "#f25c05", "#ffe066"], speed: 40 * S, size: 4 * S, life: .35, gravity: -120 * S }); }
+    if (balls.some(b => b.dead)) balls = balls.filter(b => !b.dead);
+    if (!balls.length && mode === "play") loseBall();
+  } else if (mode === "serve" && balls[0]) { balls[0].x = pad.x; balls[0].y = padY - balls[0].r - pad.sq * 2; }
+  // power-ups
+  for (const d of drops) {
+    d.t += dt; d.vy = Math.min(d.vy + 520 * S * dt, 175 * S); d.y += d.vy * dt;
+    if (d.y + 12 * S > padY && d.y - 12 * S < padY + padH && Math.abs(d.x - pad.x) < pad.w / 2 + 12 * S) { d.dead = true; pad.sq = .8; power(d.type, d.x, padY); }
+    else if (d.y > Lab.H + 20) d.dead = true;
+  }
+  if (drops.some(d => d.dead)) drops = drops.filter(d => !d.dead);
+  for (const b of bricks) { if (b.flash > 0) b.flash = Math.max(0, b.flash - dt * 6); if (b.wob > 0) b.wob = Math.max(0, b.wob - dt * 4); }
+  Lab.music.intensity(Lab.clamp(.3 + heat * .4 + Math.min(combo, 8) * .04 + (balls.length > 1 ? .12 : 0), 0, 1));
+  render(t);
+}
+
+/* ---------------------------------------------------------------- drawing */
+function bgSprite() {
+  return Lab.sprite("bg:" + Lab.W + "x" + Lab.H, Lab.W, Lab.H, (g, w, h) => {
+    draw.vgrad(g, 0, 0, w, h, ["#ffe9c9", "#f6d9ad"]);
+    const p = 30 * S; g.fillStyle = "rgba(226,92,79,.13)";
+    for (let x = -p / 2; x < w; x += p * 2) g.fillRect(x, 0, p, h);
+    for (let y = -p / 2; y < h; y += p * 2) g.fillRect(0, y, w, p);
+    // the tin lining: a soft parchment panel the biscuits sit on
+    const ph = netY + 20 * S - T;
+    draw.rect(g, L - 5, T - 2, R - L + 10, ph + 8, 16 * S, "rgba(74,44,29,.13)");
+    draw.rect(g, L - 5, T - 6, R - L + 10, ph + 6, 16 * S, "rgba(255,250,238,.9)", "rgba(74,44,29,.16)", 2);
+    g.strokeStyle = "rgba(42,157,143,.5)"; g.lineWidth = 3 * S; g.setLineDash([2 * S, 7 * S]); g.lineCap = "round";
+    draw.rr(g, L - 1, T - 2, R - L + 2, ph - 2, 12 * S); g.stroke(); g.setLineDash([]);
+  });
+}
+function brickSprite(type, hp) {
+  const w = bw - 3 * S, h = bh - 3 * S, pad = 3;
+  return Lab.sprite("k" + type + hp + ":" + Math.round(w * 4), w + pad * 2, h + pad * 2 + 3, (g) => {
+    const r = Math.min(6 * S, h * .32), x = pad, y = pad;
+    const base = (c1, c2, edge) => {
+      draw.rect(g, x, y + 3 * S, w, h, r, "rgba(74,44,29,.22)");
+      draw.rr(g, x, y, w, h, r); const gr = g.createLinearGradient(0, y, 0, y + h); gr.addColorStop(0, c1); gr.addColorStop(1, c2); g.fillStyle = gr; g.fill();
+      g.strokeStyle = edge; g.lineWidth = 1.4; g.stroke();
+      g.strokeStyle = "rgba(255,255,255,.5)"; g.lineWidth = 1.5; g.lineCap = "round"; g.beginPath(); g.moveTo(x + r, y + 2.4); g.lineTo(x + w - r, y + 2.4); g.stroke();
+    };
+    const holes = col => { g.fillStyle = col; for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) { g.beginPath(); g.arc(x + w * (.2 + i * .2), y + h * (.36 + j * .32), Math.max(.9, 1.3 * S), 0, TAU); g.fill(); } };
+    if (type === "s") { base("#f9d795", "#e7b160", "#c98d3f"); holes("rgba(160,102,40,.6)"); }
+    else if (type === "c" && hp >= 2) {
+      base("#7a4a31", "#4f2c1c", "#3a1f13");
+      g.strokeStyle = "#b98157"; g.lineWidth = 1.6 * S; g.lineJoin = "round"; g.beginPath();
+      for (let i = 0; i <= 6; i++) g[i ? "lineTo" : "moveTo"](x + w * (.12 + i * .127), y + h * (i % 2 ? .68 : .34)); g.stroke();
+    } else if (type === "c") { // half-eaten: shortbread showing through a cracked chocolate coat
+      base("#f9d795", "#e7b160", "#c98d3f"); holes("rgba(160,102,40,.5)");
+      g.save(); draw.rr(g, x, y, w, h, r); g.clip(); g.fillStyle = "#5d3524"; g.beginPath(); g.moveTo(x, y); g.lineTo(x + w * .5, y); g.lineTo(x + w * .38, y + h * .3); g.lineTo(x + w * .56, y + h * .55); g.lineTo(x + w * .4, y + h * .8); g.lineTo(x + w * .52, y + h); g.lineTo(x, y + h); g.closePath(); g.fill();
+      g.fillStyle = "#5d3524"; g.beginPath(); g.moveTo(x + w, y + h); g.lineTo(x + w * .8, y + h); g.lineTo(x + w * .88, y + h * .6); g.lineTo(x + w, y + h * .45); g.closePath(); g.fill(); g.restore();
+    } else if (type === "j") {
+      base("#f9d795", "#e7b160", "#c98d3f");
+      draw.heart(g, x + w / 2, y + h / 2, h * .34, "#b3122e"); draw.heart(g, x + w / 2, y + h / 2 - .6, h * .28, "#e2364f");
+      g.fillStyle = "rgba(255,255,255,.75)"; g.beginPath(); g.arc(x + w / 2 - h * .14, y + h / 2 - h * .12, h * .06, 0, TAU); g.fill();
+      g.fillStyle = "rgba(160,102,40,.6)"; for (const fxp of [.14, .86]) for (const fy of [.3, .7]) { g.beginPath(); g.arc(x + w * fxp, y + h * fy, Math.max(.9, 1.3 * S), 0, TAU); g.fill(); }
+    } else { // popping candy
+      base("#ffb3cf", "#ff86ad", "#d95a86");
+      const rnd = Lab.rng(11), cols = ["#fff", "#ffd166", "#7ad3ff", "#b388ff", "#06d6a0"]; g.lineWidth = 2 * S; g.lineCap = "round";
+      for (let i = 0; i < 11; i++) { const sx = x + w * (.1 + rnd() * .8), sy = y + h * (.2 + rnd() * .6), a = rnd() * TAU; g.strokeStyle = cols[i % 5]; g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + Math.cos(a) * 3.4 * S, sy + Math.sin(a) * 3.4 * S); g.stroke(); }
+    }
+  });
+}
+function ballSprite(hot, r) {
+  const sz = r * 2 + 8;
+  return Lab.sprite("ball" + (hot ? 1 : 0) + ":" + Math.round(r * 4), sz, sz, g => {
+    const c = sz / 2, gr = g.createRadialGradient(c - r * .35, c - r * .4, r * .1, c, c, r);
+    if (hot) { gr.addColorStop(0, "#fff6c2"); gr.addColorStop(.5, "#ffb347"); gr.addColorStop(1, "#f25c05"); }
+    else { gr.addColorStop(0, "#ff8a94"); gr.addColorStop(.55, "#e2364f"); gr.addColorStop(1, "#a3142c"); }
+    g.fillStyle = "rgba(74,44,29,.2)"; g.beginPath(); g.arc(c + 1, c + 2.5, r, 0, TAU); g.fill();
+    g.fillStyle = gr; g.beginPath(); g.arc(c, c, r, 0, TAU); g.fill();
+    g.strokeStyle = "rgba(255,255,255,.75)"; g.lineWidth = Math.max(1.2, r * .2); g.lineCap = "round"; g.beginPath(); g.arc(c, c, r * .62, Math.PI * 1.1, Math.PI * 1.5); g.stroke();
+  });
+}
+function drawIcon(c, type, x, y, r) {
+  c.strokeStyle = "#fff"; c.fillStyle = "#fff"; c.lineWidth = Math.max(1.6, r * .2); c.lineCap = "round"; c.lineJoin = "round";
+  if (type === "multi") { for (const [dx, dy] of [[0, -.42], [-.42, .32], [.42, .32]]) { c.beginPath(); c.arc(x + dx * r, y + dy * r, r * .26, 0, TAU); c.fill(); } }
+  else if (type === "wide") { c.beginPath(); c.moveTo(x - r * .6, y); c.lineTo(x + r * .6, y); c.moveTo(x - r * .3, y - r * .3); c.lineTo(x - r * .62, y); c.lineTo(x - r * .3, y + r * .3); c.moveTo(x + r * .3, y - r * .3); c.lineTo(x + r * .62, y); c.lineTo(x + r * .3, y + r * .3); c.stroke(); }
+  else if (type === "net") { c.beginPath(); for (let i = 0; i < 3; i++) c.arc(x + (i - 1) * r * .44, y - r * .05, r * .22, 0, Math.PI); c.stroke(); }
+  else draw.heart(c, x, y, r * .5, "#fff");
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, bg = bgSprite();
+  c.drawImage(bg, 0, 0, bg.w, bg.h);
+  // status strip: spare balls + tin name
+  const sy = Lab.play.y + 13 * Math.max(S, .78), bs = ballSprite(false, 6 * S);
+  for (let i = 0; i < lives; i++) c.drawImage(bs, L + 4 * S + i * 17 * S, sy - bs.h / 2, bs.w, bs.h);
+  draw.text(c, "TIN " + level + "  ·  " + LEVELS[(level - 1) % LEVELS.length].n, R - 4 * S, sy, { size: 12.5 * Math.max(.82, S), color: INK, align: "right", weight: 800 });
+  // rally read-out behind the action
+  const midY = (gy0 + rows * bh + padY) / 2 + 10 * S, hot = balls.some(b => b.hot);
+  if (combo >= 2) { c.globalAlpha = hot ? .34 : .17 + Math.min(.15, combo * .012); draw.text(c, "×" + Math.min(combo, 8), W / 2, midY, { size: (74 + comboPop * 22) * S, color: hot ? "#f25c05" : INK, weight: 900 }); if (combo > 8) draw.text(c, combo + " in a row", W / 2, midY + 50 * S, { size: 14 * S, color: hot ? "#f25c05" : INK }); c.globalAlpha = 1; }
+  // biscuits
+  for (const b of bricks) {
+    if (!b.alive) continue; const sp = brickSprite(b.type, b.hp), w = sp.w, h = sp.h, k = 1 + b.wob * .1 * Math.sin(b.wob * 14);
+    if (b.dy < -Lab.H) continue;
+    const jig = b.type === "b" ? Math.sin(t * 7 + b.c) * .8 * S : 0;
+    c.drawImage(sp, b.x - 3 - (w * k - w) / 2, b.y - 3 + b.dy + jig - (h * k - h) / 2, w * k, h * k);
+    if (b.flash > 0) { c.globalAlpha = b.flash * .7; draw.rect(c, b.x, b.y + b.dy, b.w, b.h, 6 * S, "#fff"); c.globalAlpha = 1; }
+  }
+  // doily net
+  if (netOn) { c.globalAlpha = netA; c.fillStyle = "#fff"; c.strokeStyle = "#7a6ad8"; c.lineWidth = 2 * S; const n = 14, sw = (R - L) / n; c.beginPath(); c.moveTo(L, netY + 8 * S); for (let i = 0; i < n; i++) c.arc(L + sw * (i + .5), netY + 2 * S + Math.sin(t * 3 + i) * S, sw / 2, Math.PI, 0); c.lineTo(R, netY + 8 * S); c.closePath(); c.fill(); c.stroke(); c.globalAlpha = 1; }
+  // falling treats
+  for (const d of drops) {
+    const P = POWERS[d.type], r = 13 * S, bob = Math.sin(d.t * 6) * .12;
+    draw.shadow(c, d.x + 1, d.y + r + 2, r * .8, r * .2, .15);
+    c.save(); c.translate(d.x, d.y); c.rotate(bob); draw.circle(c, 0, 0, r, P.c, "#fff", 2.5 * S); c.globalAlpha = .25; draw.circle(c, -r * .25, -r * .3, r * .5, "#fff"); c.globalAlpha = 1; drawIcon(c, d.type, 0, 0, r); c.restore();
+  }
+  // tray
+  const pw = pad.w * (1 + pad.sq * .08), ph = padH * (1 - pad.sq * .28), py = padY + pad.sq * 4 * S, px = pad.x - pw / 2;
+  draw.shadow(c, pad.x, py + ph + 7 * S, pw * .5, 5 * S, .16);
+  if (wideT > 0) { c.globalAlpha = .35 + .3 * (wideT < 3 ? Math.abs(Math.sin(t * 10)) : 1); draw.rect(c, pad.x - pw / 2 * (wideT / 12), py + ph + 4 * S, pw * (wideT / 12), 3 * S, 2, "#2a9d8f"); c.globalAlpha = 1; }
+  draw.rect(c, px, py + 3 * S, pw, ph, ph / 2, "#1b6f65");
+  draw.rect(c, px, py, pw, ph, ph / 2, "#2a9d8f");
+  draw.rect(c, px + 5 * S, py + 2.5 * S, pw - 10 * S, ph * .34, ph * .2, "rgba(255,255,255,.38)");
+  draw.circle(c, px + ph * .55, py + ph / 2, ph * .2, "#fff7e0"); draw.circle(c, px + pw - ph * .55, py + ph / 2, ph * .2, "#fff7e0");
+  // balls
+  for (const b of balls) {
+    const n = b.trail.length / 2; for (let i = 0; i < n; i++) { c.globalAlpha = (i / n) * (b.hot ? .4 : .22); draw.circle(c, b.trail[i * 2], b.trail[i * 2 + 1], b.r * (.35 + .6 * i / n), b.hot ? "#ff9a3c" : "#e2364f"); } c.globalAlpha = 1;
+    if (b.hot) draw.glow(c, b.x, b.y, b.r * 3.2, "#ff9a3c", .5);
+    const sp = ballSprite(b.hot, b.r), a = Math.atan2(b.vy, b.vx), st = 1 + b.sq * .22;
+    c.save(); c.translate(b.x, b.y); if (!b.stuck) { c.rotate(a); c.scale(st, 1 / st); c.rotate(-a); } c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore();
+  }
+  if (mode === "serve" && alive) {
+    const b = balls[0], a = .45 + .3 * Math.sin(t * 5);
+    if (b) { c.strokeStyle = `rgba(74,44,29,${a * .7})`; c.lineWidth = 2 * S; c.setLineDash([2 * S, 8 * S]); c.lineCap = "round"; c.beginPath(); c.moveTo(b.x, b.y - b.r - 6 * S); c.lineTo(b.x, b.y - 70 * S); c.stroke(); c.setLineDash([]); }
+    c.globalAlpha = Math.min(1, modeT * 3) * (.6 + a * .5); draw.text(c, Lab.input.down ? "let go to serve" : "drag the tray  ·  let go to serve", W / 2, padY + 44 * S, { size: 14 * Math.max(.85, S), color: INK, weight: 700 }); c.globalAlpha = 1;
+  }
+  if (bored > 8 && mode === "play") { c.globalAlpha = .5; draw.text(c, "following its nose…", W / 2, padY + 44 * S, { size: 12 * Math.max(.85, S), color: INK, weight: 700 }); c.globalAlpha = 1; }
+}
+Lab.boot();
+})();
+</script></body></html>

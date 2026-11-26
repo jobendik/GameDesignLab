@@ -1,0 +1,398 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Windfletch</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* WINDFLETCH — village-fair archery. Pull back anywhere to draw the bow, release to loose.
+ * Identity: sunny paper-craft meadow, bunting and pennants that show the wind, a little hooded archer, folk-bounce music.
+ * Depth: wind is a real force on the arrow (the aim guide only shows the first, wind-less part of the arc), arrows are
+ * lives (a miss costs one, gold returns one), consecutive hits build a ×5 streak, and a tethered balloon invites a
+ * riskier arc: thread it on the way to the target for a doubled "through shot".
+ * Ramp: every 3 hits the range grows — farther, smaller, windier, then bobbing targets and gusts.                */
+Lab.init({
+  title: "Windfletch", tagline: "Read the wind. Split the gold.", category: "Arcade & Action",
+  howto: ["Drag back anywhere to draw the bow, release to loose", "Wind bends every shot — watch the pennants", "Gold returns an arrow; a miss costs one"],
+  theme: { bg: "#f3e2b5", bg2: "#bfe3ee", fg: "#3a2a18", muted: "#7c6a50", accent: "#e2572b", accent2: "#f0a92c", light: true },
+  orient: "any", music: { style: "bounce", key: "G", vol: .4 }, restart: start,
+  attract(dt, t) { if (!demo) { reset(); demo = true; } tg.t += dt; place(tg); windVis = Math.sin(t * .4) * .5; render(t, -.3 + Math.sin(t * .8) * .12, 0, dt); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp;
+const RING = [{ n: "GOLD!", p: 50, c: "#f5c23a" }, { n: "Red", p: 30, c: "#d9412f" }, { n: "Blue", p: 20, c: "#3f7fbf" }, { n: "White", p: 10, c: "#fff6e2" }];
+const STEP = 1 / 120, MAXQ = 6, WK = .9, RANGE_K = 2.3, ANG_MIN = -1.38, ANG_MAX = .42, FLAGS = ["#e2572b", "#f5c23a", "#fff6e2", "#3f9c8f"];
+let S, groundY, bow, Dmax, G, Vmax, yLow, yHigh;
+let score, quiver, streak, bestStreak, golds, hits, level, wind, windNow, windVis, gph, tg, oldTg, arrows, litter, balloon;
+let aim, aimAng, shownAng, shownPow, kbHeld, reload, acc, ended, now, clouds, motes, twang, lean, lastStep, warned, tufts, blink, hintT, streakT, demo = false;
+
+function layout() {
+  const P = Lab.play;
+  S = clamp(Math.min(Lab.W / 390, P.h / 330), .75, 1.5);
+  groundY = P.y + P.h - Math.max(58 * S, P.h * .2);
+  const mL = 56 * S, mR = 48 * S, Dfull = Lab.W - mL - mR; Dmax = Math.min(Dfull, 560 * S);
+  bow = { x: mL + (Dfull - Dmax) / 2, y: groundY - 50 * S };
+  G = 720 * S; Vmax = Math.sqrt(G * Dmax * RANGE_K);
+  yLow = groundY - 60 * S; yHigh = Math.max(P.y + 100 * S, groundY - Math.min(330 * S, P.h * .62));
+  tufts = Array.from({ length: Math.ceil(Lab.W / 13) }, (_, i) => ({ x: i * 13 + Lab.rand(-4, 4), h: Lab.rand(7, 15), p: Lab.rand(0, TAU), y: Lab.rand(0, 1) }));
+}
+Lab.onResize(() => { if (!arrows) return; layout(); arrows = arrows.filter(a => a.state !== "fly"); litter = []; if (aim) aim.on = false; });
+
+function reset() {
+  layout();
+  score = 0; quiver = 5; streak = 0; bestStreak = 0; golds = 0; hits = 0; level = 1; wind = 0; windNow = 0; windVis = 0; gph = Lab.rand(0, TAU);
+  arrows = []; litter = []; balloon = null; oldTg = null; aim = { on: false, sx: 0, sy: 0, x: 0, y: 0, held: 0, kb: false };
+  aimAng = -.3; shownAng = -.3; shownPow = 0; kbHeld = false; reload = 0; acc = 0; ended = false; now = 0; twang = 0; lean = 0; lastStep = 0; warned = false; blink = 2; hintT = 0; streakT = 9;
+  clouds = Array.from({ length: 5 }, (_, i) => ({ x: Lab.rand(0, 1), y: Lab.rand(.02, .3), s: Lab.rand(.6, 1.15), v: Lab.rand(.6, 1.3) }));
+  motes = Array.from({ length: 16 }, () => ({ x: Lab.rand(0, 1), y: Lab.rand(.1, .95), p: Lab.rand(0, TAU), v: Lab.rand(.5, 1.2) }));
+  tg = mkTarget();
+}
+function start() {
+  reset(); demo = false;
+  Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => { if (ended) return; aim.on = true; aim.kb = false; aim.sx = aim.x = x; aim.sy = aim.y = y; aim.held = 0; lastStep = 0; }];
+  Lab.input.onMove = [(x, y) => { if (aim.on && !aim.kb) { aim.x = x; aim.y = y; } }];
+  Lab.input.onUp = [(x, y) => { if (!aim.on || aim.kb) return; aim.x = x; aim.y = y; const p = pull(); aim.on = false; if (p.power >= .1) fire(p.ang, p.power); else if (p.len > 6) Lab.sfx("tick", { pitch: .7 }); }];
+  Lab.expose({
+    get score() { return score; }, get quiver() { return quiver; }, get streak() { return streak; }, get level() { return level; }, get hits() { return hits; }, get golds() { return golds; },
+    get wind() { return windNow; }, get flying() { return flying(); }, get target() { return { x: tg.x, y: tg.y, r: tg.r, phase: tg.phase }; }, get bow() { return { x: bow.x, y: bow.y }; },
+    get balloon() { return balloon && balloon.alive ? { x: balloon.x, y: balloon.y, r: balloon.r } : null; }, get pullMax() { return 124 * S; }, get pullMin() { return 12 * S; },
+    fire, solve, setLevel(n) { level = n; hits = (n - 1) * 3; }, next() { nextTarget(); },
+  });
+  Lab.loop(frame);
+}
+const flying = () => arrows.reduce((n, a) => n + (a.state === "fly" ? 1 : 0), 0);
+const canFire = () => !ended && reload <= 0 && quiver - flying() > 0;
+function pull() {
+  const dx = aim.sx - aim.x, dy = aim.sy - aim.y, len = Math.hypot(dx, dy);
+  let ang = Math.atan2(dy, dx); if (dx < 0) ang = dy < 0 ? ANG_MIN : ANG_MAX;
+  return { ang: clamp(ang, ANG_MIN, ANG_MAX), power: clamp((len - 12 * S) / (112 * S), 0, 1), len };
+}
+const speedOf = p => Vmax * lerp(.42, 1, p);
+const muzzle = ang => ({ x: bow.x + Math.cos(ang) * 30 * S, y: bow.y + Math.sin(ang) * 30 * S });
+
+function mkTarget() {
+  const L = level, first = hits === 0, fmax = lerp(.66, 1, clamp((L - 1) / 5, 0, 1));
+  const o = {
+    fx: first ? .64 : Lab.rand(Math.max(.56, fmax - .22), fmax), fy: first ? .1 : Lab.rand(.02, L < 2 ? .4 : .96), rU: Math.max(23, 46 - (L - 1) * 3),
+    bobA: L >= 3 ? Math.min(62, 14 + (L - 3) * 10) : 0, bobW: .85 + L * .09, ph: Lab.rand(0, TAU), t: 0, show: 0, wob: 0, wobT: 0, phase: "live", stuck: [], x: 0, y: 0, r: 0,
+  };
+  Lab.tween(o, { show: 1 }, .45, { ease: "outBack" });
+  const was = wind;
+  wind = L >= 2 && !first ? Lab.rand(.25, Math.min(1, .32 + (L - 2) * .14)) * (Lab.chance(.5) ? 1 : -1) : 0;
+  if (Math.abs(wind - was) > .3) Lab.sfx("whoosh", { pitch: .7 + Math.abs(wind) * .5 });
+  if (wind && !warned) { warned = true; Lab.toast("The wind is up — watch the pennants", 1700); }
+  place(o);
+  balloon = null;
+  if (L >= 2 && !first && Lab.chance(.5)) {
+    const u = Lab.rand(.42, .7), bx = lerp(bow.x, o.x, u), by = lerp(bow.y, o.y, u) - Lab.rand(26, 84) * S;
+    balloon = { x: bx, y: Math.max(Lab.play.y + 96 * S, bow.y - reach(bx) * .8, by), r: 15 * S, ph: Lab.rand(0, TAU), alive: true, show: 0, col: Lab.choose(["#e2572b", "#3f9c8f", "#c8508c"]) };
+    Lab.tween(balloon, { show: 1 }, .5, { ease: "outBack", delay: .15 });
+  }
+  return o;
+}
+function place(o) {
+  o.r = o.rU * S; o.x = bow.x + Dmax * o.fx;
+  const top = Math.max(yHigh, bow.y - reach(o.x) * .7);
+  o.y = clamp(lerp(yLow, top, o.fy) + Math.sin(o.t * o.bobW + o.ph) * o.bobA * S, top - 8 * S, yLow + 6 * S);
+}
+/* highest point (above the bow) a full-draw shot can reach at horizontal position x — keeps every target hittable on any screen */
+function reach(x) { const R = Vmax * Vmax / G, d = x - bow.x; return (R * R - d * d) / (2 * R); }
+function nextTarget() {
+  if (ended) return;
+  oldTg = tg; const og = oldTg; og.phase = "gone"; Lab.tween(og, { show: 0 }, .26, { ease: "inBack", onDone() { if (oldTg === og) oldTg = null; } });
+  if (balloon && balloon.alive) { const b = balloon; b.alive = false; b.free = true; litter.push({ kind: "balloon", b, t: 0 }); }
+  tg = mkTarget();
+}
+
+function fire(ang, power) {
+  if (!canFire()) { if (!ended && quiver - flying() <= 0) Lab.sfx("tick", { pitch: .6 }); return false; }
+  ang = clamp(ang, ANG_MIN, ANG_MAX); power = clamp(power, 0, 1); aimAng = ang;
+  const m = muzzle(ang), v = speedOf(power);
+  arrows.push({ x: m.x, y: m.y, px: m.x, py: m.y, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v, ang, state: "fly", t: 0, pops: 0, trail: [] });
+  reload = .22; twang = 1; lean = -power;
+  Lab.audio.tone({ f: 250 + power * 120, f2: 120, dur: .16, type: "triangle", vol: .22 }); Lab.sfx("swish", { pitch: .8 + power * .5 }); Lab.buzz(10);
+  fx.sparks(m.x, m.y, ang, { n: 4, color: "#fff6e2", speed: 200, life: .2 });
+  return true;
+}
+function stepArrow(a) {
+  a.px = a.x; a.py = a.y;
+  a.vx += windNow * WK * G * STEP; a.vy += G * STEP; a.x += a.vx * STEP; a.y += a.vy * STEP; a.ang = Math.atan2(a.vy, a.vx); a.t += STEP;
+  if (balloon && balloon.alive && balloon.show > .6 && Lab.dist(a.x, a.y, balloon.x, balloon.y) < balloon.r + 5 * S) popBalloon(a);
+  if ((tg.phase === "live" || tg.phase === "hit") && tg.show > .7 && a.px < tg.x && a.x >= tg.x) {
+    const yc = lerp(a.py, a.y, (tg.x - a.px) / (a.x - a.px));
+    if (Math.abs(yc - tg.y) <= tg.r * 1.05) { a.x = tg.x; a.y = yc; return hit(a, yc); }
+  }
+  if (a.y >= groundY + 3 * S && a.vy > 0) { a.y = groundY + 3 * S; return miss(a, true); }
+  if (a.x > Lab.W + 70 || a.x < -70 || a.y > Lab.H + 60) miss(a, false);
+}
+function popBalloon(a) {
+  const b = balloon; b.alive = false; a.pops++;
+  const m = clamp(streak, 1, 5), pts = 25 * m; score += pts; Lab.setScore(score);
+  fx.burst(b.x, b.y, { n: 14, colors: [b.col, "#fff6e2"], speed: 240, life: .5, size: 4, shape: "shard", gravity: 500 }); fx.ring(b.x, b.y, { r0: b.r * .6, r1: b.r * 2.4, color: b.col, width: 3 });
+  fx.text(b.x, b.y - b.r - 8 * S, "+" + pts, { color: "#fff", size: 17 * S }); Lab.sfx("pop", { pitch: 1.25 }); Lab.hitstop(.03);
+}
+function hit(a, yc) {
+  const d = Math.abs(yc - tg.y) / tg.r, ring = d <= .22 ? 0 : d <= .5 ? 1 : d <= .78 ? 2 : 3, R = RING[ring];
+  a.state = "stuck"; a.oy = yc - tg.y; a.stickT = 0; tg.stuck.push(a); arrows.splice(arrows.indexOf(a), 1);
+  streak++; streakT = 0; bestStreak = Math.max(bestStreak, streak); hits++;
+  const mult = clamp(streak, 1, 5), through = a.pops > 0, pts = R.p * mult * (through ? 2 : 1);
+  score += pts; Lab.setScore(score); Lab.bumpScore();
+  tg.wob = (ring === 0 ? .2 : .13) * (yc < tg.y ? -1 : 1); tg.wobT = 0;
+  const hx = tg.x, hy = yc;
+  fx.sparks(hx - 4 * S, hy, Math.PI, { n: 7 + (3 - ring) * 3, colors: ["#e9d28a", "#c9a45c", "#fff"], speed: 260, spread: 1.6, life: .4, gravity: 600 });
+  fx.text(hx - 6 * S, hy - tg.r - 16 * S, (through ? "THROUGH SHOT  " : "") + "+" + pts, { color: ring === 0 ? "#ffd84a" : "#fff", size: (through || ring === 0 ? 24 : 19) * S, outline: "rgba(60,40,20,.6)" });
+  if (mult > 1) fx.text(hx - 6 * S, hy - tg.r - 40 * S, "streak ×" + mult, { color: "#ffe9a8", size: 14 * S, life: .8, outline: "rgba(60,40,20,.6)" });
+  Lab.sfx("thud", { pitch: 1.5 - ring * .2 }); Lab.sfx("knock", { pitch: 1.4 - ring * .15 }); Lab.audio.combo(Math.min(streak, 9) + (ring === 0 ? 2 : 0), { vol: .16 });
+  Lab.shake(ring === 0 ? 7 : 3, .2); Lab.buzz(ring === 0 ? 24 : 12);
+  if (ring === 0) {
+    golds++; Lab.hitstop(.07); Lab.sfx("chime"); Lab.flash("#ffe9a8", .18, .28);
+    fx.ring(hx, hy, { r0: 6, r1: tg.r * 2.6, color: "#ffd84a", width: 5, life: .5 }); fx.burst(hx, hy, { n: 16, colors: ["#ffd84a", "#fff", "#f0a92c"], speed: 300, life: .7, shape: "star", size: 4.5, gravity: 300 });
+    if (quiver < MAXQ) { quiver++; fx.text(hx - 6 * S, hy + tg.r + 20 * S, "+1 arrow", { color: "#fff", size: 15 * S, vy: 40, outline: "rgba(60,40,20,.6)" }); }
+  }
+  if (tg.phase === "live") {
+    tg.phase = "hit";
+    const nl = 1 + Math.floor(hits / 3);
+    if (nl > level) { level = nl; Lab.after(.45, () => { Lab.banner("RANGE " + level, { color: "#fff6e2", ms: 1000 }); Lab.sfx("levelup"); }); }
+    Lab.after(.62, nextTarget);
+  }
+}
+function miss(a, ground) {
+  arrows.splice(arrows.indexOf(a), 1);
+  quiver = Math.max(0, quiver - 1); streak = 0;
+  if (ground) {
+    a.state = "ground"; a.stickT = 0; litter.push({ kind: "arrow", a, t: 0 }); if (litter.length > 9) litter.shift();
+    fx.puff(a.x, groundY, { n: 7, color: "rgba(160,190,110,.8)", speed: 80 }); fx.burst(a.x, groundY, { n: 5, color: "#5c9a43", speed: 150, angle: -Math.PI / 2, spread: 1.4, life: .45, size: 3, shape: "shard" });
+    fx.text(a.x, groundY - 26 * S, "miss", { color: "#fff6e2", size: 15 * S, outline: "rgba(60,40,20,.55)" }); Lab.sfx("thud", { pitch: .75 });
+  } else fx.text(clamp(a.x, 40, Lab.W - 40), clamp(a.y, Lab.play.y + 60, groundY - 20), "wide!", { color: "#fff6e2", size: 15 * S, outline: "rgba(60,40,20,.55)" });
+  Lab.audio.tone({ f: 300, f2: 170, dur: .22, type: "triangle", vol: .13 });
+  if (quiver === 1) Lab.sfx("warn", { pitch: .8 });
+  if (quiver <= 0 && !ended) { ended = true; aim.on = false; Lab.after(.7, end); }
+}
+function end() {
+  Lab.gameover({ title: "Quiver empty", message: level > 1 ? "You shot your way to range " + level + "." : "The fair is just getting started.", score, stats: [["Golds", golds], ["Best streak", bestStreak], ["Range", level]] });
+}
+/* where would a wind-aware shot cross the target plane?  (used by tests; the player only sees the wind-less guide) */
+function planeY(ang, power, x1) {
+  const m = muzzle(ang), v = speedOf(power); let x = m.x, y = m.y, vx = Math.cos(ang) * v, vy = Math.sin(ang) * v;
+  for (let i = 0; i < 600; i++) { const px = x, py = y; vx += windNow * WK * G * STEP; vy += G * STEP; x += vx * STEP; y += vy * STEP; if (px < x1 && x >= x1) return lerp(py, y, (x1 - px) / (x - px)); if (y > groundY + 3 * S && vy > 0) return null; }
+  return null;
+}
+function solve(power, tx, ty) {
+  power = power == null ? 1 : power; tx = tx == null ? tg.x : tx; ty = ty == null ? tg.y : ty;
+  let best = null, bd = 1e9, prev = null, pa = 0;
+  for (let a = ANG_MAX; a >= -1.1; a -= .01) {
+    const y = planeY(a, power, tx); if (y == null) { prev = null; continue; }
+    if (Math.abs(y - ty) < bd) { bd = Math.abs(y - ty); best = a; }
+    if (prev != null && (prev - ty) * (y - ty) <= 0) { let lo = a, hi = pa; for (let i = 0; i < 18; i++) { const mid = (lo + hi) / 2, ym = planeY(mid, power, tx); if (ym == null || ym > ty) hi = mid; else lo = mid; } return { ang: (lo + hi) / 2, power, err: 0 }; }
+    prev = y; pa = a;
+  }
+  return best == null ? null : { ang: best, power, err: bd };
+}
+
+function frame(dt, t) {
+  now = t; reload -= dt; twang = Math.max(0, twang - dt * 3.2); lean = Lab.damp(lean, 0, 7, dt); blink -= dt; if (blink < -.12) blink = Lab.rand(2, 5); hintT += dt; streakT += dt;
+  // keyboard: Up/Down tilt, hold Space/Enter to draw, release to loose
+  const k = Lab.input.keys, hold = !!(k[" "] || k.Space || k.Enter), ay = Lab.input.axisY();
+  if (ay && !(aim.on && !aim.kb)) aimAng = clamp(aimAng + ay * .9 * dt, ANG_MIN, ANG_MAX);
+  if (hold && !kbHeld && !aim.on && !ended) { aim.on = true; aim.kb = true; aim.pow = 0; aim.held = 0; lastStep = 0; }
+  if (aim.on && aim.kb) { if (hold) aim.pow = Math.min(1, aim.pow + dt / .7); else { aim.on = false; if (aim.pow >= .1) fire(aimAng, aim.pow); } }
+  kbHeld = hold;
+  if (aim.on && !aim.kb && !Lab.input.down) aim.on = false;   // released while paused
+  let ang = aimAng, pow = 0;
+  if (aim.on) {
+    aim.held += dt;
+    if (aim.kb) pow = aim.pow; else { const p = pull(); pow = p.power; if (p.len > 12 * S) aimAng = p.ang; }
+    const trem = clamp((aim.held - 2.2) / 2.5, 0, 1) * pow; ang = aimAng + Math.sin(t * 27) * .014 * trem + Math.sin(t * 11.3) * .01 * trem;
+    const st = Math.floor(pow * 9); if (st !== lastStep) { if (st > lastStep) { Lab.audio.tone({ f: 150 + st * 26, dur: .05, type: "triangle", vol: .05 + st * .006 }); Lab.audio.noise({ dur: .03, vol: .03, bp: 900 + st * 160, q: 3 }); } lastStep = st; }
+  }
+  shownAng = Lab.damp(shownAng, ang, 26, dt); shownPow = aim.on ? Lab.damp(shownPow, pow, 30, dt) : Lab.damp(shownPow, 0, 40, dt);
+  windNow = clamp(wind + (level >= 6 ? Math.sin(t * .9 + gph) * .24 : 0), -1, 1); windVis = Lab.damp(windVis, windNow, 2.5, dt);
+  tg.t += dt; tg.wobT += dt; place(tg); if (oldTg) place(oldTg);
+  if (balloon) { balloon.ph += dt; if (balloon.alive) balloon.sway = Math.sin(balloon.ph * 1.6) * 3 * S + windVis * 5 * S; }
+  acc = Math.min(acc + dt, .05);
+  while (acc >= STEP) { acc -= STEP; for (let i = arrows.length - 1; i >= 0; i--) { const a = arrows[i]; if (a.state === "fly") stepArrow(a); } }
+  for (const a of arrows) { a.trail.push(a.x, a.y); if (a.trail.length > 14) a.trail.splice(0, 2); }
+  for (const a of tg.stuck) a.stickT += dt;
+  for (let i = litter.length - 1; i >= 0; i--) { const l = litter[i]; l.t += dt; if (l.kind === "arrow") { l.a.stickT += dt; if (l.t > 9) litter.splice(i, 1); } else { l.b.y -= (60 + l.t * 80) * S * dt; l.b.x += windVis * 50 * S * dt; if (l.b.y < -40) litter.splice(i, 1); } }
+  Lab.music.intensity(clamp(.28 + level * .07 + (quiver <= 1 ? .22 : 0) + Math.min(streak, 5) * .04, 0, 1));
+  render(t, ang, aim.on ? pow : 0, dt);
+}
+
+/* ---------- drawing ---------- */
+function backdrop() {
+  const W = Lab.W, H = Lab.H, gy = groundY;
+  return Lab.sprite("wf-bg:" + W + "x" + H, W, H, g => {
+    draw.vgrad(g, 0, 0, W, gy + 4, [[0, "#8ecde3"], [.55, "#c9e8e2"], [1, "#fbf0cf"]]);
+    draw.glow(g, W * .8, Lab.play.y + (gy - Lab.play.y) * .2, 150 * S, "#fff7c9", .9); draw.circle(g, W * .8, Lab.play.y + (gy - Lab.play.y) * .2, 26 * S, "#fffbe0");
+    const rnd = Lab.rng(11), hill = (base, amp, col, edge, f) => {
+      g.beginPath(); g.moveTo(-10, gy + 10);
+      for (let x = -10; x <= W + 10; x += 8) g.lineTo(x, base - amp * (Math.sin(x * f / S + base) * .6 + Math.sin(x * f * 2.3 / S + 1.7) * .4));
+      g.lineTo(W + 10, gy + 10); g.closePath(); g.fillStyle = col; g.fill(); g.strokeStyle = edge; g.lineWidth = 2.5 * S; g.stroke();
+    };
+    hill(gy - 96 * S, 26 * S, "#b5d8a8", "#cfe8c0", .011); hill(gy - 58 * S, 20 * S, "#93c684", "#b2dba0", .017);
+    for (let i = 0, n = Math.ceil(W / (90 * S)); i < n; i++) {   // round paper trees
+      const x = (i + .2 + rnd() * .6) * W / n, y = gy - (44 + rnd() * 26) * S, r = (11 + rnd() * 9) * S;
+      g.fillStyle = "#7a5a3a"; g.fillRect(x - 1.5 * S, y, 3 * S, r * 1.5); draw.circle(g, x, y, r, "#5fa35a"); draw.circle(g, x - r * .3, y - r * .3, r * .55, "#77b86c");
+    }
+    for (const [fx0, sc, c1] of [[.3, 1, "#e2572b"], [.62, .78, "#3f9c8f"]]) {   // fair tents
+      const x = W * fx0, w = 46 * S * sc, h = 34 * S * sc, y = gy - 30 * S;
+      g.fillStyle = "#fff6e2"; g.fillRect(x - w * .42, y - h * .5, w * .84, h * .5);
+      for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(x, y - h * 1.25); g.lineTo(x - w / 2 + i * w / 6, y - h * .5); g.lineTo(x - w / 2 + (i + 1) * w / 6, y - h * .5); g.closePath(); g.fillStyle = i % 2 ? "#fff6e2" : c1; g.fill(); }
+      g.fillStyle = c1; g.beginPath(); g.moveTo(x, y - h * 1.25); g.lineTo(x + 11 * S * sc, y - h * 1.42); g.lineTo(x, y - h * 1.56); g.closePath(); g.fill(); g.fillRect(x - .8, y - h * 1.56, 1.6, h * .35);
+    }
+    hill(gy - 16 * S, 7 * S, "#78b85a", "#9bd27a", .023);
+    draw.vgrad(g, 0, gy, W, H - gy, [[0, "#6aae4d"], [1, "#3f8a3c"]]);
+    g.fillStyle = "rgba(255,255,255,.1)"; g.fillRect(0, gy, W, 3 * S);
+    for (let i = 0, n = Math.ceil(W * (H - gy) / 2600); i < n; i++) {   // daisies + clover in the foreground
+      const x = rnd() * W, y = gy + 14 * S + rnd() * (H - gy - 20 * S), r = (2 + rnd() * 2.2) * S * (.7 + (y - gy) / (H - gy) * .8);
+      if (rnd() < .55) { g.fillStyle = "#fffdf2"; for (let p = 0; p < 5; p++) { g.beginPath(); g.arc(x + Math.cos(p * TAU / 5) * r, y + Math.sin(p * TAU / 5) * r * .7, r * .62, 0, TAU); g.fill(); } draw.circle(g, x, y, r * .5, "#f5c23a"); }
+      else { g.fillStyle = "rgba(40,110,50,.35)"; g.beginPath(); g.ellipse(x, y, r * 3.4, r * 1.3, 0, 0, TAU); g.fill(); }
+    }
+  });
+}
+function cloudSprite() {
+  return Lab.sprite("wf-cloud", 150, 70, g => { g.fillStyle = "#ffffff"; for (const [x, y, r] of [[40, 44, 22], [70, 32, 28], [102, 42, 22], [124, 50, 14], [22, 52, 13]]) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); } g.fillRect(22, 44, 104, 20); g.globalCompositeOperation = "destination-out"; g.fillRect(0, 62, 150, 10); });
+}
+function drawArrow(c, x, y, ang, a) {   // (x,y) is the tip
+  const L = 40 * S; c.save(); c.translate(x, y); c.rotate(ang);
+  c.lineCap = "round"; c.strokeStyle = "#7b5532"; c.lineWidth = 2.6 * S; c.beginPath(); c.moveTo(-L, 0); c.lineTo(-4 * S, 0); c.stroke();
+  c.fillStyle = "#4a4a52"; c.beginPath(); c.moveTo(1 * S, 0); c.lineTo(-8 * S, -3.6 * S); c.lineTo(-6 * S, 0); c.lineTo(-8 * S, 3.6 * S); c.closePath(); c.fill();
+  c.fillStyle = "#e2572b"; c.beginPath(); c.moveTo(-L + 1 * S, 0); c.lineTo(-L - 4 * S, -5 * S); c.lineTo(-L + 8 * S, -5 * S); c.lineTo(-L + 12 * S, 0); c.closePath(); c.fill();
+  c.fillStyle = "#fff6e2"; c.beginPath(); c.moveTo(-L + 1 * S, 0); c.lineTo(-L - 4 * S, 5 * S); c.lineTo(-L + 8 * S, 5 * S); c.lineTo(-L + 12 * S, 0); c.closePath(); c.fill();
+  c.restore();
+}
+function drawTarget(c, o, t) {
+  if (o.show <= .01) return;
+  const k = o.show, r = o.r, baseY = groundY + 2 * S, wob = o.wob * Math.exp(-o.wobT * 5) * Math.cos(o.wobT * 24);
+  c.save(); c.translate(o.x + 5 * S, baseY); c.scale(1, k);   // post rises out of the grass
+  const py = o.y - baseY;
+  c.fillStyle = "#8a633c"; c.fillRect(-3.5 * S, py, 7 * S, -py); c.fillStyle = "rgba(0,0,0,.14)"; c.fillRect(0, py, 3.5 * S, -py);
+  c.fillStyle = "#6f4d2c"; c.fillRect(-12 * S, -5 * S, 24 * S, 5 * S);
+  if (o.bobA) { c.fillStyle = "rgba(60,40,20,.25)"; for (let yy = py - o.bobA * S; yy <= py + o.bobA * S + 1; yy += 9 * S) c.fillRect(-5 * S, yy, 10 * S, 1.6 * S); }
+  c.translate(-5 * S, py); c.rotate(wob); c.scale(k, 1);
+  const rx = r * .36;
+  c.fillStyle = "#b98b4d"; c.beginPath(); c.ellipse(6 * S, 0, rx, r, 0, 0, TAU); c.fill();           // straw boss thickness
+  c.fillStyle = "#d9b26a"; c.fillRect(0, -r, 6 * S, r * 2);
+  const cols = ["#fff6e2", "#3f7fbf", "#d9412f", "#f5c23a"], fr = [1, .78, .5, .22];
+  for (let i = 0; i < 4; i++) { c.fillStyle = cols[i]; c.beginPath(); c.ellipse(0, 0, rx * fr[i], r * fr[i], 0, 0, TAU); c.fill(); }
+  c.strokeStyle = "#6f4d2c"; c.lineWidth = 2 * S; c.beginPath(); c.ellipse(0, 0, rx, r, 0, 0, TAU); c.stroke();
+  c.fillStyle = "rgba(255,255,255,.22)"; c.beginPath(); c.ellipse(-rx * .3, -r * .35, rx * .3, r * .42, 0, 0, TAU); c.fill();
+  for (const a of o.stuck) drawArrow(c, 7 * S, a.oy, a.ang * .5 + Math.sin(a.stickT * 55) * .12 * Math.exp(-a.stickT * 7));
+  c.restore();
+}
+function drawBalloon(c, b, t) {
+  const k = b.show, x = b.x + (b.sway || 0), y = b.y, r = b.r * k; if (k <= .01) return;
+  if (!b.free) { c.strokeStyle = "rgba(90,70,50,.55)"; c.lineWidth = 1.2 * S; c.beginPath(); c.moveTo(x, y + r); c.quadraticCurveTo(b.x - 6 * S, (y + groundY) / 2, b.x, groundY); c.stroke(); }
+  c.fillStyle = b.col; c.beginPath(); c.ellipse(x, y, r * .88, r, 0, 0, TAU); c.fill(); c.beginPath(); c.moveTo(x, y + r - 1); c.lineTo(x - 3 * S, y + r + 5 * S); c.lineTo(x + 3 * S, y + r + 5 * S); c.closePath(); c.fill();
+  c.fillStyle = "rgba(255,255,255,.4)"; c.beginPath(); c.ellipse(x - r * .32, y - r * .36, r * .2, r * .32, -.4, 0, TAU); c.fill();
+  draw.star(c, x, y + r * .1, r * .42, "rgba(255,246,226,.9)");
+}
+function drawArcher(c, t, ang, pow) {
+  const fxr = bow.x - 8 * S, gy = groundY + 2 * S, ln = lean * 4 * S - pow * 3 * S, sh = { x: bow.x + ln * .6, y: bow.y };
+  draw.shadow(c, fxr, gy, 20 * S, 4 * S, .2);
+  c.lineCap = "round"; c.strokeStyle = "#4a3524"; c.lineWidth = 5 * S;                                                       // legs
+  c.beginPath(); c.moveTo(fxr - 5 * S + ln * .3, gy - 20 * S); c.lineTo(fxr - 10 * S, gy - 2 * S); c.moveTo(fxr + 5 * S + ln * .3, gy - 20 * S); c.lineTo(fxr + 9 * S, gy - 2 * S); c.stroke();
+  c.fillStyle = "#3a2a1c"; c.fillRect(fxr - 14 * S, gy - 4 * S, 10 * S, 4 * S); c.fillRect(fxr + 5 * S, gy - 4 * S, 10 * S, 4 * S);
+  c.fillStyle = "#2f7d68"; c.beginPath(); c.moveTo(fxr - 13 * S + ln * .2, gy - 16 * S); c.quadraticCurveTo(fxr - 14 * S + ln, sh.y - 6 * S, sh.x - 10 * S, sh.y - 9 * S);   // cape body
+  c.lineTo(sh.x + 3 * S, sh.y - 9 * S); c.quadraticCurveTo(fxr + 14 * S + ln, sh.y, fxr + 12 * S + ln * .2, gy - 16 * S); c.closePath(); c.fill();
+  c.fillStyle = "#256353"; c.beginPath(); c.moveTo(fxr - 13 * S + ln * .2, gy - 16 * S); c.lineTo(fxr - 19 * S - windVis * 4 * S + ln, gy - 22 * S + Math.sin(t * 5) * 1.5 * S); c.lineTo(sh.x - 10 * S, sh.y - 9 * S); c.closePath(); c.fill();
+  const hx = sh.x - 5 * S, hy = sh.y - 20 * S;                                                                            // head + hood + feather
+  c.fillStyle = "#256353"; c.beginPath(); c.arc(hx - 1 * S, hy, 12.5 * S, 0, TAU); c.fill(); c.beginPath(); c.moveTo(hx - 12 * S, hy - 5 * S); c.lineTo(hx - 21 * S, hy + 6 * S + Math.sin(t * 4) * S); c.lineTo(hx - 8 * S, hy + 9 * S); c.closePath(); c.fill();
+  draw.circle(c, hx + 2.5 * S, hy + 1 * S, 9 * S, "#f4d6b2");
+  c.fillStyle = "#e2572b"; c.save(); c.translate(hx - 2 * S, hy - 11 * S); c.rotate(-.5 - windVis * .25 + Math.sin(t * 6) * .05); c.beginPath(); c.ellipse(0, -8 * S, 3 * S, 9 * S, 0, 0, TAU); c.fill(); c.restore();
+  const ex = hx + 6 * S + Math.cos(ang) * 1.5 * S, ey = hy + Math.sin(ang) * 1.5 * S;
+  c.fillStyle = "#3a2a1c"; if (blink < 0) c.fillRect(ex - 2 * S, ey - .6 * S, 4 * S, 1.4 * S); else if (pow > .6) c.fillRect(ex - 2.2 * S, ey - .9 * S, 4.4 * S, 2 * S); else { c.beginPath(); c.arc(ex, ey, 1.7 * S, 0, TAU); c.fill(); }
+  c.fillStyle = "rgba(230,120,100,.45)"; c.beginPath(); c.ellipse(hx + 6 * S, hy + 5 * S, 2.6 * S, 1.6 * S, 0, 0, TAU); c.fill();
+  // bow assembly
+  const dx = Math.cos(ang), dy = Math.sin(ang), nx = -dy, ny = dx, grip = { x: sh.x + dx * 22 * S, y: sh.y + dy * 22 * S };
+  const bend = 9 * S + pow * 9 * S, half = (31 - pow * 4) * S, vib = Math.sin(twang * 40) * twang * 5 * S;
+  const tip1 = { x: grip.x + nx * half - dx * bend, y: grip.y + ny * half - dy * bend }, tip2 = { x: grip.x - nx * half - dx * bend, y: grip.y - ny * half - dy * bend };
+  const nock = { x: grip.x - dx * (bend + pow * 22 * S + vib), y: grip.y - dy * (bend + pow * 22 * S + vib) };
+  c.strokeStyle = "#f4d6b2"; c.lineWidth = 4.5 * S; c.beginPath(); c.moveTo(sh.x - 2 * S, sh.y - 2 * S); c.lineTo(grip.x, grip.y); c.stroke();          // bow arm
+  c.strokeStyle = "rgba(255,250,235,.95)"; c.lineWidth = 1.3 * S; c.beginPath(); c.moveTo(tip1.x, tip1.y); c.lineTo(nock.x, nock.y); c.lineTo(tip2.x, tip2.y); c.stroke();
+  c.strokeStyle = "#8a4b22"; c.lineWidth = 4.5 * S; c.beginPath(); c.moveTo(tip1.x, tip1.y); c.quadraticCurveTo(grip.x + nx * half * .5 + dx * 7 * S, grip.y + ny * half * .5 + dy * 7 * S, grip.x, grip.y);
+  c.quadraticCurveTo(grip.x - nx * half * .5 + dx * 7 * S, grip.y - ny * half * .5 + dy * 7 * S, tip2.x, tip2.y); c.stroke();
+  c.strokeStyle = "#e9c46a"; c.lineWidth = 5.5 * S; c.beginPath(); c.moveTo(grip.x + nx * 4 * S, grip.y + ny * 4 * S); c.lineTo(grip.x - nx * 4 * S, grip.y - ny * 4 * S); c.stroke();
+  if (canFire() || aim.on) { if (quiver - flying() > 0) drawArrow(c, nock.x + dx * 40 * S, nock.y + dy * 40 * S, ang); }
+  const el = { x: sh.x - dx * 6 * S - 9 * S, y: sh.y - dy * 6 * S - 5 * S + pow * 2 * S };                                         // drawing arm
+  c.strokeStyle = "#2f7d68"; c.lineWidth = 5 * S; c.beginPath(); c.moveTo(sh.x - 4 * S, sh.y - 3 * S); c.lineTo(el.x, el.y); c.stroke();
+  c.strokeStyle = "#f4d6b2"; c.lineWidth = 4.2 * S; c.beginPath(); c.moveTo(el.x, el.y); c.lineTo(nock.x, nock.y); c.stroke(); draw.circle(c, nock.x, nock.y, 2.8 * S, "#f4d6b2");
+  return { grip, nock };
+}
+function render(t, ang, pow, dt) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, P = Lab.play, bg = backdrop(), cs = cloudSprite();
+  c.drawImage(bg, 0, 0, W, H);
+  for (const cl of clouds) { cl.x += (4 + windVis * 26) * S * cl.v / W * dt; if (cl.x > 1.25) cl.x = -.3; if (cl.x < -.35) cl.x = 1.2; c.globalAlpha = .85; c.drawImage(cs, cl.x * W - 60 * S, P.y + cl.y * (groundY - P.y) + 30 * S, cs.w * cl.s * S, cs.h * cl.s * S); } c.globalAlpha = 1;
+  // bunting: every pennant leans with the wind
+  const by = P.y + 46 * S, n = Math.max(6, Math.round(W / (36 * S))), sag = 22 * S;
+  c.strokeStyle = "rgba(90,70,50,.7)"; c.lineWidth = 1.5 * S; c.beginPath(); c.moveTo(-4, by); c.quadraticCurveTo(W / 2, by + sag * 2, W + 4, by - 4 * S); c.stroke();
+  for (let i = 0; i < n; i++) {
+    const u = (i + .5) / n, x = u * W, y = by + sag * 2 * 2 * u * (1 - u) - 4 * S * u * u, ln = windVis * .95 + Math.sin(t * (4 + Math.abs(windVis) * 7) + i * 1.3) * (.06 + Math.abs(windVis) * .16);
+    c.save(); c.translate(x, y); c.rotate(-ln); c.fillStyle = FLAGS[i % 4]; c.beginPath(); c.moveTo(-8 * S, 0); c.lineTo(8 * S, 0); c.lineTo(0, 19 * S); c.closePath(); c.fill(); c.restore();
+  }
+  for (const m of motes) {   // dandelion seeds ride the wind
+    m.x += (windVis * 150 + 10) * S * m.v / W * dt; m.y += Math.sin(t * m.v + m.p) * .024 * dt; if (m.x > 1.05) m.x = -.05; if (m.x < -.05) m.x = 1.05;
+    const x = m.x * W, y = P.y + m.y * (groundY - P.y); c.fillStyle = "rgba(255,255,255,.75)"; c.fillRect(x, y, 2.2 * S, 2.2 * S); c.fillStyle = "rgba(255,255,255,.3)"; c.fillRect(x - windVis * 9 * S, y + .5, windVis * 9 * S, 1.2);
+  }
+  if (oldTg) drawTarget(c, oldTg, t);
+  drawTarget(c, tg, t);
+  if (balloon && (balloon.alive)) drawBalloon(c, balloon, t);
+  for (const l of litter) if (l.kind === "balloon") drawBalloon(c, l.b, t);
+  for (const l of litter) if (l.kind === "arrow") { c.globalAlpha = clamp(9 - l.t, 0, 1); drawArrow(c, l.a.x, l.a.y + 5 * S, l.a.ang + Math.sin(l.a.stickT * 50) * .14 * Math.exp(-l.a.stickT * 6)); c.globalAlpha = 1; }
+  // aim guide: the first stretch of the wind-less arc
+  if (aim.on && pow > .04 && quiver - flying() > 0) {
+    const m = muzzle(ang), v = speedOf(pow); let x = m.x, y = m.y, vx = Math.cos(ang) * v, vy = Math.sin(ang) * v; const lim = bow.x + Dmax * .42, h = 1 / 30;
+    for (let i = 0; i < 26 && x < lim && y < groundY; i++) { x += vx * h; vy += G * h; y += vy * h; const u = (x - m.x) / (lim - m.x); c.globalAlpha = .85 * (1 - u * u); draw.circle(c, x, y, (3.2 - u * 1.4) * S, "#fffbe8"); }
+    c.globalAlpha = 1;
+    const cx = bow.x - 34 * S, cy = bow.y - 54 * S, pr = 13 * S;                                                              // draw-weight dial
+    c.lineWidth = 5 * S; c.lineCap = "round"; c.strokeStyle = "rgba(60,40,20,.25)"; c.beginPath(); c.arc(cx, cy, pr, 0, TAU); c.stroke();
+    c.strokeStyle = pow >= .999 ? "#e2572b" : "#f5c23a"; c.beginPath(); c.arc(cx, cy, pr, -Math.PI / 2, -Math.PI / 2 + TAU * pow); c.stroke();
+    draw.text(c, Math.round(pow * 100), cx, cy + .5, { size: 10.5 * S, color: "#3a2a18" });
+    if (!aim.kb) { c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = 2 * S; c.setLineDash([3 * S, 6 * S]); c.beginPath(); c.moveTo(aim.sx, aim.sy); c.lineTo(aim.x, aim.y); c.stroke(); c.setLineDash([]); draw.circle(c, aim.sx, aim.sy, 5 * S, "rgba(255,255,255,.5)"); draw.circle(c, aim.x, aim.y, 9 * S, null, "rgba(255,255,255,.8)", 2 * S); }
+  }
+  drawArcher(c, t, shownAng, shownPow);
+  for (const a of arrows) {
+    if (a.trail.length > 3) { c.strokeStyle = "rgba(255,255,255,.45)"; c.lineWidth = 2 * S; c.beginPath(); c.moveTo(a.trail[0], a.trail[1]); for (let i = 2; i < a.trail.length; i += 2) c.lineTo(a.trail[i], a.trail[i + 1]); c.stroke(); }
+    drawArrow(c, a.x, a.y, a.ang);
+  }
+  // grass tufts lean with the wind too
+  c.strokeStyle = "#4f9a40"; c.lineWidth = 2 * S; c.lineCap = "round"; c.beginPath();
+  for (const g of tufts) { const yy = groundY + 2 * S + g.y * 5 * S, sw = (windVis * 7 + Math.sin(t * 2.4 + g.p) * 1.6) * S; c.moveTo(g.x, yy); c.quadraticCurveTo(g.x + sw * .3, yy - g.h * S * .6, g.x + sw, yy - g.h * S); } c.stroke();
+  if (demo) return;
+  hud(c, t);
+  if (hits === 0 && !aim.on && hintT > 1.2 && quiver === 5 && !arrows.length) {   // first-shot gesture hint
+    const u = (t * .55) % 1, e = ease.inOutQuad(Math.min(1, u * 1.6)), x0 = W * .62, y0 = groundY + (H - groundY) * .4, x1 = x0 - 84 * S * e, y1 = y0 + 34 * S * e;
+    c.globalAlpha = u > .8 ? (1 - u) * 5 : 1; c.strokeStyle = "rgba(255,255,255,.7)"; c.lineWidth = 2 * S; c.setLineDash([3 * S, 6 * S]); c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); c.setLineDash([]);
+    draw.circle(c, x1, y1, 11 * S, "rgba(255,255,255,.85)", "rgba(60,40,20,.35)", 2); draw.text(c, "pull back", x0 - 30 * S, y0 - 22 * S, { size: 13 * S, color: "#fff", stroke: "rgba(40,70,30,.55)" }); c.globalAlpha = 1;
+  }
+}
+function hud(c, t) {
+  const P = Lab.play, W = Lab.W, u = clamp(S, 1, 1.35), y = P.y + 6, h = 28 * u, fly = flying();
+  // quiver
+  const qw = (18 + MAXQ * 11) * u; draw.rect(c, 10, y, qw, h, h / 2, "rgba(255,250,235,.82)", "rgba(90,70,50,.25)", 1);
+  for (let i = 0; i < MAXQ; i++) {
+    const x = 10 + (10 + i * 11) * u, have = i < quiver, out = have && i >= quiver - fly, low = quiver === 1 && have;
+    c.globalAlpha = !have ? .16 : out ? .4 : 1; c.strokeStyle = low ? Lab.color.mix("#7b5532", "#e2392b", .5 + .5 * Math.sin(t * 9)) : "#7b5532"; c.lineWidth = 2 * u; c.lineCap = "round"; c.beginPath(); c.moveTo(x, y + 8 * u); c.lineTo(x, y + 22 * u); c.stroke();
+    c.fillStyle = "#4a4a52"; c.beginPath(); c.moveTo(x, y + 4 * u); c.lineTo(x - 3 * u, y + 9.5 * u); c.lineTo(x + 3 * u, y + 9.5 * u); c.closePath(); c.fill(); c.fillStyle = "#e2572b"; c.fillRect(x - 2.5 * u, y + 19 * u, 5 * u, 4 * u);
+  } c.globalAlpha = 1;
+  if (streak >= 2) {   // streak badge beside the quiver
+    const m = clamp(streak, 1, 5), bx = 10 + qw + 8 * u, bw = 40 * u, pop = 1 + Math.max(0, .25 - streakT) * 1.2;
+    c.save(); c.translate(bx + bw / 2, y + h / 2); c.scale(pop, pop); draw.rect(c, -bw / 2, -h / 2 + 2 * u, bw, h - 4 * u, h / 2, m >= 5 ? "#e2572b" : "#f0a92c", "rgba(90,50,20,.35)", 1); draw.text(c, "×" + m, 0, 1, { size: 14 * u, color: "#fff", shadow: "rgba(90,40,10,.5)" }); c.restore();
+  }
+  // wind gauge
+  const ww = 104 * u, wx = W - 10 - ww, n = Math.round(Math.abs(windNow) * 9), dir = Math.sign(windNow);
+  draw.rect(c, wx, y, ww, h, h / 2, "rgba(255,250,235,.82)", "rgba(90,70,50,.25)", 1);
+  draw.text(c, n ? "WIND" : "CALM", wx + (n ? 26 * u : ww / 2), y + h / 2 + .5, { size: 10.5 * u, color: "#7c6a50", weight: 800 });
+  if (n) {
+    const ax = wx + 64 * u, len = (8 + n * 1.6) * u, col = n >= 6 ? "#d9412f" : "#3a2a18", my = y + h / 2;
+    c.strokeStyle = col; c.fillStyle = col; c.lineWidth = 2.6 * u; c.lineCap = "round"; c.beginPath(); c.moveTo(ax - dir * len, my); c.lineTo(ax + dir * len, my); c.stroke();
+    c.beginPath(); c.moveTo(ax + dir * (len + 5 * u), my); c.lineTo(ax + dir * (len - 3 * u), my - 5.5 * u); c.lineTo(ax + dir * (len - 3 * u), my + 5.5 * u); c.closePath(); c.fill();
+    draw.text(c, n, wx + ww - 14 * u, my + .5, { size: 13 * u, color: col });
+  }
+  // range + progress pips
+  const mid = W / 2 + (qw + (streak >= 2 ? 48 * u : 0) - ww) / 2 * (W < 480 ? 1 : 0);
+  draw.text(c, "RANGE " + level, mid, y + 9 * u, { size: 11 * u, color: "rgba(58,42,24,.75)", weight: 800 });
+  for (let i = 0; i < 3; i++) draw.circle(c, mid - 9 * u + i * 9 * u, y + 22 * u, 3 * u, i < hits % 3 ? "#e2572b" : "rgba(58,42,24,.2)");
+}
+Lab.boot();
+})();
+</script></body></html>
