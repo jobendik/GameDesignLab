@@ -76,6 +76,9 @@ chain multiplier; dawn payoff; procedural audio; touch stick + mouse + keyboard;
   CDP touch-stick drag blooms buds, builds a chain and delivers fireflies → Moonbloom opens → dawn → night 2 with Shades
   → keyboard steering → Flare refused under 3 fireflies and costs exactly 3 → Shade hit (−14 glow, chain reset, tail
   scattered) → pause freezes time (key, button, Esc) → glow runs out → game-over card and stored best → clean restart.
+  One assertion was corrected after it failed intermittently: a flare also blooms nearby buds a moment later and each
+  frees a firefly, so the check is now "3 spent, plus one per bloom gained" (skipped only if a Shade snips the tail in
+  the same 80 ms). That was a race in the test, not a game fault; passed 3 of 3 consecutive runs afterwards.
 - **Visual inspection**: screenshots looked at for menu, night 1 dawn, night 3 mid-play, low glow with Shades, game
   over, at portrait, landscape and desktop. Fixed from what I saw: washed-out dawn (lingering flash + flat tint), buds
   too dim, edge arrows colliding with the Flare button, fireflies too small.

@@ -70,8 +70,11 @@ module.exports = {
     expect((await st()).flies === f0, 'flare with fewer than 3 fireflies is refused');
     s = await bot(400, 6);
     expect(s.flies >= 3, 'gathered fireflies for a flare (' + s.flies + ')');
-    const f1 = s.flies; await page.locator('#flare').tap(); await wait(80);
-    s = await st(); expect(s.flies === f1 - 3, 'flare button spends exactly 3 fireflies (' + f1 + ' → ' + s.flies + ')');
+    // a flare also blooms the buds around it a moment later, and each bloom frees a firefly, so account for blooms gained
+    const f1 = s.flies, b1 = s.blooms, l1 = s.loose; await page.locator('#flare').tap(); await wait(80);
+    s = await st();
+    expect(s.loose !== l1 || s.flies === f1 - 3 + (s.blooms - b1), 'flare button spends exactly 3 fireflies (' + f1 + ' → ' + s.flies + ', +' + (s.blooms - b1) + ' blooms)');
+    expect(s.flies < f1 + (s.blooms - b1), 'flare cost fireflies');
 
     // 6. a Shade's touch costs glow, scatters the tail and breaks the chain
     const hit = await page.evaluate(() => {

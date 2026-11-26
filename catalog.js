@@ -81,6 +81,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--breach-vector.jpg"
   },
   {
@@ -808,6 +810,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--sproutys-garden.jpg"
   },
   {
