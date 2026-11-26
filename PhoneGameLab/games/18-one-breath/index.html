@@ -77,9 +77,9 @@ function mkRound(first) {
   const g = round.gongs[0], from = Lab.chance(.5) ? -1 : 1;
   V.x = g.x + from * 300; V.y = g.y + Lab.rand(-40, 40);
   Lab.tween(V, { x: g.x, y: g.y }, first ? .01 : .6, { ease: "outCubic" });
-  phase = "intro"; phaseT = 0; holding = false; armed = false; result = result && result.keep ? result : null;
+  phase = "intro"; phaseT = 0; holding = false; armed = false; result = null;
   if (!first) { black.a = 1; Lab.tween(black, { a: 0 }, .3); Lab.sfx("whoosh", { pitch: .7 }); }
-  if (chain > 1 && !demo) Lab.toast("Chain of " + chain + " — one life, keep ringing", 1500);
+  if (chain > 1 && !demo) result = { title: "CHAIN OF " + chain, sub: "ring them all on one life", color: "#e8a93c", t: -.35 };
 }
 function gongPos(g) {
   const th = g.swA ? Math.sin(now * g.swW + g.ph) * g.swA : 0, Lp = g.rU + 20;
@@ -210,7 +210,7 @@ function gongSprite(rU) {
     g.fillStyle = b; g.beginPath(); g.arc(m, m, r * .3, 0, TAU); g.fill(); g.strokeStyle = "rgba(60,30,10,.6)"; g.lineWidth = Math.max(1, r * .04); g.stroke();
   });
 }
-function mistSprite() { return Lab.sprite("ob-mist", 256, 128, (g, w, h) => { const gr = g.createRadialGradient(w / 2, h / 2, 4, w / 2, h / 2, w / 2); gr.addColorStop(0, "rgba(255,255,255,.95)"); gr.addColorStop(.5, "rgba(255,255,255,.6)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.scale(1, .5); g.fillStyle = gr; g.fillRect(0, 0, w, h * 2); }); }
+function mistSprite() { return Lab.sprite("ob-mist", 256, 128, (g, w, h) => { g.scale(1, .5); const gr = g.createRadialGradient(w / 2, h, 4, w / 2, h, w / 2); gr.addColorStop(0, "rgba(255,255,255,.95)"); gr.addColorStop(.5, "rgba(255,255,255,.6)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = gr; g.fillRect(0, 0, w, h * 2); }); }
 function drawSite(c, g) {
   const p = gongPos(g), rr = g.rU, top = g.y + rr + 30, rnd = Lab.rng(g.seed), beamY = g.y - p.Lp, hw = rr + 20;
   c.fillStyle = pal.near; c.beginPath(); c.moveTo(g.x - hw - 38, top);   // rock spire
@@ -261,7 +261,8 @@ function backdrop() {
 function arcGauge(c, a0, a1, frac, col, label, value, pulse) {
   const rr = R + 17 * Sx, lw = 7 * Sx; c.lineCap = "round"; c.lineWidth = lw; c.strokeStyle = "rgba(255,255,255,.1)"; c.beginPath(); c.arc(cx, cy, rr, a0, a1, a1 < a0); c.stroke();
   if (frac > .004) { c.strokeStyle = col; c.lineWidth = lw * (1 + pulse * .35); c.beginPath(); c.arc(cx, cy, rr, a0, lerp(a0, a1, frac), a1 < a0); c.stroke(); }
-  const am = (a0 + a1) / 2, ly = cy + Math.sin(am) * (rr + 16 * Sx + 4); draw.text(c, label + (value ? "  " + value : ""), cx, ly, { size: Math.max(10, 10.5 * Sx), color: col, weight: 800 });
+  if (wide) { const u = clamp(Sx, .9, 1.3), x = cx + R + (Lab.W - cx - R) / 2 + 8 * Sx, y = cy + Math.sin((a0 + a1) / 2) * 44 * u; draw.text(c, label, x, y - (value ? 12 * u : 0), { size: 11.5 * u, color: col, weight: 700 }); if (value) draw.text(c, value, x, y + 10 * u, { size: 24 * u, color: col }); }
+  else { const am = (a0 + a1) / 2, ly = cy + Math.sin(am) * (rr + 16 * Sx + 4); draw.text(c, label + (value ? "  " + value : ""), cx, ly, { size: Math.max(10.5, 10.5 * Sx), color: col, weight: 700 }); }
 }
 function render(t, dt) {
   const c = Lab.ctx, W = Lab.W, H = Lab.H, P = Lab.play, g0 = cur();
@@ -304,9 +305,13 @@ function render(t, dt) {
   for (let i = 0; i < 3; i++) { const x = 20 * u + i * 26 * u; if (i < lives) { draw.circle(c, x, ly, 9 * u, "#e8a93c", "#7d5a2c", 1.5); draw.circle(c, x, ly, 3.2 * u, "#fff0c0"); } else draw.circle(c, x, ly, 9 * u, "rgba(255,255,255,.06)", "rgba(255,255,255,.22)", 1.5); }
   draw.text(c, "LEVEL " + level, W - 14, ly - 5 * u, { size: 12 * u, color: "#f3ecd2", align: "right", weight: 800 });
   for (let i = 0; i < 3; i++) draw.circle(c, W - 20 * u - (2 - i) * 13 * u, ly + 11 * u, 4 * u, i < cleared % 3 ? "#e8a93c" : "rgba(255,255,255,.16)", i === 2 && level >= 2 ? "#e8a93c" : null, 1.2);
-  if (round.gongs.length > 1) { const n = round.gongs.length, y = wide ? cy + R + 20 * Sx > H - 8 ? cy : panel.y - 64 * u : cy - R - 46 * Sx; const x0 = (wide ? panel.x : cx) - (n - 1) * 11 * u; draw.text(c, "CHAIN", wide ? panel.x : cx - (n - 1) * 11 * u - 34 * u, wide ? y - 18 * u : y, { size: 10.5 * u, color: "#e8a93c", weight: 800 }); for (let i = 0; i < n; i++) draw.circle(c, x0 + i * 22 * u, y, 7 * u, i < round.idx || (i === round.idx && round.gongs[i].hit) ? "#e8a93c" : "rgba(255,255,255,.08)", "#e8a93c", 1.5); }
+  if (round.gongs.length > 1) {
+    const n = round.gongs.length, x0 = wide ? 20 * u : cx - (n - 1) * 11 * u, y = wide ? ly + 44 * u : ly + 2 * u;
+    draw.text(c, "CHAIN", wide ? 11 * u : cx, y - 17 * u, { size: 10.5 * u, color: "#e8a93c", weight: 700, align: wide ? "left" : "center" });
+    for (let i = 0; i < n; i++) draw.circle(c, x0 + i * 22 * u, y, 7 * u, i < round.idx || (i === round.idx && round.gongs[i].hit) ? "#e8a93c" : "rgba(255,255,255,.08)", "#e8a93c", 1.5);
+  }
   // ---- message panel: result or coaching
-  if (result && result.t < 1.5) {
+  if (result && result.t >= 0 && result.t < 1.5) {
     const k = result.t < .16 ? ease.outBack(result.t / .16) : 1, a = clamp((1.5 - result.t) * 4, 0, 1); c.globalAlpha = a;
     draw.text(c, result.title, panel.x, panel.y - 12 * u, { size: (wide ? 22 : 30) * u * k, color: result.color, shadow: "rgba(0,0,0,.6)", maxWidth: panel.w });
     draw.text(c, result.sub, panel.x, panel.y + 18 * u, { size: 14 * u, color: "rgba(243,236,210,.85)", weight: 700, maxWidth: panel.w }); c.globalAlpha = 1;
