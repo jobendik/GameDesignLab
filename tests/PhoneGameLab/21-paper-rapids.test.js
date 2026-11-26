@@ -22,15 +22,15 @@ module.exports = {
       const g = window.__lab.game, t0 = performance.now(); let shaveLane = -1;
       (function tick() {
         if (performance.now() - t0 > ms || !g.alive) return res();
-        const a = g.ahead().filter(o => o.secs > -0.02);
+        const a = g.ahead(); // includes rocks still alongside the stern
         const blockedIn = s => { const b = new Set(); a.filter(o => o.secs < s).forEach(o => o.lanes.forEach(l => b.add(l))); return b; };
         const go = to => { const d = Math.sign(to - g.lane); for (let i = Math.abs(to - g.lane); i > 0; i--) g.move(d); };
         if (mode === 'safe') { const b = blockedIn(0.6); if (b.has(g.lane)) { const o = [1, 0, 2].filter(l => !b.has(l)); if (o.length) go(o.sort((x, y) => Math.abs(x - g.lane) - Math.abs(y - g.lane))[0]); } }
         else if (mode === 'shave') { // sit in front of the next rock until the last moment, then slip away
-          const n = a.find(o => o.k !== 'duck');
+          const n = a.find(o => o.k !== 'duck' && o.secs > 0.3);
           if (n && n.secs > 0.7 && !n.lanes.includes(g.lane)) { const b = blockedIn(n.secs - 0.05); if (!b.has(n.lanes[0])) go(n.lanes[0]); }
           const b = blockedIn(0.27); if (b.has(g.lane)) { const far = blockedIn(0.6), o = [0, 1, 2].filter(l => !far.has(l)).sort((x, y) => Math.abs(x - g.lane) - Math.abs(y - g.lane)); if (o.length) go(o[0]); }
-        } else { const n = a.find(o => o.secs > 0.1); if (n && !n.lanes.includes(g.lane)) go(n.lanes[0]); } // 'crash': steer into trouble
+        } else { const n = a.find(o => o.ahead > 0); if (n && !n.lanes.includes(g.lane)) go(n.lanes[0]); } // 'crash': steer into trouble
         requestAnimationFrame(tick);
       })();
     }), [ms, mode]);

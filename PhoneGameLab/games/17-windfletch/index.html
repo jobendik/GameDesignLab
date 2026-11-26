@@ -15,13 +15,14 @@ Lab.init({
   howto: ["Drag back anywhere to draw the bow, release to loose", "Wind bends every shot — watch the pennants", "Gold returns an arrow; a miss costs one"],
   theme: { bg: "#f3e2b5", bg2: "#bfe3ee", fg: "#3a2a18", muted: "#7c6a50", accent: "#e2572b", accent2: "#f0a92c", light: true },
   orient: "any", music: { style: "bounce", key: "G", vol: .4 }, restart: start,
+  attract(dt, t) { if (!demo) { reset(); demo = true; } tg.t += dt; place(tg); windVis = Math.sin(t * .4) * .5; render(t, -.3 + Math.sin(t * .8) * .12, 0, dt); },
 });
 const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp;
 const RING = [{ n: "GOLD!", p: 50, c: "#f5c23a" }, { n: "Red", p: 30, c: "#d9412f" }, { n: "Blue", p: 20, c: "#3f7fbf" }, { n: "White", p: 10, c: "#fff6e2" }];
-const STEP = 1 / 120, MAXQ = 6, ANG_MIN = -1.38, ANG_MAX = .42, FLAGS = ["#e2572b", "#f5c23a", "#fff6e2", "#3f9c8f"];
+const STEP = 1 / 120, MAXQ = 6, WK = .9, RANGE_K = 2.3, ANG_MIN = -1.38, ANG_MAX = .42, FLAGS = ["#e2572b", "#f5c23a", "#fff6e2", "#3f9c8f"];
 let S, groundY, bow, Dmax, G, Vmax, yLow, yHigh;
 let score, quiver, streak, bestStreak, golds, hits, level, wind, windNow, windVis, gph, tg, oldTg, arrows, litter, balloon;
-let aim, aimAng, shownAng, shownPow, kbHeld, reload, acc, ended, now, clouds, motes, twang, lean, lastStep, warned, tufts, blink, hintT;
+let aim, aimAng, shownAng, shownPow, kbHeld, reload, acc, ended, now, clouds, motes, twang, lean, lastStep, warned, tufts, blink, hintT, streakT, demo = false;
 
 function layout() {
   const P = Lab.play;
@@ -29,20 +30,23 @@ function layout() {
   groundY = P.y + P.h - Math.max(58 * S, P.h * .2);
   const mL = 56 * S, mR = 48 * S, Dfull = Lab.W - mL - mR; Dmax = Math.min(Dfull, 560 * S);
   bow = { x: mL + (Dfull - Dmax) / 2, y: groundY - 50 * S };
-  G = 720 * S; Vmax = Math.sqrt(G * Dmax * 1.6);
+  G = 720 * S; Vmax = Math.sqrt(G * Dmax * RANGE_K);
   yLow = groundY - 60 * S; yHigh = Math.max(P.y + 100 * S, groundY - Math.min(330 * S, P.h * .62));
   tufts = Array.from({ length: Math.ceil(Lab.W / 13) }, (_, i) => ({ x: i * 13 + Lab.rand(-4, 4), h: Lab.rand(7, 15), p: Lab.rand(0, TAU), y: Lab.rand(0, 1) }));
 }
 Lab.onResize(() => { if (!arrows) return; layout(); arrows = arrows.filter(a => a.state !== "fly"); litter = []; if (aim) aim.on = false; });
 
-function start() {
+function reset() {
   layout();
   score = 0; quiver = 5; streak = 0; bestStreak = 0; golds = 0; hits = 0; level = 1; wind = 0; windNow = 0; windVis = 0; gph = Lab.rand(0, TAU);
   arrows = []; litter = []; balloon = null; oldTg = null; aim = { on: false, sx: 0, sy: 0, x: 0, y: 0, held: 0, kb: false };
-  aimAng = -.3; shownAng = -.3; shownPow = 0; kbHeld = false; reload = 0; acc = 0; ended = false; now = 0; twang = 0; lean = 0; lastStep = 0; warned = false; blink = 2; hintT = 0;
+  aimAng = -.3; shownAng = -.3; shownPow = 0; kbHeld = false; reload = 0; acc = 0; ended = false; now = 0; twang = 0; lean = 0; lastStep = 0; warned = false; blink = 2; hintT = 0; streakT = 9;
   clouds = Array.from({ length: 5 }, (_, i) => ({ x: Lab.rand(0, 1), y: Lab.rand(.02, .3), s: Lab.rand(.6, 1.15), v: Lab.rand(.6, 1.3) }));
   motes = Array.from({ length: 16 }, () => ({ x: Lab.rand(0, 1), y: Lab.rand(.1, .95), p: Lab.rand(0, TAU), v: Lab.rand(.5, 1.2) }));
   tg = mkTarget();
+}
+function start() {
+  reset(); demo = false;
   Lab.setScore(0);
   Lab.input.onDown = [(x, y) => { if (ended) return; aim.on = true; aim.kb = false; aim.sx = aim.x = x; aim.sy = aim.y = y; aim.held = 0; lastStep = 0; }];
   Lab.input.onMove = [(x, y) => { if (aim.on && !aim.kb) { aim.x = x; aim.y = y; } }];
@@ -80,15 +84,18 @@ function mkTarget() {
   balloon = null;
   if (L >= 2 && !first && Lab.chance(.5)) {
     const u = Lab.rand(.42, .7), bx = lerp(bow.x, o.x, u), by = lerp(bow.y, o.y, u) - Lab.rand(26, 84) * S;
-    balloon = { x: bx, y: Math.max(Lab.play.y + 96 * S, by), r: 15 * S, ph: Lab.rand(0, TAU), alive: true, show: 0, col: Lab.choose(["#e2572b", "#3f9c8f", "#c8508c"]) };
+    balloon = { x: bx, y: Math.max(Lab.play.y + 96 * S, bow.y - reach(bx) * .8, by), r: 15 * S, ph: Lab.rand(0, TAU), alive: true, show: 0, col: Lab.choose(["#e2572b", "#3f9c8f", "#c8508c"]) };
     Lab.tween(balloon, { show: 1 }, .5, { ease: "outBack", delay: .15 });
   }
   return o;
 }
 function place(o) {
   o.r = o.rU * S; o.x = bow.x + Dmax * o.fx;
-  o.y = clamp(lerp(yLow, yHigh, o.fy) + Math.sin(o.t * o.bobW + o.ph) * o.bobA * S, yHigh - 10 * S, yLow + 6 * S);
+  const top = Math.max(yHigh, bow.y - reach(o.x) * .7);
+  o.y = clamp(lerp(yLow, top, o.fy) + Math.sin(o.t * o.bobW + o.ph) * o.bobA * S, top - 8 * S, yLow + 6 * S);
 }
+/* highest point (above the bow) a full-draw shot can reach at horizontal position x — keeps every target hittable on any screen */
+function reach(x) { const R = Vmax * Vmax / G, d = x - bow.x; return (R * R - d * d) / (2 * R); }
 function nextTarget() {
   if (ended) return;
   oldTg = tg; const og = oldTg; og.phase = "gone"; Lab.tween(og, { show: 0 }, .26, { ease: "inBack", onDone() { if (oldTg === og) oldTg = null; } });
@@ -108,7 +115,7 @@ function fire(ang, power) {
 }
 function stepArrow(a) {
   a.px = a.x; a.py = a.y;
-  a.vx += windNow * .45 * G * STEP; a.vy += G * STEP; a.x += a.vx * STEP; a.y += a.vy * STEP; a.ang = Math.atan2(a.vy, a.vx); a.t += STEP;
+  a.vx += windNow * WK * G * STEP; a.vy += G * STEP; a.x += a.vx * STEP; a.y += a.vy * STEP; a.ang = Math.atan2(a.vy, a.vx); a.t += STEP;
   if (balloon && balloon.alive && balloon.show > .6 && Lab.dist(a.x, a.y, balloon.x, balloon.y) < balloon.r + 5 * S) popBalloon(a);
   if ((tg.phase === "live" || tg.phase === "hit") && tg.show > .7 && a.px < tg.x && a.x >= tg.x) {
     const yc = lerp(a.py, a.y, (tg.x - a.px) / (a.x - a.px));
@@ -126,7 +133,7 @@ function popBalloon(a) {
 function hit(a, yc) {
   const d = Math.abs(yc - tg.y) / tg.r, ring = d <= .22 ? 0 : d <= .5 ? 1 : d <= .78 ? 2 : 3, R = RING[ring];
   a.state = "stuck"; a.oy = yc - tg.y; a.stickT = 0; tg.stuck.push(a); arrows.splice(arrows.indexOf(a), 1);
-  streak++; bestStreak = Math.max(bestStreak, streak); hits++;
+  streak++; streakT = 0; bestStreak = Math.max(bestStreak, streak); hits++;
   const mult = clamp(streak, 1, 5), through = a.pops > 0, pts = R.p * mult * (through ? 2 : 1);
   score += pts; Lab.setScore(score); Lab.bumpScore();
   tg.wob = (ring === 0 ? .2 : .13) * (yc < tg.y ? -1 : 1); tg.wobT = 0;
@@ -166,7 +173,7 @@ function end() {
 /* where would a wind-aware shot cross the target plane?  (used by tests; the player only sees the wind-less guide) */
 function planeY(ang, power, x1) {
   const m = muzzle(ang), v = speedOf(power); let x = m.x, y = m.y, vx = Math.cos(ang) * v, vy = Math.sin(ang) * v;
-  for (let i = 0; i < 600; i++) { const px = x, py = y; vx += windNow * .45 * G * STEP; vy += G * STEP; x += vx * STEP; y += vy * STEP; if (px < x1 && x >= x1) return lerp(py, y, (x1 - px) / (x - px)); if (y > groundY + 3 * S && vy > 0) return null; }
+  for (let i = 0; i < 600; i++) { const px = x, py = y; vx += windNow * WK * G * STEP; vy += G * STEP; x += vx * STEP; y += vy * STEP; if (px < x1 && x >= x1) return lerp(py, y, (x1 - px) / (x - px)); if (y > groundY + 3 * S && vy > 0) return null; }
   return null;
 }
 function solve(power, tx, ty) {
@@ -182,7 +189,7 @@ function solve(power, tx, ty) {
 }
 
 function frame(dt, t) {
-  now = t; reload -= dt; twang = Math.max(0, twang - dt * 3.2); lean = Lab.damp(lean, 0, 7, dt); blink -= dt; if (blink < -.12) blink = Lab.rand(2, 5); hintT += dt;
+  now = t; reload -= dt; twang = Math.max(0, twang - dt * 3.2); lean = Lab.damp(lean, 0, 7, dt); blink -= dt; if (blink < -.12) blink = Lab.rand(2, 5); hintT += dt; streakT += dt;
   // keyboard: Up/Down tilt, hold Space/Enter to draw, release to loose
   const k = Lab.input.keys, hold = !!(k[" "] || k.Space || k.Enter), ay = Lab.input.axisY();
   if (ay && !(aim.on && !aim.kb)) aimAng = clamp(aimAng + ay * .9 * dt, ANG_MIN, ANG_MAX);
@@ -350,6 +357,7 @@ function render(t, ang, pow, dt) {
   // grass tufts lean with the wind too
   c.strokeStyle = "#4f9a40"; c.lineWidth = 2 * S; c.lineCap = "round"; c.beginPath();
   for (const g of tufts) { const yy = groundY + 2 * S + g.y * 5 * S, sw = (windVis * 7 + Math.sin(t * 2.4 + g.p) * 1.6) * S; c.moveTo(g.x, yy); c.quadraticCurveTo(g.x + sw * .3, yy - g.h * S * .6, g.x + sw, yy - g.h * S); } c.stroke();
+  if (demo) return;
   hud(c, t);
   if (hits === 0 && !aim.on && hintT > 1.2 && quiver === 5 && !arrows.length) {   // first-shot gesture hint
     const u = (t * .55) % 1, e = ease.inOutQuad(Math.min(1, u * 1.6)), x0 = W * .62, y0 = groundY + (H - groundY) * .4, x1 = x0 - 84 * S * e, y1 = y0 + 34 * S * e;
@@ -358,29 +366,32 @@ function render(t, ang, pow, dt) {
   }
 }
 function hud(c, t) {
-  const P = Lab.play, W = Lab.W, y = P.y + 6, h = 28, fly = flying();
+  const P = Lab.play, W = Lab.W, u = clamp(S, 1, 1.35), y = P.y + 6, h = 28 * u, fly = flying();
   // quiver
-  const qw = 18 + MAXQ * 11; draw.rect(c, 10, y, qw, h, 14, "rgba(255,250,235,.8)", "rgba(90,70,50,.25)", 1);
+  const qw = (18 + MAXQ * 11) * u; draw.rect(c, 10, y, qw, h, h / 2, "rgba(255,250,235,.82)", "rgba(90,70,50,.25)", 1);
   for (let i = 0; i < MAXQ; i++) {
-    const x = 20 + i * 11, have = i < quiver, out = have && i >= quiver - fly, low = quiver === 1 && have;
-    c.globalAlpha = !have ? .16 : out ? .4 : 1; c.strokeStyle = low ? Lab.color.mix("#7b5532", "#e2392b", .5 + .5 * Math.sin(t * 9)) : "#7b5532"; c.lineWidth = 2; c.lineCap = "round"; c.beginPath(); c.moveTo(x, y + 8); c.lineTo(x, y + 22); c.stroke();
-    c.fillStyle = "#4a4a52"; c.beginPath(); c.moveTo(x, y + 4); c.lineTo(x - 3, y + 9.5); c.lineTo(x + 3, y + 9.5); c.closePath(); c.fill(); c.fillStyle = "#e2572b"; c.fillRect(x - 2.5, y + 19, 5, 4);
+    const x = 10 + (10 + i * 11) * u, have = i < quiver, out = have && i >= quiver - fly, low = quiver === 1 && have;
+    c.globalAlpha = !have ? .16 : out ? .4 : 1; c.strokeStyle = low ? Lab.color.mix("#7b5532", "#e2392b", .5 + .5 * Math.sin(t * 9)) : "#7b5532"; c.lineWidth = 2 * u; c.lineCap = "round"; c.beginPath(); c.moveTo(x, y + 8 * u); c.lineTo(x, y + 22 * u); c.stroke();
+    c.fillStyle = "#4a4a52"; c.beginPath(); c.moveTo(x, y + 4 * u); c.lineTo(x - 3 * u, y + 9.5 * u); c.lineTo(x + 3 * u, y + 9.5 * u); c.closePath(); c.fill(); c.fillStyle = "#e2572b"; c.fillRect(x - 2.5 * u, y + 19 * u, 5 * u, 4 * u);
   } c.globalAlpha = 1;
-  // wind gauge
-  const ww = 104, wx = W - 10 - ww, n = Math.round(Math.abs(windNow) * 9), dir = Math.sign(windNow);
-  draw.rect(c, wx, y, ww, h, 14, "rgba(255,250,235,.8)", "rgba(90,70,50,.25)", 1);
-  draw.text(c, n ? "WIND" : "CALM", wx + (n ? 26 : ww / 2), y + h / 2 + .5, { size: 10.5, color: "#7c6a50", weight: 800 });
-  if (n) {
-    const ax = wx + 64, len = 8 + n * 1.6, col = n >= 6 ? "#d9412f" : "#3a2a18";
-    c.strokeStyle = col; c.fillStyle = col; c.lineWidth = 2.6; c.lineCap = "round"; c.beginPath(); c.moveTo(ax - dir * len, y + h / 2); c.lineTo(ax + dir * len, y + h / 2); c.stroke();
-    c.beginPath(); c.moveTo(ax + dir * (len + 5), y + h / 2); c.lineTo(ax + dir * (len - 3), y + h / 2 - 5.5); c.lineTo(ax + dir * (len - 3), y + h / 2 + 5.5); c.closePath(); c.fill();
-    draw.text(c, n, wx + ww - 14, y + h / 2 + .5, { size: 13, color: col });
+  if (streak >= 2) {   // streak badge beside the quiver
+    const m = clamp(streak, 1, 5), bx = 10 + qw + 8 * u, bw = 40 * u, pop = 1 + Math.max(0, .25 - streakT) * 1.2;
+    c.save(); c.translate(bx + bw / 2, y + h / 2); c.scale(pop, pop); draw.rect(c, -bw / 2, -h / 2 + 2 * u, bw, h - 4 * u, h / 2, m >= 5 ? "#e2572b" : "#f0a92c", "rgba(90,50,20,.35)", 1); draw.text(c, "×" + m, 0, 1, { size: 14 * u, color: "#fff", shadow: "rgba(90,40,10,.5)" }); c.restore();
   }
-  // range + streak
-  const mid = (10 + qw + wx) / 2;
-  draw.text(c, "RANGE " + level, mid, y + 9, { size: 11, color: "rgba(58,42,24,.75)", weight: 800 });
-  for (let i = 0; i < 3; i++) draw.circle(c, mid - 9 + i * 9, y + 22, 3, i < hits % 3 ? "#e2572b" : "rgba(58,42,24,.2)");
-  if (streak >= 2) { const m = clamp(streak, 1, 5); draw.text(c, "STREAK ×" + m, 12, y + h + 15, { size: 12 + m, color: "#fff", stroke: "rgba(150,60,20,.75)", align: "left" }); }
+  // wind gauge
+  const ww = 104 * u, wx = W - 10 - ww, n = Math.round(Math.abs(windNow) * 9), dir = Math.sign(windNow);
+  draw.rect(c, wx, y, ww, h, h / 2, "rgba(255,250,235,.82)", "rgba(90,70,50,.25)", 1);
+  draw.text(c, n ? "WIND" : "CALM", wx + (n ? 26 * u : ww / 2), y + h / 2 + .5, { size: 10.5 * u, color: "#7c6a50", weight: 800 });
+  if (n) {
+    const ax = wx + 64 * u, len = (8 + n * 1.6) * u, col = n >= 6 ? "#d9412f" : "#3a2a18", my = y + h / 2;
+    c.strokeStyle = col; c.fillStyle = col; c.lineWidth = 2.6 * u; c.lineCap = "round"; c.beginPath(); c.moveTo(ax - dir * len, my); c.lineTo(ax + dir * len, my); c.stroke();
+    c.beginPath(); c.moveTo(ax + dir * (len + 5 * u), my); c.lineTo(ax + dir * (len - 3 * u), my - 5.5 * u); c.lineTo(ax + dir * (len - 3 * u), my + 5.5 * u); c.closePath(); c.fill();
+    draw.text(c, n, wx + ww - 14 * u, my + .5, { size: 13 * u, color: col });
+  }
+  // range + progress pips
+  const mid = W / 2 + (qw + (streak >= 2 ? 48 * u : 0) - ww) / 2 * (W < 480 ? 1 : 0);
+  draw.text(c, "RANGE " + level, mid, y + 9 * u, { size: 11 * u, color: "rgba(58,42,24,.75)", weight: 800 });
+  for (let i = 0; i < 3; i++) draw.circle(c, mid - 9 * u + i * 9 * u, y + 22 * u, 3 * u, i < hits % 3 ? "#e2572b" : "rgba(58,42,24,.2)");
 }
 Lab.boot();
 })();
