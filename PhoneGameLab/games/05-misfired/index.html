@@ -1,0 +1,283 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Misfired</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* MISFIRED — a tray of glazed tiles comes out of the kiln; one took the glaze a shade wrong. Tap it.
+ * Identity: sunlit pottery studio. Glossy ceramic tiles on a slate tray against warm plaster, lo-fi music.
+ * Skill: pure colour discrimination. Differences are generated in OKLab so "one shade off" means the same
+ *        perceptual distance for every hue; the gap shrinks from obvious to a just-noticeable ~2%.
+ * Pressure: one kiln-heat time bank. Right picks stoke it (more when quick), wrong picks burn 2.5 s.
+ * Depth: streak multiplier for unbroken finds, mottled batches (per-tile noise) and inlay batches (only a
+ *        small motif differs) join the rotation later; every misfire you catch lands on the trophy shelf. */
+Lab.init({
+  title: "Misfired", tagline: "One tile left the kiln a shade off. Spot it.", category: "Reflex & Taps",
+  howto: ["Tap the tile whose glaze is slightly different", "Right picks stoke the kiln, wrong picks burn 2.5 s", "Unbroken streaks multiply your score"],
+  theme: { bg: "#e7dcc8", bg2: "#f6efe2", fg: "#43352a", muted: "#8a7866", accent: "#e2622b", accent2: "#f0a437", light: true },
+  orient: "any", music: { style: "chill", key: "F", vol: .5 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp;
+const TMAX = 20, FLOOR = .017, INK = "#43352a";
+const G = { x: 0, y: 0, side: 0, cell: 0, tp: 0, barX: 0, barY: 0, barW: 0, barH: 0 };
+let S = 1, size = 0, tiles = [], odd = -1, found, score, streak, bestStreak, time, roundT, lock, settle, hinted, dE, minDE, kind, shape,
+  phase, cursor, wrongs, beatT, jolt, glint, shelf, pulseT, shownTime;
+
+/* ---------- colour: OKLCH → sRGB so a "step" is perceptually the same size for every hue */
+function oklch(L, C, h) {
+  const a = C * Math.cos(h), b = C * Math.sin(h);
+  const l = Math.pow(L + .3963377774 * a + .2158037573 * b, 3), m = Math.pow(L - .1055613458 * a - .0638541728 * b, 3), s = Math.pow(L - .0894841775 * a - 1.291485548 * b, 3);
+  const r = 4.0767416621 * l - 3.3077115913 * m + .2309699292 * s, g = -1.2684380046 * l + 2.6097574011 * m - .3413193965 * s, bl = -.0041960863 * l - .7034186147 * m + 1.707614701 * s;
+  const ok = Math.min(r, g, bl) >= -.002 && Math.max(r, g, bl) <= 1.002;
+  const f = v => { v = clamp(v, 0, 1); return Math.round(255 * (v <= .0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - .055)); };
+  return { css: `rgb(${f(r)},${f(g)},${f(bl)})`, ok };
+}
+function pickPair(gap) {
+  let axis = found < 2 ? "L" : Lab.choose(["L", "L", "h", "h", "C"]);
+  for (let k = 0; k < 60; k++) {
+    const L = Lab.rand(.56, .84), C = Lab.rand(.07, .16), h = Lab.rand(0, TAU), sg = Lab.chance(.5) ? 1 : -1;
+    let L2 = L, C2 = C, h2 = h;
+    if (axis === "L") L2 = L + sg * gap;
+    else if (axis === "C") { C2 = C + sg * gap; if (C2 < .025) continue; }
+    else { const dh = gap / C; if (dh > .9) { axis = "L"; continue; } h2 = h + sg * dh; }
+    if (oklch(L - .03, C, h).ok && oklch(L + .03, C, h).ok && oklch(L2 - .03, C2, h2).ok && oklch(L2 + .03, C2, h2).ok) return { L, C, h, L2, C2, h2 };
+  }
+  return { L: .72, C: .09, h: Lab.rand(0, TAU), L2: .72 - gap, C2: .09, h2: 0 };
+}
+const gridFor = n => n < 2 ? 2 : n < 5 ? 3 : n < 10 ? 4 : n < 18 ? 5 : 6;
+const multFor = s => Math.min(5, 1 + Math.floor(s / 4));
+
+/* ---------- layout (everything derives from Lab.play; recomputed on resize) */
+function layout(n) {
+  n = n || size || 3;
+  const P = Lab.play; S = clamp(Math.min(Lab.W / 390, P.h / 700), .62, 1.45);
+  G.tp = 9 * S; G.barH = 15 * S;
+  const head = G.barH + 34 * S, bot = 14 * S, topMin = 8 * S;
+  const side = Math.max(96, Math.min(P.w - 24 * S - G.tp * 2, P.h - head - bot - topMin - G.tp * 2, 540));
+  const spare = P.h - head - bot - topMin - G.tp * 2 - side;
+  G.side = side; G.cell = side / n; G.x = P.x + (P.w - side) / 2;
+  G.y = P.y + topMin + head + G.tp + spare * .7;
+  G.barX = G.x - G.tp; G.barW = side + G.tp * 2; G.barY = G.y - G.tp - head + 2 * S;
+}
+Lab.onResize(() => layout());
+const cellAt = (x, y) => { const cx = Math.floor((x - G.x) / G.cell), cy = Math.floor((y - G.y) / G.cell); return cx < 0 || cy < 0 || cx >= size || cy >= size ? -1 : cy * size + cx; };
+const centre = i => ({ x: G.x + (i % size + .5) * G.cell, y: G.y + (Math.floor(i / size) + .5) * G.cell });
+
+function start() {
+  size = 0; tiles = []; odd = -1; found = 0; score = 0; streak = 0; bestStreak = 0; time = 15; shownTime = 15; roundT = 0; lock = 0; settle = 0;
+  hinted = false; minDE = 1; phase = "play"; cursor = -1; wrongs = 0; beatT = 0; jolt = 0; glint = 0; shelf = []; pulseT = 0;
+  Lab.setScore(0); makeRound(-1);
+  Lab.input.onDown = [(x, y) => { const i = cellAt(x, y); if (i >= 0) { cursor = -1; pick(i); } }];
+  Lab.input.onKey = [k => {
+    if (phase !== "play") return;
+    if (cursor < 0) { if (/^Arrow|^ $|^Enter$/.test(k)) cursor = Math.floor(size * size / 2); return; }
+    const cx = cursor % size, cy = Math.floor(cursor / size);
+    if (k === "ArrowLeft") cursor = cy * size + (cx + size - 1) % size; else if (k === "ArrowRight") cursor = cy * size + (cx + 1) % size;
+    else if (k === "ArrowUp") cursor = ((cy + size - 1) % size) * size + cx; else if (k === "ArrowDown") cursor = ((cy + 1) % size) * size + cx;
+    else if (k === " " || k === "Enter") pick(cursor);
+  }];
+  Lab.expose({
+    get odd() { return odd; }, get size() { return size; }, get found() { return found; }, get score() { return score; }, get time() { return time; },
+    get streak() { return streak; }, get phase() { return phase; }, get gap() { return dE; }, get kind() { return kind; }, get ready() { return lock <= 0 && phase === "play"; },
+    get shelf() { return shelf.length; }, get cursor() { return cursor; }, get wrongs() { return wrongs; }, rect(i) { const p = centre(i); return { x: p.x, y: p.y, w: G.cell, h: G.cell }; }, setTime(v) { time = v; }, setFound(v) { found = v; }, pick,
+  });
+  Lab.loop(frame);
+}
+
+function makeRound(origin) {
+  const ns = gridFor(found), rebuild = ns !== size;
+  dE = Math.max(FLOOR, .15 * Math.pow(.925, found));
+  kind = found >= 14 && Lab.chance(.3) ? "inlay" : found >= 8 && Lab.chance(.4) ? "mottled" : "plain";
+  shape = Lab.choose(["dot", "diamond", "arch"]);
+  const p = pickPair(dE * (kind === "inlay" ? 1.45 : kind === "mottled" ? 1.2 : 1));
+  let o; do { o = Lab.randInt(0, ns * ns - 1); } while (o === odd && ns > 1); odd = o;
+  const body = kind === "inlay" ? oklch(.9, .035, p.h + 1.2).css : null, oc = origin >= 0 && !rebuild ? { x: origin % ns, y: Math.floor(origin / ns) } : { x: (ns - 1) / 2, y: (ns - 1) / 2 };
+  if (rebuild) { tiles = []; size = ns; layout(); if (cursor >= 0) cursor = Math.floor(ns * ns / 2); }
+  for (let i = 0; i < ns * ns; i++) {
+    const j = kind === "mottled" ? Lab.rand(-1, 1) * dE * .26 : 0;
+    const glaze = (i === odd ? oklch(p.L2 + j, p.C2, p.h2) : oklch(p.L + j, p.C, p.h)).css;
+    const col = body || glaze, inl = body ? glaze : null, d = Math.hypot(i % ns - oc.x, Math.floor(i / ns) - oc.y) / ns;
+    if (rebuild) tiles.push({ col, inl, nCol: null, nInl: null, f: 1, sc: 0, grow: -d * .22 - .05, press: 0, shake: 0, crack: 0, pop: 0 });
+    else { const t = tiles[i]; t.nCol = col; t.nInl = inl; t.f = -d * .13; }
+  }
+  roundT = 0; hinted = false; glint = 0; lock = rebuild ? .3 : .15; settle = rebuild ? .5 : .34;
+  if (found > 0) Lab.sfx("flip", { pitch: .9 + size * .05 });
+}
+
+function pick(i) {
+  if (phase !== "play" || lock > 0 || Lab.paused || i < 0 || i >= tiles.length) return;
+  const t = tiles[i], p = centre(i); t.press = 1;
+  if (i === odd) {
+    const quick = roundT < 1.6 && !hinted, wasMult = multFor(streak);
+    streak++; bestStreak = Math.max(bestStreak, streak); found++; minDE = Math.min(minDE, dE);
+    const mult = multFor(streak), gain = Math.round((10 + size * 4 + found) * mult * (quick ? 1.5 : 1));
+    score += gain; Lab.setScore(score); if (mult > 1 || quick) Lab.bumpScore();
+    const fade = clamp(1 - (found - 20) / 60, .5, 1), add = (hinted ? .9 : clamp(2.5 - roundT * .3, 1.2, 2.3)) * fade;
+    time = Math.min(TMAX, time + add); pulseT = 1;
+    const col = t.inl || t.col;
+    fx.burst(p.x, p.y, { n: 12, colors: [col, Lab.color.shade(col, .35), "#fff"], speed: 150 + G.cell, life: .5, size: 3 + G.cell * .04, gravity: 520, shape: "shard" });
+    fx.ring(p.x, p.y, { r0: G.cell * .3, r1: G.cell * .95, color: "rgba(255,255,255,.9)", width: 4, life: .32 });
+    fx.text(p.x, p.y - G.cell * .42, "+" + gain, { color: quick ? "#ffe9a8" : "#fff", size: (quick ? 24 : 19) * S, outline: "rgba(60,36,14,.75)" });
+    if (quick && found > 2) fx.text(p.x, p.y + G.cell * .42, "quick!", { color: "#ffd98a", size: 13 * S, outline: "rgba(60,36,14,.7)", life: .6, vy: 30 });
+    Lab.audio.combo(Math.min(streak - 1, 14), { vol: .2 }); Lab.sfx("pop", { pitch: 1.25 - size * .06 }); Lab.buzz(10);
+    shelf.push({ col, x0: p.x, y0: p.y, u: 0 }); if (shelf.length > 240) shelf.shift();
+    if (mult > wasMult) { Lab.banner("STREAK ×" + mult, { color: "#e2622b", ms: 800 }); Lab.sfx("powerup", { pitch: .8 + mult * .1 }); }
+    const grew = gridFor(found) !== size;
+    makeRound(i);
+    if (grew) { Lab.sfx("levelup"); Lab.banner(size + " × " + size, { color: "#3f7f7a", ms: 900 }); }
+  } else {
+    if (t.crack) { Lab.sfx("tick"); return; }
+    t.crack = 1; t.shake = 1; time -= 2.5; streak = 0; wrongs++; jolt = 1;
+    Lab.sfx("error"); Lab.sfx("crunch", { pitch: .8 }); Lab.shake(5, .18); Lab.buzz(35);
+    fx.text(p.x, p.y - G.cell * .3, "−2.5s", { color: "#ff7a5c", size: 19 * S, outline: "rgba(60,20,10,.75)" });
+    fx.burst(p.x, p.y, { n: 6, color: "rgba(70,50,35,.7)", speed: 110, life: .4, size: 3, gravity: 500, shape: "shard" });
+  }
+}
+
+function frame(dt, t) {
+  if (phase === "play") {
+    lock -= dt;
+    if (settle > 0) settle -= dt; else { time -= dt; roundT += dt; }
+    if (roundT > 6 && !hinted) { hinted = true; glint = 0; }
+    if (hinted) glint += dt;
+    if (time < 5) { beatT -= dt; if (beatT <= 0) { Lab.sfx("heartbeat", { pitch: 1 + (5 - time) * .06 }); beatT = time < 2 ? .45 : .8; } }
+    Lab.music.intensity(.25 + .75 * clamp(1 - time / 14, 0, 1));
+    if (time <= 0) {
+      time = 0; phase = "reveal"; Lab.sfx("thud"); Lab.shake(6, .3);
+      tiles[odd].pop = 1; const p = centre(odd); fx.ring(p.x, p.y, { r0: G.cell * .2, r1: G.cell * 1.3, color: "#fff", width: 5, life: .6 });
+      Lab.after(1.0, () => Lab.gameover({ title: "The kiln went cold", score, stats: [["Misfires", found], ["Best streak", bestStreak], ["Sharpest eye", found ? (minDE * 100).toFixed(1) + "%" : "–"]] }));
+    }
+  }
+  for (const tl of tiles) {
+    if (tl.sc < 1) { tl.grow += dt; tl.sc = clamp(tl.grow / .26, 0, 1); }
+    if (tl.f < 1) { tl.f = Math.min(1, tl.f + dt / .2); if (tl.f >= .5 && tl.nCol) { tl.col = tl.nCol; tl.inl = tl.nInl; tl.nCol = null; tl.crack = 0; } }
+    tl.press = Lab.damp(tl.press, 0, 14, dt); tl.shake = Math.max(0, tl.shake - dt * 2.6); tl.pop = Math.max(0, tl.pop - dt * 1.1);
+  }
+  for (const m of shelf) if (m.u < 1) m.u = Math.min(1, m.u + dt / .5);
+  jolt = Math.max(0, jolt - dt * 3); pulseT = Math.max(0, pulseT - dt * 2.5); shownTime = Lab.damp(shownTime, time, 14, dt);
+  render(t);
+}
+
+/* ---------- drawing */
+function wall(c) {
+  draw.bg(c, "#f7f0e3", "#e3d6c0", "#efe5d3");
+  const sp = Lab.sprite("speck", 256, 256, g => { const r = Lab.rng(11); for (let i = 0; i < 520; i++) { g.fillStyle = r() < .5 ? "rgba(120,90,60,.07)" : "rgba(255,255,255,.3)"; const s = .6 + r() * 1.6; g.fillRect(r() * 256, r() * 256, s, s); } });
+  for (let y = 0; y < Lab.H; y += 256) for (let x = 0; x < Lab.W; x += 256) c.drawImage(sp, x, y, 256, 256);
+  draw.glow(c, Lab.W * .82, Lab.play.y - 30, Math.max(Lab.W, Lab.H) * .55, "#fffaf0", .55);
+  // window light: two slanted panes falling across the plaster
+  const u = Math.max(Lab.W, Lab.H) * .34, ox = Lab.W * .5 - u * .2, oy = Lab.play.y + Lab.play.h * .04;
+  c.fillStyle = "rgba(255,247,225,.42)";
+  for (let i = 0; i < 2; i++) { const x = ox + i * u * .56; c.beginPath(); c.moveTo(x, oy); c.lineTo(x + u * .48, oy - u * .1); c.lineTo(x + u * .48 + u * .34, oy + u * .9); c.lineTo(x + u * .34, oy + u); c.closePath(); c.fill(); }
+}
+function tray(c) {
+  const x = G.x - G.tp, y = G.y - G.tp, w = G.side + G.tp * 2, r = G.tp + G.cell * .12;
+  draw.rect(c, x + 2 * S, y + 7 * S, w, w, r, "rgba(70,50,30,.22)");
+  draw.rect(c, x, y, w, w, r, "#4d5158");
+  draw.rect(c, x + 2.5 * S, y + 2.5 * S, w - 5 * S, w - 5 * S, r - 2, "#3c4046", "rgba(255,255,255,.08)", 1);
+}
+const gloss = () => Lab.sprite("gloss", 96, 96, (g, w) => {
+  const r = w * .17; draw.rr(g, 0, 0, w, w, r); g.save(); g.clip();
+  let gr = g.createLinearGradient(0, 0, w * .7, w); gr.addColorStop(0, "rgba(255,255,255,.34)"); gr.addColorStop(.42, "rgba(255,255,255,.05)"); gr.addColorStop(.6, "rgba(255,255,255,0)"); gr.addColorStop(1, "rgba(0,0,0,.13)");
+  g.fillStyle = gr; g.fillRect(0, 0, w, w);
+  g.fillStyle = "rgba(255,255,255,.3)"; g.beginPath(); g.ellipse(w * .3, w * .2, w * .2, w * .07, -.5, 0, TAU); g.fill();
+  g.restore(); draw.rr(g, 1, 1, w - 2, w - 2, r - 1); g.strokeStyle = "rgba(255,255,255,.22)"; g.lineWidth = 2; g.stroke();
+});
+function drawTile(c, cx, cy, cell, tl, mark) {
+  const pad = Math.max(1.5, cell * .05), w = cell - pad * 2, r = w * .17, p = clamp(tl.f, 0, 1);
+  const flipY = Math.abs(Math.cos(p * Math.PI)), sc = ease.outBack(tl.sc) * (1 - tl.press * .08) * (1 + ease.pulse(clamp(tl.pop, 0, 1)) * .12 * (mark ? 1 : 0) + (mark ? .06 : 0));
+  if (sc <= .01) return;
+  const sx = tl.shake > 0 ? Math.sin(tl.shake * 30) * tl.shake * cell * .07 : 0;
+  c.save(); c.translate(cx + sx, cy); c.scale(sc, sc * Math.max(.04, flipY));
+  draw.rect(c, -w / 2, -w / 2 + w * .06, w, w, r, "rgba(0,0,0,.3)");
+  draw.rect(c, -w / 2, -w / 2, w, w, r, tl.col);
+  if (tl.inl) {
+    c.fillStyle = tl.inl; c.beginPath();
+    if (shape === "dot") c.arc(0, 0, w * .27, 0, TAU);
+    else if (shape === "diamond") { c.moveTo(0, -w * .32); c.lineTo(w * .32, 0); c.lineTo(0, w * .32); c.lineTo(-w * .32, 0); }
+    else { c.moveTo(-w * .28, w * .3); c.lineTo(-w * .28, -w * .02); c.arc(0, -w * .02, w * .28, Math.PI, 0); c.lineTo(w * .28, w * .3); }
+    c.closePath(); c.fill();
+  }
+  c.drawImage(gloss(), -w / 2, -w / 2, w, w);
+  if (tl.crack) {
+    draw.rect(c, -w / 2, -w / 2, w, w, r, "rgba(40,30,25,.3)");
+    c.strokeStyle = "rgba(35,25,20,.75)"; c.lineWidth = Math.max(1.5, w * .035); c.lineJoin = "round"; c.lineCap = "round"; c.beginPath();
+    c.moveTo(-w * .34, -w * .3); c.lineTo(-w * .08, -w * .06); c.lineTo(-w * .16, w * .1); c.lineTo(w * .12, w * .34);
+    c.moveTo(-w * .08, -w * .06); c.lineTo(w * .2, -w * .14); c.lineTo(w * .36, -w * .3); c.stroke();
+  }
+  if (mark) { draw.rr(c, -w / 2 - 3, -w / 2 - 3, w + 6, w + 6, r + 3); c.strokeStyle = "#fff"; c.lineWidth = Math.max(3, w * .06); c.stroke(); }
+  c.restore();
+}
+function drawShelf(c) {
+  const top = Lab.play.y + 10 * S, space = G.barY - 14 * S - top, m = clamp(G.barW / 14, 16 * S, 30 * S), rowH = m + 12 * S;
+  const rows = Math.min(3, Math.floor(space / rowH)); if (rows < 1) return;
+  const per = Math.floor((G.barW - 8 * S) / (m + 4 * S)), cap = rows * per - 2, first = Math.max(0, Math.ceil((shelf.length - cap) / per) * per);
+  for (let r = 0; r < rows; r++) {
+    const y = G.barY - 14 * S - r * rowH;
+    draw.rect(c, G.barX, y + 3 * S, G.barW, 5 * S, 2.5 * S, "rgba(70,50,30,.16)"); draw.rect(c, G.barX, y, G.barW, 5 * S, 2.5 * S, "#b98d5e");
+    draw.rect(c, G.barX, y, G.barW, 2 * S, 1, "rgba(255,255,255,.25)");
+    for (const bx of [G.barX + 18 * S, G.barX + G.barW - 18 * S]) { c.fillStyle = "#a57a4e"; c.beginPath(); c.moveTo(bx - 3 * S, y + 5 * S); c.lineTo(bx + 3 * S, y + 5 * S); c.lineTo(bx, y + 12 * S); c.closePath(); c.fill(); }
+  }
+  { // a little potted sprig keeps the top shelf company
+    const px = G.barX + G.barW - m * .75, py = G.barY - 14 * S - (rows - 1) * rowH, u = m * .5;
+    c.strokeStyle = "#6f9a63"; c.lineWidth = Math.max(1.5, u * .12); c.lineCap = "round";
+    for (const [dx, dy, lx] of [[-.5, -1.9, -.9], [.1, -2.3, .2], [.6, -1.7, 1]]) {
+      c.beginPath(); c.moveTo(px, py - u * .9); c.quadraticCurveTo(px + dx * u * .4, py - u * 1.4, px + dx * u, py + dy * u); c.stroke();
+      c.fillStyle = "#7fb070"; c.beginPath(); c.ellipse(px + dx * u, py + dy * u, u * .34, u * .18, lx, 0, TAU); c.fill();
+    }
+    c.fillStyle = "#c9683f"; c.beginPath(); c.moveTo(px - u * .62, py - u * .95); c.lineTo(px + u * .62, py - u * .95); c.lineTo(px + u * .44, py); c.lineTo(px - u * .44, py); c.closePath(); c.fill();
+    draw.rect(c, px - u * .7, py - u * 1.08, u * 1.4, u * .26, u * .08, "#d9794e");
+  }
+  if (!shelf.length) draw.text(c, "caught misfires land here", G.barX + G.barW / 2, G.barY - 14 * S - m * .55, { size: Math.max(11, 12 * S), color: "rgba(67,53,42,.38)", weight: 700 });
+  for (let i = first; i < shelf.length; i++) {
+    const k = i - first, r = Math.floor(k / per), col = k % per, s = shelf[i];
+    const tx = G.barX + 4 * S + col * (m + 4 * S) + m / 2, ty = G.barY - 14 * S - r * rowH - m / 2, e = ease.inOutCubic(s.u);
+    const x = Lab.lerp(s.x0, tx, e), y = Lab.lerp(s.y0, ty, e) - ease.pulse(s.u) * 40 * S, sz = Lab.lerp(G.cell * .8, m, e);
+    draw.rect(c, x - sz / 2, y - sz / 2 + sz * .08, sz, sz, sz * .2, "rgba(60,40,20,.25)");
+    draw.rect(c, x - sz / 2, y - sz / 2, sz, sz, sz * .2, s.col); c.drawImage(gloss(), x - sz / 2, y - sz / 2, sz, sz);
+  }
+}
+function drawBar(c, t) {
+  const x = G.barX, y = G.barY, w = G.barW, h = G.barH, fr = clamp(shownTime / TMAX, 0, 1), low = time < 5 && phase === "play";
+  const jx = jolt > 0 ? Math.sin(jolt * 40) * jolt * 5 * S : 0;
+  draw.rect(c, x + jx, y, w, h, h / 2, "rgba(90,70,50,.22)");
+  if (fr > .01) {
+    const col = low ? Lab.color.mix("#d8402a", "#ff8a5c", .5 + .5 * Math.sin(t * 12)) : Lab.color.mix("#e2622b", "#f0a437", fr);
+    draw.rect(c, x + jx + 2, y + 2, Math.max(h - 4, (w - 4) * fr), h - 4, (h - 4) / 2, col);
+    draw.rect(c, x + jx + 5, y + 3.5, Math.max(4, (w - 4) * fr - 8), (h - 4) * .3, h * .15, "rgba(255,255,255,.35)");
+    if (pulseT > 0) draw.rect(c, x + jx + 2, y + 2, Math.max(h - 4, (w - 4) * fr), h - 4, (h - 4) / 2, `rgba(255,255,255,${pulseT * .45})`);
+  }
+  const iy = y + h + 16 * S, mult = multFor(streak);
+  draw.text(c, "BATCH " + (found + 1), x + 2, iy, { size: Math.max(11, 12.5 * S), color: "rgba(67,53,42,.62)", align: "left", weight: 800 });
+  draw.text(c, time.toFixed(1) + "s", x + w / 2, iy, { size: Math.max(12, (low ? 16 : 14) * S), color: low ? "#c8361f" : INK, weight: 900 });
+  // streak pips: four per multiplier step
+  const pr = 3.6 * S, gap = 11 * S, px = x + w - 2 - pr;
+  for (let i = 0; i < 4; i++) draw.circle(c, px - (3 - i) * gap - (mult > 1 ? 30 * S : 0), iy, pr, i < streak % 4 || mult >= 5 ? "#e2622b" : "rgba(90,70,50,.2)");
+  if (mult > 1) draw.text(c, "×" + mult, x + w - 2, iy, { size: Math.max(13, 16 * S), color: "#e2622b", align: "right", weight: 900 });
+}
+function render(t) {
+  const c = Lab.ctx;
+  wall(c); drawShelf(c); drawBar(c, t); tray(c);
+  const reveal = phase === "reveal";
+  for (let i = 0; i < tiles.length; i++) {
+    if (reveal && i === odd) continue;
+    const p = centre(i), tl = tiles[i];
+    if (reveal) c.globalAlpha = .45;
+    drawTile(c, p.x, p.y, G.cell, tl, false); c.globalAlpha = 1;
+    if (hinted && i === odd && phase === "play") { // a soft glint sweeps the misfire once the player has been stuck for a while
+      const u = (glint % 1.6) / .5; if (u < 1) { const w = G.cell * .9; c.save(); c.translate(p.x, p.y); draw.rr(c, -w / 2, -w / 2, w, w, w * .17); c.clip(); c.rotate(-.6); c.fillStyle = `rgba(255,255,255,${.5 * ease.pulse(u)})`; c.fillRect(-w + u * w * 2 - w * .12, -w, w * .24, w * 2); c.restore(); }
+    }
+  }
+  if (reveal && odd >= 0) { const p = centre(odd); drawTile(c, p.x, p.y, G.cell, tiles[odd], true); }
+  if (cursor >= 0 && phase === "play") { const p = centre(cursor), w = G.cell - 2; draw.rr(c, p.x - w / 2, p.y - w / 2, w, w, w * .18); c.strokeStyle = "#fff"; c.lineWidth = 3; c.stroke(); c.strokeStyle = INK; c.lineWidth = 1.2; c.stroke(); }
+}
+/* splash backdrop: a finished tray with one obvious misfire */
+function attract(dt, t) {
+  size = 4; layout(4); shape = "dot";
+  const c = Lab.ctx; wall(c); tray(c);
+  const a = oklch(.72, .11, 3.35).css, b = oklch(.8, .11, 3.1).css;
+  for (let i = 0; i < 16; i++) { const p = centre(i); drawTile(c, p.x, p.y + Math.sin(t * 1.6 + i * .7) * 1.5 * S, G.cell, { col: i === 6 ? b : a, inl: null, f: 1, sc: 1, press: 0, shake: 0, crack: 0, pop: 0 }, false); }
+  size = 0;
+}
+Lab.boot();
+})();
+</script></body></html>

@@ -1,0 +1,371 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Paper Rapids</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PAPER RAPIDS — a folded paper boat on a three-channel brook.
+ * Identity: sunny paper-craft diorama (cut-paper banks, origami boat, flat shapes with soft offset shadows), bouncy tune.
+ * Core: swipe / tap / arrows to hop between three channels and dodge rocks, logs and paddling ducks.
+ * Hook: CLOSE SHAVES — leave a channel at the last moment and the obstacle that brushes past pays a bonus and raises
+ * your NERVE multiplier (x1..x6), which decays unless you keep shaving. Safe play scores, brave play scores big.
+ * Structure: authored wave patterns (singles, pairs, zig-zags, logs, ducks) that are always solvable, speed "reaches"
+ * every 12 rows with a new water palette, two hull points with a rare lifebuoy to patch up.               */
+Lab.init({
+  title: "Paper Rapids", tagline: "A paper boat, three channels, and a taste for close shaves.", category: "Arcade & Action",
+  howto: ["Swipe or tap a side to switch channel", "Dodge at the last moment for a CLOSE SHAVE", "Chain shaves to raise your Nerve multiplier"],
+  theme: { bg: "#2a9d96", bg2: "#bfeee0", fg: "#173a4a", accent: "#ff7a59", accent2: "#ffb347", muted: "#6f8a96", light: true },
+  orient: "portrait", music: { style: "bounce", key: "G", vol: .42 }, restart: start,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, C = Lab.color;
+const PAL = [
+  { n: "Meadow Brook", w1: "#d2f4e6", w2: "#35b0a6", sand: "#f6e7b8", grass: "#8fce6e", dark: "#5fae57" },
+  { n: "Blue Lagoon", w1: "#d8f0fb", w2: "#3a94d6", sand: "#f3e3c6", grass: "#62bd94", dark: "#3f9c79" },
+  { n: "Lilac Bend", w1: "#f7dff0", w2: "#7d6fd0", sand: "#f6dcc4", grass: "#c7a2e0", dark: "#9c78c4" },
+  { n: "Deep Run", w1: "#cfe9ea", w2: "#1f7f93", sand: "#ecdcb4", grass: "#6fb39c", dark: "#4a8f80" },
+  { n: "Indigo Rapids", w1: "#d5d9fb", w2: "#3f4aa8", sand: "#efe1cf", grass: "#8f9be6", dark: "#6a75c9" },
+];
+let S, W, H, riverL, riverR, laneW, boatY, bankW, spawnAhead;
+let speed, dist, run, rowsMade, rowsPassed, tier, palFrom, palK, ents, boat, hull, mult, multT, score, shaves, bestMult, petals, petalT, petalStep;
+let nextD, wave, safe, zigDir, alive, leftAt, inv, trail, trailD, sinkT, anchorX, swiped, moved, hintOff;
+
+function layout() {
+  W = Lab.W; H = Lab.H; S = Math.min(W / 390, Lab.play.h / 700);
+  bankW = Math.max(30 * S, W * .1); riverL = bankW + 8 * S; riverR = W - bankW - 8 * S; laneW = (riverR - riverL) / 3;
+  boatY = Lab.play.y + Lab.play.h - 140 * S; spawnAhead = boatY + 90 * S;
+}
+Lab.onResize(() => { if (boat) layout(); });
+const laneX = l => riverL + laneW * (l + .5);
+const frac = v => v - Math.floor(v), hash = i => frac(Math.sin(i * 127.1 + 311.7) * 43758.5453);
+
+function start() {
+  layout();
+  speed = S * 250; dist = 0; run = 0; rowsMade = 0; rowsPassed = 0; tier = 0; palFrom = 0; palK = 1;
+  ents = []; hull = 2; mult = 1; multT = 0; score = 0; shaves = 0; bestMult = 1; petals = 0; petalT = 0; petalStep = 0;
+  boat = { lane: 1, x: 1, from: 1, hopT: 1, lean: 0, sq: 0, bump: 0 };
+  nextD = spawnAhead + 40 * S; wave = { kind: "single", left: 5 }; safe = 1; zigDir = 1; alive = true; leftAt = [-9, -9, -9]; inv = 0;
+  trail = []; trailD = 0; sinkT = 0; anchorX = 0; swiped = false; moved = false; hintOff = false;
+  Lab.setScore(0); Lab.hint("Swipe ← → or tap a side");
+  Lab.input.swipeEarly = true;
+  Lab.input.onDown = [x => { anchorX = x; swiped = false; }];
+  Lab.input.onSwipe = [(dx, dy, ms, x) => { if (Math.abs(dx) > Math.abs(dy)) { move(dx < 0 ? -1 : 1); anchorX = x; swiped = true; } }];
+  // keep dragging after the first hop to hop again (two-channel crossings in one gesture)
+  Lab.input.onMove = [x => { if (!Lab.input.down) return; const d = x - anchorX, need = swiped ? 50 : 30; if (Math.abs(d) > need) { move(d < 0 ? -1 : 1); anchorX = x; swiped = true; } }];
+  Lab.input.onTap = [x => move(x < W / 2 ? -1 : 1)];
+  Lab.input.onKey = [k => { if (k === "ArrowLeft" || k === "a" || k === "A") move(-1); else if (k === "ArrowRight" || k === "d" || k === "D") move(1); }];
+  Lab.expose({
+    get score() { return score; }, get hull() { return hull; }, get mult() { return mult; }, get lane() { return boat.lane; }, get shaves() { return shaves; },
+    get tier() { return tier; }, get speed() { return speed; }, get dist() { return dist; }, get alive() { return alive; }, get rowsPassed() { return rowsPassed; },
+    get boatY() { return boatY; }, get laneW() { return laneW; }, get S() { return S; }, laneX, move,
+    /* obstacles ahead of the boat: {k, lanes:[…], ahead:px, secs} sorted by distance */
+    ahead() { return ents.filter(e => e.k !== "petal" && e.k !== "buoy" && e.d > dist - 34 * S).map(e => ({ k: e.k, lanes: lanesOf(e, true), ahead: e.d - dist, secs: (e.d - dist) / speed })).sort((a, b) => a.ahead - b.ahead); },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- input → boat */
+function move(dir) {
+  if (!alive || Lab.paused) return;
+  if (!moved) { moved = true; Lab.hint(""); }
+  const to = boat.lane + dir;
+  if (to < 0 || to > 2) { boat.bump = dir; Lab.sfx("knock", { pitch: 1.5 }); return; }  // bank nudge: input is still acknowledged
+  leftAt[boat.lane] = run; boat.lane = to; boat.from = boat.x; boat.hopT = 0; boat.sq = 1;
+  Lab.sfx("swish", { pitch: .85 + to * .18 }); Lab.buzz(6);
+}
+function lanesOf(e, final) {
+  if (e.k === "log") return [e.lane, e.lane + 1];
+  if (e.k === "duck") return [final ? e.to : Math.round(e.x)];
+  return [e.lane];
+}
+
+/* ---------- wave planner: every row keeps at least one lane reachable from the previous safe lane */
+function pickWave() {
+  const pool = ["single", "single", "pair"];
+  if (tier >= 1) pool.push("zig", "log", "pair");
+  if (tier >= 2) pool.push("duck", "duck", "zig");
+  if (tier >= 3) pool.push("log", "duck");
+  let k; do { k = Lab.choose(pool); } while (k === wave.kind && pool.length > 2);
+  wave = { kind: k, left: k === "zig" ? Lab.randInt(4, 6) : k === "duck" ? Lab.randInt(2, 3) : Lab.randInt(3, 5), fresh: true };
+}
+function planRow() {
+  if (wave.left <= 0) pickWave();
+  const gapT = (rowsMade < 5 ? 1.3 : Math.max(.5, 1.08 - tier * .07)) * (wave.fresh ? 1.45 : 1) * (wave.kind === "single" ? .9 : 1.05);
+  const tgt = targetSpeed(), d = nextD, far = gapT > .78, prev = safe;
+  let blocked = [];
+  const mk = (k, lane, o) => ents.push(Object.assign({ k, lane, d, x: lane, seed: Lab.randInt(0, 2), ph: Lab.rand(0, TAU), passed: false }, o));
+  if (wave.kind === "single") {
+    const b = Lab.randInt(0, 2); mk("rock", b); blocked = [b];
+    if (b === safe) safe = safe === 1 ? Lab.choose([0, 2]) : 1;
+  } else if (wave.kind === "pair" || wave.kind === "zig") {
+    if (wave.kind === "zig") { if (safe + zigDir < 0 || safe + zigDir > 2) zigDir = -zigDir; safe += zigDir; }
+    else safe = Lab.clamp(safe + Lab.choose(far ? [-2, -1, 0, 1, 2] : [-1, 0, 1]), 0, 2);
+    blocked = [0, 1, 2].filter(l => l !== safe);
+    if (safe !== 1 && tier >= 1 && Lab.chance(.45)) mk("log", blocked[0]); else blocked.forEach(l => mk("rock", l));
+  } else if (wave.kind === "log") {
+    const side = far ? Lab.choose([0, 2]) : safe === 1 ? Lab.choose([0, 2]) : safe; safe = side;
+    blocked = side === 0 ? [1, 2] : [0, 1]; mk("log", blocked[0]);
+  } else { // duck paddles from lane a into lane b about a second before it reaches you (telegraphed by chevrons + quack)
+    const a = Lab.randInt(0, 2), b = a === 0 ? 1 : a === 2 ? 1 : Lab.choose([0, 2]);
+    mk("duck", a, { to: b, mt: -1 }); blocked = [b];
+    if (tier >= 3 && Lab.chance(.5)) { const c = 3 - a - b; mk("rock", c); blocked.push(c); safe = a; }
+    else if (safe === b) safe = a; // the lane the duck leaves is always free
+  }
+  // petals trace the safe line; the odd one sits right behind an obstacle to tempt a late hop
+  if (hull < 2 && Lab.chance(.14)) mk("buoy", safe);
+  else if (Lab.chance(.62)) { const n = far ? 3 : 2, gapD = gapT * tgt; for (let i = 0; i < n; i++) { const l = i === n - 1 ? safe : (Math.abs(safe - prev) > 1 && i === 0 ? 1 : safe); ents.push({ k: "petal", lane: l, x: l, d: d - (n - 1 - i) * gapD * .28, ph: Lab.rand(0, TAU) }); } }
+  else if (Lab.chance(.25) && blocked.length) ents.push({ k: "petal", lane: blocked[0], x: blocked[0], d: d + 78 * S, ph: 0 });
+  rowsMade++; wave.left--; wave.fresh = false;
+  nextD = d + gapT * tgt;
+}
+const targetSpeed = () => S * Math.min(760, (rowsMade < 5 ? 280 : 320) + tier * 44);
+
+/* ---------- update */
+function update(dt) {
+  run += dt; speed = Lab.damp(speed, targetSpeed(), 1.4, dt); dist += speed * dt;
+  while (nextD < dist + spawnAhead) planRow();
+  if (inv > 0) inv -= dt;
+  if (multT > 0) { multT -= dt; if (multT <= 0 && mult > 1) { mult--; multT = 5; Lab.sfx("tick", { pitch: .7 }); } }
+  if (petalT > 0) { petalT -= dt; if (petalT <= 0) petalStep = 0; }
+  // boat motion: logical lane changes instantly, the hull follows in ~0.11 s
+  if (boat.hopT < 1) { boat.hopT = Math.min(1, boat.hopT + dt / .11); boat.x = Lab.lerp(boat.from, boat.lane, ease.outCubic(boat.hopT)); if (boat.hopT >= 1) fx.burst(laneX(boat.x), boatY + 12 * S, { n: 5, color: "rgba(255,255,255,.8)", speed: 90 * S, life: .35, size: 3 * S, gravity: 0, spread: Math.PI, angle: Math.PI / 2 }); }
+  boat.lean = Lab.damp(boat.lean, (boat.lane - boat.x) * 1.1 + boat.bump * .25, 16, dt); boat.sq = Lab.damp(boat.sq, 0, 10, dt); boat.bump = Lab.damp(boat.bump, 0, 12, dt);
+  trailD += speed * dt; if (trailD > 14 * S) { trailD = 0; trail.push({ x: boat.x, d: dist }); if (trail.length > 16) trail.shift(); }
+  const win = Lab.clamp(150 * S / speed, .22, .42);
+  for (let i = ents.length - 1; i >= 0; i--) {
+    const e = ents[i], dy = e.d - dist;
+    if (dy < -(H - boatY) - 90 * S) { ents.splice(i, 1); continue; }
+    if (e.k === "duck") {
+      if (e.mt < 0 && dy < speed * 1.05) { e.mt = 0; quack(); }
+      if (e.mt >= 0 && e.mt < 1) { e.mt = Math.min(1, e.mt + dt / .42); e.x = Lab.lerp(e.lane, e.to, ease.inOutQuad(e.mt)); }
+    }
+    if (e.k === "petal" || e.k === "buoy") {
+      if (Math.abs(e.x - boat.x) < .5 && Math.abs(dy) < 36 * S) { ents.splice(i, 1); e.k === "petal" ? takePetal(e) : takeBuoy(e); }
+      continue;
+    }
+    const cx = e.k === "log" ? e.lane + .5 : e.x, hw = e.k === "log" ? .84 : e.k === "duck" ? .3 : .34, hh = (e.k === "log" ? 17 : 22) * S + 20 * S;
+    if (Math.abs(cx - boat.x) < hw + .16 && dy < hh && dy > 14 * S - hh) { /* forgiving at the pointed stern */ if (inv <= 0) { crash(e, i); if (!alive) return; } continue; }
+    if (!e.passed && dy < -6 * S) {
+      e.passed = true;
+      if (!e.rowDone) { for (const o of ents) if (o.d === e.d) o.rowDone = true; rowPassed(); }
+      for (const l of lanesOf(e)) if (l !== boat.lane && run - leftAt[l] < win) { shave(e, run - leftAt[l] < win * .45); break; }
+    }
+  }
+  Lab.music.intensity(.3 + Math.min(.45, tier * .1) + (mult - 1) * .05);
+}
+function rowPassed() {
+  rowsPassed++; score += 10 * mult; Lab.setScore(score);
+  if (rowsPassed % 12 === 0) {
+    tier++; palFrom = (tier - 1) % PAL.length; palK = 0;
+    Lab.banner("REACH " + (tier + 1), { color: "#fff7df", ms: 1100 }); Lab.sfx("levelup"); Lab.toast(PAL[tier % PAL.length].n, 1300);
+    score += 50 * tier; Lab.setScore(score);
+  }
+}
+function shave(e, razor) {
+  shaves++; mult = Math.min(6, mult + 1); multT = 5; bestMult = Math.max(bestMult, mult);
+  const gain = (razor ? 40 : 20) * mult, x = laneX(boat.x), dir = Math.sign(boat.x - (e.k === "log" ? e.lane + .5 : e.x)) || 1;
+  score += gain; Lab.setScore(score); Lab.bumpScore();
+  fx.text(x, boatY - 46 * S, (razor ? "RAZOR! +" : "CLOSE +") + gain, { color: razor ? "#ff5d4a" : "#fff7df", size: (razor ? 22 : 18) * Math.max(.8, S), outline: razor ? "#fff7df" : "rgba(20,60,70,.55)" });
+  fx.sparks(x - dir * laneW * .3, boatY, dir > 0 ? Math.PI : 0, { n: razor ? 10 : 6, color: "#fff", speed: 260 * S, size: 2.6 * S });
+  Lab.audio.combo(mult + (razor ? 2 : 0), { vol: .2 }); Lab.sfx("whistle", { pitch: 1 + mult * .08 }); Lab.buzz(12);
+  if (razor) Lab.hitstop(.035);
+}
+function takePetal(e) {
+  petals++; petalStep = petalT > 0 ? Math.min(petalStep + 1, 9) : 0; petalT = 1.3;
+  score += 5 * mult; Lab.setScore(score);
+  Lab.sfx("pickup", { pitch: 1 + petalStep * .09 });
+  fx.burst(laneX(e.x), boatY - 10 * S, { n: 6, colors: ["#ff9fb5", "#ffd6de", "#fff"], speed: 120 * S, life: .45, size: 3.4 * S, gravity: 120 });
+}
+function takeBuoy(e) {
+  hull = 2; Lab.sfx("powerup"); Lab.flash("#ffffff", .2, .3); fx.ring(laneX(e.x), boatY, { r0: 10, r1: 70 * S, color: "#ff7a59", width: 5 });
+  fx.text(laneX(boat.x), boatY - 46 * S, "PATCHED UP", { color: "#fff7df", size: 17 * Math.max(.8, S), outline: "rgba(20,60,70,.55)" });
+}
+function crash(e, i) {
+  const x = laneX(boat.x); hull--; mult = 1; multT = 0;
+  ents.splice(i, 1);
+  fx.burst(x, boatY - 18 * S, { n: 16, colors: e.k === "log" ? ["#a8744f", "#e0b98a", "#fff"] : e.k === "duck" ? ["#ffd166", "#fff", "#ff9f1c"] : ["#7d8d9c", "#b4c0c9", "#fff"], speed: 300 * S, life: .6, size: 5 * S, shape: "shard", gravity: 500 });
+  fx.ring(x, boatY - 10 * S, { r0: 8, r1: 80 * S, color: "#fff", width: 6 }); Lab.sfx("crunch"); Lab.sfx("splash", { pitch: .8 }); Lab.buzz(40);
+  if (hull > 0) { inv = 1.7; Lab.shake(9, .3); Lab.hitstop(.08); Lab.flash("#ff7a59", .25, .3); speed *= .55; Lab.sfx("hurt"); fx.text(x, boatY - 50 * S, "SOGGY!", { color: "#ff5d4a", size: 20 * Math.max(.8, S), outline: "#fff7df" }); return; }
+  alive = false; sinkT = 0; Lab.shake(16, .5); Lab.hitstop(.12); Lab.flash("#ffffff", .3, .5);
+  fx.burst(x, boatY, { n: 26, colors: ["#fffdf5", "#e6ded0", "#ff7a59"], speed: 380 * S, life: .9, size: 6 * S, shape: "shard", gravity: 420 });
+  Lab.after(.85, () => Lab.gameover({ title: "Capsized!", score, stats: [["Rows", rowsPassed], ["Close shaves", shaves], ["Best nerve", "×" + bestMult]] }));
+}
+function quack() { Lab.audio.tone({ f: 620, f2: 420, dur: .09, type: "sawtooth", vol: .1, lp: 1800 }); Lab.audio.tone({ f: 560, f2: 380, dur: .11, type: "sawtooth", vol: .1, lp: 1600, delay: .12 }); }
+
+/* ---------- baked paper sprites */
+function cut(g, fill, pts, sh) { // flat cut-paper polygon with a soft offset shadow
+  const path = () => { g.beginPath(); pts.forEach((p, i) => g[i ? "lineTo" : "moveTo"](p[0], p[1])); g.closePath(); };
+  if (sh) { g.save(); g.translate(0, sh); g.fillStyle = "rgba(20,50,70,.22)"; path(); g.fill(); g.restore(); }
+  g.fillStyle = fill; path(); g.fill();
+}
+function sprBoat() {
+  const k = S * 1.18, w = 44 * k, h = 78 * k;
+  return Lab.sprite("boat" + Math.round(S * 100), w, h, g => {
+    g.translate(w / 2, h / 2 - 2 * k); g.lineJoin = "round";
+    cut(g, "#fffdf5", [[0, -34 * k], [15 * k, -2 * k], [12 * k, 20 * k], [0, 32 * k], [-12 * k, 20 * k], [-15 * k, -2 * k]], 4 * k);
+    cut(g, "#e9e1d2", [[0, -34 * k], [15 * k, -2 * k], [12 * k, 20 * k], [0, 32 * k]]);
+    cut(g, "#ff7a59", [[-15 * k, -2 * k], [-13.6 * k, 8 * k], [0, 14 * k], [13.6 * k, 8 * k], [15 * k, -2 * k], [0, 5 * k]]);
+    cut(g, "#fffdf5", [[0, -16 * k], [7 * k, 3 * k], [0, 14 * k], [-7 * k, 3 * k]], 1.5 * k);
+    cut(g, "#d8cfbd", [[0, -16 * k], [7 * k, 3 * k], [0, 14 * k]]);
+    g.strokeStyle = "rgba(120,105,85,.45)"; g.lineWidth = 1.1 * k; g.beginPath(); g.moveTo(0, -34 * k); g.lineTo(0, -16 * k); g.moveTo(0, 14 * k); g.lineTo(0, 32 * k); g.stroke();
+  });
+}
+function sprRock(v) {
+  const k = S, w = 80 * k, h = 70 * k;
+  return Lab.sprite("rock" + v + ":" + Math.round(S * 100), w, h, g => {
+    g.translate(w / 2, h / 2); const r = Lab.rng(v * 31 + 7), n = 8, pts = [], top = [];
+    for (let i = 0; i < n; i++) { const a = i / n * TAU, rr = (23 + r() * 8) * k; pts.push([Math.cos(a) * rr * 1.12, Math.sin(a) * rr * .9]); top.push([Math.cos(a) * rr * .68 - 3 * k, Math.sin(a) * rr * .52 - 5 * k]); }
+    cut(g, ["#6f8090", "#78808f", "#667a86"][v], pts, 5 * k); cut(g, ["#a3b2bd", "#a9afbb", "#98adb5"][v], top);
+    g.fillStyle = "rgba(255,255,255,.35)"; g.beginPath(); g.ellipse(-8 * k, -9 * k, 7 * k, 3 * k, -.4, 0, TAU); g.fill();
+    g.fillStyle = "#7dbb62"; g.beginPath(); g.ellipse(9 * k, 2 * k, 6 * k, 3.4 * k, .3, 0, TAU); g.fill();
+  });
+}
+function sprLog() {
+  const k = S, w = laneW * 1.74 + 12 * k, h = 46 * k;
+  return Lab.sprite("log" + Math.round(laneW) + ":" + Math.round(S * 100), w, h, g => {
+    const lw = w - 12 * k, x0 = 6 * k, y0 = 6 * k, lh = 30 * k;
+    draw.rect(g, x0, y0 + 5 * k, lw, lh, lh / 2, "rgba(20,50,70,.22)");
+    draw.rect(g, x0, y0, lw, lh, lh / 2, "#a8744f");
+    g.save(); draw.rr(g, x0, y0, lw, lh, lh / 2); g.clip();
+    g.fillStyle = "#c08a5f"; g.fillRect(x0, y0, lw, lh * .36);
+    g.strokeStyle = "rgba(90,55,35,.45)"; g.lineWidth = 1.6 * k; for (let i = 1; i < 6; i++) { const x = x0 + lw * i / 6 + (i % 2 ? 4 : -5) * k; g.beginPath(); g.moveTo(x, y0 + lh * (.3 + (i % 3) * .1)); g.lineTo(x + 12 * k, y0 + lh * (.34 + (i % 3) * .1)); g.stroke(); }
+    g.restore();
+    for (const ex of [x0 + lh * .34, x0 + lw - lh * .34]) { draw.circle(g, ex, y0 + lh / 2, lh * .3, "#e7c598"); draw.circle(g, ex, y0 + lh / 2, lh * .16, null, "#b98a5a", 1.4 * k); }
+    g.fillStyle = "#7dbb62"; g.beginPath(); g.ellipse(x0 + lw * .62, y0 + 3 * k, 9 * k, 4 * k, 0, 0, TAU); g.fill();
+  });
+}
+function sprDuck() {
+  const k = S, w = 60 * k, h = 66 * k;
+  return Lab.sprite("duck" + Math.round(S * 100), w, h, g => {
+    g.translate(w / 2, h / 2);
+    g.fillStyle = "rgba(20,50,70,.22)"; g.beginPath(); g.ellipse(0, 9 * k, 17 * k, 22 * k, 0, 0, TAU); g.fill();
+    cut(g, "#ffb347", [[-6 * k, 19 * k], [0, 31 * k], [6 * k, 19 * k]]);
+    g.fillStyle = "#fff6da"; g.beginPath(); g.ellipse(0, 4 * k, 17 * k, 22 * k, 0, 0, TAU); g.fill();
+    g.fillStyle = "#f3e2ad"; g.beginPath(); g.ellipse(-8 * k, 2 * k, 6 * k, 14 * k, .25, 0, TAU); g.fill(); g.beginPath(); g.ellipse(8 * k, 2 * k, 6 * k, 14 * k, -.25, 0, TAU); g.fill();
+    cut(g, "#fff6da", [[-7 * k, -16 * k], [0, -28 * k], [7 * k, -16 * k]]);
+    draw.circle(g, 0, 14 * k, 10 * k, "#ffd166"); draw.circle(g, -4.5 * k, 16 * k, 1.8 * k, "#3a2a1a"); draw.circle(g, 4.5 * k, 16 * k, 1.8 * k, "#3a2a1a");
+  });
+}
+function sprPetal() {
+  const k = S, w = 34 * k;
+  return Lab.sprite("petal" + Math.round(S * 100), w, w, g => {
+    g.translate(w / 2, w / 2);
+    for (let i = 0; i < 5; i++) { g.save(); g.rotate(i * TAU / 5); g.fillStyle = "rgba(20,50,70,.18)"; g.beginPath(); g.ellipse(0, -7 * k + 2 * k, 5.4 * k, 8 * k, 0, 0, TAU); g.fill(); g.restore(); }
+    for (let i = 0; i < 5; i++) { g.save(); g.rotate(i * TAU / 5); g.fillStyle = i % 2 ? "#ff8fab" : "#ffa9bf"; g.beginPath(); g.ellipse(0, -7 * k, 5.4 * k, 8 * k, 0, 0, TAU); g.fill(); g.restore(); }
+    draw.circle(g, 0, 0, 4 * k, "#ffe38a");
+  });
+}
+function sprBuoy() {
+  const k = S, w = 50 * k;
+  return Lab.sprite("buoy" + Math.round(S * 100), w, w, g => {
+    g.translate(w / 2, w / 2); g.lineWidth = 10 * k;
+    g.strokeStyle = "rgba(20,50,70,.22)"; g.beginPath(); g.arc(0, 4 * k, 15 * k, 0, TAU); g.stroke();
+    g.strokeStyle = "#fffdf5"; g.beginPath(); g.arc(0, 0, 15 * k, 0, TAU); g.stroke();
+    g.strokeStyle = "#ff5d4a"; for (let i = 0; i < 4; i++) { g.beginPath(); g.arc(0, 0, 15 * k, i * TAU / 4 - .35, i * TAU / 4 + .35); g.stroke(); }
+  });
+}
+
+/* ---------- render */
+function frame(dt, t) {
+  if (alive) update(dt); else { sinkT += dt; speed = Lab.damp(speed, 0, 3, dt); dist += speed * dt; }
+  if (palK < 1) palK = Math.min(1, palK + dt / 1.6);
+  render(t);
+}
+function pal(key) { const a = PAL[palFrom][key], b = PAL[tier % PAL.length][key]; return palK >= 1 ? b : C.mix(a, b, ease.inOutQuad(palK)); }
+function render(t) {
+  const c = Lab.ctx, yOf = d => boatY - (d - dist);
+  draw.bg(c, pal("w1"), pal("w2"));
+  // ripples + channel currents (deterministic slots, no arrays)
+  const step = 52 * S, i0 = Math.floor((dist - (H - boatY) - 40) / step), i1 = Math.ceil((dist + boatY + 40) / step);
+  c.lineCap = "round"; c.strokeStyle = "rgba(255,255,255,.32)"; c.lineWidth = 2.2 * S;
+  for (let i = i0; i <= i1; i++) {
+    const y = yOf(i * step) + hash(i * 3) * step, x = riverL + hash(i) * (riverR - riverL), w = (10 + hash(i * 7) * 16) * S;
+    c.beginPath(); c.moveTo(x - w, y); c.quadraticCurveTo(x, y - 5 * S, x + w, y); c.stroke();
+  }
+  c.strokeStyle = "rgba(255,255,255,.2)"; c.lineWidth = 3 * S; c.setLineDash([16 * S, 30 * S]); c.lineDashOffset = -dist;
+  for (let l = 1; l < 3; l++) { c.beginPath(); c.moveTo(riverL + laneW * l, -20); c.lineTo(riverL + laneW * l, H + 20); c.stroke(); }
+  c.setLineDash([]);
+  // wake: two foam ribbons that remember where the boat has been
+  if (trail.length > 1 && sinkT < .3) {
+    c.fillStyle = "rgba(255,255,255,.13)"; c.beginPath(); c.moveTo(laneX(boat.x), boatY + 20 * S);
+    for (let i = trail.length - 1; i >= 0; i--) { const p = trail[i], k = (dist - p.d) / (220 * S); c.lineTo(laneX(p.x) + (7 + k * 22) * S, yOf(p.d) + 26 * S); }
+    for (let i = 0; i < trail.length; i++) { const p = trail[i], k = (dist - p.d) / (220 * S); c.lineTo(laneX(p.x) - (7 + k * 22) * S, yOf(p.d) + 26 * S); }
+    c.closePath(); c.fill(); c.lineWidth = 2.6 * S;
+    for (const sgn of [-1, 1]) for (let i = trail.length - 1; i > 0; i--) {
+      const p = trail[i], q = trail[i - 1], k = (dist - p.d) / (220 * S), k2 = (dist - q.d) / (220 * S);
+      c.strokeStyle = `rgba(255,255,255,${Math.max(0, .55 - k * .5)})`; c.beginPath(); c.moveTo(laneX(p.x) + sgn * (7 + k * 22) * S, yOf(p.d) + 26 * S); c.lineTo(laneX(q.x) + sgn * (7 + k2 * 22) * S, yOf(q.d) + 26 * S); c.stroke();
+    }
+  }
+  drawBanks(c, t, i0, i1, yOf);
+  // pickups, then obstacles (far first)
+  const pet = sprPetal(), buoy = sprBuoy(), duck = sprDuck(), logS = sprLog();
+  for (const e of ents) {
+    const y = yOf(e.d); if (y < -70 * S) continue;
+    if (e.k === "petal") { c.save(); c.translate(laneX(e.x), y); c.rotate(t * 1.4 + e.ph); const sc = 1 + Math.sin(t * 5 + e.ph) * .08; c.scale(sc, sc); c.drawImage(pet, -pet.w / 2, -pet.h / 2, pet.w, pet.h); c.restore(); }
+    else if (e.k === "buoy") { const sc = 1 + Math.sin(t * 4) * .07; c.save(); c.translate(laneX(e.x), y); c.rotate(Math.sin(t * 2) * .2); c.scale(sc, sc); c.drawImage(buoy, -buoy.w / 2, -buoy.h / 2, buoy.w, buoy.h); c.restore(); }
+  }
+  for (const e of ents) {
+    const y = yOf(e.d); if (y < -80 * S || e.k === "petal" || e.k === "buoy") continue;
+    const foam = .5 + .5 * Math.sin(t * 3 + e.ph);
+    if (e.k === "rock") {
+      const x = laneX(e.lane), s = sprRock(e.seed);
+      c.strokeStyle = `rgba(255,255,255,${.35 + foam * .25})`; c.lineWidth = 3 * S; c.beginPath(); c.ellipse(x, y + 3 * S, (31 + foam * 4) * S, (25 + foam * 3) * S, 0, 0, TAU); c.stroke();
+      c.drawImage(s, x - s.w / 2, y - s.h / 2, s.w, s.h);
+    } else if (e.k === "log") {
+      const x = laneX(e.lane + .5), bob = Math.sin(t * 2 + e.ph) * .025;
+      c.strokeStyle = `rgba(255,255,255,${.3 + foam * .25})`; c.lineWidth = 3 * S; draw.rr(c, x - logS.w / 2 + 2 * S, y - 20 * S, logS.w - 4 * S, 42 * S, 21 * S); c.stroke();
+      c.save(); c.translate(x, y); c.rotate(bob); c.drawImage(logS, -logS.w / 2, -logS.h / 2, logS.w, logS.h); c.restore();
+    } else {
+      const x = laneX(e.x), dir = Math.sign(e.to - e.lane), moving = e.mt >= 0 && e.mt < 1;
+      if (e.mt < 1) { // telegraph: chevrons marching toward the lane it will take
+        const a = e.mt < 0 ? .55 + .35 * Math.sin(t * 10) : 1 - e.mt; c.strokeStyle = `rgba(255,93,74,${a})`; c.lineWidth = 4 * S; c.lineJoin = "round";
+        for (let i = 0; i < 3; i++) { const cxv = x + dir * (26 + i * 13 + ((t * 30) % 13)) * S; c.globalAlpha = 1 - i * .28; c.beginPath(); c.moveTo(cxv - dir * 6 * S, y - 8 * S); c.lineTo(cxv, y); c.lineTo(cxv - dir * 6 * S, y + 8 * S); c.stroke(); }
+        c.globalAlpha = 1;
+      }
+      c.strokeStyle = `rgba(255,255,255,${.3 + foam * .2})`; c.lineWidth = 2.5 * S; c.beginPath(); c.ellipse(x, y + 4 * S, 22 * S, 27 * S, 0, 0, TAU); c.stroke();
+      c.save(); c.translate(x, y); c.rotate((moving ? -dir * .5 * ease.pulse(e.mt) : 0) + Math.sin(t * 6 + e.ph) * .06); c.drawImage(duck, -duck.w / 2, -duck.h / 2, duck.w, duck.h); c.restore();
+    }
+  }
+  // boat
+  const bx = laneX(boat.x), s = sprBoat(), sink = Lab.clamp(sinkT / .7, 0, 1);
+  if (sink < 1 && (inv <= 0 || Math.floor(inv * 12) % 2 === 0)) {
+    const hop = boat.hopT < 1 ? ease.pulse(boat.hopT) : 0, sq = boat.sq * .12, bob = Math.sin(t * 3.2) * .035;
+    draw.shadow(c, bx, boatY + 8 * S, 13 * S * (1 - hop * .3), 26 * S * (1 - hop * .3), .14);
+    c.save(); c.translate(bx + boat.bump * 6 * S, boatY - hop * 9 * S + sink * 14 * S); c.rotate(boat.lean * .5 + bob + sink * 1.2); c.scale((1 + sq + hop * .08) * (1 - sink * .6), (1 - sq + hop * .08) * (1 - sink * .6)); c.globalAlpha = 1 - sink;
+    c.drawImage(s, -s.w / 2, -s.h / 2, s.w, s.h);
+    if (hull < 2) { c.fillStyle = "rgba(60,120,150,.34)"; c.beginPath(); c.moveTo(0, 32 * S); c.lineTo(-12 * S, 18 * S); c.lineTo(-14 * S, 4 * S); c.lineTo(14 * S, 10 * S); c.lineTo(12 * S, 18 * S); c.closePath(); c.fill(); }
+    c.restore(); c.globalAlpha = 1;
+  }
+  // top haze keeps the HUD legible; then the canvas HUD (hull + nerve)
+  const hz = c.createLinearGradient(0, 0, 0, Lab.play.y + 70 * S); hz.addColorStop(0, "rgba(255,253,245,.85)"); hz.addColorStop(1, "rgba(255,253,245,0)"); c.fillStyle = hz; c.fillRect(-40, -40, W + 80, Lab.play.y + 70 * S + 40);
+  const hy = Lab.play.y + 16 * S, u = Math.max(.82, S);
+  for (let i = 0; i < 2; i++) { c.save(); c.translate(18 * u + i * 22 * u, hy); c.scale(.36 * u / S, .36 * u / S); c.globalAlpha = i < hull ? 1 : .22; c.drawImage(s, -s.w / 2, -s.h / 2, s.w, s.h); c.restore(); }
+  c.globalAlpha = 1;
+  if (mult > 1) {
+    const pw = 86 * u, px = W - pw - 10 * u, py = hy - 13 * u, k = Lab.clamp(multT / 5, 0, 1);
+    draw.rect(c, px, py, pw, 26 * u, 13 * u, "rgba(23,58,74,.82)");
+    c.save(); draw.rr(c, px, py, pw, 26 * u, 13 * u); c.clip(); c.fillStyle = mult >= 6 ? "#ff5d4a" : "#ff7a59"; c.fillRect(px, py + 22 * u, pw * k, 4 * u); c.restore();
+    draw.text(c, "NERVE ×" + mult, px + pw / 2, py + 11.5 * u, { size: 12.5 * u, color: "#fff7df" });
+  }
+}
+function drawBanks(c, t, i0, i1, yOf) {
+  const sand = pal("sand"), grass = pal("grass"), dark = pal("dark");
+  const edge = (side, d, amp, ph) => (Math.sin(d * .011 / S + ph) + Math.sin(d * .027 / S + ph * 2.1) * .5) * amp * S * side;
+  for (const side of [1, -1]) {
+    const x0 = side > 0 ? 0 : W, layers = [[bankW, 7, 0, "rgba(20,60,70,.16)", 5], [bankW, 7, 0, sand, 0], [bankW * .62, 6, 1.7, dark, 3], [bankW * .62, 6, 1.7, grass, 0]];
+    for (const [bw, amp, ph, col, off] of layers) {
+      c.fillStyle = col; c.beginPath(); c.moveTo(x0 - side * 50, -30);
+      for (let y = -30; y <= H + 30; y += 22) { const d = dist + boatY - y; c.lineTo(x0 + side * (bw + off) + edge(side, d, amp, ph + (side > 0 ? 0 : 4)), y); }
+      c.lineTo(x0 - side * 50, H + 30); c.closePath(); c.fill();
+    }
+  }
+  // bank decor: reeds, stones and daisies at deterministic world slots
+  for (let i = i0 * 2; i <= i1 * 2; i++) {
+    const h1 = hash(i * 5 + 1), h2 = hash(i * 9 + 2), side = h1 < .5 ? 0 : 1, y = yOf(i * 26 * S), x = side ? W - bankW * (.12 + h2 * .5) : bankW * (.12 + h2 * .5), kind = Math.floor(hash(i * 13) * 4);
+    if (kind === 0) { draw.circle(c, x, y + 1.5 * S, 5 * S, "rgba(20,60,70,.16)"); draw.circle(c, x, y, 5 * S, "#fffdf5"); draw.circle(c, x, y, 2 * S, "#ffcf5a"); }
+    else if (kind === 1) { c.fillStyle = dark; c.beginPath(); c.ellipse(x, y, 9 * S, 6 * S, h2 * 3, 0, TAU); c.fill(); }
+    else if (kind === 2) { c.strokeStyle = dark; c.lineWidth = 2.4 * S; c.lineCap = "round"; const sw = Math.sin(t * 2 + i) * 2 * S; for (let j = -1; j <= 1; j++) { c.beginPath(); c.moveTo(x + j * 4 * S, y + 7 * S); c.lineTo(x + j * 6 * S + sw, y - 7 * S); c.stroke(); } }
+  }
+}
+Lab.boot();
+})();
+</script></body></html>
