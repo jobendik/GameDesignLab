@@ -625,7 +625,8 @@
       e.preventDefault(); unlockAudio();
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
       if (paused) return;
-      const p = xy(e), rec = { id: e.pointerId, x: p.x, y: p.y, startX: p.x, startY: p.y, t0: performance.now(), swiped: false };
+      const p = xy(e), rec = { id: e.pointerId, type: e.pointerType || 'mouse', x: p.x, y: p.y, startX: p.x, startY: p.y, t0: performance.now(), swiped: false };
+      input.pointerType = rec.type; // 'mouse' | 'touch' | 'pen' of the latest press
       ptrs.set(e.pointerId, rec); sync();
       if (primary == null || !ptrs.has(primary)) {
         primary = e.pointerId;

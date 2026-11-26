@@ -253,7 +253,8 @@ window.LAB_GAMES = [
     "t": "Sparkmoth",
     "d": "Weave through the fireworks.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--14-sparkmoth.jpg"
    },
    {
     "n": 15,
@@ -261,7 +262,8 @@ window.LAB_GAMES = [
     "t": "Facet",
     "d": "Cut flying gems. Then cut the pieces.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--15-facet.jpg"
    },
    {
     "n": 16,
@@ -269,7 +271,8 @@ window.LAB_GAMES = [
     "t": "Pin Whirl",
     "d": "Stick every pin. Don't prick a neighbour.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--16-pin-whirl.jpg"
    },
    {
     "n": 17,

@@ -5,19 +5,20 @@
 > Scores are 1–10 per `QUALITY_STANDARD.md`; "subjective" judgements come from code reading and scripted play, not human playtests.
 
 
-## Standalone arcade games (`games/`) — 1/65 reviewed
+## Standalone arcade games (`games/`) — 2/65 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
+| [Neon Hagen](games/neon-hagen.html) | 1 → **7** | 7 | 7 | 7 | 8 | 7 | 6 | 7 | 8 | 6 | 8 | 8 | 7 | [record](docs/reviews/games/neon-hagen.md) |
 | [Static Bloom](games/neon-strike.html) | 3 → **7** | 7 | 7 | 7 | 7 | 6 | 7 | 7 | 7 | 7 | 6 | 8 | 7 | [record](docs/reviews/games/neon-strike.md) |
 
-Averages: overall **7.0** · Fun 7.0 · Depth 7.0 · Feel 7.0 · Look 7.0 · Anim 6.0 · Audio 7.0 · Ctrl 7.0 · Onb 7.0 · Replay 7.0 · Perf 6.0 · Robust 8.0 · Polish 7.0
+Averages: overall **7.0** · Fun 7.0 · Depth 7.0 · Feel 7.0 · Look 7.5 · Anim 6.5 · Audio 6.5 · Ctrl 7.0 · Onb 7.5 · Replay 6.5 · Perf 7.0 · Robust 8.0 · Polish 7.0
 
-**Below 8 — revisit first:** [Static Bloom](games/neon-strike.html) (7)
+**Below 8 — revisit first:** [Neon Hagen](games/neon-hagen.html) (7), [Static Bloom](games/neon-strike.html) (7)
 
-<details><summary>64 not yet reviewed (baseline prototypes)</summary>
+<details><summary>63 not yet reviewed (baseline prototypes)</summary>
 
-`games/arcanum-pinball` · `games/aura-rooms` · `games/bloom-bureau` · `games/bounce-dungeon` · `games/breach-vector` · `games/brink-edge-rush` · `games/brink-reactor` · `games/busy-beavers` · `games/chomp-chain-rush` · `games/chroma-frenzy` · `games/cosmic-devourer` · `games/exquisite-corpse` · `games/frequency` · `games/furniture-forts` · `games/grapple-gliders` · `games/hyper-dash` · `games/kosmisk-slange` · `games/last-war-ultimate` · `games/little-hero-adventure` · `games/lumberjack-idle-empire` · `games/lumis-luminescence` · `games/lysarkivet` · `games/maze-munch-rush` · `games/mystic-potion-sort` · `games/neon-ash` · `games/neon-burst` · `games/neon-core-ballstorm` · `games/neon-galaxy` · `games/neon-hagen` · `games/neon-nexus-omega` · `games/neon-pin-climb` · `games/neon-pinball-rush` · `games/neon-runner-overdrive` · `games/neon-survivor-overdrive` · `games/orbit-drift-3d` · `games/orbit-drift-sling` · `games/painted-wilds` · `games/physics-charades` · `games/pinata-pop` · `games/pinball-wizard-3d` · `games/pitch-26` · `games/pocket-football` · `games/power-wash-royale` · `games/pulsar` · `games/puppet-panic` · `games/ricochet-brawlers` · `games/slithergar` · `games/sonar-abyss` · `games/spire` · `games/sproutys-garden` · `games/star-petal-ballstorm` · `games/star-trail-adventure` · `games/svev-miner` · `games/swarm-logic` · `games/the-elevator` · `games/the-global-dig` · `games/the-grid-war` · `games/the-tower` · `games/tiny-detective-cafe` · `games/tiny-tactics-cards` · `games/unicorn-magic-sort` · `games/unscrew-it` · `games/void-drift` · `games/word-forts`
+`games/arcanum-pinball` · `games/aura-rooms` · `games/bloom-bureau` · `games/bounce-dungeon` · `games/breach-vector` · `games/brink-edge-rush` · `games/brink-reactor` · `games/busy-beavers` · `games/chomp-chain-rush` · `games/chroma-frenzy` · `games/cosmic-devourer` · `games/exquisite-corpse` · `games/frequency` · `games/furniture-forts` · `games/grapple-gliders` · `games/hyper-dash` · `games/kosmisk-slange` · `games/last-war-ultimate` · `games/little-hero-adventure` · `games/lumberjack-idle-empire` · `games/lumis-luminescence` · `games/lysarkivet` · `games/maze-munch-rush` · `games/mystic-potion-sort` · `games/neon-ash` · `games/neon-burst` · `games/neon-core-ballstorm` · `games/neon-galaxy` · `games/neon-nexus-omega` · `games/neon-pin-climb` · `games/neon-pinball-rush` · `games/neon-runner-overdrive` · `games/neon-survivor-overdrive` · `games/orbit-drift-3d` · `games/orbit-drift-sling` · `games/painted-wilds` · `games/physics-charades` · `games/pinata-pop` · `games/pinball-wizard-3d` · `games/pitch-26` · `games/pocket-football` · `games/power-wash-royale` · `games/pulsar` · `games/puppet-panic` · `games/ricochet-brawlers` · `games/slithergar` · `games/sonar-abyss` · `games/spire` · `games/sproutys-garden` · `games/star-petal-ballstorm` · `games/star-trail-adventure` · `games/svev-miner` · `games/swarm-logic` · `games/the-elevator` · `games/the-global-dig` · `games/the-grid-war` · `games/the-tower` · `games/tiny-detective-cafe` · `games/tiny-tactics-cards` · `games/unicorn-magic-sort` · `games/unscrew-it` · `games/void-drift` · `games/word-forts`
 
 </details>
 

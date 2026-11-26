@@ -456,6 +456,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--neon-hagen.jpg"
   },
   {
@@ -1300,7 +1302,8 @@ window.GDL_CATALOG = {
    "n": 14,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--14-sparkmoth.jpg"
   },
   {
    "id": "PhoneGameLab/15-facet",
@@ -1319,7 +1322,8 @@ window.GDL_CATALOG = {
    "n": 15,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--15-facet.jpg"
   },
   {
    "id": "PhoneGameLab/16-pin-whirl",
@@ -1338,7 +1342,8 @@ window.GDL_CATALOG = {
    "n": 16,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--16-pin-whirl.jpg"
   },
   {
    "id": "PhoneGameLab/17-windfletch",

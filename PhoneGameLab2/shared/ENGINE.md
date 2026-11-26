@@ -54,7 +54,7 @@ Scale everything from the stage size (e.g. `const S = Math.min(Lab.W/390, Lab.pl
 Test at 390×844 and 844×390 (and 1280×800 desktop).
 
 ## Input (`Lab.input`)
-- State: `down, x, y, dx, dy, startX, startY, pressT` (press event time on the `performance.now()` clock), `justDown, justUp, pointers[] ({id,x,y,startX,startY})` (multitouch), `keys{}` (by `e.key` and `e.code`),
+- State: `down, x, y, dx, dy, startX, startY, pressT` (press event time on the `performance.now()` clock), `justDown, justUp, pointers[] ({id,type,x,y,startX,startY})` (multitouch; `type`/`input.pointerType` = 'mouse'|'touch'|'pen'), `keys{}` (by `e.key` and `e.code`),
   `pressed('Space')` (this frame), `axisX()/axisY()` (arrows + WASD → -1/0/1).
 - Handlers (assign arrays inside `start()`): `onDown/onUp/onTap [(x,y,id)]`, `onMove [(x,y,dx,dy,id)]`, `onSwipe [(dx,dy,ms,x,y)]`, `onKey [(key,e)]`.
   Or `Lab.on('tap'|'down'|'up'|'move'|'swipe'|'key', fn)` (auto-removed on restart).
