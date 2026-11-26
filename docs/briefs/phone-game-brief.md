@@ -52,6 +52,22 @@ its original core idea.
 7. Write `docs/reviews/<Lab>/<slug>.md` from `docs/reviews/TEMPLATE.md`. Be honest in the scores: they describe the
    result, not the effort. State which verification levels you actually ran.
 
+## Lessons from the first wave (read these — each one cost somebody time)
+- Register `Lab.onResize` **once at top level**, never inside `start()` (it persists across restarts).
+- Use `Lab.init({attract:(dt,t)=>{…}})` to draw a live scene behind the splash card instead of a plain gradient.
+- The bundled Fredoka font is fairly wide: check every text for overflow at 390 px (how-to lines, HUD labels, stat labels).
+- Fast movers need swept collision tests (a ball/character can cross a thin hazard in one frame).
+- Particles live in screen space: for scrolling/transformed worlds see the note in ENGINE.md.
+- Sustained sounds: `Lab.audio.loop(...)`. Beat-locked events: `Lab.music.onBeat`. Runs that simply end: `Lab.gameover({neutral:true})`.
+- Bake full-stage backgrounds at `W+80 × H+80` and draw at `(-40,-40)`; never stretch a `W×H` sprite.
+- Tests: Playwright's touchscreen only taps — drive drags/swipes with mouse pointer events; read score + HUD state in one
+  `page.evaluate` when the score ticks continuously; a custom `timeout` on the spec is allowed for long runs.
+- Depth: several first-wave games plateau late (no new hazards/patterns after a few minutes) and portrait games get
+  small on 844×390 landscape phones. Plan late-game variety up front, and use `orient:"any"` where the design can fill a
+  landscape stage.
+- A usage limit can cut you off mid-task: finish each game completely (game → screenshots → test → review) before
+  starting the next.
+
 ## Hard rules
 - Touch **only**: your games' folders, your games' test files, your games' review files. Nothing else — not
   `shared/`, not `tools/`, not catalogs/launchers/other docs, not other games. (Catalogs are generated from each
