@@ -1235,7 +1235,8 @@ window.GDL_CATALOG = {
    "n": 11,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--11-scribble-siege.jpg"
   },
   {
    "id": "PhoneGameLab/12-cold-snap",
@@ -1254,7 +1255,8 @@ window.GDL_CATALOG = {
    "n": 12,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--12-cold-snap.jpg"
   },
   {
    "id": "PhoneGameLab/13-suds-patrol",
@@ -1464,23 +1466,25 @@ window.GDL_CATALOG = {
    "n": 23,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--23-pogo-peak.jpg"
   },
   {
    "id": "PhoneGameLab/24-helix-fall",
    "path": "PhoneGameLab/games/24-helix-fall/index.html",
    "collection": "PhoneGameLab",
-   "title": "Helix Fall",
-   "desc": "Rotate the tower so the ball falls through gaps.",
+   "title": "Spindle Drop",
+   "desc": "Twist the toy tower. Let the marble plunge.",
    "genre": [
-    "Runner & Movement"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 24,
-   "v2": false,
+   "v2": true,
    "thumb": "thumbs/PhoneGameLab--24-helix-fall.jpg"
   },
   {

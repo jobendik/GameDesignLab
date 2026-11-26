@@ -1,57 +1,250 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Spindle Drop</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Helix Fall", instructions:"Drag to rotate the tower. Drop the ball through gaps.", restart:start});
-let rings, ball, rot, dragX, level, score;
-function makeLevel(){
-  rings=[]; const N=10+level;
-  for(let i=0;i<N;i++){
-    const segs=[];
-    const gaps=Lab.randInt(1,3);
-    const arcs=4;
-    for(let s=0;s<arcs;s++) segs.push(true);
-    for(let g=0;g<gaps;g++){ segs[Lab.randInt(0,arcs-1)]=false; }
-    rings.push({y: 200+i*70, segs, kill: Math.random()<0.2});
-  }
-  ball={x:Lab.W/2, y:120, vy:0, r:14};
-  rot=0;
-}
-function start(){
-  score=0; level=1; makeLevel();
-  Lab.setScore(0);
-  Lab.input.onMove=[(x,y,dx)=>{ if(Lab.input.down) rot+=dx*0.012;}];
-  Lab.loop(dt=>{
-    ball.vy+=900*dt; ball.y+=ball.vy*dt;
-    // collision with first ring below ball
-    for(const r of rings){
-      if(Math.abs(r.y-ball.y)<14 && ball.vy>0){
-        const arcs=r.segs.length;
-        // angular position of ball relative to ring center
-        // we treat ball as at angle = (rot) mod TAU
-        const ang=((rot)%(Lab.TAU)+Lab.TAU)%Lab.TAU;
-        const idx=Math.floor(ang/(Lab.TAU/arcs));
-        if(r.segs[idx]){
-          if(r.kill){ Lab.gameover({title:"Spike!",message:"Score: "+score}); return; }
-          ball.vy=-380; Lab.beep(700,.05); break;
-        } else { score++; Lab.setScore(score); Lab.beep(900,.04); break; }
-      }
-    }
-    // scroll down
-    if(ball.y>Lab.H*0.55){ const d=ball.y-Lab.H*0.55; ball.y-=d; for(const r of rings) r.y-=d; }
-    rings=rings.filter(r=>r.y>50);
-    if(!rings.length){ level++; Lab.toast("Level "+level); makeLevel();}
-    const c=Lab.ctx; c.fillStyle="#10042a"; c.fillRect(0,0,Lab.W,Lab.H);
-    const cx=Lab.W/2;
-    for(const r of rings){
-      const arcs=r.segs.length;
-      for(let s=0;s<arcs;s++){ if(!r.segs[s]) continue;
-        c.beginPath(); c.fillStyle=r.kill?"#ff5577":"#5af";
-        c.arc(cx,r.y, 100, rot+s*Lab.TAU/arcs, rot+(s+1)*Lab.TAU/arcs);
-        c.lineTo(cx,r.y); c.fill();
-      }
-    }
-    c.beginPath(); c.fillStyle="#ffd35a"; c.arc(ball.x,ball.y,ball.r,0,Lab.TAU); c.fill();
+(function(){ "use strict";
+/* SPINDLE DROP — a glass marble bounces down a wooden toy spindle stacked with painted discs.
+ * Identity: nursery-shelf toy: birch spindle, chunky painted wooden discs with real thickness, polka-dot wallpaper, funk.
+ * Core: drag (or arrows) to twist the whole spindle; the marble only moves vertically. Drop through the gaps.
+ * Depth: PLUNGE — every floor passed without a bounce is worth one more (10, 20, 30…); after three the marble runs hot
+ * and SMASHES the next disc it meets, studs and all. Bouncing on a gem slab banks the gem but ends the plunge.
+ * Own twist: CLOCKWORK discs (brass-toothed) keep turning on their own, so lining up a long plunge is about timing.
+ * Rendering: orthographic 2.5-D — each disc is 12 wedges drawn as end walls, shaded outer wall strips and elliptical
+ * top faces, painter-sorted bottom-to-top with the spindle and marble slotted between discs.  Units: 1 u = S px.   */
+Lab.init({
+  title: "Spindle Drop", tagline: "Twist the toy tower. Let the marble plunge.", category: "Arcade & Action",
+  howto: ["Drag to twist the spindle", "Drop through gaps — chain floors to PLUNGE", "3 floors in a row smashes the next disc"],
+  theme: { bg: "#f6dcc0", bg2: "#fdf3df", fg: "#3b2a3a", accent: "#e8553f", accent2: "#3fb8a9", muted: "#8a7684", light: true },
+  orient: "portrait", music: { style: "funk", key: "D", vol: .34 }, restart: start,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, C = Lab.color;
+const SEG = 12, DA = TAU / SEG, K = .42, GAP = 122, TH = 17, BR = 13, G = 2600, VB = 570;
+const GAPS = 0, SOLID = 1, SPIKE = 2, GOAL = 4;
+const LOOKS = [
+  { a: "#3fb8a9", b: "#ffd9a8", bg1: "#fdf3df", bg2: "#f7d9b9", dot: "#f0c79d" },
+  { a: "#f08a6c", b: "#bfe3d0", bg1: "#eef7ee", bg2: "#cfe8dc", dot: "#b5d9c8" },
+  { a: "#e9b44c", b: "#c9c2ee", bg1: "#f3f0fd", bg2: "#d8d2f2", dot: "#c3bbe8" },
+  { a: "#8d7be0", b: "#ffd1dc", bg1: "#fff1f4", bg2: "#f9d0da", dot: "#f2b9c6" },
+  { a: "#5aa9d6", b: "#ffe9a8", bg1: "#fffbe8", bg2: "#f6e7b4", dot: "#ecd58f" },
+];
+const shadeTab = {};
+function shades(col) { return shadeTab[col] || (shadeTab[col] = Array.from({ length: 16 }, (_, i) => C.mix(C.shade(col, -.52), C.shade(col, -.08), i / 15))); }
+let S, W, H, CX, R, RP, RB, anchor;
+let discs, ball, rot, rotT, camY, maxBy, level, nFloors, floors, totalFloors, score, streak, bestStreak, smashes, gems, alive, clearing, bounces, dragged, hintT, look;
+
+function layout() { W = Lab.W; H = Lab.H; S = Math.min(W / 390, Lab.play.h / 700); CX = W / S / 2; R = Math.min(W * .39, 158 * S) / S; RP = R * .23; RB = R * .67; anchor = (Lab.play.y + Lab.play.h * .27) / S; }
+Lab.onResize(() => { if (ball) layout(); });
+const sens = () => TAU / (W * .85);
+const norm = a => ((a % TAU) + TAU) % TAU;
+
+function start() {
+  layout();
+  rot = rotT = 0; score = 0; streak = 0; bestStreak = 0; smashes = 0; gems = 0; totalFloors = 0; alive = true; bounces = 0; dragged = false; hintT = 0;
+  ball = { by: 0, vy: 0, sq: 0, hot: 0, trail: [] };
+  build(1);
+  Lab.setScore(0); Lab.hint("");
+  Lab.input.onDown = [() => { dragged = true; }];
+  Lab.input.onMove = [(x, y, dx) => { if (Lab.input.down && alive) rotT -= dx * sens(); }];
+  Lab.input.onKey = [() => { dragged = true; }];
+  Lab.expose({
+    get rot() { return rot; }, get score() { return score; }, get streak() { return streak; }, get bestStreak() { return bestStreak; }, get level() { return level; }, get floors() { return totalFloors; },
+    get smashes() { return smashes; }, get gems() { return gems; }, get alive() { return alive; }, get bounces() { return bounces; }, get by() { return ball.by; }, get vy() { return ball.vy; }, get sens() { return sens(); },
+    get left() { return nFloors - floors; }, get clearing() { return clearing; },
+    rotate(d) { if (alive) rotT += d; },
+    /* next live disc at/below the marble and the signed twist (rad) that brings the nearest wedge of `kind` (0 gap, 1 solid, 2 studs) under it */
+    next() { const d = nextDisc(); return d ? { y: d.y, under: segType(d), spin: d.spin, segs: d.segs.slice() } : null; },
+    angleTo(kind) { const d = nextDisc(); if (!d) return null; let best = null; for (let k = 0; k < SEG; k++) { if (d.segs[k] !== kind) continue; const same = (d.segs[(k + 1) % SEG] === kind ? 1 : 0) + (d.segs[(k + SEG - 1) % SEG] === kind ? 1 : 0); let dl = norm(Math.PI / 2 - ((k + .5) * DA + rot + d.ang) + Math.PI) - Math.PI; const cost = Math.abs(dl) + (2 - same) * .45; if (!best || cost < best.cost) best = { delta: dl, cost }; } return best ? best.delta : null; },
   });
+  Lab.loop(frame);
 }
-start();
+
+/* ---------- level building */
+function build(lv) {
+  level = lv; look = LOOKS[(lv - 1) % LOOKS.length]; discs = []; nFloors = Math.min(30, 9 + lv * 3); floors = 0; clearing = false;
+  for (let i = 0; i < nFloors; i++) discs.push(mkDisc(i, lv));
+  discs.push({ y: nFloors * GAP, segs: new Array(SEG).fill(GOAL), spin: 0, ang: 0, gem: -1, blots: [], gone: -1, col: "#fff3dc", base: true });
+  ball.by = -150; ball.vy = 0; ball.hot = 0; ball.trail.length = 0; streak = 0; maxBy = 0; camY = -anchor - 20;
+}
+function mkDisc(i, lv) {
+  const segs = new Array(SEG).fill(SOLID), d = Lab.clamp((lv - 1) * .16 + i / nFloors * .22, 0, 1);
+  const disc = { y: i * GAP, segs, spin: 0, ang: 0, gem: -1, blots: [], gone: -1, col: i % 2 ? look.b : look.a, base: false };
+  const gw = i === 0 ? 3 : Lab.chance(.6 - d * .45) ? 3 : 2, two = i > 0 && Lab.chance(.3 - d * .12);
+  let g0 = Lab.randInt(0, SEG - 1);
+  if (i === 0) g0 = (Math.floor(norm(Math.PI / 2 - rot) / DA) + 5) % SEG; // the marble always starts over wood, gap a short twist away
+  for (let k = 0; k < gw; k++) segs[(g0 + k) % SEG] = GAPS;
+  if (two) { const g1 = g0 + gw + Lab.randInt(2, SEG - gw * 2 - 2); for (let k = 0; k < gw; k++) segs[(g1 + k) % SEG] = GAPS; }
+  let hz = i < (lv === 1 ? 3 : 1) ? 0 : Math.min(5, Math.floor(d * 4.2 + Lab.rand(.2, 1.7)));
+  for (let tries = 0; hz > 0 && tries < 30; tries++) { const k = Lab.randInt(0, SEG - 1); if (segs[k] !== SOLID || segs.filter(s => s === SOLID).length <= 3) continue; segs[k] = SPIKE; hz--; if (hz > 0 && Lab.chance(.5) && segs[(k + 1) % SEG] === SOLID && segs.filter(s => s === SOLID).length > 3) { segs[(k + 1) % SEG] = SPIKE; hz--; } }
+  if (i > 0 && Lab.chance(.22)) { const solid = []; segs.forEach((s, k) => { if (s === SOLID) solid.push(k); }); disc.gem = Lab.choose(solid); }
+  if (lv >= 2 && i > 0 && Lab.chance(Math.min(.45, .14 + (lv - 2) * .08))) { disc.spin = Lab.rand(.45, .8 + Math.min(.5, lv * .06)) * Lab.choose([-1, 1]); disc.col = "#d9a441"; }
+  return disc;
+}
+const nextDisc = () => { let best = null; for (const d of discs) if (d.gone < 0 && d.y >= ball.by - 1 && (!best || d.y < best.y)) best = d; return best; };
+function segIdx(d) { return Math.floor(norm(Math.PI / 2 - (rot + d.ang)) / DA) % SEG; }
+function segType(d) { // what the marble's centre is over, with a few degrees of mercy at the edge of a studded wedge
+  const a = norm(Math.PI / 2 - (rot + d.ang)) / DA, k = Math.floor(a) % SEG, f = a - Math.floor(a); let t = d.segs[k];
+  if (t === SPIKE) { const p = d.segs[(k + SEG - 1) % SEG], n = d.segs[(k + 1) % SEG]; if (f < .15 && p !== SPIKE) t = p; else if (f > .85 && n !== SPIKE) t = n; }
+  return t;
+}
+
+/* ---------- update */
+function update(dt) {
+  const ax = Lab.input.axisX(); if (ax && alive) rotT -= ax * 3.4 * dt;
+  rot = Lab.damp(rot, rotT, 32, dt);
+  for (let i = discs.length - 1; i >= 0; i--) { const d = discs[i]; d.ang += d.spin * dt; if (d.gone >= 0) { d.gone += dt; if (d.gone > .34) discs.splice(i, 1); } }
+  ball.sq = Lab.damp(ball.sq, 0, 11, dt); ball.hot = Lab.damp(ball.hot, streak >= 3 ? 1 : 0, 10, dt);
+  if (!alive) return;
+  const prev = ball.by; ball.vy = Math.min(ball.vy + G * dt, 1500); ball.by += ball.vy * dt;
+  if (ball.vy > 0) for (const d of discs) if (d.gone < 0 && prev <= d.y && ball.by >= d.y) { hit(d); break; }
+  if (ball.by > maxBy) maxBy = ball.by;
+  camY = Lab.damp(camY, maxBy - anchor, 9, dt);
+  if (streak >= 2 || ball.hot > .2) { ball.trail.push({ y: ball.by, a: 1 }); if (ball.trail.length > 10) ball.trail.shift(); } for (const p of ball.trail) p.a -= dt * 5;
+  while (ball.trail.length && ball.trail[0].a <= 0) ball.trail.shift();
+  Lab.music.intensity(.3 + Math.min(.4, streak * .12) + Math.min(.25, level * .05));
+}
+const sx = () => CX * S, syOf = y => (y - camY + K * RB) * S;
+function hit(d) {
+  const t = segType(d), px = sx(), py = syOf(d.y);
+  if (t === GAPS) { // through the gap: the floor is cleared and the plunge grows
+    d.gone = 0; streak++; floors++; totalFloors++; bestStreak = Math.max(bestStreak, streak); const pts = 10 * streak; score += pts; Lab.setScore(score);
+    Lab.audio.combo(streak - 1, { vol: .18 }); Lab.sfx("tick", { pitch: 1 + streak * .05 }); if (d.gem >= 0) takeGem(d);
+    fx.text(px + 58 * S, py - 20 * S, "+" + pts, { color: streak >= 3 ? "#e8553f" : "#3b2a3a", outline: "#fffaf0", size: (14 + Math.min(streak, 7) * 1.6) * Math.max(.85, S), life: .7 });
+    if (streak === 3) { Lab.sfx("whoosh", { pitch: 1.3 }); fx.ring(px, py, { r0: 10, r1: 70 * S, color: "#ff9a3d", width: 5 }); }
+    if (streak >= 2) Lab.bumpScore(); return;
+  }
+  if (t === GOAL) { ball.by = d.y; ball.vy = -VB; ball.sq = 1; bounces++; streak = 0; Lab.sfx("knock", { pitch: .8 }); if (!clearing) levelClear(px, py); return; }
+  if (streak >= 3) { // hot marble: smash the whole disc, studs included
+    d.gone = 0; smashes++; floors++; totalFloors++; const pts = 30 + 10 * streak; score += pts; Lab.setScore(score); Lab.bumpScore(); if (d.gem >= 0) takeGem(d);
+    ball.by = d.y; ball.vy = -260; ball.sq = 1; streak = 0;
+    fx.burst(px, py, { n: 26, colors: [d.col, C.shade(d.col, -.3), "#fffaf0", "#ff9a3d"], speed: 430 * S, life: .7, size: 6 * S, shape: "shard", gravity: 900 }); fx.ring(px, py, { r0: 12, r1: 120 * S, color: "#fffaf0", width: 7 });
+    fx.text(px, py - 46 * S, "SMASH! +" + pts, { color: "#e8553f", outline: "#fffaf0", size: 22 * Math.max(.85, S) });
+    Lab.sfx("crunch", { pitch: .8 }); Lab.sfx("thud"); Lab.shake(10, .3); Lab.hitstop(.07); Lab.buzz(30); return;
+  }
+  if (t === SPIKE) { die(px, py); return; }
+  ball.by = d.y; ball.vy = -VB; ball.sq = 1; bounces++; streak = 0;
+  Lab.sfx("knock", { pitch: .9 + (d.y / GAP % 5) * .06 }); Lab.buzz(6);
+  fx.burst(px, py, { n: 4, color: "rgba(255,250,240,.8)", speed: 80 * S, life: .3, size: 3 * S, gravity: 200, spread: Math.PI, angle: -Math.PI / 2 });
+  d.blots.push(norm(Math.PI / 2 - (rot + d.ang))); if (d.blots.length > 4) d.blots.shift();
+  if (d.gem === segIdx(d)) takeGem(d);
+}
+function takeGem(d) {
+  d.gem = -1; gems++; score += 25; Lab.setScore(score); Lab.sfx("gem"); const px = sx(), py = syOf(d.y);
+  fx.burst(px, py - 14 * S, { n: 10, colors: ["#7ef0d0", "#fff", "#3fb8a9"], speed: 200 * S, life: .5, size: 4 * S, shape: "star", gravity: 300 }); fx.text(px - 56 * S, py - 24 * S, "GEM +25", { color: "#1f9c8a", outline: "#fffaf0", size: 15 * Math.max(.85, S), life: .8 });
+}
+function levelClear(px, py) {
+  clearing = true; const bonus = 100 * level; score += bonus; Lab.setScore(score); Lab.bumpScore();
+  Lab.sfx("levelup"); Lab.banner("LEVEL " + level + " CLEAR", { color: "#e8553f", ms: 1000 }); Lab.flash("#fffaf0", .25, .35);
+  fx.burst(px, py, { n: 40, colors: [look.a, look.b, "#e8553f", "#fffaf0"], speed: 520 * S, life: 1, size: 6 * S, shape: "star", gravity: 700, spread: Math.PI, angle: -Math.PI / 2 });
+  Lab.after(1.05, () => { if (!alive) return; Lab.flash(LOOKS[level % LOOKS.length].bg1, .4, 1); build(level + 1); Lab.toast("Level " + level + (level === 2 ? " · clockwork discs!" : ""), 1300); });
+}
+function die(px, py) {
+  alive = false; Lab.sfx("glass"); Lab.sfx("hurt"); Lab.shake(14, .45); Lab.hitstop(.1); Lab.flash("#e8553f", .25, .35); Lab.buzz(60);
+  fx.burst(px, py - 10 * S, { n: 30, colors: ["#2f5fd0", "#8fb0ff", "#fff"], speed: 420 * S, life: .9, size: 5 * S, shape: "shard", gravity: 1000 });
+  Lab.after(.8, () => Lab.gameover({ title: "Spiked!", score, stats: [["Level", level], ["Best plunge", "×" + bestStreak], ["Gems", gems]] }));
+}
+
+/* ---------- the tower */
+function drawDisc(c, d, t) {
+  const phi = rot + d.ang; let y = d.y - camY, r = d.base ? R * 1.1 : R, rp = RP, a = 1;
+  if (d.gone >= 0) { const u = d.gone / .34; r *= 1 + ease.outCubic(u) * .3; a = 1 - u; y -= u * 16; }
+  if (y < -R * K - 60 || y > H / S + R * K + 30) return;
+  c.globalAlpha = a;
+  const segs = d.segs, sh = shades(d.col), shS = shades("#d23a36");
+  // 1. cut faces at the ends of wooden runs (only those turned toward the viewer)
+  for (let k = 0; k < SEG; k++) {
+    if (segs[k] === GAPS) continue;
+    const prevGap = segs[(k + SEG - 1) % SEG] === GAPS, nextGap = segs[(k + 1) % SEG] === GAPS;
+    for (const [isGap, ang, vis] of [[prevGap, phi + k * DA, -1], [nextGap, phi + (k + 1) * DA, 1]]) {
+      if (!isGap || Math.cos(ang) * vis <= .02) continue;
+      const cs = Math.cos(ang), sn = Math.sin(ang) * K;
+      c.fillStyle = (segs[k] === SPIKE ? shS : sh)[2 + Math.round(Math.abs(Math.cos(ang)) * 5)];
+      c.beginPath(); c.moveTo(CX + rp * cs, y + rp * sn); c.lineTo(CX + r * cs, y + r * sn); c.lineTo(CX + r * cs, y + r * sn + TH); c.lineTo(CX + rp * cs, y + rp * sn + TH); c.closePath(); c.fill();
+    }
+  }
+  // 2. outer wall, front half only, in half-wedge strips shaded like a cylinder lit from the upper left
+  for (let k = 0; k < SEG; k++) {
+    if (segs[k] === GAPS) continue; const tab = segs[k] === SPIKE ? shS : segs[k] === GOAL ? shades(k % 2 ? "#3b2a3a" : "#fff3dc") : sh;
+    for (let h = 0; h < 2; h++) {
+      let s = norm(phi + k * DA + h * DA / 2), e = s + DA / 2;
+      if (s < Math.PI) e = Math.min(e, Math.PI); else if (e > TAU) { s = 0; e -= TAU; } else continue;
+      if (e - s < .004) continue;
+      c.fillStyle = tab[Math.round((.5 + .5 * Math.cos((s + e) / 2 - 2.25)) * 15)];
+      c.beginPath(); c.ellipse(CX, y, r, r * K, 0, s, e + .012); c.ellipse(CX, y + TH, r, r * K, 0, e + .012, s, true); c.closePath(); c.fill();
+    }
+  }
+  // 3. top faces (merged runs), bevel highlight, clockwork teeth
+  for (let k = 0; k < SEG;) {
+    const ty = segs[k]; let n = 1; if (ty === GOAL) n = 1; else while (k + n < SEG && segs[k + n] === ty) n++;
+    if (ty !== GAPS) {
+      const a0 = phi + k * DA, a1 = phi + (k + n) * DA + .004;
+      c.fillStyle = ty === SPIKE ? "#e8483f" : ty === GOAL ? (k % 2 ? "#3b2a3a" : "#fff3dc") : d.col;
+      c.beginPath(); c.ellipse(CX, y, r, r * K, 0, a0, a1); c.ellipse(CX, y, rp, rp * K, 0, a1, a0, true); c.closePath(); c.fill();
+      c.strokeStyle = "rgba(255,255,255,.38)"; c.lineWidth = 2.2; c.beginPath(); c.ellipse(CX, y, r - 2, (r - 2) * K, 0, a0, a1 - .004); c.stroke();
+      if (ty === SOLID) { c.strokeStyle = "rgba(60,40,50,.1)"; c.lineWidth = 1.2; c.beginPath(); c.ellipse(CX, y, r * .62, r * .62 * K, 0, a0 + .03, a1 - .03); c.stroke(); }
+    }
+    k += n;
+  }
+  if (d.spin) { c.strokeStyle = "#8a5a1c"; c.lineWidth = 4.5; c.setLineDash([5, 9.2]); c.lineDashOffset = -phi * r; c.beginPath(); c.ellipse(CX, y, r - 7, (r - 7) * K, 0, 0, TAU); c.stroke(); c.setLineDash([]); }
+  // 4. marks left by bounces, then studs and gem back-to-front
+  c.fillStyle = "rgba(47,95,208,.28)"; for (const b of d.blots) { const an = b + phi; c.beginPath(); c.ellipse(CX + RB * Math.cos(an), y + RB * K * Math.sin(an), 10, 10 * K, 0, 0, TAU); c.fill(); }
+  const tops = [];
+  for (let k = 0; k < SEG; k++) { const an = phi + (k + .5) * DA; if (segs[k] === SPIKE) { tops.push([Math.sin(an - .13), an - .13, .52, 0]); tops.push([Math.sin(an + .13), an + .13, .84, 0]); } if (d.gem === k) tops.push([Math.sin(an), an, .67, 1]); }
+  tops.sort((p, q) => p[0] - q[0]);
+  for (const [, an, rr, gem] of tops) {
+    const x = CX + r * rr * Math.cos(an), yy = y + r * rr * K * Math.sin(an);
+    if (gem) { const bob = Math.sin(t * 4 + d.y) * 2.5 - 15; draw.shadow(c, x, yy, 8, 3, .18); c.fillStyle = "#3fd0b4"; c.beginPath(); c.moveTo(x, yy + bob - 10); c.lineTo(x + 8, yy + bob); c.lineTo(x, yy + bob + 10); c.lineTo(x - 8, yy + bob); c.closePath(); c.fill(); c.fillStyle = "#b9f6e6"; c.beginPath(); c.moveTo(x, yy + bob - 10); c.lineTo(x + 8, yy + bob); c.lineTo(x, yy + bob - 2); c.lineTo(x - 8, yy + bob); c.closePath(); c.fill(); }
+    else { c.fillStyle = "rgba(90,20,20,.3)"; c.beginPath(); c.ellipse(x, yy, 8, 3.4, 0, 0, TAU); c.fill(); c.fillStyle = "#fff3dc"; c.beginPath(); c.moveTo(x - 7, yy); c.lineTo(x, yy - 17); c.lineTo(x + 7, yy); c.closePath(); c.fill(); c.fillStyle = "#e3cfae"; c.beginPath(); c.moveTo(x + 1, yy); c.lineTo(x, yy - 17); c.lineTo(x + 7, yy); c.closePath(); c.fill(); }
+  }
+  c.globalAlpha = 1;
+}
+function drawPole(c, y0, y1, grad) { // spindle between two discs, with the front lip of its footprint on the lower one
+  if (y1 < -40 || y0 > H / S + 40) return; c.fillStyle = grad; c.fillRect(CX - RP, y0, RP * 2, y1 - y0); c.beginPath(); c.ellipse(CX, y1, RP, RP * K, 0, 0, Math.PI); c.fill();
+  c.fillStyle = "rgba(120,90,50,.16)"; for (let yy = Math.ceil((y0 + camY) / 44) * 44 - camY; yy < y1 - 4; yy += 44) c.fillRect(CX - RP, yy, RP * 2, 2);
+}
+function drawBall(c, t) {
+  const y = ball.by - camY + K * RB - BR, v = Lab.clamp(ball.vy / 1500, -1, 1), sxk = 1 + ball.sq * .28 - Math.abs(v) * .12, syk = 1 - ball.sq * .28 + Math.abs(v) * .16;
+  for (const p of ball.trail) { c.globalAlpha = Math.max(0, p.a) * .3; draw.circle(c, CX, p.y - camY + K * RB - BR, BR * (.5 + p.a * .4), ball.hot > .5 ? "#ff9a3d" : "#8fb0ff"); } c.globalAlpha = 1;
+  if (ball.hot > .05) draw.glow(c, CX, y, BR * 3.2, "#ff8a2a", .55 * ball.hot);
+  const sp = Lab.sprite("marble" + (ball.hot > .5 ? "H" : "") + Math.round(S * 100), (BR * 2 + 4) * S, (BR * 2 + 4) * S, g => {
+    g.scale(S, S); const m = BR + 2, hot = ball.hot > .5, gr = g.createRadialGradient(m - 4, m - 5, 1, m, m, BR); gr.addColorStop(0, hot ? "#fff3c4" : "#bcd2ff"); gr.addColorStop(.45, hot ? "#ff9a3d" : "#3f72e6"); gr.addColorStop(1, hot ? "#d9481f" : "#1f3f9c");
+    g.fillStyle = gr; g.beginPath(); g.arc(m, m, BR, 0, TAU); g.fill();
+    g.save(); g.beginPath(); g.arc(m, m, BR, 0, TAU); g.clip(); g.strokeStyle = hot ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.5)"; g.lineWidth = 2.6; g.beginPath(); g.moveTo(m - BR, m + 4); g.bezierCurveTo(m - 4, m - 8, m + 3, m + 10, m + BR, m - 3); g.stroke(); g.restore();
+    g.fillStyle = "rgba(255,255,255,.85)"; g.beginPath(); g.ellipse(m - 4.5, m - 5.5, 3.6, 2.4, -.6, 0, TAU); g.fill();
+  });
+  c.save(); c.translate(CX, y + BR * (1 - syk)); c.scale(sxk, syk); c.drawImage(sp, -BR - 2, -BR - 2, BR * 2 + 4, BR * 2 + 4); c.restore();
+  if (streak >= 2) { const pu = 1 + .12 * Math.sin(t * 16); draw.text(c, "×" + streak, CX + 34, y - 4, { size: (17 + Math.min(streak, 6) * 2) * pu, color: streak >= 3 ? "#e8553f" : "#3b2a3a", stroke: "#fffaf0", align: "left" }); }
+}
+
+/* ---------- render */
+function frame(dt, t) { update(dt); if (!dragged) hintT += dt; render(t); }
+function render(t) {
+  const c = Lab.ctx, u = Math.max(.85, S);
+  draw.bg(c, look.bg1, look.bg2);
+  // polka-dot wallpaper drifting at a fraction of the fall speed
+  c.fillStyle = look.dot; const sp = 64 * S, off = ((-camY * S * .35) % (sp * 2) + sp * 2) % (sp * 2);
+  for (let j = -2; j < H / sp + 2; j++) for (let i = -1; i < W / sp + 1; i++) { c.globalAlpha = .5; c.beginPath(); c.arc(i * sp + (j % 2 ? sp / 2 : 0) + sp / 4, j * sp + off - sp, 5.5 * S, 0, TAU); c.fill(); } c.globalAlpha = 1;
+  c.save(); c.scale(S, S);
+  const grad = c.createLinearGradient(CX - RP, 0, CX + RP, 0); grad.addColorStop(0, "#c9ab7c"); grad.addColorStop(.3, "#f6e6c3"); grad.addColorStop(.62, "#e6cf9f"); grad.addColorStop(1, "#b39264");
+  const order = discs.slice().sort((p, q) => q.y - p.y); let ballDrawn = false, under = null;
+  for (const d of order) if (d.gone < 0 && d.y >= ball.by - 1 && (!under || d.y < under.y)) under = d;
+  for (let i = 0; i < order.length; i++) {
+    const d = order[i], above = order[i + 1];
+    if (!ballDrawn && d.y < ball.by - 1) { drawBall(c, t); ballDrawn = true; }
+    drawDisc(c, d, t);
+    if (d === under && segType(d) !== GAPS) { const h = Lab.clamp((d.y - ball.by) / 110, 0, 1); draw.shadow(c, CX, d.y - camY + K * RB, BR * (1.05 - h * .45), BR * (1.05 - h * .45) * K, .26 - h * .14); }
+    drawPole(c, above ? above.y - camY : -60, d.y - camY, grad);
+  }
+  if (!order.length) drawPole(c, -60, H / S + 60, grad);
+  if (!ballDrawn && alive) drawBall(c, t);
+  c.restore();
+  // soft top haze, level progress rail, first-run prompt
+  const hz = c.createLinearGradient(0, 0, 0, Lab.play.y + 50); hz.addColorStop(0, C.alpha(look.bg1, .92)); hz.addColorStop(1, C.alpha(look.bg1, 0)); c.fillStyle = hz; c.fillRect(-40, -40, W + 80, Lab.play.y + 90);
+  const rx = 16 * u, r0 = Lab.play.y + 44 * u, rl = Math.min(190 * u, Lab.play.h * .34), k = Lab.clamp(floors / nFloors, 0, 1);
+  draw.rect(c, rx - 3 * u, r0, 6 * u, rl, 3 * u, "rgba(59,42,58,.16)"); draw.rect(c, rx - 3 * u, r0, 6 * u, rl * k, 3 * u, look.a); draw.circle(c, rx, r0 + rl * k, 6.5 * u, "#2f5fd0", "#fffaf0", 2);
+  draw.circle(c, rx, r0 - 16 * u, 12 * u, "#3b2a3a"); draw.text(c, String(level), rx, r0 - 15.5 * u, { size: 13 * u, color: "#fffaf0" }); draw.text(c, "LV", rx, r0 + rl + 14 * u, { size: 9 * u, color: "rgba(59,42,58,.6)" });
+  if (!dragged && alive && hintT < 8) { const a = Math.min(1, hintT * 2) * (.7 + .3 * Math.sin(t * 5)), y = H - Lab.safe.bottom - 96 * u, dx = Math.sin(t * 2.4) * 44 * u; c.globalAlpha = a; draw.text(c, "DRAG TO TWIST", W / 2, y, { size: 20 * u, color: "#3b2a3a", stroke: "#fffaf0" }); draw.circle(c, W / 2 + dx, y + 32 * u, 11 * u, "rgba(59,42,58,.85)", "#fffaf0", 2); c.globalAlpha = 1; }
+}
+Lab.boot();
+})();
 </script></body></html>

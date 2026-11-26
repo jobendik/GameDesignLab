@@ -226,7 +226,8 @@ window.LAB_GAMES = [
     "t": "Scribble Siege",
     "d": "The doodles in the margin are marching. Rub them out.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--11-scribble-siege.jpg"
    },
    {
     "n": 12,
@@ -234,7 +235,8 @@ window.LAB_GAMES = [
     "t": "Cold Snap",
     "d": "Break the drifting ice. Scoop the sunstones before they sink.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--12-cold-snap.jpg"
    },
    {
     "n": 13,
@@ -299,7 +301,16 @@ window.LAB_GAMES = [
     "t": "Pogo Peak",
     "d": "Bounce a pogo chick from meadow to starlight.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--23-pogo-peak.jpg"
+   },
+   {
+    "n": 24,
+    "slug": "24-helix-fall",
+    "t": "Spindle Drop",
+    "d": "Twist the toy tower. Let the marble plunge.",
+    "v2": true,
+    "thumb": "../thumbs/PhoneGameLab--24-helix-fall.jpg"
    }
   ]
  },
@@ -433,13 +444,6 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--20-frostfoot.jpg"
-   },
-   {
-    "n": 24,
-    "slug": "24-helix-fall",
-    "t": "Helix Fall",
-    "d": "Rotate the tower so the ball falls through gaps.",
-    "thumb": "../thumbs/PhoneGameLab--24-helix-fall.jpg"
    },
    {
     "n": 25,
