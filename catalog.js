@@ -285,13 +285,15 @@ window.GDL_CATALOG = {
    "id": "games/little-hero-adventure",
    "path": "games/little-hero-adventure.html",
    "collection": "arcade",
-   "title": "Zelda Lite Adventure",
-   "desc": "Top-down zelda-like sketch.",
+   "title": "Thimble & the Bramble King",
+   "desc": "A mouse knight with a thimble helm and a sewing-needle sword: slash, roll and whirl across a tiny garden kingdom, wake three Lantern Blooms and dethrone the Bramble King.",
    "genre": [
-    "Adventure"
+    "Adventure",
+    "Action"
    ],
    "controls": [
     "touch",
+    "mouse",
     "keyboard"
    ],
    "thumb": "thumbs/games--little-hero-adventure.jpg"
@@ -441,11 +443,16 @@ window.GDL_CATALOG = {
    "path": "games/neon-hagen.html",
    "collection": "arcade",
    "title": "Neon Hagen",
-   "desc": "Co-op flower-blooming garden.",
+   "desc": "Drift a wisp of light through a sleeping night garden, bloom its buds into a trail of fireflies and wake the Moonblooms before the dark closes in.",
    "genre": [
-    "Casual"
+    "Arcade",
+    "Action"
    ],
-   "controls": [],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
    "thumb": "thumbs/games--neon-hagen.jpg"
   },
   {
@@ -514,12 +521,15 @@ window.GDL_CATALOG = {
    "id": "games/neon-strike",
    "path": "games/neon-strike.html",
    "collection": "arcade",
-   "title": "Neon Krunker: Overdrive",
-   "desc": "3D neon-styled first-person shooter.",
+   "title": "Static Bloom",
+   "desc": "A fast first-person arena shooter: shatter crystalline signal constructs, sweep up their shards before they fade, and ride your flow multiplier through endless waves.",
    "genre": [
-    "Shooter"
+    "Shooter",
+    "Action",
+    "Arcade"
    ],
    "controls": [
+    "touch",
     "mouse",
     "keyboard"
    ],
@@ -780,13 +790,16 @@ window.GDL_CATALOG = {
    "path": "games/sproutys-garden.html",
    "collection": "arcade",
    "title": "Sprouty's Garden",
-   "desc": "Tend to Sprouty",
+   "desc": "Plant, water and harvest against the sunset, bonk the slugs and crows, and keep little Sprouty",
    "genre": [
-    "Casual"
+    "Strategy",
+    "Arcade",
+    "Simulation"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "thumb": "thumbs/games--sproutys-garden.jpg"
   },
@@ -1025,8 +1038,8 @@ window.GDL_CATALOG = {
    "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/02-whack-a-mole",
-   "path": "PhoneGameLab/games/02-whack-a-mole/index.html",
+   "id": "PhoneGameLab/02-crab-bop",
+   "path": "PhoneGameLab/games/02-crab-bop/index.html",
    "collection": "PhoneGameLab",
    "title": "Crab Bop",
    "desc": "Bop the crabs. Mind the urchins.",
@@ -1040,41 +1053,44 @@ window.GDL_CATALOG = {
    ],
    "n": 2,
    "v2": true,
-   "thumb": "thumbs/PhoneGameLab--02-whack-a-mole.jpg"
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/03-reaction-duel",
-   "path": "PhoneGameLab/games/03-reaction-duel/index.html",
+   "id": "PhoneGameLab/03-flinch",
+   "path": "PhoneGameLab/games/03-flinch/index.html",
    "collection": "PhoneGameLab",
-   "title": "Reaction Duel",
-   "desc": "Wait for the signal — fastest finger wins.",
+   "title": "Flinch",
+   "desc": "Eight green lights. Don't jump the gun.",
    "genre": [
     "Reflex & Taps"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 3,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--03-reaction-duel.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/04-quick-draw",
-   "path": "PhoneGameLab/games/04-quick-draw/index.html",
+   "id": "PhoneGameLab/04-corkslinger",
+   "path": "PhoneGameLab/games/04-corkslinger/index.html",
    "collection": "PhoneGameLab",
-   "title": "Quick Draw",
-   "desc": "Cowboy duel: don't fire before \"DRAW!\".",
+   "title": "Corkslinger",
+   "desc": "Wait for the bell. Out-draw the whole toy box.",
    "genre": [
     "Reflex & Taps"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 4,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--04-quick-draw.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/05-misfired",
@@ -1110,41 +1126,47 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 6,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/07-memory-match",
-   "path": "PhoneGameLab/games/07-memory-match/index.html",
+   "id": "PhoneGameLab/07-beetle-box",
+   "path": "PhoneGameLab/games/07-beetle-box/index.html",
    "collection": "PhoneGameLab",
-   "title": "Memory Match",
-   "desc": "Flip cards and find matching pairs.",
+   "title": "Beetle Box",
+   "desc": "Pin the pairs. Only forgetting costs you.",
    "genre": [
-    "Reflex & Taps"
+    "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 7,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--07-memory-match.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/08-shell-game",
-   "path": "PhoneGameLab/games/08-shell-game/index.html",
+   "id": "PhoneGameLab/08-swindle",
+   "path": "PhoneGameLab/games/08-swindle/index.html",
    "collection": "PhoneGameLab",
-   "title": "Cups & Ball",
-   "desc": "Watch the cups shuffle. Where's the ball?",
+   "title": "Swindle",
+   "desc": "Eyes on the pearl. The cups cheat.",
    "genre": [
     "Reflex & Taps"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 8,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--08-shell-game.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/09-tea-break",
@@ -1180,23 +1202,26 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 10,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/11-scribble-siege",
    "path": "PhoneGameLab/games/11-scribble-siege/index.html",
    "collection": "PhoneGameLab",
-   "title": "Space Invaders",
-   "desc": "Drag to move ship. Tap to fire.",
+   "title": "Scribble Siege",
+   "desc": "The doodles in the margin are marching. Rub them out.",
    "genre": [
-    "Minigame"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 11,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/12-cold-snap",
@@ -1229,7 +1254,9 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 13,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/14-bullet-hell",
@@ -1316,23 +1343,26 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 18,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/19-tin-topple",
    "path": "PhoneGameLab/games/19-tin-topple/index.html",
    "collection": "PhoneGameLab",
-   "title": "Cannon",
-   "desc": "Drag from cannon to aim; release to fire (parabolic).",
+   "title": "Tin Topple",
+   "desc": "Topple the block forts. Bonk every tin bot.",
    "genre": [
-    "Minigame"
+    "Stack & Physics"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 19,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/20-frostfoot",
@@ -1365,40 +1395,45 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 21,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/22-traffic-dodge",
-   "path": "PhoneGameLab/games/22-traffic-dodge/index.html",
+   "id": "PhoneGameLab/22-sundown-sprint",
+   "path": "PhoneGameLab/games/22-sundown-sprint/index.html",
    "collection": "PhoneGameLab",
-   "title": "Traffic Dodge",
-   "desc": "Top-down: weave through traffic.",
+   "title": "Sundown Sprint",
+   "desc": "Floor it down the desert highway. Skim traffic to buy time.",
    "genre": [
-    "Runner & Movement"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 22,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--22-traffic-dodge.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/23-doodle-jump",
    "path": "PhoneGameLab/games/23-doodle-jump/index.html",
    "collection": "PhoneGameLab",
-   "title": "Doodle Jump",
-   "desc": "Auto-bounce upward, tilt to steer.",
+   "title": "Pogo Peak",
+   "desc": "Bounce a pogo chick from meadow to starlight.",
    "genre": [
-    "Runner & Movement"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 23,
-   "v2": false,
+   "v2": true,
    "thumb": "thumbs/PhoneGameLab--23-doodle-jump.jpg"
   },
   {
@@ -1452,24 +1487,26 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 26,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/27-jetpack",
-   "path": "PhoneGameLab/games/27-jetpack/index.html",
+   "id": "PhoneGameLab/27-fizzwhiz",
+   "path": "PhoneGameLab/games/27-fizzwhiz/index.html",
    "collection": "PhoneGameLab",
-   "title": "Jetpack Hold",
-   "desc": "Hold to fly, release to fall.",
+   "title": "Fizzwhiz",
+   "desc": "Ride a shaken soda bottle down the sundown boardwalk.",
    "genre": [
     "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 27,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--27-jetpack.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/28-cave-flyer",
@@ -1503,39 +1540,45 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 29,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/30-wobblewire",
    "path": "PhoneGameLab/games/30-wobblewire/index.html",
    "collection": "PhoneGameLab",
-   "title": "Balance Beam",
-   "desc": "Tap LEFT / RIGHT side to nudge balance. Stay centered!",
+   "title": "Wobblewire",
+   "desc": "Lean left, lean right. Don't look down.",
    "genre": [
-    "Minigame"
+    "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 30,
-   "v2": false
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/31-sinkstones",
    "path": "PhoneGameLab/games/31-sinkstones/index.html",
    "collection": "PhoneGameLab",
-   "title": "Vanishing Tiles",
-   "desc": "Tap a tile to step there. Avoid empty squares and fading ones!",
+   "title": "Sinkstones",
+   "desc": "Remember the stones. Cross before they sink.",
    "genre": [
-    "Minigame"
+    "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 31,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/32-inkstride",

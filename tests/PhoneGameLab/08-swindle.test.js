@@ -12,12 +12,11 @@ module.exports = {
     expect(await game(g => g.phase) === 'show' && await game(g => g.lives) === 3 && await game(g => g.n) === 3, 'opens by showing the pearl: 3 cups, 3 coins');
     // 1. the shuffle really moves cups, and input is ignored until it ends
     await until('shuffle');
-    const before = await game(g => g.slots()); const seen = new Set();
+    const seen = new Set();
     await tapCup(0); expect(await game(g => g.phase) === 'shuffle' && await game(g => g.lives) === 3, 'cannot pick during the shuffle');
     for (let k = 0; k < 400 && await game(g => g.phase) === 'shuffle'; k++) { const m = await game(g => g.move); if (m) seen.add(m); await wait(20); }
     await until('pick');
     expect(seen.has('swap') && await validSlots(), 'cups were swapped and every slot is still occupied once');
-    expect((await game(g => g.slots())).join() !== before.join() || true, 'slots tracked');
     // 2. a real touch on the pearl's cup wins the pot, with a quick-pick bonus
     expect(await game(g => g.quick) > 1.5, 'quick bonus is live at the start of the pick');
     await tapCup(await game(g => g.ballIndex));

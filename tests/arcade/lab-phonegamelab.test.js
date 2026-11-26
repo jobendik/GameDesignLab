@@ -58,9 +58,11 @@ async function labTest({ page, expect, wait, url }, lab) {
   expect(await page.evaluate(() => document.activeElement.classList.contains('card')), 'arrow down moves into the cards');
 
   // hosted on its own: no thumbnails, no parent arcade page → still complete, with at most one probe request
+  const here = page.url().split('#')[0];
+  await page.goto('about:blank');                       // let lazy images of the previous document settle before counting
   let thumbReqs = 0;
   await page.route(/\/thumbs\//, r => { thumbReqs++; r.abort(); });
-  await page.reload(); await wait(500);
+  await page.goto(here, { waitUntil: 'load' }); await wait(500);
   expect((await page.$$('#cats .card')).length === items.length, 'renders every game without thumbnails');
   expect((await page.$$('#cats .card .thumb img')).length === 0 && (await page.$$('#cats .card .thumb b')).length === items.length, 'placeholders stand in for missing thumbnails');
   expect(thumbReqs <= 1, 'missing thumbnails are probed once, not requested ' + thumbReqs + ' times');

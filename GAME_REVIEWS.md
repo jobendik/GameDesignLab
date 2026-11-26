@@ -14,17 +14,37 @@
 
 </details>
 
-## Phone Game Lab (`PhoneGameLab/`) — 1/70 reviewed
+## Phone Game Lab (`PhoneGameLab/`) — 19/70 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
+| [Splodge](PhoneGameLab/games/01-splodge/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/01-splodge.md) |
+| [Crab Bop](PhoneGameLab/games/02-crab-bop/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/02-crab-bop.md) |
+| [Flinch](PhoneGameLab/games/03-flinch/index.html) | 2 → **8** | 8 | 6 | 8 | 9 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/03-flinch.md) |
+| [Odd Mood](PhoneGameLab/games/06-odd-mood/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 8 | 8 | 8 | 8 | [record](docs/reviews/PhoneGameLab/06-odd-mood.md) |
+| [Beetle Box](PhoneGameLab/games/07-beetle-box/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 7 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/07-beetle-box.md) |
+| [Swindle](PhoneGameLab/games/08-swindle/index.html) | 2 → **8** | 8 | 7 | 8 | 9 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/08-swindle.md) |
+| [Tea Break](PhoneGameLab/games/09-tea-break/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/09-tea-break.md) |
+| [Bramble Drop](PhoneGameLab/games/10-bramble-drop/index.html) | 1 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/10-bramble-drop.md) |
+| [Suds Patrol](PhoneGameLab/games/13-suds-patrol/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/13-suds-patrol.md) |
+| [Windfletch](PhoneGameLab/games/17-windfletch/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/17-windfletch.md) |
+| [One Breath](PhoneGameLab/games/18-one-breath/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/18-one-breath.md) |
+| [Paper Rapids](PhoneGameLab/games/21-paper-rapids/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/21-paper-rapids.md) |
+| [Sundown Sprint](PhoneGameLab/games/22-sundown-sprint/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/22-sundown-sprint.md) |
+| [Jelly Drift](PhoneGameLab/games/26-jelly-drift/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/26-jelly-drift.md) |
+| [Tiltwood](PhoneGameLab/games/29-tiltwood/index.html) | 2 → **8** | 8 | 7 | 8 | 9 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/29-tiltwood.md) |
+| [Wobblewire](PhoneGameLab/games/30-wobblewire/index.html) | 2 → **8** | 8 | 7 | 8 | 9 | 8 | 7 | 8 | 8 | 7 | 7 | 8 | 8 | [record](docs/reviews/PhoneGameLab/30-wobblewire.md) |
 | [Star Jar](PhoneGameLab/games/37-star-jar/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 8 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/37-star-jar.md) |
+| [Misfired](PhoneGameLab/games/05-misfired/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/05-misfired.md) |
+| [Goat Up](PhoneGameLab/games/25-goat-up/index.html) | 2 → **7** | 7 | 6 | 8 | 8 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/25-goat-up.md) |
 
-Averages: overall **8.0** · Fun 8.0 · Depth 7.0 · Feel 8.0 · Look 8.0 · Anim 8.0 · Audio 8.0 · Ctrl 8.0 · Onb 8.0 · Replay 7.0 · Perf 9.0 · Robust 8.0 · Polish 8.0
+Averages: overall **7.9** · Fun 7.9 · Depth 6.9 · Feel 8.0 · Look 8.2 · Anim 7.5 · Audio 7.2 · Ctrl 8.1 · Onb 7.9 · Replay 7.2 · Perf 8.8 · Robust 8.0 · Polish 7.9
 
-<details><summary>69 not yet reviewed (baseline prototypes)</summary>
+**Below 8 — revisit first:** [Misfired](PhoneGameLab/games/05-misfired/index.html) (7), [Goat Up](PhoneGameLab/games/25-goat-up/index.html) (7)
 
-`PhoneGameLab/01-splodge` · `PhoneGameLab/02-whack-a-mole` · `PhoneGameLab/03-reaction-duel` · `PhoneGameLab/04-quick-draw` · `PhoneGameLab/05-misfired` · `PhoneGameLab/06-odd-one-out` · `PhoneGameLab/07-memory-match` · `PhoneGameLab/08-shell-game` · `PhoneGameLab/09-tea-break` · `PhoneGameLab/10-bramble-drop` · `PhoneGameLab/11-scribble-siege` · `PhoneGameLab/12-cold-snap` · `PhoneGameLab/13-suds-patrol` · `PhoneGameLab/14-bullet-hell` · `PhoneGameLab/15-fruit-slice` · `PhoneGameLab/16-knife-throw` · `PhoneGameLab/17-windfletch` · `PhoneGameLab/18-one-breath` · `PhoneGameLab/19-tin-topple` · `PhoneGameLab/20-frostfoot` · `PhoneGameLab/21-paper-rapids` · `PhoneGameLab/22-traffic-dodge` · `PhoneGameLab/23-doodle-jump` · `PhoneGameLab/24-helix-fall` · `PhoneGameLab/25-goat-up` · `PhoneGameLab/26-flappy` · `PhoneGameLab/27-jetpack` · `PhoneGameLab/28-cave-flyer` · `PhoneGameLab/29-tiltwood` · `PhoneGameLab/30-wobblewire` · `PhoneGameLab/31-sinkstones` · `PhoneGameLab/32-inkstride` · `PhoneGameLab/33-shape-gate` · `PhoneGameLab/34-stack-runner` · `PhoneGameLab/35-cake-tower` · `PhoneGameLab/36-sky-high` · `PhoneGameLab/38-plinko` · `PhoneGameLab/39-basketball` · `PhoneGameLab/40-pool` · `PhoneGameLab/41-goal-flick` · `PhoneGameLab/42-bridge-build` · `PhoneGameLab/43-2048` · `PhoneGameLab/44-match-3` · `PhoneGameLab/45-tap-clusters` · `PhoneGameLab/46-connect-dots` · `PhoneGameLab/47-pipe-rotate` · `PhoneGameLab/48-water-sort` · `PhoneGameLab/49-ball-sort` · `PhoneGameLab/50-screw-puzzle` · `PhoneGameLab/51-15-puzzle` · `PhoneGameLab/52-tetris` · `PhoneGameLab/53-block-blast` · `PhoneGameLab/54-maze` · `PhoneGameLab/55-laser-mirror` · `PhoneGameLab/56-lights-out` · `PhoneGameLab/57-minesweeper` · `PhoneGameLab/58-word-search` · `PhoneGameLab/59-nonogram` · `PhoneGameLab/60-sudoku` · `PhoneGameLab/61-snake` · `PhoneGameLab/62-slither` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
+<details><summary>51 not yet reviewed (baseline prototypes)</summary>
+
+`PhoneGameLab/04-corkslinger` · `PhoneGameLab/11-scribble-siege` · `PhoneGameLab/12-cold-snap` · `PhoneGameLab/14-bullet-hell` · `PhoneGameLab/15-fruit-slice` · `PhoneGameLab/16-knife-throw` · `PhoneGameLab/19-tin-topple` · `PhoneGameLab/20-frostfoot` · `PhoneGameLab/23-doodle-jump` · `PhoneGameLab/24-helix-fall` · `PhoneGameLab/27-fizzwhiz` · `PhoneGameLab/28-cave-flyer` · `PhoneGameLab/31-sinkstones` · `PhoneGameLab/32-inkstride` · `PhoneGameLab/33-shape-gate` · `PhoneGameLab/34-stack-runner` · `PhoneGameLab/35-cake-tower` · `PhoneGameLab/36-sky-high` · `PhoneGameLab/38-plinko` · `PhoneGameLab/39-basketball` · `PhoneGameLab/40-pool` · `PhoneGameLab/41-goal-flick` · `PhoneGameLab/42-bridge-build` · `PhoneGameLab/43-2048` · `PhoneGameLab/44-match-3` · `PhoneGameLab/45-tap-clusters` · `PhoneGameLab/46-connect-dots` · `PhoneGameLab/47-pipe-rotate` · `PhoneGameLab/48-water-sort` · `PhoneGameLab/49-ball-sort` · `PhoneGameLab/50-screw-puzzle` · `PhoneGameLab/51-15-puzzle` · `PhoneGameLab/52-tetris` · `PhoneGameLab/53-block-blast` · `PhoneGameLab/54-maze` · `PhoneGameLab/55-laser-mirror` · `PhoneGameLab/56-lights-out` · `PhoneGameLab/57-minesweeper` · `PhoneGameLab/58-word-search` · `PhoneGameLab/59-nonogram` · `PhoneGameLab/60-sudoku` · `PhoneGameLab/61-snake` · `PhoneGameLab/62-slither` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
 
 </details>
 

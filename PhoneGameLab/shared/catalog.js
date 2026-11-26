@@ -13,25 +13,26 @@ window.LAB_GAMES = [
    },
    {
     "n": 2,
-    "slug": "02-whack-a-mole",
+    "slug": "02-crab-bop",
     "t": "Crab Bop",
     "d": "Bop the crabs. Mind the urchins.",
     "v2": true,
-    "thumb": "../thumbs/PhoneGameLab--02-whack-a-mole.jpg"
+    "score": 8
    },
    {
     "n": 3,
-    "slug": "03-reaction-duel",
-    "t": "Reaction Duel",
-    "d": "Wait for the signal — fastest finger wins.",
-    "thumb": "../thumbs/PhoneGameLab--03-reaction-duel.jpg"
+    "slug": "03-flinch",
+    "t": "Flinch",
+    "d": "Eight green lights. Don't jump the gun.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 4,
-    "slug": "04-quick-draw",
-    "t": "Quick Draw",
-    "d": "Cowboy duel: don't fire before \"DRAW!\".",
-    "thumb": "../thumbs/PhoneGameLab--04-quick-draw.jpg"
+    "slug": "04-corkslinger",
+    "t": "Corkslinger",
+    "d": "Wait for the bell. Out-draw the whole toy box.",
+    "v2": true
    },
    {
     "n": 5,
@@ -46,326 +47,30 @@ window.LAB_GAMES = [
     "slug": "06-odd-mood",
     "t": "Odd Mood",
     "d": "Everyone feels the same. Except one. Find them.",
-    "v2": true
-   },
-   {
-    "n": 7,
-    "slug": "07-memory-match",
-    "t": "Memory Match",
-    "d": "Flip cards and find matching pairs.",
-    "thumb": "../thumbs/PhoneGameLab--07-memory-match.jpg"
+    "v2": true,
+    "score": 8
    },
    {
     "n": 8,
-    "slug": "08-shell-game",
-    "t": "Cups & Ball",
-    "d": "Watch the cups shuffle. Where's the ball?",
-    "thumb": "../thumbs/PhoneGameLab--08-shell-game.jpg"
-   }
-  ]
- },
- {
-  "cat": "Arcade & Action",
-  "items": [
-   {
-    "n": 9,
-    "slug": "09-tea-break",
-    "t": "Tea Break",
-    "d": "Bash through the biscuit tin, one rally at a time.",
+    "slug": "08-swindle",
+    "t": "Swindle",
+    "d": "Eyes on the pearl. The cups cheat.",
     "v2": true,
     "score": 8
-   },
-   {
-    "n": 13,
-    "slug": "13-suds-patrol",
-    "t": "Suds Patrol",
-    "d": "One bar of soap. One very dirty floor.",
-    "v2": true
-   },
-   {
-    "n": 14,
-    "slug": "14-bullet-hell",
-    "t": "Bullet Hell",
-    "d": "Survive dense bullet patterns.",
-    "thumb": "../thumbs/PhoneGameLab--14-bullet-hell.jpg"
-   },
-   {
-    "n": 15,
-    "slug": "15-fruit-slice",
-    "t": "Fruit Slice",
-    "d": "Swipe to slice fruit, dodge bombs.",
-    "thumb": "../thumbs/PhoneGameLab--15-fruit-slice.jpg"
-   },
-   {
-    "n": 16,
-    "slug": "16-knife-throw",
-    "t": "Knife Throw",
-    "d": "Stick knives in a spinning log.",
-    "thumb": "../thumbs/PhoneGameLab--16-knife-throw.jpg"
-   },
-   {
-    "n": 17,
-    "slug": "17-windfletch",
-    "t": "Windfletch",
-    "d": "Read the wind. Split the gold.",
-    "v2": true,
-    "score": 8
-   },
-   {
-    "n": 21,
-    "slug": "21-paper-rapids",
-    "t": "Paper Rapids",
-    "d": "A paper boat, three channels, and a taste for close shaves.",
-    "v2": true
-   }
-  ]
- },
- {
-  "cat": "Puzzle & Match",
-  "items": [
-   {
-    "n": 10,
-    "slug": "10-bramble-drop",
-    "t": "Bramble Drop",
-    "d": "Pick the bramble clean before it reaches the hedge.",
-    "v2": true
-   }
-  ]
- },
- {
-  "cat": "Minigame",
-  "items": [
-   {
-    "n": 11,
-    "slug": "11-scribble-siege",
-    "t": "Space Invaders",
-    "d": "Drag to move ship. Tap to fire."
-   },
-   {
-    "n": 12,
-    "slug": "12-cold-snap",
-    "t": "Asteroids",
-    "d": "Drag to steer toward your finger. Tap-and-hold to thrust. Double-tap to fire."
-   },
-   {
-    "n": 19,
-    "slug": "19-tin-topple",
-    "t": "Cannon",
-    "d": "Drag from cannon to aim; release to fire (parabolic)."
-   },
-   {
-    "n": 20,
-    "slug": "20-frostfoot",
-    "t": "Endless Runner",
-    "d": "Tap = jump • Swipe down = slide."
-   },
-   {
-    "n": 30,
-    "slug": "30-wobblewire",
-    "t": "Balance Beam",
-    "d": "Tap LEFT / RIGHT side to nudge balance. Stay centered!"
-   },
-   {
-    "n": 31,
-    "slug": "31-sinkstones",
-    "t": "Vanishing Tiles",
-    "d": "Tap a tile to step there. Avoid empty squares and fading ones!"
-   },
-   {
-    "n": 32,
-    "slug": "32-inkstride",
-    "t": "Color Path",
-    "d": "Tap to switch color. Only step on tiles matching your color."
-   }
-  ]
- },
- {
-  "cat": "Skill & Rhythm",
-  "items": [
-   {
-    "n": 18,
-    "slug": "18-one-breath",
-    "t": "One Breath",
-    "d": "Hold your breath. Ring the far gong.",
-    "v2": true
-   },
-   {
-    "n": 67,
-    "slug": "67-cooking-serve",
-    "t": "Cook & Serve",
-    "d": "Drag the right ingredients to each order.",
-    "thumb": "../thumbs/PhoneGameLab--67-cooking-serve.jpg"
-   },
-   {
-    "n": 68,
-    "slug": "68-sort-baskets",
-    "t": "Sort Baskets",
-    "d": "Fling falling items into the right basket.",
-    "thumb": "../thumbs/PhoneGameLab--68-sort-baskets.jpg"
-   },
-   {
-    "n": 69,
-    "slug": "69-piano-tiles",
-    "t": "Piano Tiles",
-    "d": "Tap the black tiles — never miss one.",
-    "thumb": "../thumbs/PhoneGameLab--69-piano-tiles.jpg"
-   },
-   {
-    "n": 70,
-    "slug": "70-rhythm-lane",
-    "t": "Rhythm Lane",
-    "d": "Hit notes in their lanes in time with the beat.",
-    "thumb": "../thumbs/PhoneGameLab--70-rhythm-lane.jpg"
-   }
-  ]
- },
- {
-  "cat": "Runner & Movement",
-  "items": [
-   {
-    "n": 22,
-    "slug": "22-traffic-dodge",
-    "t": "Traffic Dodge",
-    "d": "Top-down: weave through traffic.",
-    "thumb": "../thumbs/PhoneGameLab--22-traffic-dodge.jpg"
-   },
-   {
-    "n": 23,
-    "slug": "23-doodle-jump",
-    "t": "Doodle Jump",
-    "d": "Auto-bounce upward, tilt to steer.",
-    "thumb": "../thumbs/PhoneGameLab--23-doodle-jump.jpg"
-   },
-   {
-    "n": 24,
-    "slug": "24-helix-fall",
-    "t": "Helix Fall",
-    "d": "Rotate the tower so the ball falls through gaps.",
-    "thumb": "../thumbs/PhoneGameLab--24-helix-fall.jpg"
-   },
-   {
-    "n": 25,
-    "slug": "25-goat-up",
-    "t": "Goat Up",
-    "d": "Hop the zig-zag crags before you run out of puff.",
-    "v2": true,
-    "score": 7
-   },
-   {
-    "n": 26,
-    "slug": "26-jelly-drift",
-    "t": "Jelly Drift",
-    "d": "Pulse up, drift down, thread the reef.",
-    "v2": true
-   },
-   {
-    "n": 27,
-    "slug": "27-jetpack",
-    "t": "Jetpack Hold",
-    "d": "Hold to fly, release to fall.",
-    "thumb": "../thumbs/PhoneGameLab--27-jetpack.jpg"
-   },
-   {
-    "n": 28,
-    "slug": "28-cave-flyer",
-    "t": "Cave Flyer",
-    "d": "Navigate a narrowing cave tunnel.",
-    "thumb": "../thumbs/PhoneGameLab--28-cave-flyer.jpg"
-   },
-   {
-    "n": 29,
-    "slug": "29-tiltwood",
-    "t": "Tiltwood",
-    "d": "Tip the board. Roll the marble home.",
-    "v2": true
-   },
-   {
-    "n": 33,
-    "slug": "33-shape-gate",
-    "t": "Shape Gate",
-    "d": "Morph shape to fit the gate's hole.",
-    "thumb": "../thumbs/PhoneGameLab--33-shape-gate.jpg"
-   },
-   {
-    "n": 34,
-    "slug": "34-stack-runner",
-    "t": "Stack Runner",
-    "d": "Collect blocks, lay them to cross gaps.",
-    "thumb": "../thumbs/PhoneGameLab--34-stack-runner.jpg"
-   }
-  ]
- },
- {
-  "cat": "Stack & Physics",
-  "items": [
-   {
-    "n": 35,
-    "slug": "35-cake-tower",
-    "t": "Cake Tower",
-    "d": "Drop swinging layers — perfect timing.",
-    "thumb": "../thumbs/PhoneGameLab--35-cake-tower.jpg"
-   },
-   {
-    "n": 36,
-    "slug": "36-sky-high",
-    "t": "Sky High Stack",
-    "d": "Sliding blocks, only matching overlap stays.",
-    "thumb": "../thumbs/PhoneGameLab--36-sky-high.jpg"
-   },
-   {
-    "n": 38,
-    "slug": "38-plinko",
-    "t": "Plinko",
-    "d": "Drop the ball — chase the big multiplier.",
-    "thumb": "../thumbs/PhoneGameLab--38-plinko.jpg"
-   },
-   {
-    "n": 39,
-    "slug": "39-basketball",
-    "t": "Basketball Flick",
-    "d": "Flick to shoot, arc to the hoop.",
-    "thumb": "../thumbs/PhoneGameLab--39-basketball.jpg"
-   },
-   {
-    "n": 40,
-    "slug": "40-pool",
-    "t": "Pool",
-    "d": "Drag-aim the cue, pot the balls.",
-    "thumb": "../thumbs/PhoneGameLab--40-pool.jpg"
-   },
-   {
-    "n": 41,
-    "slug": "41-goal-flick",
-    "t": "Goal Flick",
-    "d": "Flick the ball past the keeper.",
-    "thumb": "../thumbs/PhoneGameLab--41-goal-flick.jpg"
-   },
-   {
-    "n": 42,
-    "slug": "42-bridge-build",
-    "t": "Bridge Build",
-    "d": "Hold to extend a bridge over the gap.",
-    "thumb": "../thumbs/PhoneGameLab--42-bridge-build.jpg"
-   }
-  ]
- },
- {
-  "cat": "Physics & Merge",
-  "items": [
-   {
-    "n": 37,
-    "slug": "37-star-jar",
-    "t": "Star Jar",
-    "d": "Fuse star-stuff. Don't overflow the jar.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab--37-star-jar.jpg"
    }
   ]
  },
  {
   "cat": "Puzzle & Logic",
   "items": [
+   {
+    "n": 7,
+    "slug": "07-beetle-box",
+    "t": "Beetle Box",
+    "d": "Pin the pairs. Only forgetting costs you.",
+    "v2": true,
+    "score": 8
+   },
    {
     "n": 43,
     "slug": "43-2048",
@@ -491,6 +196,318 @@ window.LAB_GAMES = [
     "t": "Mini Sudoku",
     "d": "Fill the 4×4 grid — no row/col/box repeats.",
     "thumb": "../thumbs/PhoneGameLab--60-sudoku.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Arcade & Action",
+  "items": [
+   {
+    "n": 9,
+    "slug": "09-tea-break",
+    "t": "Tea Break",
+    "d": "Bash through the biscuit tin, one rally at a time.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 11,
+    "slug": "11-scribble-siege",
+    "t": "Scribble Siege",
+    "d": "The doodles in the margin are marching. Rub them out.",
+    "v2": true
+   },
+   {
+    "n": 13,
+    "slug": "13-suds-patrol",
+    "t": "Suds Patrol",
+    "d": "One bar of soap. One very dirty floor.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 14,
+    "slug": "14-bullet-hell",
+    "t": "Bullet Hell",
+    "d": "Survive dense bullet patterns.",
+    "thumb": "../thumbs/PhoneGameLab--14-bullet-hell.jpg"
+   },
+   {
+    "n": 15,
+    "slug": "15-fruit-slice",
+    "t": "Fruit Slice",
+    "d": "Swipe to slice fruit, dodge bombs.",
+    "thumb": "../thumbs/PhoneGameLab--15-fruit-slice.jpg"
+   },
+   {
+    "n": 16,
+    "slug": "16-knife-throw",
+    "t": "Knife Throw",
+    "d": "Stick knives in a spinning log.",
+    "thumb": "../thumbs/PhoneGameLab--16-knife-throw.jpg"
+   },
+   {
+    "n": 17,
+    "slug": "17-windfletch",
+    "t": "Windfletch",
+    "d": "Read the wind. Split the gold.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 21,
+    "slug": "21-paper-rapids",
+    "t": "Paper Rapids",
+    "d": "A paper boat, three channels, and a taste for close shaves.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 22,
+    "slug": "22-sundown-sprint",
+    "t": "Sundown Sprint",
+    "d": "Floor it down the desert highway. Skim traffic to buy time.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 23,
+    "slug": "23-doodle-jump",
+    "t": "Pogo Peak",
+    "d": "Bounce a pogo chick from meadow to starlight.",
+    "v2": true,
+    "thumb": "../thumbs/PhoneGameLab--23-doodle-jump.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Puzzle & Match",
+  "items": [
+   {
+    "n": 10,
+    "slug": "10-bramble-drop",
+    "t": "Bramble Drop",
+    "d": "Pick the bramble clean before it reaches the hedge.",
+    "v2": true,
+    "score": 8
+   }
+  ]
+ },
+ {
+  "cat": "Minigame",
+  "items": [
+   {
+    "n": 12,
+    "slug": "12-cold-snap",
+    "t": "Asteroids",
+    "d": "Drag to steer toward your finger. Tap-and-hold to thrust. Double-tap to fire."
+   },
+   {
+    "n": 20,
+    "slug": "20-frostfoot",
+    "t": "Endless Runner",
+    "d": "Tap = jump • Swipe down = slide."
+   },
+   {
+    "n": 32,
+    "slug": "32-inkstride",
+    "t": "Color Path",
+    "d": "Tap to switch color. Only step on tiles matching your color."
+   }
+  ]
+ },
+ {
+  "cat": "Skill & Rhythm",
+  "items": [
+   {
+    "n": 18,
+    "slug": "18-one-breath",
+    "t": "One Breath",
+    "d": "Hold your breath. Ring the far gong.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 67,
+    "slug": "67-cooking-serve",
+    "t": "Cook & Serve",
+    "d": "Drag the right ingredients to each order.",
+    "thumb": "../thumbs/PhoneGameLab--67-cooking-serve.jpg"
+   },
+   {
+    "n": 68,
+    "slug": "68-sort-baskets",
+    "t": "Sort Baskets",
+    "d": "Fling falling items into the right basket.",
+    "thumb": "../thumbs/PhoneGameLab--68-sort-baskets.jpg"
+   },
+   {
+    "n": 69,
+    "slug": "69-piano-tiles",
+    "t": "Piano Tiles",
+    "d": "Tap the black tiles — never miss one.",
+    "thumb": "../thumbs/PhoneGameLab--69-piano-tiles.jpg"
+   },
+   {
+    "n": 70,
+    "slug": "70-rhythm-lane",
+    "t": "Rhythm Lane",
+    "d": "Hit notes in their lanes in time with the beat.",
+    "thumb": "../thumbs/PhoneGameLab--70-rhythm-lane.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Stack & Physics",
+  "items": [
+   {
+    "n": 19,
+    "slug": "19-tin-topple",
+    "t": "Tin Topple",
+    "d": "Topple the block forts. Bonk every tin bot.",
+    "v2": true
+   },
+   {
+    "n": 35,
+    "slug": "35-cake-tower",
+    "t": "Cake Tower",
+    "d": "Drop swinging layers — perfect timing.",
+    "thumb": "../thumbs/PhoneGameLab--35-cake-tower.jpg"
+   },
+   {
+    "n": 36,
+    "slug": "36-sky-high",
+    "t": "Sky High Stack",
+    "d": "Sliding blocks, only matching overlap stays.",
+    "thumb": "../thumbs/PhoneGameLab--36-sky-high.jpg"
+   },
+   {
+    "n": 38,
+    "slug": "38-plinko",
+    "t": "Plinko",
+    "d": "Drop the ball — chase the big multiplier.",
+    "thumb": "../thumbs/PhoneGameLab--38-plinko.jpg"
+   },
+   {
+    "n": 39,
+    "slug": "39-basketball",
+    "t": "Basketball Flick",
+    "d": "Flick to shoot, arc to the hoop.",
+    "thumb": "../thumbs/PhoneGameLab--39-basketball.jpg"
+   },
+   {
+    "n": 40,
+    "slug": "40-pool",
+    "t": "Pool",
+    "d": "Drag-aim the cue, pot the balls.",
+    "thumb": "../thumbs/PhoneGameLab--40-pool.jpg"
+   },
+   {
+    "n": 41,
+    "slug": "41-goal-flick",
+    "t": "Goal Flick",
+    "d": "Flick the ball past the keeper.",
+    "thumb": "../thumbs/PhoneGameLab--41-goal-flick.jpg"
+   },
+   {
+    "n": 42,
+    "slug": "42-bridge-build",
+    "t": "Bridge Build",
+    "d": "Hold to extend a bridge over the gap.",
+    "thumb": "../thumbs/PhoneGameLab--42-bridge-build.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Runner & Movement",
+  "items": [
+   {
+    "n": 24,
+    "slug": "24-helix-fall",
+    "t": "Helix Fall",
+    "d": "Rotate the tower so the ball falls through gaps.",
+    "thumb": "../thumbs/PhoneGameLab--24-helix-fall.jpg"
+   },
+   {
+    "n": 25,
+    "slug": "25-goat-up",
+    "t": "Goat Up",
+    "d": "Hop the zig-zag crags before you run out of puff.",
+    "v2": true,
+    "score": 7
+   },
+   {
+    "n": 26,
+    "slug": "26-jelly-drift",
+    "t": "Jelly Drift",
+    "d": "Pulse up, drift down, thread the reef.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 27,
+    "slug": "27-fizzwhiz",
+    "t": "Fizzwhiz",
+    "d": "Ride a shaken soda bottle down the sundown boardwalk.",
+    "v2": true
+   },
+   {
+    "n": 28,
+    "slug": "28-cave-flyer",
+    "t": "Cave Flyer",
+    "d": "Navigate a narrowing cave tunnel.",
+    "thumb": "../thumbs/PhoneGameLab--28-cave-flyer.jpg"
+   },
+   {
+    "n": 29,
+    "slug": "29-tiltwood",
+    "t": "Tiltwood",
+    "d": "Tip the board. Roll the marble home.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 30,
+    "slug": "30-wobblewire",
+    "t": "Wobblewire",
+    "d": "Lean left, lean right. Don't look down.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 31,
+    "slug": "31-sinkstones",
+    "t": "Sinkstones",
+    "d": "Remember the stones. Cross before they sink.",
+    "v2": true
+   },
+   {
+    "n": 33,
+    "slug": "33-shape-gate",
+    "t": "Shape Gate",
+    "d": "Morph shape to fit the gate's hole.",
+    "thumb": "../thumbs/PhoneGameLab--33-shape-gate.jpg"
+   },
+   {
+    "n": 34,
+    "slug": "34-stack-runner",
+    "t": "Stack Runner",
+    "d": "Collect blocks, lay them to cross gaps.",
+    "thumb": "../thumbs/PhoneGameLab--34-stack-runner.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Physics & Merge",
+  "items": [
+   {
+    "n": 37,
+    "slug": "37-star-jar",
+    "t": "Star Jar",
+    "d": "Fuse star-stuff. Don't overflow the jar.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--37-star-jar.jpg"
    }
   ]
  },
