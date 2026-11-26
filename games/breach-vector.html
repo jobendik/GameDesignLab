@@ -208,7 +208,7 @@ const ET = {
   flanker: { hp: 45, r: 12, walk: 85, run: 205, view: 340, fov: 2.1, turn: 7, burst: 1, pellets: 4, rof: 0.1, cd: 1.15, dmg: 7, bspd: 560, spread: 0.2, color: '#ff9f1c', score: 60, react: 0.45, name: 'FLANKER' },
   marksman: { hp: 40, r: 12, walk: 55, run: 90, view: 640, fov: 0.95, turn: 3.2, burst: 1, rof: 0.1, cd: 2.2, dmg: 38, bspd: 1500, spread: 0.008, color: '#b47cff', score: 70, react: 0.2, aim: 0.9, name: 'MARKSMAN' },
   heavy: { hp: 190, r: 17, walk: 50, run: 88, view: 360, fov: 1.75, turn: 2.1, burst: 6, rof: 0.09, cd: 1.6, dmg: 7, bspd: 600, spread: 0.13, color: '#ffd166', score: 120, react: 0.6, shield: true, name: 'HEAVY' },
-  commander: { hp: 120, r: 14, walk: 75, run: 160, view: 420, fov: 2.1, turn: 6, burst: 4, rof: 0.11, cd: 0.95, dmg: 10, bspd: 700, spread: 0.06, color: '#ff2e88', score: 300, react: 0.4, name: 'COMMANDER' },
+  commander: { hp: 150, r: 14, walk: 75, run: 160, view: 420, fov: 2.1, turn: 6, burst: 4, rof: 0.11, cd: 0.95, dmg: 10, bspd: 700, spread: 0.06, color: '#ff2e88', score: 300, react: 0.4, name: 'COMMANDER' },
 };
 const PERKS = [
   { id: 'soles', name: 'Soft Soles', desc: 'Running is 60% quieter' }, { id: 'armor', name: 'Plate Carrier', desc: '+50 armour every mission' },
@@ -412,7 +412,7 @@ function startMission(n) {
   P = { x: L.spawn.x, y: L.spawn.y, vx: 0, vy: 0, r: 12, ang: 0, hp: Math.min(100, RUN.hp + (n > 1 ? 20 : 0)), armor: 50 * perk('armor'), wi: 0, fireCd: 0, reloadT: 0, dashT: 0, dashCd: 0, dvx: 0, dvy: 0, inv: 0, meleeCd: 0, sneak: false, moving: false, stepT: 0, dead: false, hurtT: 0, lunge: 0, flashes: 2 + 2 * perk('band'), flashMax: 2 + 2 * perk('band'), flashCd: 0, kick: 0, spreadAdd: 0, ctx: null, hackT: null,
     w: WEAPONS.map((w, i) => ({ ...w, mag: Math.round(w.mag * magK), ammo: Math.round(w.mag * magK), res: RUN.w ? Math.max(RUN.w[i], Math.round(w.reserve * 0.6)) : w.reserve })) };
   if (L.rooms[L.entry].cx > P.x) P.ang = 0;
-  bullets.length = parts.length = texts.length = rings.length = decals.length = bangs.length = 0; cam.x = P.x; cam.y = P.y; G.slow = 0; G.shake = 0; G.whiteout = 0; G.alert = G.alertPrev = 'hidden'; G.time = 0;
+  bullets.length = parts.length = texts.length = rings.length = decals.length = bangs.length = 0; cam.x = P.x; cam.y = P.y; G.slow = 0; G.shake = 0; G.whiteout = 0; G.alert = G.alertPrev = 'hidden'; G.time = 0; G.failWhy = null;
   hudDirty(); banner('OP ' + n + ' · ' + MTYPE[L.type], L.obj[0].label.toUpperCase());
   $('timer').style.display = 'none';
 }
@@ -425,7 +425,7 @@ function reinforce() { // the job is done: a response team comes in from the far
 function addScore(n, at, label, color) { RUN.score += n; if (at) floatText(at.x, at.y - 22, (label ? label + ' ' : '') + '+' + n, color || '#b9ffe9'); hud.score = -1; }
 function missionComplete() {
   if (G.mode !== 'play') return; G.mode = 'debrief'; document.body.classList.remove('play'); SFX.win(); RUN.cleared++;
-  const par = 45 + L.rooms.length * 16, tb = Math.max(0, Math.round((par - M.time) * 6)), lines = [['Objectives', (L.obj.length - 1) * 300], ['Hostiles neutralised ×' + M.kills, RUN.score - M.start - (L.obj.length - 1) * 300]];
+  const par = 45 + L.rooms.length * 16, tb = Math.max(0, Math.round((par - M.time) * 6)), lines = [['Objectives', (L.obj.length - 1) * 300], ['Field actions · ' + M.kills + ' neutralised', RUN.score - M.start - (L.obj.length - 1) * 300]];
   const bonus = [['Extraction', 400 + 100 * L.n], ['Time ' + fmt(M.time) + ' / par ' + fmt(par), tb]]; if (!M.spotted) bonus.push(['GHOST — never in combat', 600]); if (!M.hurt) bonus.push(['Untouched', 250]); if (M.kills === 0) bonus.push(['Pacifist', 300]);
   let add = 0; for (const b of bonus) add += b[1]; RUN.score += add; const total = RUN.score - M.start;
   const gradeScore = (M.spotted ? 0 : 2) + (M.hurt ? 0 : 1) + (tb > 0 ? 1 : 0) + (M.takedowns >= 2 || M.silent >= 3 ? 1 : 0), grade = gradeScore >= 4 ? 'S' : gradeScore === 3 ? 'A' : gradeScore === 2 ? 'B' : 'C';
@@ -433,7 +433,7 @@ function missionComplete() {
   $('dTally').innerHTML = [...lines, ...bonus].map(l => `<div><span>${l[0]}</span><b>${l[1] > 0 ? '+' : ''}${l[1]}</b></div>`).join('') + `<div class="tot"><span>Mission</span><b>+${total}</b></div>`;
   const opts = PERKS.filter(p => perk(p.id) < 2).sort(() => rnd() - 0.5).slice(0, 3); G.perkOpts = opts;
   $('dPerks').innerHTML = opts.map((p, i) => `<button class="perk" data-i="${i}"><b>${p.name}</b><span>${p.desc}</span></button>`).join('');
-  RUN.hp = P.hp; RUN.w = P.w.map(w => w.res + w.ammo - w.mag < 0 ? 0 : w.res); saveBest(); $('debrief').classList.remove('hidden'); G.debriefAt = performance.now();
+  RUN.hp = P.hp; RUN.w = P.w.map(w => w.res); saveBest(); $('debrief').classList.remove('hidden'); G.debriefAt = performance.now();
 }
 function choosePerk(i) { if (G.mode !== 'debrief' || performance.now() - G.debriefAt < 450) return; const p = G.perkOpts[i]; if (!p) return; RUN.perks[p.id] = perk(p.id) + 1; if (p.id === 'medic') RUN.hp = Math.min(100, RUN.hp + 50); SFX.pick(); $('debrief').classList.add('hidden'); G.mode = 'play'; document.body.classList.add('play'); startMission(RUN.mission + 1); last = performance.now(); }
 function saveBest() { if (RUN.score > G.best) { G.best = RUN.score; G.newBest = true; store.set('gdl:best:' + KEY, G.best); } hud.best = -1; }
@@ -523,15 +523,15 @@ function melee(c) {
   else { damageEnemy(e, 40, P.x, P.y, 1); e.stun = Math.max(e.stun, 0.5); SFX.hit(); }
 }
 function updatePlayer(dt) {
-  if (P.dead) { M.deadT += dt; if (M.deadT > 1.3) gameOver('Operator down'); return; }
+  if (P.dead) { M.deadT += dt; if (M.deadT > 1.3) gameOver(G.failWhy || 'Operator down'); return; }
   // aim
   if (G.touch) { if (IN.aimMag > 0.18) P.ang = Math.atan2(IN.ay, IN.ax); else if (P.moving) P.ang += angDiff(Math.atan2(P.vy, P.vx), P.ang) * Math.min(1, dt * 8); }
-  else { IN.wx = (IN.mx - VW / 2) / Z + cam.x; IN.wy = (IN.my - VH / 2) / Z + cam.y; const dx = IN.wx - P.x, dy = IN.wy - P.y; if (dx * dx + dy * dy > 16) P.ang = Math.atan2(dy, dx); }
+  else { viewCam(); IN.wx = (IN.mx - VW / 2) / Z + cam.rx; IN.wy = (IN.my - VH / 2) / Z + cam.ry; const dx = IN.wx - P.x, dy = IN.wy - P.y; if (dx * dx + dy * dy > 16) P.ang = Math.atan2(dy, dx); }
   // move
   let mx = IN.r - IN.l + IN.lx, my = IN.d - IN.u + IN.ly; const ml = hyp(mx, my); if (ml > 1) { mx /= ml; my /= ml; }
   P.sneak = !!IN.sneak || (G.touch && ml > 0.05 && ml < 0.6); P.moving = ml > 0.08; const spd = P.sneak ? 95 : 205;
   P.dashCd -= dt; P.inv = Math.max(0, P.inv - dt); P.meleeCd -= dt; P.flashCd -= dt; P.fireCd -= dt; P.hurtT = Math.max(0, P.hurtT - dt); P.kick = Math.max(0, P.kick - dt * 9); P.lunge = Math.max(0, P.lunge - dt * 6); P.spreadAdd = Math.max(0, P.spreadAdd - dt * 0.12); if (P.hitT > 0) P.hitT -= dt;
-  if (IN.dash) { IN.dash = false; if (P.dashCd <= 0) { let dx = mx, dy = my; if (ml < 0.1) { dx = Math.cos(P.ang); dy = Math.sin(P.ang); } else { dx /= Math.max(ml, 1e-3) * (ml > 1 ? 1 : 1); const l = hyp(dx, dy); dx /= l; dy = my / Math.max(hyp(mx, my), 1e-3); } const l2 = hyp(dx, dy) || 1; P.dvx = dx / l2 * 640; P.dvy = dy / l2 * 640; P.dashT = 0.15; P.dashCd = 1.1 * (1 - 0.4 * Math.min(1, perk('dash'))); P.inv = 0.2; SFX.dash(); noise(P.x, P.y, 150 * (1 - 0.6 * Math.min(1, perk('soles'))), false); } }
+  if (IN.dash) { IN.dash = false; if (P.dashCd <= 0) { let dx = mx, dy = my; if (ml < 0.1) { dx = Math.cos(P.ang); dy = Math.sin(P.ang); } const l2 = hyp(dx, dy) || 1; P.dvx = dx / l2 * 640; P.dvy = dy / l2 * 640; P.dashT = 0.15; P.dashCd = 1.1 * (1 - 0.4 * Math.min(1, perk('dash'))); P.inv = 0.2; SFX.dash(); noise(P.x, P.y, 150 * (1 - 0.6 * Math.min(1, perk('soles'))), false); } }
   if (P.dashT > 0) { P.dashT -= dt; P.vx = P.dvx; P.vy = P.dvy; if (parts.length < 300) parts.push({ x: P.x, y: P.y, vx: 0, vy: 0, life: 0.22, max: 0.22, color: '#3df2b4', size: 9 }); }
   else { const k = 1 - Math.exp(-dt * 16); P.vx += (mx * spd - P.vx) * k; P.vy += (my * spd - P.vy) * k; }
   P.x += P.vx * dt; P.y += P.vy * dt; const hit = pushOut(P, P.r, L.solid);
@@ -546,7 +546,7 @@ function updatePlayer(dt) {
   // context action
   const c = P.ctx = context();
   if (IN.melee) { IN.melee = false; if (c && c.e) melee(c); }
-  if (IN.actEdge) { IN.actEdge = false; if (c) { if (c.e) melee(c); else if (c.kind === 'door') { if (c.d.open) { if (!L.enemies.some(e => !e.dead && hyp(e.x - c.d.cx, e.y - c.d.cy) < 30) && hyp(P.x - clamp(P.x, c.d.x, c.d.x + c.d.w), P.y - clamp(P.y, c.d.y, c.d.y + c.d.h)) > P.r + 1) { c.d.open = false; rebuild(); SFX.door(); } } else openDoor(c.d, false); } else if (c.kind === 'locked') SFX.locked(); } }
+  if (IN.actEdge) { IN.actEdge = false; if (c) { if (c.e) melee(c); else if (c.kind === 'door') { if (c.d.open) { const dd = c.d; if (!L.enemies.some(e => hyp(e.x - dd.cx, e.y - dd.cy) < 34) && hyp(P.x - clamp(P.x, dd.x, dd.x + dd.w), P.y - clamp(P.y, dd.y, dd.y + dd.h)) > P.r + 1) { dd.open = false; rebuild(); SFX.door(); } } else openDoor(c.d, false); } else if (c.kind === 'locked') SFX.locked(); } }
   if (c && c.kind === 'hack' && IN.act) { const t = c.t, k = 1 - 0.4 * Math.min(1, perk('hands')), before = t.prog; t.prog += dt / (t.time * k); if (Math.floor(t.prog * 8) !== Math.floor(before * 8)) SFX.tick(t.prog); P.hackT = t; if (t.prog >= 1) { t.done = true; t.prog = 1; spark(t.x, t.y, '#3df2b4', 18, 160); if (t.kind === 'switch') { for (const d of L.doors) if (d.locked) { d.locked = false; ring(d.cx, d.cy, 60, 'rgba(61,242,180,', 0.8); } rebuild(); } if (t.kind === 'core') { M.bomb = 45; $('timer').style.display = 'block'; for (const e of L.enemies) if (!e.dead && e.state !== 'combat') { setState(e, 'search'); e.lx = t.x; e.ly = t.y; e.searchT = 14; } } objDone(t.kind); } }
   else { P.hackT = null; for (const t of L.terms) if (!t.done && t.prog > 0) t.prog = Math.max(0, t.prog - dt * 0.8); }
   // pickups
@@ -671,7 +671,7 @@ function update(dt) {
   if (G.slow > 0) { G.slow -= dt; dt *= 0.35; }
   G.time += dt; M.time += dt; updatePlayer(dt); if (G.mode !== 'play') return; updateEnemies(dt); updateBullets(dt); updateFx(dt);
   if (M.bomb > 0) { const b = M.bomb; M.bomb -= dt; if (Math.floor(b) !== Math.floor(M.bomb) && M.bomb < 10) SFX.beep(); if (M.bomb <= 0 && !P.dead) { SFX.boom(P.x, P.y); G.whiteout = 1; P.dead = true; P.hp = 0; M.deadT = 0.6; G.failWhy = 'Caught in the blast'; banner('DETONATION', 'YOU DID NOT MAKE IT OUT', true); } }
-  if (P.dead && M.deadT > 1.3 && G.mode === 'play') gameOver(G.failWhy); if (!P.dead) G.failWhy = null;
+  
   if (G.alert !== G.alertPrev) { if (G.alertPrev === 'combat' && G.alert !== 'combat') hintOnce('lost', 'THEY LOST YOU', 'STAY OUT OF SIGHT UNTIL THE SEARCH ENDS'); G.alertPrev = G.alert; hud.alert = ''; }
   // camera
   const lx = G.touch ? Math.cos(P.ang) * 46 : (IN.mx - VW / 2) / Z * 0.16, ly = G.touch ? Math.sin(P.ang) * 46 : (IN.my - VH / 2) / Z * 0.16, k = 1 - Math.exp(-dt * 7); cam.x += (P.x + lx - cam.x) * k; cam.y += (P.y + ly - cam.y) * k;
@@ -681,6 +681,7 @@ function update(dt) {
    RENDER
    ===================================================================================== */
 const canvas = $('game'), g = canvas.getContext('2d'), fogC = document.createElement('canvas'), fg = fogC.getContext('2d');
+function viewCam() { const vw = VW / Z, vh = VH / Z; cam.rx = L.W + 120 > vw ? clamp(cam.x, vw / 2 - 60, L.W - vw / 2 + 60) : L.W / 2; cam.ry = L.H + 120 > vh ? clamp(cam.y, vh / 2 - 60, L.H - vh / 2 + 60) : L.H / 2; }
 function resize() { DPR = Math.min(2, window.devicePixelRatio || 1); VW = Math.max(1, innerWidth); VH = Math.max(1, innerHeight); canvas.width = Math.round(VW * DPR); canvas.height = Math.round(VH * DPR); fogC.width = canvas.width; fogC.height = canvas.height; Z = clamp(Math.sqrt(VW * VH) / 880, 0.6, 1.2); if (G.touch) Z = Math.max(Z, 0.66); }
 const polyA = new Float32Array(2400), polyI = [];
 function sightPoly(ox, oy, maxD) {
@@ -703,7 +704,7 @@ function drawEnemyBody(e, x, y, ang, alpha, ghost) {
 }
 function render() {
   g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#04060b'; g.fillRect(0, 0, canvas.width, canvas.height); if (!L) return;
-  const vw = VW / Z, vh = VH / Z; let cx = cam.x, cy = cam.y; cx = L.W + 120 > vw ? clamp(cx, vw / 2 - 60, L.W - vw / 2 + 60) : L.W / 2; cy = L.H + 120 > vh ? clamp(cy, vh / 2 - 60, L.H - vh / 2 + 60) : L.H / 2; cam.rx = cx; cam.ry = cy;
+  const vw = VW / Z, vh = VH / Z; viewCam(); const cx = cam.rx, cy = cam.ry;
   const sh = REDUCED ? 0.3 : 1, sx = (Math.random() - 0.5) * G.shake * sh, sy = (Math.random() - 0.5) * G.shake * sh, S = DPR * Z, ox = (VW / 2 - cx * Z + sx) * DPR, oy = (VH / 2 - cy * Z + sy) * DPR;
   g.setTransform(S, 0, 0, S, ox, oy);
   const x0 = cx - vw / 2 - 40, x1 = cx + vw / 2 + 40, y0 = cy - vh / 2 - 40, y1 = cy + vh / 2 + 40, inV = (x, y, m) => x > x0 - m && x < x1 + m && y > y0 - m && y < y1 + m;
@@ -775,10 +776,10 @@ function render() {
   // ---- screen space
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
   // objective arrow at the screen edge
-  { let tx = null, ty = 0, col = '#4cc9f0'; if (M.phase === 'exfil') { tx = L.extract.x + L.extract.w / 2; ty = L.extract.y + L.extract.h / 2; col = '#3df2b4'; } else { let bd = 1e9; for (const t of L.terms) { if (t.done) continue; if (t.kind !== 'switch' && L.doors.some(d => d.locked) && t.room === L.final) continue; const d = hyp(t.x - P.x, t.y - P.y); if (d < bd) { bd = d; tx = t.x; ty = t.y; col = t.kind === 'switch' ? '#ffb627' : '#4cc9f0'; } } if (tx == null) { const c = L.enemies.find(e => e.type === 'commander'); if (c && L.rooms[c.room].seen) { tx = c.gx || c.x; ty = c.gy || c.y; col = '#ff2e88'; } else if (c || L.type !== 1) { const F = L.rooms[L.final]; tx = F.cx; ty = F.cy; col = '#ff2e88'; } } }
+  if (G.mode !== 'menu') { let tx = null, ty = 0, col = '#4cc9f0'; if (M.phase === 'exfil') { tx = L.extract.x + L.extract.w / 2; ty = L.extract.y + L.extract.h / 2; col = '#3df2b4'; } else { let bd = 1e9; for (const t of L.terms) { if (t.done) continue; if (t.kind !== 'switch' && L.doors.some(d => d.locked) && t.room === L.final) continue; const d = hyp(t.x - P.x, t.y - P.y); if (d < bd) { bd = d; tx = t.x; ty = t.y; col = t.kind === 'switch' ? '#ffb627' : '#4cc9f0'; } } if (tx == null) { const c = L.enemies.find(e => e.type === 'commander'); if (c && L.rooms[c.room].seen) { tx = c.gx || c.x; ty = c.gy || c.y; col = '#ff2e88'; } else if (c || L.type !== 1) { const F = L.rooms[L.final]; tx = F.cx; ty = F.cy; col = '#ff2e88'; } } }
     if (tx != null) { const sxp = (tx - cx) * Z + VW / 2, syp = (ty - cy) * Z + VH / 2, m = 46; if (sxp < m || sxp > VW - m || syp < m + 30 || syp > VH - m) { const a = Math.atan2(syp - VH / 2, sxp - VW / 2), ex2 = clamp(sxp, m, VW - m), ey2 = clamp(syp, m + 40, VH - m - 20); g.save(); g.translate(ex2, ey2); g.rotate(a); g.fillStyle = col; g.globalAlpha = 0.7 + 0.3 * Math.sin(G.time * 5); g.beginPath(); g.moveTo(14, 0); g.lineTo(-8, 9); g.lineTo(-3, 0); g.lineTo(-8, -9); g.closePath(); g.fill(); g.restore(); g.globalAlpha = 1; } } }
   // minimap
-  { const mw = VW < 500 ? 84 : 124, k = mw / L.W, mh = L.H * k, mx = VW - mw - 12 - safeR, my = (VW < 500 ? 96 : 104) + safeT + (G.touch ? 56 : 0); g.fillStyle = 'rgba(8,14,26,.72)'; g.fillRect(mx - 3, my - 3, mw + 6, mh + 6); for (const R of L.rooms) { g.fillStyle = R.seen ? 'rgba(76,201,240,.2)' : 'rgba(255,255,255,.04)'; g.fillRect(mx + (R.x - WT) * k + 1, my + (R.y - WT) * k + 1, CW * k - 2, CH * k - 2); }
+  if (G.mode !== 'menu') { const mw = VW < 500 ? 84 : 124, k = mw / L.W, mh = L.H * k, mx = VW - mw - 12 - safeR, my = (VW < 500 ? 96 : 104) + safeT + (G.touch ? 56 : 0); g.fillStyle = 'rgba(8,14,26,.72)'; g.fillRect(mx - 3, my - 3, mw + 6, mh + 6); for (const R of L.rooms) { g.fillStyle = R.seen ? 'rgba(76,201,240,.2)' : 'rgba(255,255,255,.04)'; g.fillRect(mx + (R.x - WT) * k + 1, my + (R.y - WT) * k + 1, CW * k - 2, CH * k - 2); }
     for (const d of L.doors) { g.fillStyle = d.locked ? '#ff4d5e' : d.open ? '#3df2b4' : '#4cc9f0'; g.fillRect(mx + d.cx * k - 2, my + d.cy * k - 2, 4, 4); } for (const t of L.terms) if (!t.done) { g.fillStyle = t.kind === 'switch' ? '#ffb627' : '#fff'; g.fillRect(mx + t.x * k - 2, my + t.y * k - 2, 4, 4); }
     const e = L.extract; g.strokeStyle = '#3df2b4'; g.lineWidth = 1; g.strokeRect(mx + e.x * k, my + e.y * k, e.w * k, e.h * k); for (const en of L.enemies) if (en.vis > 0.3) { g.fillStyle = en.T.color; g.fillRect(mx + en.x * k - 1.5, my + en.y * k - 1.5, 3, 3); } g.fillStyle = '#3df2b4'; g.beginPath(); g.arc(mx + P.x * k, my + P.y * k, 3, 0, TAU); g.fill(); }
   // crosshair (mouse)
@@ -811,7 +812,7 @@ function frame(now) {
   requestAnimationFrame(frame); let raw = Math.min((now - last) / 1000, 0.1); last = now; if (raw < 0) raw = 0;
   if (G.mode === 'play') { if (!G.manual) { let acc = raw; while (acc > 1e-5 && G.mode === 'play') { const h = Math.min(acc, 1 / 40); update(h); acc -= h; } } if (G.mode === 'play') updateHud(); }
   else if (G.mode === 'menu' && L) { // attract: guards keep patrolling behind the menu
-    G.time += raw; for (const e of L.enemies) { e.vis = 1; } const sv = P.x; updateEnemiesMenu(raw); cam.x = L.W / 2 + Math.sin(G.time * 0.1) * 120; cam.y = L.H / 2 + Math.cos(G.time * 0.13) * 60; }
+    G.time += raw; updateEnemiesMenu(raw); cam.x = L.W / 2 + Math.sin(G.time * 0.1) * 120; cam.y = L.H / 2 + Math.cos(G.time * 0.13) * 60; }
   musicTick(raw); render();
 }
 function updateEnemiesMenu(dt) { const px = P.x, py = P.y; P.x = -9999; P.y = -9999; for (const e of L.enemies) updateEnemy(e, Math.min(dt, 0.05)); for (const e of L.enemies) e.vis = 1; P.x = L.W / 2; P.y = L.H / 2; P.dead = true; M.deadT = 99; for (const d of L.doors) d.anim = clamp(d.anim + (d.open ? dt * 7 : -dt * 7), 0, 1); }
@@ -875,7 +876,7 @@ window.__gdl = {
   advance(sec) { const n = Math.round(sec * 60); for (let i = 0; i < n && G.mode === 'play'; i++) update(1 / 60); if (G.mode === 'play') updateHud(); return G.mode; },
   manual(on) { G.manual = !!on; },
   teleport(x, y) { P.x = x; P.y = y; P.vx = P.vy = 0; cam.x = x; cam.y = y; },
-  aim(x, y) { P.ang = Math.atan2(y - P.y, x - P.x); IN.mx = (x - cam.x) * Z + VW / 2; IN.my = (y - cam.y) * Z + VH / 2; },
+  aim(x, y) { P.ang = Math.atan2(y - P.y, x - P.x); viewCam(); IN.mx = (x - cam.rx) * Z + VW / 2; IN.my = (y - cam.ry) * Z + VH / 2; IN.ax = x - P.x; IN.ay = y - P.y; },
   path(x, y) { const p = findPath(P.x, P.y, x, y); return p ? Array.from(p) : null; },
   los(ax, ay, bx, by) { return losClear(ax, ay, bx, by); },
 };
