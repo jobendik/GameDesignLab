@@ -261,7 +261,7 @@
   function muteLoops(m) { if (!ac) return; for (const h of loops) h._g.gain.setTargetAtTime(m ? 0 : h.vol, ac.currentTime, .04); }
   // v1 compat
   Lab.beep = function (freq = 440, dur = 0.06, type = 'square', gain = 0.05) { tone({ f: freq, dur: Math.max(.03, dur), type, vol: Math.min(.3, gain * 2.2), lp: type === 'square' || type === 'sawtooth' ? 3800 : 0 }); };
-  Lab.buzz = function (p) { try { if (!reduced && navigator.vibrate) navigator.vibrate(p || 10); } catch (e) { } };
+  Lab.buzz = function (p) { try { if (!reduced && navigator.vibrate && (unlocked || (navigator.userActivation && navigator.userActivation.hasBeenActive))) navigator.vibrate(p || 10); } catch (e) { } }; // browsers block vibrate before a user gesture
 
   /* ---- generative music: tiny step sequencer with per-game seeded riffs and intensity layers */
   const CH = { M: [0, 4, 7], m: [0, 3, 7], M7: [0, 4, 7, 11], m7: [0, 3, 7, 10], 7: [0, 4, 7, 10], sus: [0, 5, 7], add9: [0, 4, 7, 14] };

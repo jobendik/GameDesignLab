@@ -49,7 +49,9 @@ bounce mechanic with a streak; altitude zones as milestones; balloon power-up; p
 
 ## Test results
 - Smoke (`tools/smoke.js 23-pogo-peak`): pass, 61 fps headless, no errors, survives resize/blur.
-- Gameplay test (`tests/PhoneGameLab/23-pogo-peak.test.js`): pass (4 of 4 runs after the test was corrected) —
+- Gameplay test (`tests/PhoneGameLab/23-pogo-peak.test.js`): pass (5 of 5 consecutive runs in its final form). The
+  test exposed a real bug — at bounce-shroom speed Pip could tunnel through a burr in one frame — fixed with a swept
+  body test for hazards, stars and balloons. Covers:
   auto-bounce, real mouse drag steering, arrow keys and screen wrap, Down-key slam and flick-down slam, power bounce +
   streak, scripted climbing raises height and score, chained slams, a spawned burr dazes instead of killing, falling
   off-screen ends the run, best recorded, restart resets.

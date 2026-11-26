@@ -1,0 +1,228 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Pin Whirl</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PIN WHIRL — toss sewing pins into a spinning pincushion without pricking a pin that is already there.
+ * Identity: a sewing table. Linen, felt cushions shaped like fruit, glass-headed pins, four-hole buttons, a thimble.
+ * Depth: each stage has its own spin (steady, surging, swaying, stop-and-go, sudden flips with a wobble warning);
+ * landing right beside a neighbour pays a SNUG / RAZOR bonus (risk on purpose); buttons sewn on the rim are bonus targets,
+ * and five of them buy a thimble that forgives one prick; every fifth stage is a big cushion guarded by orbiting bobbins.
+ * Audio: each pin of a stage plays the next step of a rising scale, so finishing a cushion finishes the tune.          */
+Lab.init({
+  title: "Pin Whirl", tagline: "Stick every pin. Don't prick a neighbour.", category: "Arcade & Action",
+  howto: ["Tap to toss a pin into the cushion", "Never hit a pin that's already stuck", "Hit buttons: five earn a thimble"],
+  theme: { bg: "#e6d5b8", bg2: "#f6ecd9", fg: "#4a3426", muted: "#8a6f5a", accent: "#e2473f", accent2: "#3f9a6b", light: true },
+  orient: "portrait", music: { style: "chill", key: "G", vol: .5 }, restart: start,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, rand = Lab.rand, INK = "#4a3426", HALF = Math.PI / 2;
+const HEADS = ["#e2473f", "#3f7fd9", "#f2b530", "#3f9a6b", "#9a5fd0", "#f07aa8", "#31b7c4"];
+const STYLES = [["Tomato", "#e2473f"], ["Blueberry", "#4f63c6"], ["Lemon", "#f0c033"], ["Plum", "#9a4fb0"], ["Mint", "#48b58a"]];
+const PATS = ["steady", "steady", "surge", "stopgo", "sway", "flip", "surge", "stopgo"];
+const HIT = .118, SNUG = .27, RAZOR = .185;
+let S, PL, C, pins, buttons, orbs, fly, quiver, total, stage, score, stuck, btnTotal, thimbles, state, stateT, buffer, held, hintT, popT, dead, snugs, nextPinT;
+
+function layout() {
+  const p = Lab.play; PL = { x: p.x, y: p.y, w: p.w, h: p.h }; S = Math.min(Lab.W / 390, p.h / 740);
+  if (C) { C.x = PL.x + PL.w / 2; C.y = PL.y + PL.h * .37; C.R = (C.boss ? 90 : 76) * S; }
+}
+Lab.onResize(() => { if (C) layout(); });
+const startY = () => Math.min(C.y + C.R + 285 * S, PL.y + PL.h - 78 * S), LEN = () => 54 * S;
+
+function start() {
+  C = { x: 0, y: 0, R: 0, rot: 0, w: 0, t: 0, dir: 1, s: 1, pat: "steady", style: 0, boss: false, dent: 0, flipT: 2, warn: 0, scale: 0 };
+  layout();
+  score = 0; stage = 0; stuck = 0; btnTotal = 0; thimbles = 0; buffer = 0; held = false; hintT = 6; popT = 0; dead = null; snugs = 0; fly = null; nextPinT = 0;
+  Lab.setScore(0);
+  Lab.input.onUp = []; Lab.input.onMove = []; Lab.input.onTap = []; Lab.input.onSwipe = [];
+  Lab.input.onDown = [() => toss()];
+  Lab.input.onKey = [k => { if (k === " " || k === "Enter" || k === "ArrowUp") toss(); }];
+  Lab.expose({
+    get cushion() { return C; }, get pins() { return pins; }, get buttons() { return buttons; }, get orbs() { return orbs; }, get quiver() { return quiver; }, get stage() { return stage; },
+    get score() { return score; }, get thimbles() { return thimbles; }, get state() { return state; }, get stuck() { return stuck; }, get collected() { return btnTotal; }, get flying() { return !!fly; },
+    HIT, toss, hold(v) { held = v !== false; }, setRot(a) { C.rot = a; }, giveThimble() { thimbles = Math.min(2, thimbles + 1); },
+  });
+  nextStage();
+  Lab.loop(frame);
+}
+
+/* ------------------------------------------------------------------ stages */
+function nextStage() {
+  stage++; const boss = stage % 5 === 0, tier = Math.floor((stage - 1) / 5), n = stage - tier;      // n counts ordinary stages
+  C.boss = boss; C.style = boss ? 5 : (stage - 1 - tier) % STYLES.length; C.pat = boss ? "boss" : stage <= 9 ? PATS[(n - 1) % PATS.length] : Lab.choose(PATS.slice(2));
+  C.dir = stage % 2 ? 1 : -1; C.s = Math.min(2.7, 1.2 + stage * .085); C.t = 0; C.w = 0; C.rot = rand(0, TAU); C.flipT = rand(1.6, 2.6); C.warn = 0; C.dent = 0; C.scale = 0;
+  layout();
+  total = quiver = boss ? Math.min(13, 9 + tier) : Math.min(10, 5 + Math.ceil(stage * .55));
+  pins = []; buttons = []; orbs = [];
+  const pre = boss || stage < 2 ? 0 : Math.min(4, 1 + Math.floor(stage / 3)), slots = Lab.shuffle(Array.from({ length: 12 }, (_, i) => i / 12 * TAU + rand(-.08, .08)));
+  for (let i = 0; i < pre; i++) pins.push({ a: slots[i], c: -1, t: 1, old: true });
+  const nb = boss ? 3 : 1 + (stage > 2 && stage % 2 ? 1 : 0); for (let i = 0; i < nb; i++) buttons.push({ a: slots[pre + i], c: Lab.randInt(0, HEADS.length - 1), t: 0 });
+  if (boss) for (let i = 0; i <= Math.min(1, tier); i++) orbs.push({ a: rand(0, TAU), w: (i ? -1.5 : 1.15) + tier * .15 * (i ? -1 : 1) });
+  state = "intro"; stateT = 0; fly = null; nextPinT = 0;
+  Lab.tween(C, { scale: 1 }, .45, { ease: "outBack" });
+  if (boss) { Lab.banner("BIG CUSHION", { color: "#e2473f", ms: 1200 }); Lab.sfx("warn", { pitch: .7 }); } else if (stage > 1) Lab.sfx("whoosh", { pitch: 1.2, vol: .6 });
+  popT = 1;
+}
+function spin(dt) {
+  if (held) return; C.t += dt; const s = C.s, p = C.pat; let target = s * C.dir, k = 7;
+  if (p === "surge") target = s * C.dir * (1 + .75 * Math.sin(C.t * 1.9));
+  else if (p === "sway") target = s * 1.75 * Math.sin(C.t * 1.15);
+  else if (p === "stopgo") { const u = C.t % 2.6, d = Math.floor(C.t / 2.6) % 2 ? -1 : 1; target = u < 1.55 ? s * 1.3 * d * C.dir : 0; k = 6; }
+  else if (p === "flip" || p === "boss") {
+    C.flipT -= dt; if (C.flipT <= .4 && !C.warn) { C.warn = .4; Lab.sfx("tick", { pitch: .7 }); Lab.sfx("tick", { pitch: .9 }); }      // wobble warns of the reversal
+    if (C.flipT <= 0) { C.dir *= -1; C.flipT = p === "boss" ? rand(2.2, 3.6) : rand(1.3, 2.7); }
+    target = s * (p === "boss" ? .85 * (1 + .45 * Math.sin(C.t * 1.3)) : 1.15) * C.dir; k = 6;
+  }
+  C.w = Lab.damp(C.w, target, k, dt); C.rot += C.w * dt; if (C.warn > 0) C.warn -= dt;
+  for (const o of orbs) o.a += o.w * dt;
+}
+
+/* ------------------------------------------------------------------ tossing */
+function toss() {
+  if (state === "over" || Lab.paused) return; hintT = Math.min(hintT, .4);
+  if (state !== "play" || fly || nextPinT > 0 || quiver <= 0) { buffer = .2; return; }          // buffered: fires as soon as the next pin is ready
+  buffer = 0; fly = { y: startY(), vy: -2000 * S, x: C.x, vx: 0, rot: 0, vr: 0, bounce: false, t: 0 };
+  Lab.sfx("swish", { pitch: 1.2 + (total - quiver) * .03, vol: .7 });
+}
+function land() {
+  const a = Lab.wrap(HALF - C.rot, 0, TAU), tipX = C.x, tipY = C.y + C.R;
+  for (const o of orbs) if (Math.abs(Lab.angleDiff(o.a, HALF)) < .23) return prick(tipX, tipY + LEN() * .5, "BLOCKED!");
+  let gap = 9; for (const p of pins) gap = Math.min(gap, Math.abs(Lab.angleDiff(a, p.a)));
+  if (gap < HIT) return prick(tipX, tipY + LEN() - 8 * S, "PRICKED!");
+  const idx = total - quiver, c = quiverCol(0); pins.push({ a, c, t: 0, old: false }); quiver--; stuck++; fly = null; nextPinT = .11;
+  let pts = 10, label = "";
+  if (gap < RAZOR) { pts += 15; label = "RAZOR"; snugs++; } else if (gap < SNUG) { pts += 5; label = "SNUG"; snugs++; }
+  C.dent = 1; Lab.sfx("knock", { pitch: .8, vol: .8 }); Lab.audio.combo(idx, { vol: .16 }); Lab.buzz(8);
+  fx.burst(tipX, tipY, { n: 6, colors: [styleCol(), "#fff5e0"], speed: 130, spread: Math.PI, angle: HALF, life: .35, size: 3, gravity: 300 });
+  for (const b of buttons) if (!b.dead && Math.abs(Lab.angleDiff(a, b.a)) < .17) {
+    b.dead = true; btnTotal++; pts += 20; Lab.sfx("coin"); fx.burst(tipX, tipY + 4, { n: 10, colors: [HEADS[b.c], "#fff"], speed: 220, life: .6, size: 4, gravity: 600, shape: "ring" });
+    if (btnTotal % 5 === 0) { if (thimbles < 2) { thimbles++; Lab.sfx("unlock"); Lab.banner("THIMBLE!", { color: "#b0892f", ms: 900 }); } else pts += 50; }
+    label = label ? label + " + BUTTON" : "BUTTON";
+  }
+  score += pts; Lab.setScore(score); if (label) { Lab.bumpScore(); if (label[0] !== "B") Lab.sfx("star", { pitch: label[0] === "R" ? 1.25 : 1, vol: .7 }); }
+  fx.text(tipX + (idx % 2 ? -1 : 1) * (label ? 62 : 40) * S, tipY + (24 + (idx % 3) * 9) * S, (label ? label + " " : "") + "+" + pts, { color: label[0] === "R" ? "#e2473f" : label ? "#b0782a" : INK, outline: "rgba(255,250,240,.9)", size: label ? 17 : 14 });
+  if (buttons.some(b => b.dead)) buttons = buttons.filter(b => !b.dead);
+  if (quiver <= 0) clearStage();
+}
+function prick(x, y, word) {
+  const f = fly; f.bounce = true; f.y = y; f.vy = 520 * S; f.vx = rand(-1, 1) > 0 ? 260 * S : -260 * S; f.vr = f.vx > 0 ? 14 : -14; f.t = 0; C.dent = 1.4;
+  fx.sparks(x, y, HALF, { n: 10, color: "#fff5c8", speed: 420, life: .3, spread: 2.4 }); Lab.sfx("glass", { pitch: 1.3 }); Lab.sfx("knock", { pitch: 1.6 }); Lab.shake(8, .25); Lab.hitstop(.07); Lab.buzz(40);
+  fx.text(x, y + 30 * S, word, { color: "#e2473f", outline: "rgba(255,250,240,.9)", size: 22 });
+  if (thimbles > 0) { thimbles--; Lab.sfx("unlock", { pitch: .7 }); fx.text(x, y + 56 * S, "thimble saved you", { color: "#b0782a", outline: "rgba(255,250,240,.9)", size: 14 }); nextPinT = .55; return; }
+  state = "over"; stateT = 0; Lab.slowmo(.35, .6); Lab.flash("#e2473f", .25, .25);
+}
+function clearStage() {
+  const bonus = (C.boss ? 200 : 25) + stage * 10; score += bonus; Lab.setScore(score); Lab.bumpScore(); state = "clear"; stateT = 0;
+  Lab.sfx(C.boss ? "win" : "levelup"); Lab.buzz(20); if (C.boss) { Lab.shake(8, .4); fx.confetti({ n: 50 }); if (thimbles < 2) thimbles++; }
+  fx.text(C.x, C.y - C.R - 34 * S, (C.boss ? "BIG CUSHION DONE  +" : "STAGE " + stage + "  +") + bonus, { color: "#3f9a6b", outline: "rgba(255,250,240,.95)", size: 20, life: 1.2 });
+  fx.ring(C.x, C.y, { r0: C.R, r1: C.R + 130 * S, color: styleCol(), width: 6, life: .5 });
+  for (const p of pins) { const a = p.a + C.rot, r = C.R + LEN() - 8 * S; fx.burst(C.x + Math.cos(a) * r, C.y + Math.sin(a) * r, { n: 3, color: p.old ? "#8d8d99" : HEADS[p.c], speed: 240, angle: a, spread: .8, life: .6, size: 4, gravity: 500 }); }
+  Lab.tween(C, { scale: 0 }, .32, { ease: "inBack", delay: .45 });
+}
+const styleCol = () => C.boss ? "#f0567a" : STYLES[C.style][1];
+
+/* ------------------------------------------------------------------ frame */
+function frame(dt, t) {
+  stateT += dt; spin(dt); C.dent = Lab.damp(C.dent, 0, 11, dt); if (popT > 0) popT -= dt * 1.6; hintT -= dt; if (nextPinT > 0) nextPinT -= dt;
+  for (const p of pins) p.t = Math.min(1, p.t + dt * 3.2); for (const b of buttons) b.t = Math.min(1, b.t + dt * 2.5);
+  if (state === "intro" && stateT > .4) { state = "play"; }
+  if (state === "clear" && stateT > .85) nextStage();
+  if (buffer > 0) { buffer -= dt; if (state === "play" && !fly && nextPinT <= 0 && quiver > 0) toss(); }
+  if (fly) {
+    const f = fly; f.t += dt;
+    if (!f.bounce) { f.y += f.vy * dt; if (f.y <= C.y + C.R - 6 * S) land(); }
+    else { f.vy += 1500 * S * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.rot += f.vr * dt; if (f.t > .6 && state !== "over") fly = null; }
+  }
+  if (state === "over" && stateT > .65 && !dead) { dead = true; Lab.gameover({ title: "Pricked!", score, stats: [["Stage", stage], ["Pins stuck", stuck], ["Buttons", btnTotal]] }); }
+  Lab.music.intensity(clamp(.3 + stage * .05 + (C.boss ? .3 : 0) + (total ? (1 - quiver / total) * .25 : 0), 0, 1));
+  render(t);
+}
+
+/* ------------------------------------------------------------------ art */
+function linen() {
+  return Lab.sprite("linen:" + Lab.W + "x" + Lab.H, Lab.W, Lab.H, (g, W, H) => {
+    draw.vgrad(g, 0, 0, W, H, ["#f6ecd9", "#ecdcc0"]);
+    g.lineWidth = 1; for (let y = 0; y < H; y += 4) { g.strokeStyle = y % 8 ? "rgba(120,90,50,.045)" : "rgba(255,255,255,.22)"; g.beginPath(); g.moveTo(0, y + .5); g.lineTo(W, y + .5); g.stroke(); }
+    for (let x = 0; x < W; x += 4) { g.strokeStyle = x % 8 ? "rgba(120,90,50,.035)" : "rgba(255,255,255,.14)"; g.beginPath(); g.moveTo(x + .5, 0); g.lineTo(x + .5, H); g.stroke(); }
+    const rnd = Lab.rng(9); g.lineCap = "round"; g.lineWidth = 2;
+    for (let i = 0; i < 26; i++) { const x = rnd() * W, y = Lab.play.y + rnd() * (H - Lab.play.y), s = 4 + rnd() * 3; g.strokeStyle = [`rgba(226,71,63,.16)`, `rgba(63,154,107,.16)`, `rgba(63,127,217,.14)`][i % 3]; g.beginPath(); g.moveTo(x - s, y - s); g.lineTo(x + s, y + s); g.moveTo(x + s, y - s); g.lineTo(x - s, y + s); g.stroke(); }
+    const m = 9, top = Lab.play.y + 2; g.strokeStyle = "rgba(226,71,63,.55)"; g.lineWidth = 2; g.setLineDash([9, 6]); draw.rr(g, m, top, W - m * 2, H - top - m, 16); g.stroke(); g.setLineDash([]);
+  });
+}
+function cushionSprite(style, R) {
+  const sz = Math.ceil(R * 2 + 12);
+  return Lab.sprite("cush:" + style + ":" + Math.round(R), sz, sz, g => {
+    const cx = sz / 2, boss = style === 5, col = boss ? "#f0567a" : STYLES[style][1], dk = Lab.color.shade(col, -.28), lt = Lab.color.shade(col, .25);
+    g.fillStyle = col; g.beginPath(); g.arc(cx, cx, R, 0, TAU); g.fill();
+    g.save(); g.beginPath(); g.arc(cx, cx, R, 0, TAU); g.clip();
+    if (style === 0 || style === 2 || boss) { g.strokeStyle = dk; g.lineWidth = Math.max(2, R * .035); for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; g.beginPath(); g.moveTo(cx, cx); g.quadraticCurveTo(cx + Math.cos(a + .25) * R * .6, cx + Math.sin(a + .25) * R * .6, cx + Math.cos(a) * R, cx + Math.sin(a) * R); g.stroke(); } }
+    if (style === 1 || style === 4) { g.fillStyle = "rgba(255,255,255,.75)"; for (let k = 0; k < 3; k++) for (let i = 0; i < 6 + k * 4; i++) { const a = i / (6 + k * 4) * TAU + k * .4, r = R * (.3 + k * .25); g.beginPath(); g.arc(cx + Math.cos(a) * r, cx + Math.sin(a) * r, R * .045, 0, TAU); g.fill(); } }
+    if (style === 3) { g.strokeStyle = lt; g.lineWidth = R * .07; for (let i = -6; i <= 6; i++) { g.beginPath(); g.moveTo(cx + i * R * .22 - R, cx - R); g.lineTo(cx + i * R * .22 + R, cx + R); g.stroke(); } }
+    if (boss) { g.fillStyle = "#ffe08a"; const rnd = Lab.rng(4); for (let i = 0; i < 46; i++) { const a = rnd() * TAU, r = R * (.25 + rnd() * .68); g.beginPath(); g.ellipse(cx + Math.cos(a) * r, cx + Math.sin(a) * r, R * .022, R * .04, a, 0, TAU); g.fill(); } }
+    g.restore();
+    g.strokeStyle = "rgba(255,250,235,.8)"; g.lineWidth = Math.max(1.6, R * .025); g.setLineDash([R * .09, R * .07]); g.beginPath(); g.arc(cx, cx, R * .88, 0, TAU); g.stroke(); g.setLineDash([]);
+    g.strokeStyle = dk; g.lineWidth = 2.5; g.beginPath(); g.arc(cx, cx, R - 1, 0, TAU); g.stroke();
+    const leaf = boss ? "#3f9a6b" : style === 2 ? "#fff8dc" : "#3f9a6b"; g.fillStyle = leaf; draw.star(g, cx, cx, R * (boss ? .34 : .27), leaf, boss ? 7 : 5, .45); g.strokeStyle = Lab.color.shade(leaf, -.3); g.lineWidth = 1.5; g.stroke(); draw.circle(g, cx, cx, R * .07, Lab.color.shade(leaf, -.35));
+  });
+}
+function shadeSprite(R) { const sz = Math.ceil(R * 2 + 12); return Lab.sprite("shade:" + Math.round(R), sz, sz, g => { const cx = sz / 2, gr = g.createRadialGradient(cx - R * .3, cx - R * .35, R * .1, cx, cx, R); gr.addColorStop(0, "rgba(255,255,255,.3)"); gr.addColorStop(.55, "rgba(255,255,255,0)"); gr.addColorStop(1, "rgba(60,20,20,.3)"); g.fillStyle = gr; g.beginPath(); g.arc(cx, cx, R, 0, TAU); g.fill(); }); }
+function headSprite(c) { const r = 7.5 * S, sz = Math.ceil(r * 2 + 4); return Lab.sprite("head:" + c + ":" + Math.round(r * 4), sz, sz, g => { const cx = sz / 2, col = c < 0 ? "#8d8d99" : HEADS[c], gr = g.createRadialGradient(cx - r * .35, cx - r * .4, r * .1, cx, cx, r); gr.addColorStop(0, Lab.color.shade(col, .6)); gr.addColorStop(.5, col); gr.addColorStop(1, Lab.color.shade(col, -.35)); g.fillStyle = gr; g.beginPath(); g.arc(cx, cx, r, 0, TAU); g.fill(); g.strokeStyle = Lab.color.shade(col, -.5); g.lineWidth = 1.2; g.stroke(); }); }
+/* a pin drawn along +x from its tip at (0,0): shaft, then the glass head */
+function drawPin(c, len, col, alpha) {
+  c.strokeStyle = "#7d8794"; c.lineWidth = 2.6 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(0, 0); c.lineTo(len, 0); c.stroke();
+  c.strokeStyle = "#e9eef3"; c.lineWidth = 1 * S; c.beginPath(); c.moveTo(2, -.6 * S); c.lineTo(len, -.6 * S); c.stroke();
+  const h = headSprite(col); c.drawImage(h, len - h.w / 2, -h.h / 2, h.w, h.h);
+}
+function drawButton(c, x, y, r, col, rot) {
+  c.save(); c.translate(x, y); c.rotate(rot); draw.circle(c, 0, 1.5, r, "rgba(60,30,20,.25)"); draw.circle(c, 0, 0, r, col, Lab.color.shade(col, -.4), 1.5); draw.circle(c, 0, 0, r * .68, null, Lab.color.shade(col, .35), 1.5);
+  c.fillStyle = Lab.color.shade(col, -.55); for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { c.beginPath(); c.arc(dx * r * .22, dy * r * .22, r * .11, 0, TAU); c.fill(); } c.restore();
+}
+function drawThimble(c, x, y, s, on) {
+  c.globalAlpha = on ? 1 : .22; c.fillStyle = on ? "#c9a24a" : "#8a6f5a"; c.beginPath(); c.moveTo(x - 9 * s, y + 10 * s); c.lineTo(x - 6.5 * s, y - 6 * s); c.quadraticCurveTo(x, y - 14 * s, x + 6.5 * s, y - 6 * s); c.lineTo(x + 9 * s, y + 10 * s); c.closePath(); c.fill();
+  c.fillStyle = on ? "#a57f2c" : "#6d5545"; c.fillRect(x - 10 * s, y + 7 * s, 20 * s, 4 * s); if (on) { c.fillStyle = "rgba(255,255,255,.55)"; for (let j = 0; j < 2; j++) for (let i = -1; i <= 1; i++) { c.beginPath(); c.arc(x + i * 4 * s, y - 3 * s + j * 5 * s, 1 * s, 0, TAU); c.fill(); } } c.globalAlpha = 1;
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, L = LEN(), R = C.R;
+  c.fillStyle = "#ecdcc0"; c.fillRect(-40, -40, W + 80, H + 80); const bg = linen(); c.drawImage(bg, 0, 0, W, H);
+  // --- cushion (dent recoil on impact, wobble before a flip, pop in/out between stages)
+  const wob = C.warn > 0 ? Math.sin(C.warn * 50) * .035 : 0, sc = Math.max(0, C.scale) * (1 - C.dent * .035), cy = C.y - C.dent * 5 * S;
+  draw.shadow(c, C.x + 4 * S, C.y + 9 * S, (R + 5 * S) * sc, (R + 5 * S) * sc, .1);
+  if (sc > .01) {
+    c.save(); c.translate(C.x, cy); c.scale(sc * (1 + wob), sc * (1 - wob)); c.rotate(C.rot);
+    for (const p of pins) { c.save(); c.rotate(p.a); const set = p.t < 1 ? ease.outElastic(p.t) : 1; c.translate(R - 8 * S + (1 - set) * 10 * S, 0); drawPin(c, L, p.c); c.restore(); }
+    const cs = cushionSprite(C.style, R); c.drawImage(cs, -cs.w / 2, -cs.h / 2, cs.w, cs.h);
+    for (const b of buttons) { const k = ease.outBack(b.t); drawButton(c, Math.cos(b.a) * (R + 3 * S), Math.sin(b.a) * (R + 3 * S), 12.5 * S * k, HEADS[b.c], b.a); }
+    c.rotate(-C.rot); const sh = shadeSprite(R); c.drawImage(sh, -sh.w / 2, -sh.h / 2, sh.w, sh.h);
+    c.restore();
+  }
+  for (const o of orbs) {                                   // bobbins circling a big cushion block the landing spot when they pass underneath
+    const r = R + L * .62, x = C.x + Math.cos(o.a) * r * sc, y = cy + Math.sin(o.a) * r * sc, near = Math.abs(Lab.angleDiff(o.a, HALF)) < .23;
+    c.save(); c.translate(x, y); c.rotate(o.a + HALF); draw.rect(c, -15 * S, -9 * S, 30 * S, 18 * S, 4 * S, near ? "#e2473f" : "#3f7fd9"); c.strokeStyle = "rgba(255,255,255,.4)"; c.lineWidth = 1; for (let i = -2; i <= 2; i++) { c.beginPath(); c.moveTo(-14 * S, i * 3.4 * S); c.lineTo(14 * S, i * 3.4 * S); c.stroke(); }
+    draw.rect(c, -18 * S, -11 * S, 5 * S, 22 * S, 2 * S, "#c79a5b"); draw.rect(c, 13 * S, -11 * S, 5 * S, 22 * S, 2 * S, "#c79a5b"); c.restore();
+  }
+  // --- landing notch + guide
+  const sy = startY();
+  c.strokeStyle = "rgba(74,52,38,.16)"; c.lineWidth = 2; c.setLineDash([3, 9]); c.beginPath(); c.moveTo(C.x, C.y + R + L + 6 * S); c.lineTo(C.x, sy - 8 * S); c.stroke(); c.setLineDash([]);
+  c.fillStyle = "rgba(74,52,38,.4)"; c.beginPath(); c.moveTo(C.x, C.y + R + L + 2 * S); c.lineTo(C.x - 5 * S, C.y + R + L + 11 * S); c.lineTo(C.x + 5 * S, C.y + R + L + 11 * S); c.closePath(); c.fill();
+  // --- the pin in hand / in flight
+  c.save();
+  if (fly) { c.translate(fly.x, fly.y); c.rotate(HALF + fly.rot); drawPin(c, L, quiverCol(0)); }
+  else if (state !== "over" && quiver > 0 && state !== "clear") { const k = clamp(1 - nextPinT / .11, 0, 1), bob = Math.sin(t * 3) * 2 * S; draw.shadow(c, C.x, sy + L + 12 * S, 16 * S, 4 * S, .14); c.translate(C.x, sy + (1 - k) * 40 * S + bob); c.rotate(HALF); c.globalAlpha = k; drawPin(c, L, quiverCol(0)); }
+  c.restore(); c.globalAlpha = 1;
+  // --- quiver: pins left for this cushion, stuck in a felt strip
+  const qy = PL.y + PL.h - 34 * S, qx = PL.x + 22 * S, qw = Math.min(PL.w * .52, total * 15 * S + 16 * S);
+  draw.rect(c, qx - 8 * S, qy + 8 * S, qw, 18 * S, 7 * S, "#3f9a6b", "#2c7450", 1.5);
+  for (let i = 0; i < total; i++) { const x = qx + 6 * S + i * (qw - 22 * S) / Math.max(1, total - 1), on = i < quiver - (fly && !fly.bounce ? 1 : 0); c.save(); c.translate(x, qy + 14 * S); c.rotate(-HALF); c.globalAlpha = on ? 1 : .18; c.scale(.55, .55); drawPin(c, 34 * S, on ? quiverCol(i) : -1); c.restore(); } c.globalAlpha = 1;
+  for (let i = 0; i < 2; i++) drawThimble(c, PL.x + PL.w - 34 * S - i * 30 * S, qy + 12 * S, S * 1.05, i < thimbles);
+  const bx = PL.x + PL.w - 84 * S; for (let i = 0; i < 5; i++) draw.circle(c, bx - i * 11 * S, qy + 17 * S, 3.6 * S, i < btnTotal % 5 ? "#3f7fd9" : "rgba(74,52,38,.16)");
+  // --- stage label
+  const pk = popT > 0 ? 1 + ease.pulse(clamp(popT, 0, 1)) * .25 : 1, ly = PL.y + 12 + 10 * S;
+  draw.text(c, C.boss ? "BIG CUSHION" : "STAGE " + stage, PL.x + PL.w / 2, ly, { size: (11 + 6 * S) * pk, color: C.boss ? "#e2473f" : INK, weight: 700 });
+  draw.text(c, (C.boss ? "Strawberry" : STYLES[C.style][0]) + " · " + ({ steady: "steady", surge: "surging", sway: "swaying", stopgo: "stop & go", flip: "flips!", boss: "guarded" })[C.pat], PL.x + PL.w / 2, ly + 10 + 9 * S, { size: 11.5, color: "#8a6f5a", weight: 600 });
+  if (hintT > 0 && stuck === 0) { const a = Math.min(1, hintT / .4); draw.text(c, "tap anywhere to toss", C.x, sy + L + 40 * S, { size: 13, color: `rgba(74,52,38,${a * .8})`, weight: 600 }); }
+}
+const quiverCol = i => (stuck + i) % HEADS.length;
+Lab.boot();
+})();
+</script></body></html>

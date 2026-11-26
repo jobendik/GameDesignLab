@@ -69,12 +69,15 @@ window.GDL_CATALOG = {
    "id": "games/breach-vector",
    "path": "games/breach-vector.html",
    "collection": "arcade",
-   "title": "BREACH VECTOR — Advanced Tactical Prototype",
-   "desc": "Advanced tactical breach prototype.",
+   "title": "Breach Vector",
+   "desc": "Top-down tactical stealth: read the vision cones, ghost or breach room by room through a new facility every mission, finish the job and get out.",
    "genre": [
-    "Shooter"
+    "Stealth",
+    "Action",
+    "Roguelite"
    ],
    "controls": [
+    "touch",
     "mouse",
     "keyboard"
    ],
@@ -533,6 +536,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--neon-strike.jpg"
   },
   {
@@ -1283,7 +1288,7 @@ window.GDL_CATALOG = {
    "path": "PhoneGameLab/games/14-sparkmoth/index.html",
    "collection": "PhoneGameLab",
    "title": "Sparkmoth",
-   "desc": "Weave through the fireworks. Skim the sparks.",
+   "desc": "Weave through the fireworks.",
    "genre": [
     "Arcade & Action"
    ],
@@ -1293,41 +1298,47 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 14,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/15-fruit-slice",
-   "path": "PhoneGameLab/games/15-fruit-slice/index.html",
+   "id": "PhoneGameLab/15-facet",
+   "path": "PhoneGameLab/games/15-facet/index.html",
    "collection": "PhoneGameLab",
-   "title": "Fruit Slice",
-   "desc": "Swipe to slice fruit, dodge bombs.",
+   "title": "Facet",
+   "desc": "Cut flying gems. Then cut the pieces.",
    "genre": [
     "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 15,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--15-fruit-slice.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/16-knife-throw",
-   "path": "PhoneGameLab/games/16-knife-throw/index.html",
+   "id": "PhoneGameLab/16-pin-whirl",
+   "path": "PhoneGameLab/games/16-pin-whirl/index.html",
    "collection": "PhoneGameLab",
-   "title": "Knife Throw",
-   "desc": "Stick knives in a spinning log.",
+   "title": "Pin Whirl",
+   "desc": "Stick every pin. Don't prick a neighbour.",
    "genre": [
     "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 16,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--16-knife-throw.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/17-windfletch",
@@ -1470,8 +1481,8 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--23-pogo-peak.jpg"
   },
   {
-   "id": "PhoneGameLab/24-helix-fall",
-   "path": "PhoneGameLab/games/24-helix-fall/index.html",
+   "id": "PhoneGameLab/24-spindle-drop",
+   "path": "PhoneGameLab/games/24-spindle-drop/index.html",
    "collection": "PhoneGameLab",
    "title": "Spindle Drop",
    "desc": "Twist the toy tower. Let the marble plunge.",
@@ -1485,7 +1496,9 @@ window.GDL_CATALOG = {
    ],
    "n": 24,
    "v2": true,
-   "thumb": "thumbs/PhoneGameLab--24-helix-fall.jpg"
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--24-spindle-drop.jpg"
   },
   {
    "id": "PhoneGameLab/25-goat-up",

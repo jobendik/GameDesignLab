@@ -5,16 +5,23 @@
 > Scores are 1–10 per `QUALITY_STANDARD.md`; "subjective" judgements come from code reading and scripted play, not human playtests.
 
 
-## Standalone arcade games (`games/`) — 0/65 reviewed
+## Standalone arcade games (`games/`) — 1/65 reviewed
 
+| Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
+|---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
+| [Static Bloom](games/neon-strike.html) | 3 → **7** | 7 | 7 | 7 | 7 | 6 | 7 | 7 | 7 | 7 | 6 | 8 | 7 | [record](docs/reviews/games/neon-strike.md) |
 
-<details><summary>65 not yet reviewed (baseline prototypes)</summary>
+Averages: overall **7.0** · Fun 7.0 · Depth 7.0 · Feel 7.0 · Look 7.0 · Anim 6.0 · Audio 7.0 · Ctrl 7.0 · Onb 7.0 · Replay 7.0 · Perf 6.0 · Robust 8.0 · Polish 7.0
 
-`games/arcanum-pinball` · `games/aura-rooms` · `games/bloom-bureau` · `games/bounce-dungeon` · `games/breach-vector` · `games/brink-edge-rush` · `games/brink-reactor` · `games/busy-beavers` · `games/chomp-chain-rush` · `games/chroma-frenzy` · `games/cosmic-devourer` · `games/exquisite-corpse` · `games/frequency` · `games/furniture-forts` · `games/grapple-gliders` · `games/hyper-dash` · `games/kosmisk-slange` · `games/last-war-ultimate` · `games/little-hero-adventure` · `games/lumberjack-idle-empire` · `games/lumis-luminescence` · `games/lysarkivet` · `games/maze-munch-rush` · `games/mystic-potion-sort` · `games/neon-ash` · `games/neon-burst` · `games/neon-core-ballstorm` · `games/neon-galaxy` · `games/neon-hagen` · `games/neon-nexus-omega` · `games/neon-pin-climb` · `games/neon-pinball-rush` · `games/neon-runner-overdrive` · `games/neon-strike` · `games/neon-survivor-overdrive` · `games/orbit-drift-3d` · `games/orbit-drift-sling` · `games/painted-wilds` · `games/physics-charades` · `games/pinata-pop` · `games/pinball-wizard-3d` · `games/pitch-26` · `games/pocket-football` · `games/power-wash-royale` · `games/pulsar` · `games/puppet-panic` · `games/ricochet-brawlers` · `games/slithergar` · `games/sonar-abyss` · `games/spire` · `games/sproutys-garden` · `games/star-petal-ballstorm` · `games/star-trail-adventure` · `games/svev-miner` · `games/swarm-logic` · `games/the-elevator` · `games/the-global-dig` · `games/the-grid-war` · `games/the-tower` · `games/tiny-detective-cafe` · `games/tiny-tactics-cards` · `games/unicorn-magic-sort` · `games/unscrew-it` · `games/void-drift` · `games/word-forts`
+**Below 8 — revisit first:** [Static Bloom](games/neon-strike.html) (7)
+
+<details><summary>64 not yet reviewed (baseline prototypes)</summary>
+
+`games/arcanum-pinball` · `games/aura-rooms` · `games/bloom-bureau` · `games/bounce-dungeon` · `games/breach-vector` · `games/brink-edge-rush` · `games/brink-reactor` · `games/busy-beavers` · `games/chomp-chain-rush` · `games/chroma-frenzy` · `games/cosmic-devourer` · `games/exquisite-corpse` · `games/frequency` · `games/furniture-forts` · `games/grapple-gliders` · `games/hyper-dash` · `games/kosmisk-slange` · `games/last-war-ultimate` · `games/little-hero-adventure` · `games/lumberjack-idle-empire` · `games/lumis-luminescence` · `games/lysarkivet` · `games/maze-munch-rush` · `games/mystic-potion-sort` · `games/neon-ash` · `games/neon-burst` · `games/neon-core-ballstorm` · `games/neon-galaxy` · `games/neon-hagen` · `games/neon-nexus-omega` · `games/neon-pin-climb` · `games/neon-pinball-rush` · `games/neon-runner-overdrive` · `games/neon-survivor-overdrive` · `games/orbit-drift-3d` · `games/orbit-drift-sling` · `games/painted-wilds` · `games/physics-charades` · `games/pinata-pop` · `games/pinball-wizard-3d` · `games/pitch-26` · `games/pocket-football` · `games/power-wash-royale` · `games/pulsar` · `games/puppet-panic` · `games/ricochet-brawlers` · `games/slithergar` · `games/sonar-abyss` · `games/spire` · `games/sproutys-garden` · `games/star-petal-ballstorm` · `games/star-trail-adventure` · `games/svev-miner` · `games/swarm-logic` · `games/the-elevator` · `games/the-global-dig` · `games/the-grid-war` · `games/the-tower` · `games/tiny-detective-cafe` · `games/tiny-tactics-cards` · `games/unicorn-magic-sort` · `games/unscrew-it` · `games/void-drift` · `games/word-forts`
 
 </details>
 
-## Phone Game Lab (`PhoneGameLab/`) — 29/70 reviewed
+## Phone Game Lab (`PhoneGameLab/`) — 33/70 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
@@ -30,6 +37,9 @@
 | [Scribble Siege](PhoneGameLab/games/11-scribble-siege/index.html) | 2 → **8** | 8 | 8 | 8 | 9 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/11-scribble-siege.md) |
 | [Cold Snap](PhoneGameLab/games/12-cold-snap/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 7 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/12-cold-snap.md) |
 | [Suds Patrol](PhoneGameLab/games/13-suds-patrol/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/13-suds-patrol.md) |
+| [Sparkmoth](PhoneGameLab/games/14-sparkmoth/index.html) | 2 → **8** | 8 | 8 | 8 | 9 | 7 | 7 | 9 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/14-sparkmoth.md) |
+| [Facet](PhoneGameLab/games/15-facet/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 8 | 7 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/15-facet.md) |
+| [Pin Whirl](PhoneGameLab/games/16-pin-whirl/index.html) | 2 → **8** | 8 | 7 | 8 | 9 | 7 | 8 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/16-pin-whirl.md) |
 | [Windfletch](PhoneGameLab/games/17-windfletch/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/17-windfletch.md) |
 | [One Breath](PhoneGameLab/games/18-one-breath/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/18-one-breath.md) |
 | [Tin Topple](PhoneGameLab/games/19-tin-topple/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 8 | 6 | 9 | 9 | 8 | [record](docs/reviews/PhoneGameLab/19-tin-topple.md) |
@@ -37,6 +47,7 @@
 | [Paper Rapids](PhoneGameLab/games/21-paper-rapids/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/21-paper-rapids.md) |
 | [Sundown Sprint](PhoneGameLab/games/22-sundown-sprint/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/22-sundown-sprint.md) |
 | [Pogo Peak](PhoneGameLab/games/23-pogo-peak/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 8 | 7 | 8 | 7 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/23-pogo-peak.md) |
+| [Spindle Drop](PhoneGameLab/games/24-spindle-drop/index.html) | 1 → **8** | 8 | 7 | 8 | 9 | 8 | 7 | 8 | 8 | 7 | 8 | 8 | 8 | [record](docs/reviews/PhoneGameLab/24-spindle-drop.md) |
 | [Jelly Drift](PhoneGameLab/games/26-jelly-drift/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/26-jelly-drift.md) |
 | [Fizzwhiz](PhoneGameLab/games/27-fizzwhiz/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 8 | 8 | 8 | [record](docs/reviews/PhoneGameLab/27-fizzwhiz.md) |
 | [Hollowlight](PhoneGameLab/games/28-hollowlight/index.html) | 2 → **8** | 8 | 7 | 8 | 9 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 8 | [record](docs/reviews/PhoneGameLab/28-hollowlight.md) |
@@ -48,13 +59,13 @@
 | [Misfired](PhoneGameLab/games/05-misfired/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/05-misfired.md) |
 | [Goat Up](PhoneGameLab/games/25-goat-up/index.html) | 2 → **7** | 7 | 6 | 8 | 8 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/25-goat-up.md) |
 
-Averages: overall **7.9** · Fun 7.9 · Depth 7.2 · Feel 8.0 · Look 8.3 · Anim 7.6 · Audio 7.2 · Ctrl 8.1 · Onb 7.9 · Replay 7.1 · Perf 8.8 · Robust 8.0 · Polish 7.9
+Averages: overall **7.9** · Fun 7.9 · Depth 7.2 · Feel 8.0 · Look 8.3 · Anim 7.5 · Audio 7.2 · Ctrl 8.2 · Onb 7.9 · Replay 7.2 · Perf 8.8 · Robust 8.0 · Polish 7.9
 
 **Below 8 — revisit first:** [Misfired](PhoneGameLab/games/05-misfired/index.html) (7), [Goat Up](PhoneGameLab/games/25-goat-up/index.html) (7)
 
-<details><summary>41 not yet reviewed (baseline prototypes)</summary>
+<details><summary>37 not yet reviewed (baseline prototypes)</summary>
 
-`PhoneGameLab/14-sparkmoth` · `PhoneGameLab/15-fruit-slice` · `PhoneGameLab/16-knife-throw` · `PhoneGameLab/24-helix-fall` · `PhoneGameLab/33-shape-gate` · `PhoneGameLab/34-stack-runner` · `PhoneGameLab/35-cake-tower` · `PhoneGameLab/36-sky-high` · `PhoneGameLab/38-plinko` · `PhoneGameLab/39-basketball` · `PhoneGameLab/40-pool` · `PhoneGameLab/41-goal-flick` · `PhoneGameLab/42-bridge-build` · `PhoneGameLab/43-2048` · `PhoneGameLab/44-match-3` · `PhoneGameLab/45-tap-clusters` · `PhoneGameLab/46-connect-dots` · `PhoneGameLab/47-pipe-rotate` · `PhoneGameLab/48-water-sort` · `PhoneGameLab/49-ball-sort` · `PhoneGameLab/50-screw-puzzle` · `PhoneGameLab/51-15-puzzle` · `PhoneGameLab/52-tetris` · `PhoneGameLab/53-block-blast` · `PhoneGameLab/54-maze` · `PhoneGameLab/55-laser-mirror` · `PhoneGameLab/56-lights-out` · `PhoneGameLab/57-minesweeper` · `PhoneGameLab/58-word-search` · `PhoneGameLab/59-nonogram` · `PhoneGameLab/60-sudoku` · `PhoneGameLab/61-snake` · `PhoneGameLab/62-slither` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
+`PhoneGameLab/33-shape-gate` · `PhoneGameLab/34-stack-runner` · `PhoneGameLab/35-cake-tower` · `PhoneGameLab/36-sky-high` · `PhoneGameLab/38-plinko` · `PhoneGameLab/39-basketball` · `PhoneGameLab/40-pool` · `PhoneGameLab/41-goal-flick` · `PhoneGameLab/42-bridge-build` · `PhoneGameLab/43-2048` · `PhoneGameLab/44-match-3` · `PhoneGameLab/45-tap-clusters` · `PhoneGameLab/46-connect-dots` · `PhoneGameLab/47-pipe-rotate` · `PhoneGameLab/48-water-sort` · `PhoneGameLab/49-ball-sort` · `PhoneGameLab/50-screw-puzzle` · `PhoneGameLab/51-15-puzzle` · `PhoneGameLab/52-tetris` · `PhoneGameLab/53-block-blast` · `PhoneGameLab/54-maze` · `PhoneGameLab/55-laser-mirror` · `PhoneGameLab/56-lights-out` · `PhoneGameLab/57-minesweeper` · `PhoneGameLab/58-word-search` · `PhoneGameLab/59-nonogram` · `PhoneGameLab/60-sudoku` · `PhoneGameLab/61-snake` · `PhoneGameLab/62-slither` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
 
 </details>
 

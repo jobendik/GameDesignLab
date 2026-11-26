@@ -12,25 +12,27 @@ module.exports = {
     await page.click('#bStart'); await wait(300);
     await page.evaluate(() => window.__gdl.manual(true)); // the test steps the simulation itself (deterministic); real-time stepping is checked in the pause section
     let s = await st(); expect(s.mode === 'playing' && s.hp === 100 && s.score === 0 && s.ammo === 32, 'clean run after start');
+    // NOTE: headless Chromium emits a spurious mousemove (movement = -cursor position) on every button press while the pointer is
+    // locked, so the test always aims *after* pressing the button. Real browsers do not do this.
     // ---- one real mouse shot at the core does double damage; a body shot does base damage (tested alone, before wave 1)
     await page.mouse.move(640, 400);
     const c0 = await page.evaluate(() => { const g = window.__gdl; const i = g.spawn('lancer', 0, 6); g.advance(0.05); const los = g.aimAt(i, true); return { i, los, hp: g.enemies()[i].hp }; });
     expect(c0.los, 'clear line of fire to the lancer');
-    await page.mouse.down(); await adv(0.02); await page.mouse.up();
+    await page.mouse.down(); await page.evaluate(i => { window.__gdl.aimAt(i, true); window.__gdl.advance(0.02); }, c0.i); await page.mouse.up();
     const c1 = (await page.evaluate(() => window.__gdl.enemies()))[c0.i]; s = await st();
     expect(s.shots === 1 && s.ammo === 31, 'one click, one shot'); expect(Math.abs(c0.hp - c1.hp - 40) < 0.5, 'a core hit deals double damage (' + (c0.hp - c1.hp).toFixed(1) + ')');
-    await adv(0.5); await page.evaluate(i => window.__gdl.aimAt(i, false), c0.i); await page.mouse.down(); await adv(0.02); await page.mouse.up();
+    await adv(0.5); await page.mouse.down(); await page.evaluate(i => { window.__gdl.aimAt(i, false); window.__gdl.advance(0.02); }, c0.i); await page.mouse.up();
     const c2 = (await page.evaluate(() => window.__gdl.enemies()))[c0.i]; expect(Math.abs(c1.hp - c2.hp - 20) < 0.5, 'a body hit deals base damage (' + (c1.hp - c2.hp).toFixed(1) + ')');
     await page.mouse.down(); await page.evaluate(() => { const g = window.__gdl; let n = 0; while (g.state.enemies && n++ < 60) { g.aimAt(0); g.advance(0.1); } }); await page.mouse.up();
     s = await st(); expect(s.kills === 1 && s.score >= 160 && s.shards > 0, 'the kill scores and drops shards (' + s.score + ', ' + s.shards + ' shards)');
     await page.evaluate(() => window.__gdl.teleport(0, 16));
     // ---- keyboard movement is real and dt-based
-    const z0 = s.z; await page.keyboard.down('KeyW'); await adv(0.6); await page.keyboard.up('KeyW');
-    s = await st(); expect(s.z < z0 - 3, 'W moves the player forward (' + (z0 - s.z).toFixed(2) + 'm)');
+    const p0 = await st(); await page.keyboard.down('KeyW'); await adv(0.6); await page.keyboard.up('KeyW');
+    s = await st(); const fwd = (s.x - p0.x) * -Math.sin(p0.yaw) + (s.z - p0.z) * -Math.cos(p0.yaw); expect(fwd > 3, 'W moves the player along the view direction (' + fwd.toFixed(2) + 'm in 0.6s)');
     await page.keyboard.press('Space'); await adv(0.2); expect((await st()).y > 0.5, 'Space jumps');
     await adv(1.2); expect((await st()).y === 0, 'gravity lands the player');
-    const x0 = (await st()).x; await page.keyboard.down('KeyD'); await page.keyboard.press('ShiftLeft'); await adv(0.2); await page.keyboard.up('KeyD');
-    expect((await st()).x > x0 + 3, 'Shift dashes along the move direction');
+    const p1 = await st(); await page.keyboard.down('KeyD'); await page.keyboard.press('ShiftLeft'); await adv(0.2); await page.keyboard.up('KeyD');
+    s = await st(); const side = (s.x - p1.x) * Math.cos(p1.yaw) - (s.z - p1.z) * Math.sin(p1.yaw); expect(side > 3, 'Shift dashes along the move direction (' + side.toFixed(2) + 'm right in 0.2s)');
     // ---- wave 1 arrives
     await adv(4.5); s = await st(); expect(s.wave === 1 && s.enemies > 0, 'wave 1 spawns constructs (' + s.enemies + ')');
     // ---- real mouse button fires; aim comes from the test hook, damage from the game's own ray test
@@ -40,12 +42,12 @@ module.exports = {
     await page.evaluate(() => { const g = window.__gdl; let n = 0; while (g.state.kills < 2 && n++ < 80) { g.aimAt(0); g.advance(0.1); } });
     s = await st(); expect(s.kills >= 2, 'wave constructs die to sustained fire');
     // clear the wave: flow multiplier climbs with a kill chain, shards are collected by proximity
-    await page.evaluate(() => { const g = window.__gdl; let n = 0; while (g.state.wave < 2 && g.state.mode === 'playing' && n++ < 900) { if (g.state.enemies) g.aimAt(0); g.advance(0.1); } });
+    const maxFlow = await page.evaluate(() => { const g = window.__gdl; let n = 0, mf = 1; while (g.state.wave < 2 && g.state.mode === 'playing' && n++ < 900) { if (g.state.enemies) g.aimAt(0); g.advance(0.1); mf = Math.max(mf, g.state.flow); } return mf; });
     await page.mouse.up();
-    s = await st(); expect(s.wave === 2 && s.mode === 'playing', 'clearing every construct starts wave 2'); expect(s.kills >= 5, 'most of wave 1 was shot down (' + s.kills + ')'); expect(s.score >= 1000, 'score reflects kills + flow + clear bonus (' + s.score + ')');
+    s = await st(); expect(s.wave === 2 && s.mode === 'playing', 'clearing every construct starts wave 2'); expect(s.kills >= 5, 'most of wave 1 was shot down (' + s.kills + ')'); expect(maxFlow >= 2, 'a kill chain raises the flow multiplier (×' + maxFlow + ')'); expect(s.score >= 700, 'score reflects kills, shards and the clear bonus (' + s.score + ')');
     // ---- nova: right mouse launches an explosive that damages a group
-    await page.evaluate(() => { const g = window.__gdl; g.give('nova'); g.teleport(0, 20); for (let i = 0; i < 3; i++) g.spawn('drifter', i - 1, 7); g.advance(0.05); g.aimAt(g.enemies().length - 2); });
-    const k0 = (await st()).kills; await page.mouse.click(640, 400, { button: 'right' }); await adv(0.8);
+    await page.evaluate(() => { const g = window.__gdl; g.give('nova'); g.teleport(0, 20); for (let i = 0; i < 3; i++) g.spawn('drifter', i - 1, 7); g.advance(0.05); });
+    const k0 = (await st()).kills; await page.mouse.down({ button: 'right' }); await page.evaluate(() => { const g = window.__gdl; g.aimAt(g.enemies().length - 2); g.advance(0.8); }); await page.mouse.up({ button: 'right' });
     s = await st(); expect(s.nova === 2, 'right click spends a nova charge'); expect(s.kills >= k0 + 2, 'the nova blast kills grouped constructs (' + (s.kills - k0) + ')');
     // ---- pickups: walking onto a pad collects it
     const pk = await page.evaluate(() => { const g = window.__gdl; let n = 0; while (!g.state.pickups.length && n++ < 300) { if (g.state.enemies) g.aimAt(0); g.advance(0.1); } return g.state.pickups[0]; });

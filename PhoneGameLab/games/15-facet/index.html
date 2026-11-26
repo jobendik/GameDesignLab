@@ -1,0 +1,234 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Facet</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* FACET — a gem-cutter's swipe game. Rough stones are tossed over a velvet tray; your swipe is the cutting wheel.
+ * Twist: cuts are real geometry. Each stone is a convex polygon that is split exactly along the line you drew, and the
+ * pieces can be cut again (stone → halves → quarters → slivers) for rising value, so one toss can be worth seven cuts.
+ * Depth: chain cuts within 0.7 s for a multiplier, cut through the middle for a CLEAN bonus, leave the red-veined
+ * hexstones alone, grab the white star diamond for a few seconds of slow, double-value "brilliance".
+ * Identity: emerald velvet, gold thread, low-poly gems whose facets catch the light as they spin, glassy chimes, funk.   */
+Lab.init({
+  title: "Facet", tagline: "Cut flying gems. Then cut the pieces.", category: "Arcade & Action",
+  howto: ["Swipe through a gem to cut it", "Pieces can be cut again for more", "Never cut a red-veined hexstone"],
+  theme: { bg: "#06231f", bg2: "#0f4a43", accent: "#f2c14e", accent2: "#35c9d6" },
+  orient: "portrait", music: { style: "funk", key: "E", vol: .42 }, restart: start,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, rand = Lab.rand;
+const GEMS = [["Ruby", "#e2364f"], ["Sapphire", "#2f6fe0"], ["Emerald", "#1fc276"], ["Topaz", "#f2a81d"], ["Amethyst", "#9a55e0"], ["Aqua", "#35c9d6"], ["Rose", "#f078b4"]];
+const RAMP = GEMS.map(g => Array.from({ length: 9 }, (_, i) => Lab.color.shade(g[1], -.6 + i * .16)));
+const STAR = Array.from({ length: 9 }, (_, i) => Lab.color.hsl(190 + i * 22, 70, 62 + i * 4));
+const BASE = [10, 15, 25], TRAIL = .17;
+let S, PL, G, gems, trail, blade, score, lives, chain, chainT, bestChain, cuts, cleans, volley, lot, dirT, quiet, alive, brill, missFx, hintT, dying, frozen;
+
+function layout() { const p = Lab.play; PL = { x: p.x, y: p.y, w: p.w, h: p.h }; S = Math.min(Lab.W / 390, p.h / 740); G = 820 * S; }
+Lab.onResize(() => { if (gems) { layout(); trail.length = 0; } });
+
+function start() {
+  layout();
+  gems = []; trail = []; blade = { x: 0, y: 0, vx: 0, vy: 0, down: false }; score = 0; lives = 3; chain = 0; chainT = 0; bestChain = 0; cuts = 0; cleans = 0;
+  volley = 0; lot = 1; dirT = .7; quiet = false; alive = true; brill = 0; missFx = []; hintT = 6; dying = 0; frozen = false;
+  Lab.setScore(0);
+  Lab.input.onTap = []; Lab.input.onSwipe = []; Lab.input.onKey = [];
+  Lab.input.onDown = [(x, y) => { blade.down = true; blade.x = x; blade.y = y; blade.vx = blade.vy = 0; trail.length = 0; trail.push({ x, y, t: Lab.now() }); }];
+  Lab.input.onMove = [(x, y) => { if (!Lab.input.down || !blade.down) return; stroke(blade.x, blade.y, x, y); }];
+  Lab.input.onUp = [() => { blade.down = false; for (const g of gems) commit(g); }];
+  Lab.expose({
+    get gems() { return gems; }, get score() { return score; }, get lives() { return lives; }, get chain() { return chain; }, get cuts() { return cuts; }, get cleans() { return cleans; },
+    get volley() { return volley; }, get brilliance() { return brill; }, get area() { return PL; }, get S() { return S; },
+    quiet(v) { quiet = v !== false; }, freeze(v) { frozen = v !== false; }, launch(kind, x, y, vx, vy) { const g = mkGem(kind, x, y, vx || 0, vy || 0); gems.push(g); return g; },
+  });
+  Lab.loop(frame);
+}
+
+/* ------------------------------------------------------------------ geometry */
+function area(v) { let a = 0; for (let i = 0, n = v.length; i < n; i++) { const p = v[i], q = v[(i + 1) % n]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; }
+function centroid(v) { let a = 0, cx = 0, cy = 0; for (let i = 0, n = v.length; i < n; i++) { const p = v[i], q = v[(i + 1) % n], k = p[0] * q[1] - q[0] * p[1]; a += k; cx += (p[0] + q[0]) * k; cy += (p[1] + q[1]) * k; } return [cx / (3 * a), cy / (3 * a)]; }
+function inside(v, p) { let s = 0; for (let i = 0, n = v.length; i < n; i++) { const a = v[i], b = v[(i + 1) % n], c = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]); if (c !== 0) { if (s && (c > 0) !== (s > 0)) return false; s = c; } } return true; }
+function crossings(v, a, b) {          // parameters t∈[0,1] where segment a→b crosses the polygon outline, sorted
+  const out = [], rx = b[0] - a[0], ry = b[1] - a[1];
+  for (let i = 0, n = v.length; i < n; i++) { const p = v[i], q = v[(i + 1) % n], sx = q[0] - p[0], sy = q[1] - p[1], den = rx * sy - ry * sx; if (Math.abs(den) < 1e-9) continue; const t = ((p[0] - a[0]) * sy - (p[1] - a[1]) * sx) / den, u = ((p[0] - a[0]) * ry - (p[1] - a[1]) * rx) / den; if (t >= 0 && t <= 1 && u >= 0 && u <= 1) out.push(t); }
+  return out.sort((x, y) => x - y);
+}
+function split(v, p, q) {              // convex polygon → two polygons along the line p→q; ce = indices of the fresh cut edge
+  const nx = -(q[1] - p[1]), ny = q[0] - p[0], d = v.map(pt => (pt[0] - p[0]) * nx + (pt[1] - p[1]) * ny), A = [], B = [], ca = [], cb = [];
+  for (let i = 0, n = v.length; i < n; i++) {
+    const j = (i + 1) % n, a = v[i], b = v[j], da = d[i], db = d[j];
+    (da >= 0 ? A : B).push(a);
+    if ((da >= 0) !== (db >= 0)) { const t = da / (da - db), ip = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; ca.push(A.length); A.push(ip); cb.push(B.length); B.push([ip[0], ip[1]]); }
+  }
+  return A.length >= 3 && B.length >= 3 && ca.length === 2 ? { A, B, ca, cb, nx, ny } : null;
+}
+const toLocal = (g, x, y) => { const dx = x - g.x, dy = y - g.y, c = Math.cos(-g.rot), s = Math.sin(-g.rot); return [dx * c - dy * s, dx * s + dy * c]; };
+const toWorld = (g, p) => { const c = Math.cos(g.rot), s = Math.sin(g.rot); return [g.x + p[0] * c - p[1] * s, g.y + p[0] * s + p[1] * c]; };
+
+/* ------------------------------------------------------------------ stones */
+function mkGem(kind, x, y, vx, vy) {
+  const R = (kind === "hex" ? 30 : kind === "star" ? 31 : rand(33, 41)) * S, n = kind === "hex" ? 9 : Lab.randInt(6, 8), asp = kind === "gem" ? rand(.74, 1) : 1, v = [], off = rand(0, TAU);
+  for (let i = 0; i < n; i++) { const a = off + (i + rand(-.28, .28)) / n * TAU, rr = kind === "hex" ? (i % 2 ? .62 : 1.08) : 1; v.push([Math.cos(a) * R * rr, Math.sin(a) * R * rr * asp]); }
+  return { kind, v, x, y, vx, vy, rot: rand(0, TAU), w: rand(-2.4, 2.4), c: Lab.randInt(0, GEMS.length - 1), gen: 0, whole: true, R, a0: Math.abs(area(v)), entry: null, last: null, eT: 0, ce: null, ceT: 0, age: 0, tw: rand(0, TAU) };
+}
+function toss(kind) {
+  const R = 40 * S, x = PL.x + rand(.1, .9) * PL.w, h = rand(.52, .8) * PL.h, vy = -Math.sqrt(2 * G * h), T = -2 * vy / G, tx = PL.x + rand(.22, .78) * PL.w;
+  gems.push(mkGem(kind, x, PL.y + PL.h + R, (tx - x) / T * 1.6, vy)); Lab.sfx("whoosh", { pitch: kind === "hex" ? .6 : rand(.9, 1.3), vol: .5 });
+  if (kind === "hex") Lab.sfx("warn", { pitch: .7 });
+}
+function director(dt) {
+  if (quiet || !alive) return; dirT -= dt; if (dirT > 0) return;
+  volley++; lot = Math.floor((volley - 1) / 6) + 1;
+  if (volley % 6 === 0) {                      // every sixth toss is a rush: a clean stream, no hexstones
+    const n = 5 + lot; Lab.banner("RUSH!", { color: "#f2c14e", ms: 900 }); Lab.sfx("levelup");
+    for (let i = 0; i < n; i++) Lab.after(.5 + i * .24, () => toss("gem")); dirT = .5 + n * .24 + 2.4; return;
+  }
+  if (volley > 1 && volley % 6 === 1) Lab.banner("LOT " + lot, { color: "#ffffff", ms: 900 });
+  const n = clamp(1 + Math.floor((volley - 1) / 4) + (volley > 6 && Lab.chance(.35) ? 1 : 0), 1, 5), hex = volley < 5 ? 0 : (Lab.chance(.3 + lot * .09) ? 1 : 0) + (lot >= 4 && Lab.chance(.3) ? 1 : 0);
+  for (let i = 0; i < n; i++) Lab.after(i ? rand(.05, .45) : 0, () => toss("gem"));
+  for (let i = 0; i < hex; i++) Lab.after(rand(.1, .5), () => toss("hex"));
+  if (volley > 7 && brill <= 0 && Lab.chance(.1)) Lab.after(.3, () => toss("star"));
+  dirT = Math.max(1.45, 2.7 - lot * .17) + n * .13;
+}
+
+/* ------------------------------------------------------------------ cutting */
+function stroke(x0, y0, x1, y1) {
+  const now = Lab.now(), dx = x1 - x0, dy = y1 - y0, d = Math.hypot(dx, dy); if (d < .5) return;
+  blade.vx = dx; blade.vy = dy; blade.x = x1; blade.y = y1; trail.push({ x: x1, y: y1, t: now }); if (trail.length > 40) trail.shift(); hintT = Math.min(hintT, .5);
+  if (d > 14 && now - (blade.sw || 0) > .16) { blade.sw = now; Lab.sfx("swish", { pitch: clamp(.8 + d / 90, .8, 1.8), vol: .45 }); }
+  if (!alive) return;
+  const list = gems.slice();
+  for (const g of list) {
+    if (g.dead || g.age < .04) continue; const R = g.R * 1.2 + d; if (Math.abs(g.x - x1) > R || Math.abs(g.y - y1) > R) continue;
+    const a = toLocal(g, x0, y0), b = toLocal(g, x1, y1), ts = crossings(g.v, a, b), at = t => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    if (!g.entry) {
+      if (ts.length >= 2) cut(g, at(ts[0]), at(ts[ts.length - 1]), dx / d, dy / d);
+      else if (ts.length === 1 && !inside(g.v, a)) { g.entry = at(ts[0]); g.last = b; g.eT = now; const w = toWorld(g, g.entry); fx.sparks(w[0], w[1], Math.atan2(-dy, -dx), { n: 4, color: "#fff7d6", speed: 220, life: .2, size: 2 }); }
+      else if (inside(g.v, a) && inside(g.v, b)) { g.entry = a; g.last = b; g.eT = now; }
+    } else if (ts.length >= 1 && !inside(g.v, b)) cut(g, g.entry, at(ts[ts.length - 1]), dx / d, dy / d);
+    else { g.last = b; g.eT = now; }
+  }
+}
+function commit(g) {                    // blade lifted / stalled inside a stone: finish the cut if it went deep enough
+  if (!g.entry || g.dead) return; const e = g.entry, l = g.last; g.entry = null;
+  if (l && Math.hypot(l[0] - e[0], l[1] - e[1]) > g.R * .55) { const w0 = toWorld(g, e), w1 = toWorld(g, l), d = Math.hypot(w1[0] - w0[0], w1[1] - w0[1]) || 1; cut(g, e, l, (w1[0] - w0[0]) / d, (w1[1] - w0[1]) / d); }
+}
+function cut(g, p, q, bx, by) {
+  g.entry = null;
+  if (g.kind === "hex") return hexed(g);
+  if (g.gen >= 3) return;
+  const sp = split(g.v, p, q); if (!sp) return;
+  const aA = Math.abs(area(sp.A)), aB = Math.abs(area(sp.B)), tot = aA + aB, ratio = Math.min(aA, aB) / tot;
+  if (ratio < .1) return;                                                         // a sliver is a graze, not a cut
+  g.dead = true; cuts++; chain++; chainT = .7; bestChain = Math.max(bestChain, chain);
+  const clean = ratio > .4, m = mult() * (brill > 0 ? 2 : 1), star = g.kind === "star";
+  let pts = Math.round(BASE[g.gen] * (clean ? 1.5 : 1)) * m; if (star) pts += 50 * m; if (clean) cleans++;
+  score += pts; Lab.setScore(score); if (m > 2 || clean) Lab.bumpScore();
+  const wp = toWorld(g, p), wq = toWorld(g, q), mx = (wp[0] + wq[0]) / 2, my = (wp[1] + wq[1]) / 2, ang = Math.atan2(by, bx), col = star ? "#ffffff" : GEMS[g.c][1];
+  const nl = Math.hypot(sp.nx, sp.ny) || 1, cr = Math.cos(g.rot), sr = Math.sin(g.rot), nwx = (sp.nx * cr - sp.ny * sr) / nl, nwy = (sp.nx * sr + sp.ny * cr) / nl;
+  [[sp.A, sp.ca, 1], [sp.B, sp.cb, -1]].forEach(([v, ce, sgn]) => {
+    const c = centroid(v), w = toWorld(g, c), nv = v.map(pt => [pt[0] - c[0], pt[1] - c[1]]), push = (95 + 40 * g.gen) * S;
+    gems.push({ kind: "gem", v: nv, x: w[0], y: w[1], vx: g.vx + nwx * sgn * push + bx * 50 * S, vy: g.vy + nwy * sgn * push + by * 50 * S - 60 * S, rot: g.rot, w: g.w + sgn * rand(1.2, 3.6), c: g.c, gen: g.gen + 1, whole: false, R: Math.max(...nv.map(pt => Math.hypot(pt[0], pt[1]))), a0: Math.abs(area(nv)), entry: null, last: null, eT: 0, ce, ceT: .35, age: 0, tw: rand(0, TAU), star });
+  });
+  // feedback: sparks along the cut, gem dust, glassy note that climbs with the chain and with smaller pieces
+  fx.sparks(mx, my, ang, { n: 7, color: "#fff7d6", speed: 460, life: .26, size: 2.6 }); fx.sparks(mx, my, ang + Math.PI, { n: 4, color: "#fff7d6", speed: 300, life: .2, size: 2 });
+  fx.burst(mx, my, { n: 6 + (3 - g.gen) * 2, colors: [col, Lab.color.shade(col, .5), "#ffffff"], speed: 190, life: .5, size: 3.2, gravity: 500, shape: "shard" });
+  fx.text(mx, my - 16 * S, (clean ? "CLEAN +" : "+") + pts, { color: clean ? "#f2c14e" : "#ffffff", size: (clean ? 17 : 14) + Math.min(8, m) });
+  Lab.audio.tone({ f: (1250 + g.gen * 380) * (clean ? 1.26 : 1), dur: .16, vol: .11, type: "sine" }); Lab.audio.tone({ f: 2900 + g.gen * 500, dur: .07, vol: .04, type: "triangle" }); Lab.audio.combo(Math.min(16, chain - 1), { vol: .09 }); Lab.audio.noise({ dur: .05, vol: .09, hp: 4500 });
+  if (g.gen === 0) { Lab.hitstop(.022); Lab.buzz(8); } if (clean && g.gen === 0) fx.ring(mx, my, { r0: 6, r1: g.R * 1.7, color: "#f2c14e", width: 3, life: .3 });
+  if (star) { brill = 1.8; Lab.slowmo(.45, 4); Lab.flash("#ffffff", .3, .5); Lab.sfx("chime"); Lab.sfx("powerup", { pitch: 1.4 }); Lab.banner("BRILLIANCE ×2", { color: "#ffffff", ms: 1100 }); }
+}
+const mult = () => Math.min(6, 1 + Math.floor(Math.max(0, chain - 1) / 2));
+function hexed(g) {
+  g.dead = true; chain = 0; chainT = 0; for (const o of gems) o.entry = null;
+  fx.burst(g.x, g.y, { n: 30, colors: ["#2a2030", "#ff3b4e", "#7a1f2e", "#111"], speed: 420, life: .8, size: 5, gravity: 500, shape: "shard" }); fx.ring(g.x, g.y, { r0: 10, r1: 150 * S, color: "#ff3b4e", width: 7, life: .45 });
+  Lab.shake(16, .45); Lab.hitstop(.1); Lab.flash("#ff3b4e", .3, .45); Lab.sfx("glass", { pitch: .6 }); Lab.sfx("explode", { pitch: 1.2 }); Lab.buzz(70);
+  fx.text(g.x, g.y - 30 * S, "HEXED!", { color: "#ff6b7a", size: 22 }); loseLife();
+}
+function loseLife() { lives--; if (lives <= 0 && alive) { alive = false; dying = .001; blade.down = false; Lab.slowmo(.3, .6); } }
+
+/* ------------------------------------------------------------------ frame */
+function frame(dt, t) {
+  director(dt);
+  if (chainT > 0) { chainT -= dt; if (chainT <= 0) { if (chain >= 4) { const b = chain * 5; score += b; Lab.setScore(score); fx.text(blade.x, blade.y - 30 * S, chain + " CUT CHAIN +" + b, { color: "#35c9d6", size: 17 }); Lab.sfx("star"); } chain = 0; } }
+  if (brill > 0) brill -= dt; hintT -= dt;
+  const now = Lab.now(), floor = PL.y + PL.h;
+  for (const g of gems) {
+    g.age += dt; if (g.ceT > 0) g.ceT -= dt; if (frozen) continue;
+    g.vy += G * dt; g.x += g.vx * dt; g.y += g.vy * dt; g.rot += g.w * dt;
+    if (g.x < PL.x + g.R * .6 && g.vx < 0 || g.x > PL.x + PL.w - g.R * .6 && g.vx > 0) g.vx *= -.6;
+    if (g.entry && now - g.eT > .22) commit(g);
+    if (g.y > floor + g.R + 50 && g.vy > 0) {
+      g.dead = true;
+      if (g.whole && g.kind === "gem" && alive) { missFx.push({ x: clamp(g.x, PL.x + 30, PL.x + PL.w - 30), t: 0 }); Lab.sfx("error"); chain = 0; if (cuts > 0 || volley > 3) { Lab.shake(6, .2); Lab.buzz(30); loseLife(); } else hintT = 5; }   // the first few drops before any cut are free
+    }
+  }
+  if (gems.some(g => g.dead)) gems = gems.filter(g => !g.dead);
+  while (trail.length && now - trail[0].t > TRAIL) trail.shift();
+  for (const m of missFx) m.t += dt; if (missFx.length && missFx[0].t > 1) missFx.shift();
+  Lab.music.intensity(alive ? clamp(.25 + lot * .1 + mult() * .08 + (brill > 0 ? .3 : 0), 0, 1) : .1);
+  render(t, now);
+  if (dying > 0) { dying += dt; if (dying > .5) { dying = 0; Lab.gameover({ title: lives <= 0 ? "Tray closed" : "Done", score, stats: [["Cuts", cuts], ["Best chain", bestChain], ["Clean", cleans]] }); } }
+}
+
+/* ------------------------------------------------------------------ art */
+function velvet() {
+  return Lab.sprite("velvet:" + Lab.W + "x" + Lab.H, Lab.W, Lab.H, (g, W, H) => {
+    g.fillStyle = "#06231f"; g.fillRect(0, 0, W, H);
+    const gr = g.createRadialGradient(W * .5, H * .42, 20, W * .5, H * .5, Math.max(W, H) * .75); gr.addColorStop(0, "#17695e"); gr.addColorStop(.5, "#0d4039"); gr.addColorStop(1, "#04181a"); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    g.strokeStyle = "rgba(255,255,255,.022)"; g.lineWidth = 1; for (let x = -H; x < W; x += 7) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x + H, H); g.stroke(); }
+    g.strokeStyle = "rgba(0,0,0,.05)"; for (let x = 0; x < W + H; x += 9) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x - H, H); g.stroke(); }
+    const m = 10, top = Lab.play.y + 2; g.strokeStyle = "rgba(242,193,78,.5)"; g.lineWidth = 1.5; g.setLineDash([7, 5]); draw.rr(g, m, top, W - m * 2, H - top - m, 18); g.stroke(); g.setLineDash([]);     // gold stitching
+    for (const [cx, cy] of [[m + 9, top + 9], [W - m - 9, top + 9], [m + 9, H - m - 9], [W - m - 9, H - m - 9]]) draw.poly(g, cx, cy, 4, 4, 0, "rgba(242,193,78,.7)");
+  });
+}
+function gemPath(c, v, k) { c.beginPath(); for (let i = 0; i < v.length; i++) c[i ? "lineTo" : "moveTo"](v[i][0] * k, v[i][1] * k); c.closePath(); }
+function drawGem(c, g, t) {
+  const v = g.v, n = v.length, pop = g.age < .12 && !g.whole ? 1 + (1 - g.age / .12) * .12 : 1;
+  c.save(); c.translate(g.x, g.y); c.rotate(g.rot); if (pop !== 1) c.scale(pop, pop);
+  if (g.kind === "hex") {
+    gemPath(c, v, 1); c.fillStyle = "#231a2b"; c.fill(); c.strokeStyle = "#ff3b4e"; c.lineWidth = 2 * S; c.lineJoin = "round"; c.stroke();
+    gemPath(c, v, .55); c.fillStyle = "#3a2b45"; c.fill();
+    c.strokeStyle = `rgba(255,70,90,${.65 + .35 * Math.sin(t * 9 + g.tw)})`; c.lineWidth = 1.6 * S; c.beginPath(); for (let i = 0; i < n; i += 2) { c.moveTo(v[i][0] * .9, v[i][1] * .9); c.lineTo(v[(i + 3) % n][0] * .3, v[(i + 3) % n][1] * .3); c.lineTo(0, 0); } c.stroke();
+    c.restore(); return;
+  }
+  const ramp = g.kind === "star" || g.star ? STAR : RAMP[g.c], k = g.gen ? .5 : .56;
+  gemPath(c, v, 1); c.fillStyle = ramp[3]; c.fill();
+  for (let i = 0; i < n; i++) {                                    // crown facets: brightness follows the facet's angle to a fixed light, so they flash as the stone spins
+    const a = v[i], b = v[(i + 1) % n], ang = Math.atan2(b[1] - a[1], b[0] - a[0]) + g.rot, sh = .5 + .5 * Math.cos(ang - 2.3), fresh = g.ce && g.ceT > 0 && i === (g.ce[1] === g.ce[0] + 1 ? g.ce[0] : g.ce[1]);
+    c.fillStyle = ramp[1 + Math.round(sh * 6)]; c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.lineTo(b[0] * k, b[1] * k); c.lineTo(a[0] * k, a[1] * k); c.closePath(); c.fill();
+    if (fresh) { c.strokeStyle = `rgba(255,255,255,${g.ceT / .35})`; c.lineWidth = 3.2 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke(); }
+  }
+  const tb = .5 + .5 * Math.cos(g.rot * 2 + g.tw); gemPath(c, v, k); c.fillStyle = ramp[5 + Math.round(tb * 2)]; c.fill();
+  c.fillStyle = "rgba(255,255,255,.5)"; c.beginPath(); c.moveTo(v[0][0] * k * .8, v[0][1] * k * .8); c.lineTo(v[1][0] * k * .8, v[1][1] * k * .8); c.lineTo(0, 0); c.closePath(); c.fill();
+  gemPath(c, v, 1); c.strokeStyle = ramp[0]; c.lineWidth = 1.4 * S; c.lineJoin = "round"; c.stroke();
+  c.restore();
+  const tw = Math.sin(t * 5 + g.tw); if (tw > .86 && g.gen < 2) { const p = toWorld(g, v[0]), s = (tw - .86) * 60 * S; c.fillStyle = "#fff"; c.beginPath(); c.moveTo(p[0] - s, p[1]); c.lineTo(p[0], p[1] - s * .25); c.lineTo(p[0] + s, p[1]); c.lineTo(p[0], p[1] + s * .25); c.closePath(); c.fill(); c.beginPath(); c.moveTo(p[0], p[1] - s); c.lineTo(p[0] + s * .25, p[1]); c.lineTo(p[0], p[1] + s); c.lineTo(p[0] - s * .25, p[1]); c.closePath(); c.fill(); }
+}
+function ribbon(c, pts, now, wMax, fill) {
+  const n = pts.length; if (n < 2) return; const L = [], R = [];
+  for (let i = 0; i < n; i++) {
+    const p = pts[i], a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)]; let dx = b.x - a.x, dy = b.y - a.y; const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
+    const life = 1 - (now - p.t) / TRAIL, w = wMax * Math.max(0, life) * (i === n - 1 ? .25 : i === n - 2 ? .7 : 1) * (i / (n - 1) * .6 + .4);
+    L.push([p.x - dy * w, p.y + dx * w]); R.push([p.x + dy * w, p.y - dx * w]);
+  }
+  c.fillStyle = fill; c.beginPath(); c.moveTo(L[0][0], L[0][1]); for (let i = 1; i < n; i++) c.lineTo(L[i][0], L[i][1]); const h = pts[n - 1], q = pts[n - 2], hx = h.x - q.x, hy = h.y - q.y, hd = Math.hypot(hx, hy) || 1; c.lineTo(h.x + hx / hd * wMax * .9, h.y + hy / hd * wMax * .9); for (let i = n - 1; i >= 0; i--) c.lineTo(R[i][0], R[i][1]); c.closePath(); c.fill();
+}
+function render(t, now) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H;
+  c.fillStyle = "#04181a"; c.fillRect(-40, -40, W + 80, H + 80); const bg = velvet(); c.drawImage(bg, 0, 0, W, H);
+  if (brill > 0) { c.fillStyle = `rgba(255,255,255,${.06 + .03 * Math.sin(t * 20)})`; c.fillRect(0, 0, W, H); }
+  for (const g of gems) if (g.kind !== "gem" && !g.star) draw.glow(c, g.x, g.y, g.R * 2.3, g.kind === "hex" ? "#ff3b4e" : "#ffffff", g.kind === "hex" ? .28 + .12 * Math.sin(t * 9) : .3);
+  for (const g of gems) drawGem(c, g, t);
+  for (const m of missFx) { const a = 1 - m.t; draw.glow(c, m.x, PL.y + PL.h, 90 * S, "#ff3b4e", .5 * a); draw.text(c, "DROPPED", m.x, PL.y + PL.h - 30 * S - m.t * 30, { size: 15, color: `rgba(255,120,130,${a})`, weight: 700 }); }
+  // the cutting wheel: wide soft glow, then a white-hot core; colour warms with the chain multiplier
+  if (trail.length > 1) { const m = mult(), glow = brill > 0 ? "rgba(190,240,255,.34)" : m >= 4 ? "rgba(255,150,90,.36)" : m >= 2 ? "rgba(255,214,110,.34)" : "rgba(160,235,225,.3)"; ribbon(c, trail, now, 13 * S, glow); ribbon(c, trail, now, 7 * S, "rgba(255,255,255,.55)"); ribbon(c, trail, now, 3.6 * S, "#ffffff"); }
+  // --- HUD
+  const y = PL.y + 20;
+  for (let i = 0; i < 3; i++) { const x = PL.x + 28 + i * 24, on = i < lives; c.globalAlpha = on ? 1 : .25; c.fillStyle = on ? "#f2c14e" : "#9fb5b0"; c.beginPath(); c.moveTo(x - 8, y - 3); c.lineTo(x - 4, y - 8); c.lineTo(x + 4, y - 8); c.lineTo(x + 8, y - 3); c.lineTo(x, y + 8); c.closePath(); c.fill(); if (on) { c.fillStyle = "rgba(255,255,255,.55)"; c.beginPath(); c.moveTo(x - 8, y - 3); c.lineTo(x - 4, y - 8); c.lineTo(x, y - 3); c.closePath(); c.fill(); } } c.globalAlpha = 1;
+  draw.text(c, "LOT " + lot, PL.x + PL.w / 2, y - 1, { size: 12, color: "rgba(242,193,78,.75)", weight: 700 });
+  if (chain >= 2) { const m = mult(), x = PL.x + PL.w - 26; draw.text(c, "×" + m, x, y, { size: 17 + m * 1.5, color: m > 1 ? "#f2c14e" : "#ffffff", align: "right", weight: 800 }); draw.text(c, chain + " chain", x, y + 17, { size: 10.5, color: "rgba(255,255,255,.7)", align: "right", weight: 600 }); draw.rect(c, x - 46, y + 26, 46, 3, 1.5, "rgba(255,255,255,.15)"); draw.rect(c, x - 46 * clamp(chainT / .7, 0, 1), y + 26, 46 * clamp(chainT / .7, 0, 1), 3, 1.5, "#f2c14e"); }
+  if (hintT > 0 && alive && cuts === 0) { const a = Math.min(1, hintT / .5), u = (t * .9) % 1, hx = PL.x + PL.w * (.25 + .5 * ease.inOutCubic(u)), hy = PL.y + PL.h * .62; c.globalAlpha = a * (u < .1 ? u * 10 : u > .8 ? (1 - u) * 5 : 1); c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = 3; c.lineCap = "round"; c.beginPath(); c.moveTo(PL.x + PL.w * .25, hy); c.lineTo(hx, hy); c.stroke(); draw.circle(c, hx, hy, 9, "rgba(255,255,255,.85)"); c.globalAlpha = a; draw.text(c, "swipe through the gems", PL.x + PL.w / 2, hy + 30, { size: 13, color: "rgba(255,255,255,.8)", weight: 600 }); c.globalAlpha = 1; }
+}
+Lab.boot();
+})();
+</script></body></html>

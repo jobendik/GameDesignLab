@@ -251,22 +251,25 @@ window.LAB_GAMES = [
     "n": 14,
     "slug": "14-sparkmoth",
     "t": "Sparkmoth",
-    "d": "Weave through the fireworks. Skim the sparks.",
-    "v2": true
+    "d": "Weave through the fireworks.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 15,
-    "slug": "15-fruit-slice",
-    "t": "Fruit Slice",
-    "d": "Swipe to slice fruit, dodge bombs.",
-    "thumb": "../thumbs/PhoneGameLab--15-fruit-slice.jpg"
+    "slug": "15-facet",
+    "t": "Facet",
+    "d": "Cut flying gems. Then cut the pieces.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 16,
-    "slug": "16-knife-throw",
-    "t": "Knife Throw",
-    "d": "Stick knives in a spinning log.",
-    "thumb": "../thumbs/PhoneGameLab--16-knife-throw.jpg"
+    "slug": "16-pin-whirl",
+    "t": "Pin Whirl",
+    "d": "Stick every pin. Don't prick a neighbour.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 17,
@@ -306,11 +309,12 @@ window.LAB_GAMES = [
    },
    {
     "n": 24,
-    "slug": "24-helix-fall",
+    "slug": "24-spindle-drop",
     "t": "Spindle Drop",
     "d": "Twist the toy tower. Let the marble plunge.",
     "v2": true,
-    "thumb": "../thumbs/PhoneGameLab--24-helix-fall.jpg"
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--24-spindle-drop.jpg"
    }
   ]
  },

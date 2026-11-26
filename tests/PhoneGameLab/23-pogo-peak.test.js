@@ -47,6 +47,14 @@ module.exports = {
     await page.mouse.move(200, 400); await page.mouse.down(); await page.mouse.move(202, 470, { steps: 2 });
     expect(await game(g => g.slamming || g.streak >= 2), 'flicking down starts a slam');
     await page.mouse.up();
+    // --- hazard (tested low over the meadow, where nothing else can interfere): a burr touching Pip's body knocks him
+    //     down and dazes him; it does not end the run by itself
+    // (wait out any mercy window from an earlier knock or balloon ride so the touch is a fair one)
+    for (let i = 0; i < 200 && !(await game(g => g.vy < -200 && !g.slamming && g.inv <= 0 && g.balloon <= 0 && g.dazed <= 0)); i++) await wait(40);
+    // sample on the very frame the knock lands: a ledge right below may bounce him again within a few frames
+    const kn = await game(g => new Promise(res => { g.spawnThing('burr', g.x, g.y - 6); let n = 0; (function f() { if (g.dazed > 0 || ++n > 30) return res({ dazed: g.dazed, vy: g.vy, alive: g.alive, streak: g.streak }); requestAnimationFrame(f); })(); }));
+    expect(kn.dazed > 0 && kn.vy > 0 && kn.alive && kn.streak === 0, 'a burr knocks Pip down and dazes him (' + JSON.stringify(kn) + ')');
+    await wait(1500);
     // --- climb through real platforms
     await pilot(8000, 'climb');
     const c1 = await game(g => ({ h: g.height, score: g.score, bounces: g.bounces, alive: g.alive }));
@@ -55,15 +63,10 @@ module.exports = {
     await pilot(5000, 'slam');
     const c2 = await game(g => ({ h: g.height, best: g.bestStreak, alive: g.alive }));
     expect(c2.best >= 2 && c2.h > c1.h, 'chained slams build a streak while climbing (' + JSON.stringify(c2) + ')');
-    // --- hazard: a burr touching Pip's body knocks him down (dazed), it does not end the run by itself
-    // (wait out any mercy window from an earlier knock or balloon ride so the touch is a fair one)
-    for (let i = 0; i < 200 && !(await game(g => g.vy < -200 && !g.slamming && g.inv <= 0 && g.balloon <= 0 && g.dazed <= 0)); i++) await pilot(60, 'climb');
-    await game(g => g.spawnThing('burr', g.x, g.y - 6)); await wait(80);
-    expect(await game(g => g.dazed > 0 && g.vy > 0 && g.alive), 'a burr knocks Pip down and dazes him');
     // --- the only way to lose: fall off the bottom of the screen
     for (let i = 0; i < 30 && !(await state()).over; i++) { await pilot(400, 'fall'); await wait(120); }
     const s = await state(); expect(s.over, 'falling off the screen ends the run'); expect(s.best >= s.score && s.best > 0, 'best score recorded');
-    await wait(1400); await page.keyboard.press('Enter'); await wait(500);
+    await wait(1400); await page.keyboard.press('Enter'); await wait(200); // sample before the first auto-bounce can score
     const r = await state(); expect(r.running && !r.over && r.score <= 30, 'restart gives a clean run');
     const g0 = await game(g => ({ h: g.height, streak: g.bestStreak, stars: g.stars, zone: g.zone, things: g.things.filter(t => t.k === 'burr').length }));
     expect(g0.h <= 30 && g0.streak === 0 && g0.stars <= 1 && g0.zone === 0 && g0.things === 0, 'state fully reset (' + JSON.stringify(g0) + ')');
