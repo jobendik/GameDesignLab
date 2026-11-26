@@ -15,7 +15,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--arcanum-pinball.jpg"
   },
   {
    "id": "games/aura-rooms",
@@ -30,7 +31,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--aura-rooms.jpg"
   },
   {
    "id": "games/bloom-bureau",
@@ -45,7 +47,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--bloom-bureau.jpg"
   },
   {
    "id": "games/bounce-dungeon",
@@ -59,7 +62,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--bounce-dungeon.jpg"
   },
   {
    "id": "games/breach-vector",
@@ -73,7 +77,8 @@ window.GDL_CATALOG = {
    "controls": [
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--breach-vector.jpg"
   },
   {
    "id": "games/brink-edge-rush",
@@ -88,7 +93,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--brink-edge-rush.jpg"
   },
   {
    "id": "games/brink-reactor",
@@ -103,7 +109,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--brink-reactor.jpg"
   },
   {
    "id": "games/busy-beavers",
@@ -118,7 +125,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--busy-beavers.jpg"
   },
   {
    "id": "games/chomp-chain-rush",
@@ -133,7 +141,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--chomp-chain-rush.jpg"
   },
   {
    "id": "games/chroma-frenzy",
@@ -148,7 +157,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--chroma-frenzy.jpg"
   },
   {
    "id": "games/cosmic-devourer",
@@ -162,7 +172,8 @@ window.GDL_CATALOG = {
    "controls": [
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--cosmic-devourer.jpg"
   },
   {
    "id": "games/exquisite-corpse",
@@ -176,7 +187,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--exquisite-corpse.jpg"
   },
   {
    "id": "games/frequency",
@@ -190,7 +202,8 @@ window.GDL_CATALOG = {
    "controls": [
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--frequency.jpg"
   },
   {
    "id": "games/furniture-forts",
@@ -203,7 +216,8 @@ window.GDL_CATALOG = {
    ],
    "controls": [
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--furniture-forts.jpg"
   },
   {
    "id": "games/grapple-gliders",
@@ -218,7 +232,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--grapple-gliders.jpg"
   },
   {
    "id": "games/hyper-dash",
@@ -233,7 +248,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--hyper-dash.jpg"
   },
   {
    "id": "games/kosmisk-slange",
@@ -247,7 +263,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--kosmisk-slange.jpg"
   },
   {
    "id": "games/last-war-ultimate",
@@ -261,7 +278,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--last-war-ultimate.jpg"
   },
   {
    "id": "games/little-hero-adventure",
@@ -275,7 +293,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--little-hero-adventure.jpg"
   },
   {
    "id": "games/lumberjack-idle-empire",
@@ -290,7 +309,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--lumberjack-idle-empire.jpg"
   },
   {
    "id": "games/lumis-luminescence",
@@ -304,7 +324,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--lumis-luminescence.jpg"
   },
   {
    "id": "games/lysarkivet",
@@ -319,7 +340,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--lysarkivet.jpg"
   },
   {
    "id": "games/maze-munch-rush",
@@ -334,7 +356,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--maze-munch-rush.jpg"
   },
   {
    "id": "games/mystic-potion-sort",
@@ -349,7 +372,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--mystic-potion-sort.jpg"
   },
   {
    "id": "games/neon-ash",
@@ -363,7 +387,8 @@ window.GDL_CATALOG = {
    "controls": [
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--neon-ash.jpg"
   },
   {
    "id": "games/neon-burst",
@@ -377,7 +402,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--neon-burst.jpg"
   },
   {
    "id": "games/neon-core-ballstorm",
@@ -392,7 +418,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--neon-core-ballstorm.jpg"
   },
   {
    "id": "games/neon-galaxy",
@@ -406,7 +433,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--neon-galaxy.jpg"
   },
   {
    "id": "games/neon-hagen",
@@ -417,7 +445,8 @@ window.GDL_CATALOG = {
    "genre": [
     "Casual"
    ],
-   "controls": []
+   "controls": [],
+   "thumb": "thumbs/games--neon-hagen.jpg"
   },
   {
    "id": "games/neon-nexus-omega",
@@ -431,7 +460,8 @@ window.GDL_CATALOG = {
    "controls": [
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--neon-nexus-omega.jpg"
   },
   {
    "id": "games/neon-pin-climb",
@@ -446,7 +476,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--neon-pin-climb.jpg"
   },
   {
    "id": "games/neon-pinball-rush",
@@ -461,7 +492,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--neon-pinball-rush.jpg"
   },
   {
    "id": "games/neon-runner-overdrive",
@@ -475,7 +507,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--neon-runner-overdrive.jpg"
   },
   {
    "id": "games/neon-strike",
@@ -489,7 +522,8 @@ window.GDL_CATALOG = {
    "controls": [
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--neon-strike.jpg"
   },
   {
    "id": "games/neon-survivor-overdrive",
@@ -503,7 +537,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--neon-survivor-overdrive.jpg"
   },
   {
    "id": "games/orbit-drift-3d",
@@ -518,7 +553,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--orbit-drift-3d.jpg"
   },
   {
    "id": "games/orbit-drift-sling",
@@ -533,7 +569,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--orbit-drift-sling.jpg"
   },
   {
    "id": "games/painted-wilds",
@@ -548,7 +585,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--painted-wilds.jpg"
   },
   {
    "id": "games/physics-charades",
@@ -561,7 +599,8 @@ window.GDL_CATALOG = {
    ],
    "controls": [
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--physics-charades.jpg"
   },
   {
    "id": "games/pinata-pop",
@@ -576,7 +615,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--pinata-pop.jpg"
   },
   {
    "id": "games/pinball-wizard-3d",
@@ -591,7 +631,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--pinball-wizard-3d.jpg"
   },
   {
    "id": "games/pitch-26",
@@ -606,7 +647,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--pitch-26.jpg"
   },
   {
    "id": "games/pocket-football",
@@ -621,7 +663,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--pocket-football.jpg"
   },
   {
    "id": "games/power-wash-royale",
@@ -635,7 +678,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--power-wash-royale.jpg"
   },
   {
    "id": "games/pulsar",
@@ -649,7 +693,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--pulsar.jpg"
   },
   {
    "id": "games/puppet-panic",
@@ -663,7 +708,8 @@ window.GDL_CATALOG = {
    "controls": [
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--puppet-panic.jpg"
   },
   {
    "id": "games/ricochet-brawlers",
@@ -678,7 +724,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--ricochet-brawlers.jpg"
   },
   {
    "id": "games/slithergar",
@@ -693,7 +740,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--slithergar.jpg"
   },
   {
    "id": "games/sonar-abyss",
@@ -708,7 +756,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--sonar-abyss.jpg"
   },
   {
    "id": "games/spire",
@@ -723,7 +772,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--spire.jpg"
   },
   {
    "id": "games/sproutys-garden",
@@ -737,7 +787,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--sproutys-garden.jpg"
   },
   {
    "id": "games/star-petal-ballstorm",
@@ -752,7 +803,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--star-petal-ballstorm.jpg"
   },
   {
    "id": "games/star-trail-adventure",
@@ -767,7 +819,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--star-trail-adventure.jpg"
   },
   {
    "id": "games/svev-miner",
@@ -782,7 +835,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--svev-miner.jpg"
   },
   {
    "id": "games/swarm-logic",
@@ -796,7 +850,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--swarm-logic.jpg"
   },
   {
    "id": "games/the-elevator",
@@ -809,7 +864,8 @@ window.GDL_CATALOG = {
    ],
    "controls": [
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--the-elevator.jpg"
   },
   {
    "id": "games/the-global-dig",
@@ -822,7 +878,8 @@ window.GDL_CATALOG = {
    ],
    "controls": [
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--the-global-dig.jpg"
   },
   {
    "id": "games/the-grid-war",
@@ -836,7 +893,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--the-grid-war.jpg"
   },
   {
    "id": "games/the-tower",
@@ -851,7 +909,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--the-tower.jpg"
   },
   {
    "id": "games/tiny-detective-cafe",
@@ -865,7 +924,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--tiny-detective-cafe.jpg"
   },
   {
    "id": "games/tiny-tactics-cards",
@@ -879,7 +939,8 @@ window.GDL_CATALOG = {
    "controls": [
     "touch",
     "mouse"
-   ]
+   ],
+   "thumb": "thumbs/games--tiny-tactics-cards.jpg"
   },
   {
    "id": "games/unicorn-magic-sort",
@@ -894,7 +955,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--unicorn-magic-sort.jpg"
   },
   {
    "id": "games/unscrew-it",
@@ -909,7 +971,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--unscrew-it.jpg"
   },
   {
    "id": "games/void-drift",
@@ -924,7 +987,8 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--void-drift.jpg"
   },
   {
    "id": "games/word-forts",
@@ -939,14 +1003,15 @@ window.GDL_CATALOG = {
     "touch",
     "mouse",
     "keyboard"
-   ]
+   ],
+   "thumb": "thumbs/games--word-forts.jpg"
   },
   {
-   "id": "PhoneGameLab/01-tap-frenzy",
-   "path": "PhoneGameLab/games/01-tap-frenzy/index.html",
+   "id": "PhoneGameLab/01-splodge",
+   "path": "PhoneGameLab/games/01-splodge/index.html",
    "collection": "PhoneGameLab",
-   "title": "Tap Frenzy",
-   "desc": "Tap as many circles as you can before time runs out.",
+   "title": "Splodge",
+   "desc": "Pop the paint before the clock runs dry.",
    "genre": [
     "Reflex & Taps"
    ],
@@ -955,7 +1020,9 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 1,
-   "v2": false
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/02-whack-a-mole",
@@ -971,7 +1038,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 2,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--02-whack-a-mole.jpg"
   },
   {
    "id": "PhoneGameLab/03-reaction-duel",
@@ -987,7 +1055,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 3,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--03-reaction-duel.jpg"
   },
   {
    "id": "PhoneGameLab/04-quick-draw",
@@ -1003,39 +1072,44 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 4,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--04-quick-draw.jpg"
   },
   {
-   "id": "PhoneGameLab/05-find-difference",
-   "path": "PhoneGameLab/games/05-find-difference/index.html",
+   "id": "PhoneGameLab/05-misfired",
+   "path": "PhoneGameLab/games/05-misfired/index.html",
    "collection": "PhoneGameLab",
-   "title": "Find the Difference",
-   "desc": "Spot the cell that's different from the rest.",
+   "title": "Misfired",
+   "desc": "One tile left the kiln a shade off. Spot it.",
    "genre": [
     "Reflex & Taps"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 5,
-   "v2": false
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/06-odd-one-out",
-   "path": "PhoneGameLab/games/06-odd-one-out/index.html",
+   "id": "PhoneGameLab/06-odd-mood",
+   "path": "PhoneGameLab/games/06-odd-mood/index.html",
    "collection": "PhoneGameLab",
-   "title": "Odd One Out",
-   "desc": "Tap the face whose expression differs.",
+   "title": "Odd Mood",
+   "desc": "Everyone feels the same. Except one. Find them.",
    "genre": [
     "Reflex & Taps"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 6,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/07-memory-match",
@@ -1051,7 +1125,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 7,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--07-memory-match.jpg"
   },
   {
    "id": "PhoneGameLab/08-shell-game",
@@ -1067,32 +1142,36 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 8,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--08-shell-game.jpg"
   },
   {
-   "id": "PhoneGameLab/09-brick-breaker",
-   "path": "PhoneGameLab/games/09-brick-breaker/index.html",
+   "id": "PhoneGameLab/09-tea-break",
+   "path": "PhoneGameLab/games/09-tea-break/index.html",
    "collection": "PhoneGameLab",
-   "title": "Brick Breaker",
-   "desc": "Paddle a ball to destroy the wall.",
+   "title": "Tea Break",
+   "desc": "Bash through the biscuit tin, one rally at a time.",
    "genre": [
     "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 9,
-   "v2": false
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/10-bubble-shooter",
-   "path": "PhoneGameLab/games/10-bubble-shooter/index.html",
+   "id": "PhoneGameLab/10-bramble-drop",
+   "path": "PhoneGameLab/games/10-bramble-drop/index.html",
    "collection": "PhoneGameLab",
    "title": "Bubble Shooter",
-   "desc": "Match 3+ bubbles of the same color.",
+   "desc": "Aim & tap to shoot. Match 3+ same-color.",
    "genre": [
-    "Arcade & Action"
+    "Minigame"
    ],
    "controls": [
     "touch",
@@ -1102,13 +1181,13 @@ window.GDL_CATALOG = {
    "v2": false
   },
   {
-   "id": "PhoneGameLab/11-space-invaders",
-   "path": "PhoneGameLab/games/11-space-invaders/index.html",
+   "id": "PhoneGameLab/11-scribble-siege",
+   "path": "PhoneGameLab/games/11-scribble-siege/index.html",
    "collection": "PhoneGameLab",
    "title": "Space Invaders",
-   "desc": "Shoot the descending alien grid.",
+   "desc": "Drag to move ship. Tap to fire.",
    "genre": [
-    "Arcade & Action"
+    "Minigame"
    ],
    "controls": [
     "touch",
@@ -1118,13 +1197,13 @@ window.GDL_CATALOG = {
    "v2": false
   },
   {
-   "id": "PhoneGameLab/12-asteroids",
-   "path": "PhoneGameLab/games/12-asteroids/index.html",
+   "id": "PhoneGameLab/12-cold-snap",
+   "path": "PhoneGameLab/games/12-cold-snap/index.html",
    "collection": "PhoneGameLab",
    "title": "Asteroids",
-   "desc": "Rotate, thrust, and shoot the rocks.",
+   "desc": "Drag to steer toward your finger. Tap-and-hold to thrust. Double-tap to fire.",
    "genre": [
-    "Arcade & Action"
+    "Minigame"
    ],
    "controls": [
     "touch",
@@ -1134,20 +1213,21 @@ window.GDL_CATALOG = {
    "v2": false
   },
   {
-   "id": "PhoneGameLab/13-twin-stick",
-   "path": "PhoneGameLab/games/13-twin-stick/index.html",
+   "id": "PhoneGameLab/13-suds-patrol",
+   "path": "PhoneGameLab/games/13-suds-patrol/index.html",
    "collection": "PhoneGameLab",
-   "title": "Twin-Stick Arena",
-   "desc": "Two thumbs: one moves, one shoots.",
+   "title": "Suds Patrol",
+   "desc": "One bar of soap. One very dirty floor.",
    "genre": [
     "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 13,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/14-bullet-hell",
@@ -1163,7 +1243,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 14,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--14-bullet-hell.jpg"
   },
   {
    "id": "PhoneGameLab/15-fruit-slice",
@@ -1179,7 +1260,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 15,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--15-fruit-slice.jpg"
   },
   {
    "id": "PhoneGameLab/16-knife-throw",
@@ -1195,32 +1277,36 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 16,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--16-knife-throw.jpg"
   },
   {
-   "id": "PhoneGameLab/17-bow-arrow",
-   "path": "PhoneGameLab/games/17-bow-arrow/index.html",
+   "id": "PhoneGameLab/17-windfletch",
+   "path": "PhoneGameLab/games/17-windfletch/index.html",
    "collection": "PhoneGameLab",
-   "title": "Bow & Arrow",
-   "desc": "Drag to aim, release to fire.",
+   "title": "Windfletch",
+   "desc": "Read the wind. Split the gold.",
    "genre": [
     "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 17,
-   "v2": false
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/18-sniper-timing",
-   "path": "PhoneGameLab/games/18-sniper-timing/index.html",
+   "id": "PhoneGameLab/18-one-breath",
+   "path": "PhoneGameLab/games/18-one-breath/index.html",
    "collection": "PhoneGameLab",
    "title": "Sniper Timing",
-   "desc": "One shot — wait for the perfect moment.",
+   "desc": "One bullet per round. Tap when the cross is over the target.",
    "genre": [
-    "Arcade & Action"
+    "Minigame"
    ],
    "controls": [
     "touch",
@@ -1230,13 +1316,13 @@ window.GDL_CATALOG = {
    "v2": false
   },
   {
-   "id": "PhoneGameLab/19-cannon",
-   "path": "PhoneGameLab/games/19-cannon/index.html",
+   "id": "PhoneGameLab/19-tin-topple",
+   "path": "PhoneGameLab/games/19-tin-topple/index.html",
    "collection": "PhoneGameLab",
    "title": "Cannon",
-   "desc": "Lob projectiles in a parabola.",
+   "desc": "Drag from cannon to aim; release to fire (parabolic).",
    "genre": [
-    "Arcade & Action"
+    "Minigame"
    ],
    "controls": [
     "touch",
@@ -1246,13 +1332,13 @@ window.GDL_CATALOG = {
    "v2": false
   },
   {
-   "id": "PhoneGameLab/20-endless-runner",
-   "path": "PhoneGameLab/games/20-endless-runner/index.html",
+   "id": "PhoneGameLab/20-frostfoot",
+   "path": "PhoneGameLab/games/20-frostfoot/index.html",
    "collection": "PhoneGameLab",
    "title": "Endless Runner",
-   "desc": "Tap to jump, swipe down to slide.",
+   "desc": "Tap = jump • Swipe down = slide.",
    "genre": [
-    "Runner & Movement"
+    "Minigame"
    ],
    "controls": [
     "touch",
@@ -1262,20 +1348,21 @@ window.GDL_CATALOG = {
    "v2": false
   },
   {
-   "id": "PhoneGameLab/21-lane-dodger",
-   "path": "PhoneGameLab/games/21-lane-dodger/index.html",
+   "id": "PhoneGameLab/21-paper-rapids",
+   "path": "PhoneGameLab/games/21-paper-rapids/index.html",
    "collection": "PhoneGameLab",
-   "title": "Lane Dodger",
-   "desc": "Swipe between 3 lanes to dodge.",
+   "title": "Paper Rapids",
+   "desc": "A paper boat, three channels, and a taste for close shaves.",
    "genre": [
-    "Runner & Movement"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 21,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/22-traffic-dodge",
@@ -1291,7 +1378,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 22,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--22-traffic-dodge.jpg"
   },
   {
    "id": "PhoneGameLab/23-doodle-jump",
@@ -1307,7 +1395,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 23,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--23-doodle-jump.jpg"
   },
   {
    "id": "PhoneGameLab/24-helix-fall",
@@ -1323,32 +1412,36 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 24,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--24-helix-fall.jpg"
   },
   {
-   "id": "PhoneGameLab/25-stair-climb",
-   "path": "PhoneGameLab/games/25-stair-climb/index.html",
+   "id": "PhoneGameLab/25-goat-up",
+   "path": "PhoneGameLab/games/25-goat-up/index.html",
    "collection": "PhoneGameLab",
-   "title": "Stair Climb",
-   "desc": "Tap left/right to climb stairs — don't slip.",
+   "title": "Goat Up",
+   "desc": "Hop the zig-zag crags before you run out of puff.",
    "genre": [
     "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 25,
-   "v2": false
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/26-flappy",
-   "path": "PhoneGameLab/games/26-flappy/index.html",
+   "id": "PhoneGameLab/26-jelly-drift",
+   "path": "PhoneGameLab/games/26-jelly-drift/index.html",
    "collection": "PhoneGameLab",
    "title": "Flappy Tap",
-   "desc": "Tap to flap through pipe gaps.",
+   "desc": "Tap to flap. Pass through pipe gaps.",
    "genre": [
-    "Runner & Movement"
+    "Minigame"
    ],
    "controls": [
     "touch",
@@ -1371,7 +1464,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 27,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--27-jetpack.jpg"
   },
   {
    "id": "PhoneGameLab/28-cave-flyer",
@@ -1387,32 +1481,34 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 28,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--28-cave-flyer.jpg"
   },
   {
-   "id": "PhoneGameLab/29-marble-maze",
-   "path": "PhoneGameLab/games/29-marble-maze/index.html",
+   "id": "PhoneGameLab/29-tiltwood",
+   "path": "PhoneGameLab/games/29-tiltwood/index.html",
    "collection": "PhoneGameLab",
-   "title": "Marble Maze",
-   "desc": "Drag the marble through walls to the goal.",
+   "title": "Tiltwood",
+   "desc": "Tip the board. Roll the marble home.",
    "genre": [
     "Runner & Movement"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 29,
-   "v2": false
+   "v2": true
   },
   {
-   "id": "PhoneGameLab/30-balance-beam",
-   "path": "PhoneGameLab/games/30-balance-beam/index.html",
+   "id": "PhoneGameLab/30-wobblewire",
+   "path": "PhoneGameLab/games/30-wobblewire/index.html",
    "collection": "PhoneGameLab",
    "title": "Balance Beam",
-   "desc": "Tap left/right to keep your balance.",
+   "desc": "Tap LEFT / RIGHT side to nudge balance. Stay centered!",
    "genre": [
-    "Runner & Movement"
+    "Minigame"
    ],
    "controls": [
     "touch",
@@ -1422,13 +1518,13 @@ window.GDL_CATALOG = {
    "v2": false
   },
   {
-   "id": "PhoneGameLab/31-disappearing-tiles",
-   "path": "PhoneGameLab/games/31-disappearing-tiles/index.html",
+   "id": "PhoneGameLab/31-sinkstones",
+   "path": "PhoneGameLab/games/31-sinkstones/index.html",
    "collection": "PhoneGameLab",
    "title": "Vanishing Tiles",
-   "desc": "Stand only on tiles that aren't fading.",
+   "desc": "Tap a tile to step there. Avoid empty squares and fading ones!",
    "genre": [
-    "Runner & Movement"
+    "Minigame"
    ],
    "controls": [
     "touch",
@@ -1438,13 +1534,13 @@ window.GDL_CATALOG = {
    "v2": false
   },
   {
-   "id": "PhoneGameLab/32-color-path",
-   "path": "PhoneGameLab/games/32-color-path/index.html",
+   "id": "PhoneGameLab/32-inkstride",
+   "path": "PhoneGameLab/games/32-inkstride/index.html",
    "collection": "PhoneGameLab",
    "title": "Color Path",
-   "desc": "Tap to switch color — only step on matching tiles.",
+   "desc": "Tap to switch color. Only step on tiles matching your color.",
    "genre": [
-    "Runner & Movement"
+    "Minigame"
    ],
    "controls": [
     "touch",
@@ -1467,7 +1563,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 33,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--33-shape-gate.jpg"
   },
   {
    "id": "PhoneGameLab/34-stack-runner",
@@ -1483,7 +1580,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 34,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--34-stack-runner.jpg"
   },
   {
    "id": "PhoneGameLab/35-cake-tower",
@@ -1499,7 +1597,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 35,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--35-cake-tower.jpg"
   },
   {
    "id": "PhoneGameLab/36-sky-high",
@@ -1515,7 +1614,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 36,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--36-sky-high.jpg"
   },
   {
    "id": "PhoneGameLab/37-star-jar",
@@ -1534,7 +1634,8 @@ window.GDL_CATALOG = {
    "n": 37,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--37-star-jar.jpg"
   },
   {
    "id": "PhoneGameLab/38-plinko",
@@ -1550,7 +1651,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 38,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--38-plinko.jpg"
   },
   {
    "id": "PhoneGameLab/39-basketball",
@@ -1566,7 +1668,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 39,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--39-basketball.jpg"
   },
   {
    "id": "PhoneGameLab/40-pool",
@@ -1582,7 +1685,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 40,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--40-pool.jpg"
   },
   {
    "id": "PhoneGameLab/41-goal-flick",
@@ -1598,7 +1702,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 41,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--41-goal-flick.jpg"
   },
   {
    "id": "PhoneGameLab/42-bridge-build",
@@ -1614,7 +1719,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 42,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--42-bridge-build.jpg"
   },
   {
    "id": "PhoneGameLab/43-2048",
@@ -1630,7 +1736,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 43,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--43-2048.jpg"
   },
   {
    "id": "PhoneGameLab/44-match-3",
@@ -1646,7 +1753,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 44,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--44-match-3.jpg"
   },
   {
    "id": "PhoneGameLab/45-tap-clusters",
@@ -1662,7 +1770,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 45,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--45-tap-clusters.jpg"
   },
   {
    "id": "PhoneGameLab/46-connect-dots",
@@ -1678,7 +1787,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 46,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--46-connect-dots.jpg"
   },
   {
    "id": "PhoneGameLab/47-pipe-rotate",
@@ -1694,7 +1804,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 47,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--47-pipe-rotate.jpg"
   },
   {
    "id": "PhoneGameLab/48-water-sort",
@@ -1710,7 +1821,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 48,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--48-water-sort.jpg"
   },
   {
    "id": "PhoneGameLab/49-ball-sort",
@@ -1726,7 +1838,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 49,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--49-ball-sort.jpg"
   },
   {
    "id": "PhoneGameLab/50-screw-puzzle",
@@ -1742,7 +1855,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 50,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--50-screw-puzzle.jpg"
   },
   {
    "id": "PhoneGameLab/51-15-puzzle",
@@ -1758,7 +1872,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 51,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--51-15-puzzle.jpg"
   },
   {
    "id": "PhoneGameLab/52-tetris",
@@ -1774,7 +1889,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 52,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--52-tetris.jpg"
   },
   {
    "id": "PhoneGameLab/53-block-blast",
@@ -1790,7 +1906,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 53,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--53-block-blast.jpg"
   },
   {
    "id": "PhoneGameLab/54-maze",
@@ -1806,7 +1923,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 54,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--54-maze.jpg"
   },
   {
    "id": "PhoneGameLab/55-laser-mirror",
@@ -1822,7 +1940,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 55,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--55-laser-mirror.jpg"
   },
   {
    "id": "PhoneGameLab/56-lights-out",
@@ -1838,7 +1957,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 56,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--56-lights-out.jpg"
   },
   {
    "id": "PhoneGameLab/57-minesweeper",
@@ -1854,7 +1974,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 57,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--57-minesweeper.jpg"
   },
   {
    "id": "PhoneGameLab/58-word-search",
@@ -1870,7 +1991,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 58,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--58-word-search.jpg"
   },
   {
    "id": "PhoneGameLab/59-nonogram",
@@ -1886,7 +2008,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 59,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--59-nonogram.jpg"
   },
   {
    "id": "PhoneGameLab/60-sudoku",
@@ -1902,7 +2025,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 60,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--60-sudoku.jpg"
   },
   {
    "id": "PhoneGameLab/61-snake",
@@ -1918,7 +2042,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 61,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--61-snake.jpg"
   },
   {
    "id": "PhoneGameLab/62-slither",
@@ -1934,7 +2059,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 62,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--62-slither.jpg"
   },
   {
    "id": "PhoneGameLab/63-agar",
@@ -1950,7 +2076,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 63,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--63-agar.jpg"
   },
   {
    "id": "PhoneGameLab/64-tower-defense",
@@ -1966,7 +2093,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 64,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--64-tower-defense.jpg"
   },
   {
    "id": "PhoneGameLab/65-idle-clicker",
@@ -1982,7 +2110,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 65,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--65-idle-clicker.jpg"
   },
   {
    "id": "PhoneGameLab/66-merge-idle",
@@ -1998,7 +2127,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 66,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--66-merge-idle.jpg"
   },
   {
    "id": "PhoneGameLab/67-cooking-serve",
@@ -2014,7 +2144,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 67,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--67-cooking-serve.jpg"
   },
   {
    "id": "PhoneGameLab/68-sort-baskets",
@@ -2030,7 +2161,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 68,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--68-sort-baskets.jpg"
   },
   {
    "id": "PhoneGameLab/69-piano-tiles",
@@ -2046,7 +2178,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 69,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--69-piano-tiles.jpg"
   },
   {
    "id": "PhoneGameLab/70-rhythm-lane",
@@ -2062,7 +2195,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 70,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab--70-rhythm-lane.jpg"
   },
   {
    "id": "PhoneGameLab2/2048",
@@ -2078,7 +2212,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 1,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--2048.jpg"
   },
   {
    "id": "PhoneGameLab2/balloon-splash",
@@ -2094,7 +2229,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 2,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--balloon-splash.jpg"
   },
   {
    "id": "PhoneGameLab2/basketball",
@@ -2110,7 +2246,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 3,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--basketball.jpg"
   },
   {
    "id": "PhoneGameLab2/berry-bounce",
@@ -2126,7 +2263,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 4,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--berry-bounce.jpg"
   },
   {
    "id": "PhoneGameLab2/brick-blast",
@@ -2142,7 +2280,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 5,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--brick-blast.jpg"
   },
   {
    "id": "PhoneGameLab2/brick-breaker",
@@ -2158,7 +2297,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 6,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--brick-breaker.jpg"
   },
   {
    "id": "PhoneGameLab2/bridge",
@@ -2174,7 +2314,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 7,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--bridge.jpg"
   },
   {
    "id": "PhoneGameLab2/bubble-shooter",
@@ -2190,7 +2331,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 8,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--bubble-shooter.jpg"
   },
   {
    "id": "PhoneGameLab2/bubble-up",
@@ -2206,7 +2348,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 9,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--bubble-up.jpg"
   },
   {
    "id": "PhoneGameLab2/building-block-puzzle",
@@ -2222,7 +2365,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 10,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--building-block-puzzle.jpg"
   },
   {
    "id": "PhoneGameLab2/bumper-park",
@@ -2238,7 +2382,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 11,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--bumper-park.jpg"
   },
   {
    "id": "PhoneGameLab2/busy-bugs",
@@ -2254,7 +2399,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 12,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--busy-bugs.jpg"
   },
   {
    "id": "PhoneGameLab2/cake-tower",
@@ -2270,7 +2416,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 13,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--cake-tower.jpg"
   },
   {
    "id": "PhoneGameLab2/candy-connect",
@@ -2286,7 +2433,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 14,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--candy-connect.jpg"
   },
   {
    "id": "PhoneGameLab2/castle-craft",
@@ -2302,7 +2450,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 15,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--castle-craft.jpg"
   },
   {
    "id": "PhoneGameLab2/cats-and-cans",
@@ -2318,7 +2467,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 16,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--cats-and-cans.jpg"
   },
   {
    "id": "PhoneGameLab2/clean-the-ocean",
@@ -2334,7 +2484,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 17,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--clean-the-ocean.jpg"
   },
   {
    "id": "PhoneGameLab2/climber-tom",
@@ -2350,7 +2501,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 18,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--climber-tom.jpg"
   },
   {
    "id": "PhoneGameLab2/connect",
@@ -2366,7 +2518,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 19,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--connect.jpg"
   },
   {
    "id": "PhoneGameLab2/cupid-tom",
@@ -2382,7 +2535,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 20,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--cupid-tom.jpg"
   },
   {
    "id": "PhoneGameLab2/destroy-aliens",
@@ -2398,7 +2552,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 21,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--destroy-aliens.jpg"
   },
   {
    "id": "PhoneGameLab2/donut-spin",
@@ -2414,7 +2569,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 22,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--donut-spin.jpg"
   },
   {
    "id": "PhoneGameLab2/dress-up",
@@ -2430,7 +2586,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 23,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--dress-up.jpg"
   },
   {
    "id": "PhoneGameLab2/face-designer",
@@ -2446,7 +2603,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 24,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--face-designer.jpg"
   },
   {
    "id": "PhoneGameLab2/find-pattern",
@@ -2462,7 +2620,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 25,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--find-pattern.jpg"
   },
   {
    "id": "PhoneGameLab2/fishtastic",
@@ -2478,7 +2637,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 26,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--fishtastic.jpg"
   },
   {
    "id": "PhoneGameLab2/fishy-frenzy",
@@ -2494,7 +2654,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 27,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--fishy-frenzy.jpg"
   },
   {
    "id": "PhoneGameLab2/flappy-tom",
@@ -2510,7 +2671,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 28,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--flappy-tom.jpg"
   },
   {
    "id": "PhoneGameLab2/football",
@@ -2526,7 +2688,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 29,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--football.jpg"
   },
   {
    "id": "PhoneGameLab2/fruit-boom",
@@ -2542,7 +2705,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 30,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--fruit-boom.jpg"
   },
   {
    "id": "PhoneGameLab2/go-up",
@@ -2558,7 +2722,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 31,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--go-up.jpg"
   },
   {
    "id": "PhoneGameLab2/goal",
@@ -2574,7 +2739,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 32,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--goal.jpg"
   },
   {
    "id": "PhoneGameLab2/guitar-ace",
@@ -2590,7 +2756,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 33,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--guitar-ace.jpg"
   },
   {
    "id": "PhoneGameLab2/happy-connect",
@@ -2606,7 +2773,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 34,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--happy-connect.jpg"
   },
   {
    "id": "PhoneGameLab2/happy-face",
@@ -2622,7 +2790,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 35,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--happy-face.jpg"
   },
   {
    "id": "PhoneGameLab2/hit-the-road",
@@ -2638,7 +2807,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 36,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--hit-the-road.jpg"
   },
   {
    "id": "PhoneGameLab2/hole-chase",
@@ -2654,7 +2824,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 37,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--hole-chase.jpg"
   },
   {
    "id": "PhoneGameLab2/hungry-fish",
@@ -2670,7 +2841,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 38,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--hungry-fish.jpg"
   },
   {
    "id": "PhoneGameLab2/ice-cream-shop",
@@ -2686,7 +2858,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 39,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--ice-cream-shop.jpg"
   },
   {
    "id": "PhoneGameLab2/ice-smash",
@@ -2702,7 +2875,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 40,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--ice-smash.jpg"
   },
   {
    "id": "PhoneGameLab2/jigsaw-puzzles",
@@ -2718,7 +2892,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 41,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--jigsaw-puzzles.jpg"
   },
   {
    "id": "PhoneGameLab2/jump",
@@ -2734,7 +2909,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 42,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--jump.jpg"
   },
   {
    "id": "PhoneGameLab2/jungle-shot",
@@ -2750,7 +2926,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 43,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--jungle-shot.jpg"
   },
   {
    "id": "PhoneGameLab2/make-a-kite",
@@ -2766,7 +2943,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 44,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--make-a-kite.jpg"
   },
   {
    "id": "PhoneGameLab2/marble-mix-up",
@@ -2782,7 +2960,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 45,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--marble-mix-up.jpg"
   },
   {
    "id": "PhoneGameLab2/maze",
@@ -2798,7 +2977,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 46,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--maze.jpg"
   },
   {
    "id": "PhoneGameLab2/memory",
@@ -2814,7 +2994,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 47,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--memory.jpg"
   },
   {
    "id": "PhoneGameLab2/monkey-catch",
@@ -2830,7 +3011,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 48,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--monkey-catch.jpg"
   },
   {
    "id": "PhoneGameLab2/mower",
@@ -2846,7 +3028,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 49,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--mower.jpg"
   },
   {
    "id": "PhoneGameLab2/pinata-drop",
@@ -2862,7 +3045,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 50,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--pinata-drop.jpg"
   },
   {
    "id": "PhoneGameLab2/planet-hop",
@@ -2878,7 +3062,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 51,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--planet-hop.jpg"
   },
   {
    "id": "PhoneGameLab2/race-car",
@@ -2894,7 +3079,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 52,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--race-car.jpg"
   },
   {
    "id": "PhoneGameLab2/rainbows",
@@ -2910,7 +3096,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 53,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--rainbows.jpg"
   },
   {
    "id": "PhoneGameLab2/rocket-fun",
@@ -2926,7 +3113,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 54,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--rocket-fun.jpg"
   },
   {
    "id": "PhoneGameLab2/rolling-ball",
@@ -2942,7 +3130,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 55,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--rolling-ball.jpg"
   },
   {
    "id": "PhoneGameLab2/sky-high",
@@ -2958,7 +3147,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 56,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--sky-high.jpg"
   },
   {
    "id": "PhoneGameLab2/sky-race",
@@ -2974,7 +3164,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 57,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--sky-race.jpg"
   },
   {
    "id": "PhoneGameLab2/sky-skater",
@@ -2990,7 +3181,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 58,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--sky-skater.jpg"
   },
   {
    "id": "PhoneGameLab2/sleepy-bugs",
@@ -3006,7 +3198,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 59,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--sleepy-bugs.jpg"
   },
   {
    "id": "PhoneGameLab2/slice-and-sip",
@@ -3022,7 +3215,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 60,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--slice-and-sip.jpg"
   },
   {
    "id": "PhoneGameLab2/sliding-pets",
@@ -3038,7 +3232,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 61,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--sliding-pets.jpg"
   },
   {
    "id": "PhoneGameLab2/snack-baskets",
@@ -3054,7 +3249,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 62,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--snack-baskets.jpg"
   },
   {
    "id": "PhoneGameLab2/snake-trails",
@@ -3070,7 +3266,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 63,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--snake-trails.jpg"
   },
   {
    "id": "PhoneGameLab2/snakes-and-ladders",
@@ -3086,7 +3283,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 64,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--snakes-and-ladders.jpg"
   },
   {
    "id": "PhoneGameLab2/snappy-frog",
@@ -3102,7 +3300,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 65,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--snappy-frog.jpg"
   },
   {
    "id": "PhoneGameLab2/space-piano",
@@ -3118,7 +3317,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 66,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--space-piano.jpg"
   },
   {
    "id": "PhoneGameLab2/space-trails",
@@ -3134,7 +3334,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 67,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--space-trails.jpg"
   },
   {
    "id": "PhoneGameLab2/splashy",
@@ -3150,7 +3351,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 68,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--splashy.jpg"
   },
   {
    "id": "PhoneGameLab2/spooky-train",
@@ -3166,7 +3368,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 69,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--spooky-train.jpg"
   },
   {
    "id": "PhoneGameLab2/spray-paint",
@@ -3182,7 +3385,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 70,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--spray-paint.jpg"
   },
   {
    "id": "PhoneGameLab2/sub-adventure",
@@ -3198,7 +3402,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 71,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--sub-adventure.jpg"
   },
   {
    "id": "PhoneGameLab2/super-balloons",
@@ -3214,7 +3419,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 72,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--super-balloons.jpg"
   },
   {
    "id": "PhoneGameLab2/tap-tap",
@@ -3230,7 +3436,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 73,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--tap-tap.jpg"
   },
   {
    "id": "PhoneGameLab2/tiny-puzzles",
@@ -3246,7 +3453,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 74,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--tiny-puzzles.jpg"
   },
   {
    "id": "PhoneGameLab2/tom-run",
@@ -3262,7 +3470,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 75,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--tom-run.jpg"
   },
   {
    "id": "PhoneGameLab2/totem-blast",
@@ -3278,7 +3487,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 76,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--totem-blast.jpg"
   },
   {
    "id": "PhoneGameLab2/unicorns",
@@ -3294,7 +3504,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 77,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--unicorns.jpg"
   },
   {
    "id": "PhoneGameLab2/water-rush",
@@ -3310,7 +3521,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 78,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--water-rush.jpg"
   },
   {
    "id": "PhoneGameLab2/whack-a-mouse",
@@ -3326,7 +3538,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 79,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--whack-a-mouse.jpg"
   },
   {
    "id": "PhoneGameLab2/wire-ball",
@@ -3342,7 +3555,8 @@ window.GDL_CATALOG = {
     "mouse"
    ],
    "n": 80,
-   "v2": false
+   "v2": false,
+   "thumb": "thumbs/PhoneGameLab2--wire-ball.jpg"
   }
  ]
 };

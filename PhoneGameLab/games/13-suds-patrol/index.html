@@ -17,8 +17,8 @@ Lab.init({
 });
 const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, INK = "#16324f";
 const ET = {
-  blob:   { r: 15, hp: 2,  sp: 62,  col: "#9a7440", pts: 10, gems: 1 },
-  skit:   { r: 10, hp: 1,  sp: 150, col: "#8f88ad", pts: 15, gems: 1 },
+  blob:   { r: 15, hp: 2,  sp: 70,  col: "#9a7440", pts: 10, gems: 1 },
+  skit:   { r: 10, hp: 1,  sp: 165, col: "#8f88ad", pts: 15, gems: 1 },
   spit:   { r: 16, hp: 3,  sp: 50,  col: "#5d9c4a", pts: 25, gems: 2 },
   charge: { r: 18, hp: 5,  sp: 44,  col: "#7350a0", pts: 35, gems: 3 },
   gunk:   { r: 27, hp: 9,  sp: 38,  col: "#56633a", pts: 40, gems: 3 },
@@ -95,14 +95,14 @@ function buildWave(n) {
   const b = Math.floor(n / 5), g = [];
   if (n % 5 === 0) { g.push({ gap: 0, list: ["boss"] }); for (let i = 0; i < 2 + b; i++) g.push({ gap: 7, list: Array(2 + b).fill(i % 2 ? "skit" : "blob") }); return g; }
   const pool = [["blob", 1, 5]]; if (n >= 2) pool.push(["skit", 1, 4]); if (n >= 3) pool.push(["spit", 3, 2.4]); if (n >= 4) pool.push(["charge", 4, 2]); if (n >= 7) pool.push(["gunk", 5, 1.6]);
-  let budget = 4 + n * 2.7;
+  let budget = 5 + n * 3.4 + Math.max(0, n - 5) * 1.6;
   const debut = { 2: ["skit", "skit", "skit", "skit"], 3: ["spit", "blob", "blob"], 4: ["charge", "blob", "blob"], 7: ["gunk", "skit", "skit"] }[n];
   if (debut) { g.push({ gap: 0, list: debut }); budget -= debut.length + 2; }
   const tot = pool.reduce((a, p) => a + p[2], 0);
   while (budget > 0) {
-    const list = [], size = Lab.randInt(2, 4) + (n > 8 ? 1 : 0);
+    const list = [], size = Lab.randInt(2, 4) + Math.min(3, Math.floor(n / 4));
     for (let i = 0; i < size && budget > 0; i++) { let x = Lab.rand(0, tot), pick = pool[0]; for (const p of pool) { if ((x -= p[2]) < 0) { pick = p; break; } } if (pick[1] > budget + 1) pick = pool[0]; list.push(pick[0]); budget -= pick[1]; }
-    g.push({ gap: g.length ? Math.max(2.2, 4.4 - n * .12) : 0, list });
+    g.push({ gap: g.length ? Math.max(1.5, 3.8 - n * .15) : 0, list });
   }
   return g;
 }
@@ -117,9 +117,9 @@ function spawnSpot(minD) {
 }
 function pend(type, x, y, t) { pends.push({ type, x, y, t: t || .95, t0: t || .95 }); }
 function mkEnemy(type, x, y) {
-  const d = ET[type], k = 1 + Math.min(.45, Math.max(0, wave - 1) * .03);
+  const d = ET[type], k = 1 + Math.min(.6, Math.max(0, wave - 1) * .04);
   const e = { type, x, y, vx: 0, vy: 0, kx: 0, ky: 0, r: d.r * S, hp: d.hp, max: d.hp, sp: d.sp * S * k, age: 0, flash: 0, sq: 0, st: 0, tm: Lab.rand(.9, 1.8), ang: 0, seed: Lab.rand(0, TAU), dead: false, n: 0 };
-  if (type === "boss") { e.hp = e.max = 55 + Math.floor(wave / 5) * 45; boss = e; } else if (wave > 8) e.hp = e.max = Math.ceil(d.hp * (1 + (wave - 8) * .09));
+  if (type === "boss") { e.hp = e.max = 30 + Math.floor(wave / 5) * 70; boss = e; } else if (wave > 5) e.hp = e.max = Math.ceil(d.hp * (1 + (wave - 5) * .1));
   return e;
 }
 
@@ -131,7 +131,7 @@ function fire(ang, manual) {
     const a = ang + da, px = -Math.sin(ang) * o * S, py = Math.cos(ang) * o * S;
     if (shots.length < 160) shots.push({ x: P.x + Math.cos(ang) * off + px, y: P.y + Math.sin(ang) * off + py, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r, dmg, life: .95, pierce: up.pierce, bounce: up.bounce, hit: null, wob: Lab.rand(0, TAU) });
   }
-  P.kick = 1; P.fire = 1 / (5.2 * (1 + .25 * up.rapid)) / (manual ? 1 : .7);
+  P.kick = 1; P.fire = 1 / (5.2 * (1 + .25 * up.rapid)) / (manual ? 1 : .62);
   Lab.audio.tone({ f: 480 + Lab.rand(0, 90) + up.big * -40, f2: 880, dur: .05, vol: .045, type: "sine" });
 }
 function damage(e, dmg, ang) {
@@ -158,8 +158,8 @@ function kill(e, ang) {
     for (const o of enemies) if (!o.dead && o !== e) damage(o, 99, Math.atan2(o.y - e.y, o.x - e.x)); eshots.length = 0; pends.length = 0;
   }
   if (up.pop > 0 && e.type !== "boss") {
-    const R = (44 + 16 * up.pop) * S + e.r; fx.ring(e.x, e.y, { r0: e.r, r1: R, color: "#ff9d7d", width: 6, life: .28 });
-    for (const o of enemies) if (!o.dead && Lab.dist(o.x, o.y, e.x, e.y) < R + o.r) damage(o, .5 + .5 * up.pop, Math.atan2(o.y - e.y, o.x - e.x));
+    const R = (34 + 13 * up.pop) * S + e.r; fx.ring(e.x, e.y, { r0: e.r, r1: R, color: "#ff9d7d", width: 6, life: .28 });
+    for (const o of enemies) if (!o.dead && Lab.dist(o.x, o.y, e.x, e.y) < R + o.r) damage(o, .5 * up.pop, Math.atan2(o.y - e.y, o.x - e.x));
   }
 }
 const mult = () => Math.min(8, 1 + Math.floor(combo / 4));
@@ -252,7 +252,7 @@ function update(dt, t) {
   // --- wave director
   if (phase === "fight") {
     queueT -= dt; const live = enemies.length + pends.length;
-    if (queue.length && (queueT <= 0 || (live === 0 && queueT > .5)) && enemies.length < 24) {
+    if (queue.length && (queueT <= 0 || (live === 0 && queueT > .5)) && enemies.length < 28) {
       const g = queue.shift();
       for (const type of g.list) { if (type === "boss") pend("boss", A.x + A.w / 2, A.y + Math.min(A.h * .25, 150 * S), 1.6); else { const [x, y] = spawnSpot(190 * S); pend(type, x, y); } }
       queueT = queue.length ? queue[0].gap : 0; Lab.sfx("bubble", { pitch: .5 });
@@ -317,7 +317,7 @@ function updEnemy(e, dt) {
   else if (e.type === "spit") {
     const want = 215 * S, k = d > want + 30 * S ? 1 : d < want - 40 * S ? -.9 : 0, orb = Math.sin(e.seed) > 0 ? .55 : -.55; tx = (ux * k - uy * orb) * e.sp; ty = (uy * k + ux * orb) * e.sp; e.tm -= dt;
     if (e.st === 0 && e.tm <= 0 && e.age > .8) { e.st = 1; e.tm = .7; Lab.sfx("warn", { pitch: 1.5 }); }
-    else if (e.st === 1) { tx = ty = 0; e.ang = Math.atan2(dy, dx); if (e.tm <= 0) { spit(e, wave >= 9 ? 3 : 1, .3, 185 + Math.min(60, wave * 4)); e.st = 0; e.tm = Lab.rand(2.2, 3.2); } }
+    else if (e.st === 1) { tx = ty = 0; e.ang = Math.atan2(dy, dx); if (e.tm <= 0) { spit(e, wave >= 7 ? 3 : 1, .32, 190 + Math.min(80, wave * 6)); e.st = 0; e.tm = Lab.rand(2.2, 3.2); } }
   } else if (e.type === "charge" || e.type === "boss") {
     const isB = e.type === "boss"; e.tm -= dt;
     if (e.st === 0) {

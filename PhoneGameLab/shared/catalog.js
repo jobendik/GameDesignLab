@@ -5,51 +5,61 @@ window.LAB_GAMES = [
   "items": [
    {
     "n": 1,
-    "slug": "01-tap-frenzy",
-    "t": "Tap Frenzy",
-    "d": "Tap as many circles as you can before time runs out."
+    "slug": "01-splodge",
+    "t": "Splodge",
+    "d": "Pop the paint before the clock runs dry.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 2,
     "slug": "02-whack-a-mole",
     "t": "Whack-a-Mole",
-    "d": "Whack moles that pop up — avoid the bombs."
+    "d": "Whack moles that pop up — avoid the bombs.",
+    "thumb": "../thumbs/PhoneGameLab--02-whack-a-mole.jpg"
    },
    {
     "n": 3,
     "slug": "03-reaction-duel",
     "t": "Reaction Duel",
-    "d": "Wait for the signal — fastest finger wins."
+    "d": "Wait for the signal — fastest finger wins.",
+    "thumb": "../thumbs/PhoneGameLab--03-reaction-duel.jpg"
    },
    {
     "n": 4,
     "slug": "04-quick-draw",
     "t": "Quick Draw",
-    "d": "Cowboy duel: don't fire before \"DRAW!\"."
+    "d": "Cowboy duel: don't fire before \"DRAW!\".",
+    "thumb": "../thumbs/PhoneGameLab--04-quick-draw.jpg"
    },
    {
     "n": 5,
-    "slug": "05-find-difference",
-    "t": "Find the Difference",
-    "d": "Spot the cell that's different from the rest."
+    "slug": "05-misfired",
+    "t": "Misfired",
+    "d": "One tile left the kiln a shade off. Spot it.",
+    "v2": true,
+    "score": 7
    },
    {
     "n": 6,
-    "slug": "06-odd-one-out",
-    "t": "Odd One Out",
-    "d": "Tap the face whose expression differs."
+    "slug": "06-odd-mood",
+    "t": "Odd Mood",
+    "d": "Everyone feels the same. Except one. Find them.",
+    "v2": true
    },
    {
     "n": 7,
     "slug": "07-memory-match",
     "t": "Memory Match",
-    "d": "Flip cards and find matching pairs."
+    "d": "Flip cards and find matching pairs.",
+    "thumb": "../thumbs/PhoneGameLab--07-memory-match.jpg"
    },
    {
     "n": 8,
     "slug": "08-shell-game",
     "t": "Cups & Ball",
-    "d": "Watch the cups shuffle. Where's the ball?"
+    "d": "Watch the cups shuffle. Where's the ball?",
+    "thumb": "../thumbs/PhoneGameLab--08-shell-game.jpg"
    }
   ]
  },
@@ -58,69 +68,119 @@ window.LAB_GAMES = [
   "items": [
    {
     "n": 9,
-    "slug": "09-brick-breaker",
-    "t": "Brick Breaker",
-    "d": "Paddle a ball to destroy the wall."
-   },
-   {
-    "n": 10,
-    "slug": "10-bubble-shooter",
-    "t": "Bubble Shooter",
-    "d": "Match 3+ bubbles of the same color."
-   },
-   {
-    "n": 11,
-    "slug": "11-space-invaders",
-    "t": "Space Invaders",
-    "d": "Shoot the descending alien grid."
-   },
-   {
-    "n": 12,
-    "slug": "12-asteroids",
-    "t": "Asteroids",
-    "d": "Rotate, thrust, and shoot the rocks."
+    "slug": "09-tea-break",
+    "t": "Tea Break",
+    "d": "Bash through the biscuit tin, one rally at a time.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 13,
-    "slug": "13-twin-stick",
-    "t": "Twin-Stick Arena",
-    "d": "Two thumbs: one moves, one shoots."
+    "slug": "13-suds-patrol",
+    "t": "Suds Patrol",
+    "d": "One bar of soap. One very dirty floor.",
+    "v2": true
    },
    {
     "n": 14,
     "slug": "14-bullet-hell",
     "t": "Bullet Hell",
-    "d": "Survive dense bullet patterns."
+    "d": "Survive dense bullet patterns.",
+    "thumb": "../thumbs/PhoneGameLab--14-bullet-hell.jpg"
    },
    {
     "n": 15,
     "slug": "15-fruit-slice",
     "t": "Fruit Slice",
-    "d": "Swipe to slice fruit, dodge bombs."
+    "d": "Swipe to slice fruit, dodge bombs.",
+    "thumb": "../thumbs/PhoneGameLab--15-fruit-slice.jpg"
    },
    {
     "n": 16,
     "slug": "16-knife-throw",
     "t": "Knife Throw",
-    "d": "Stick knives in a spinning log."
+    "d": "Stick knives in a spinning log.",
+    "thumb": "../thumbs/PhoneGameLab--16-knife-throw.jpg"
    },
    {
     "n": 17,
-    "slug": "17-bow-arrow",
-    "t": "Bow & Arrow",
-    "d": "Drag to aim, release to fire."
+    "slug": "17-windfletch",
+    "t": "Windfletch",
+    "d": "Read the wind. Split the gold.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 21,
+    "slug": "21-paper-rapids",
+    "t": "Paper Rapids",
+    "d": "A paper boat, three channels, and a taste for close shaves.",
+    "v2": true
+   }
+  ]
+ },
+ {
+  "cat": "Minigame",
+  "items": [
+   {
+    "n": 10,
+    "slug": "10-bramble-drop",
+    "t": "Bubble Shooter",
+    "d": "Aim & tap to shoot. Match 3+ same-color."
+   },
+   {
+    "n": 11,
+    "slug": "11-scribble-siege",
+    "t": "Space Invaders",
+    "d": "Drag to move ship. Tap to fire."
+   },
+   {
+    "n": 12,
+    "slug": "12-cold-snap",
+    "t": "Asteroids",
+    "d": "Drag to steer toward your finger. Tap-and-hold to thrust. Double-tap to fire."
    },
    {
     "n": 18,
-    "slug": "18-sniper-timing",
+    "slug": "18-one-breath",
     "t": "Sniper Timing",
-    "d": "One shot — wait for the perfect moment."
+    "d": "One bullet per round. Tap when the cross is over the target."
    },
    {
     "n": 19,
-    "slug": "19-cannon",
+    "slug": "19-tin-topple",
     "t": "Cannon",
-    "d": "Lob projectiles in a parabola."
+    "d": "Drag from cannon to aim; release to fire (parabolic)."
+   },
+   {
+    "n": 20,
+    "slug": "20-frostfoot",
+    "t": "Endless Runner",
+    "d": "Tap = jump • Swipe down = slide."
+   },
+   {
+    "n": 26,
+    "slug": "26-jelly-drift",
+    "t": "Flappy Tap",
+    "d": "Tap to flap. Pass through pipe gaps."
+   },
+   {
+    "n": 30,
+    "slug": "30-wobblewire",
+    "t": "Balance Beam",
+    "d": "Tap LEFT / RIGHT side to nudge balance. Stay centered!"
+   },
+   {
+    "n": 31,
+    "slug": "31-sinkstones",
+    "t": "Vanishing Tiles",
+    "d": "Tap a tile to step there. Avoid empty squares and fading ones!"
+   },
+   {
+    "n": 32,
+    "slug": "32-inkstride",
+    "t": "Color Path",
+    "d": "Tap to switch color. Only step on tiles matching your color."
    }
   ]
  },
@@ -128,94 +188,68 @@ window.LAB_GAMES = [
   "cat": "Runner & Movement",
   "items": [
    {
-    "n": 20,
-    "slug": "20-endless-runner",
-    "t": "Endless Runner",
-    "d": "Tap to jump, swipe down to slide."
-   },
-   {
-    "n": 21,
-    "slug": "21-lane-dodger",
-    "t": "Lane Dodger",
-    "d": "Swipe between 3 lanes to dodge."
-   },
-   {
     "n": 22,
     "slug": "22-traffic-dodge",
     "t": "Traffic Dodge",
-    "d": "Top-down: weave through traffic."
+    "d": "Top-down: weave through traffic.",
+    "thumb": "../thumbs/PhoneGameLab--22-traffic-dodge.jpg"
    },
    {
     "n": 23,
     "slug": "23-doodle-jump",
     "t": "Doodle Jump",
-    "d": "Auto-bounce upward, tilt to steer."
+    "d": "Auto-bounce upward, tilt to steer.",
+    "thumb": "../thumbs/PhoneGameLab--23-doodle-jump.jpg"
    },
    {
     "n": 24,
     "slug": "24-helix-fall",
     "t": "Helix Fall",
-    "d": "Rotate the tower so the ball falls through gaps."
+    "d": "Rotate the tower so the ball falls through gaps.",
+    "thumb": "../thumbs/PhoneGameLab--24-helix-fall.jpg"
    },
    {
     "n": 25,
-    "slug": "25-stair-climb",
-    "t": "Stair Climb",
-    "d": "Tap left/right to climb stairs — don't slip."
-   },
-   {
-    "n": 26,
-    "slug": "26-flappy",
-    "t": "Flappy Tap",
-    "d": "Tap to flap through pipe gaps."
+    "slug": "25-goat-up",
+    "t": "Goat Up",
+    "d": "Hop the zig-zag crags before you run out of puff.",
+    "v2": true,
+    "score": 7
    },
    {
     "n": 27,
     "slug": "27-jetpack",
     "t": "Jetpack Hold",
-    "d": "Hold to fly, release to fall."
+    "d": "Hold to fly, release to fall.",
+    "thumb": "../thumbs/PhoneGameLab--27-jetpack.jpg"
    },
    {
     "n": 28,
     "slug": "28-cave-flyer",
     "t": "Cave Flyer",
-    "d": "Navigate a narrowing cave tunnel."
+    "d": "Navigate a narrowing cave tunnel.",
+    "thumb": "../thumbs/PhoneGameLab--28-cave-flyer.jpg"
    },
    {
     "n": 29,
-    "slug": "29-marble-maze",
-    "t": "Marble Maze",
-    "d": "Drag the marble through walls to the goal."
-   },
-   {
-    "n": 30,
-    "slug": "30-balance-beam",
-    "t": "Balance Beam",
-    "d": "Tap left/right to keep your balance."
-   },
-   {
-    "n": 31,
-    "slug": "31-disappearing-tiles",
-    "t": "Vanishing Tiles",
-    "d": "Stand only on tiles that aren't fading."
-   },
-   {
-    "n": 32,
-    "slug": "32-color-path",
-    "t": "Color Path",
-    "d": "Tap to switch color — only step on matching tiles."
+    "slug": "29-tiltwood",
+    "t": "Tiltwood",
+    "d": "Tip the board. Roll the marble home.",
+    "v2": true
    },
    {
     "n": 33,
     "slug": "33-shape-gate",
     "t": "Shape Gate",
-    "d": "Morph shape to fit the gate's hole."
+    "d": "Morph shape to fit the gate's hole.",
+    "thumb": "../thumbs/PhoneGameLab--33-shape-gate.jpg"
    },
    {
     "n": 34,
     "slug": "34-stack-runner",
     "t": "Stack Runner",
-    "d": "Collect blocks, lay them to cross gaps."
+    "d": "Collect blocks, lay them to cross gaps.",
+    "thumb": "../thumbs/PhoneGameLab--34-stack-runner.jpg"
    }
   ]
  },
@@ -226,43 +260,50 @@ window.LAB_GAMES = [
     "n": 35,
     "slug": "35-cake-tower",
     "t": "Cake Tower",
-    "d": "Drop swinging layers — perfect timing."
+    "d": "Drop swinging layers — perfect timing.",
+    "thumb": "../thumbs/PhoneGameLab--35-cake-tower.jpg"
    },
    {
     "n": 36,
     "slug": "36-sky-high",
     "t": "Sky High Stack",
-    "d": "Sliding blocks, only matching overlap stays."
+    "d": "Sliding blocks, only matching overlap stays.",
+    "thumb": "../thumbs/PhoneGameLab--36-sky-high.jpg"
    },
    {
     "n": 38,
     "slug": "38-plinko",
     "t": "Plinko",
-    "d": "Drop the ball — chase the big multiplier."
+    "d": "Drop the ball — chase the big multiplier.",
+    "thumb": "../thumbs/PhoneGameLab--38-plinko.jpg"
    },
    {
     "n": 39,
     "slug": "39-basketball",
     "t": "Basketball Flick",
-    "d": "Flick to shoot, arc to the hoop."
+    "d": "Flick to shoot, arc to the hoop.",
+    "thumb": "../thumbs/PhoneGameLab--39-basketball.jpg"
    },
    {
     "n": 40,
     "slug": "40-pool",
     "t": "Pool",
-    "d": "Drag-aim the cue, pot the balls."
+    "d": "Drag-aim the cue, pot the balls.",
+    "thumb": "../thumbs/PhoneGameLab--40-pool.jpg"
    },
    {
     "n": 41,
     "slug": "41-goal-flick",
     "t": "Goal Flick",
-    "d": "Flick the ball past the keeper."
+    "d": "Flick the ball past the keeper.",
+    "thumb": "../thumbs/PhoneGameLab--41-goal-flick.jpg"
    },
    {
     "n": 42,
     "slug": "42-bridge-build",
     "t": "Bridge Build",
-    "d": "Hold to extend a bridge over the gap."
+    "d": "Hold to extend a bridge over the gap.",
+    "thumb": "../thumbs/PhoneGameLab--42-bridge-build.jpg"
    }
   ]
  },
@@ -275,7 +316,8 @@ window.LAB_GAMES = [
     "t": "Star Jar",
     "d": "Fuse star-stuff. Don't overflow the jar.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--37-star-jar.jpg"
    }
   ]
  },
@@ -286,109 +328,127 @@ window.LAB_GAMES = [
     "n": 43,
     "slug": "43-2048",
     "t": "2048",
-    "d": "Swipe to merge equal tiles."
+    "d": "Swipe to merge equal tiles.",
+    "thumb": "../thumbs/PhoneGameLab--43-2048.jpg"
    },
    {
     "n": 44,
     "slug": "44-match-3",
     "t": "Match 3",
-    "d": "Swap adjacent gems to make 3+ in a row."
+    "d": "Swap adjacent gems to make 3+ in a row.",
+    "thumb": "../thumbs/PhoneGameLab--44-match-3.jpg"
    },
    {
     "n": 45,
     "slug": "45-tap-clusters",
     "t": "Tap Clusters",
-    "d": "Tap groups of same-color blocks to pop them."
+    "d": "Tap groups of same-color blocks to pop them.",
+    "thumb": "../thumbs/PhoneGameLab--45-tap-clusters.jpg"
    },
    {
     "n": 46,
     "slug": "46-connect-dots",
     "t": "Connect Dots",
-    "d": "Draw lines between pairs — no crossings."
+    "d": "Draw lines between pairs — no crossings.",
+    "thumb": "../thumbs/PhoneGameLab--46-connect-dots.jpg"
    },
    {
     "n": 47,
     "slug": "47-pipe-rotate",
     "t": "Pipe Rotate",
-    "d": "Rotate pipes so water reaches the end."
+    "d": "Rotate pipes so water reaches the end.",
+    "thumb": "../thumbs/PhoneGameLab--47-pipe-rotate.jpg"
    },
    {
     "n": 48,
     "slug": "48-water-sort",
     "t": "Water Sort",
-    "d": "Pour colors between tubes until each is one color."
+    "d": "Pour colors between tubes until each is one color.",
+    "thumb": "../thumbs/PhoneGameLab--48-water-sort.jpg"
    },
    {
     "n": 49,
     "slug": "49-ball-sort",
     "t": "Ball Sort",
-    "d": "Move balls between tubes to sort by color."
+    "d": "Move balls between tubes to sort by color.",
+    "thumb": "../thumbs/PhoneGameLab--49-ball-sort.jpg"
    },
    {
     "n": 50,
     "slug": "50-screw-puzzle",
     "t": "Screw Puzzle",
-    "d": "Unscrew bolts in the right order to free parts."
+    "d": "Unscrew bolts in the right order to free parts.",
+    "thumb": "../thumbs/PhoneGameLab--50-screw-puzzle.jpg"
    },
    {
     "n": 51,
     "slug": "51-15-puzzle",
     "t": "15 Puzzle",
-    "d": "Slide numbered tiles into order."
+    "d": "Slide numbered tiles into order.",
+    "thumb": "../thumbs/PhoneGameLab--51-15-puzzle.jpg"
    },
    {
     "n": 52,
     "slug": "52-tetris",
     "t": "Tetris",
-    "d": "Fit falling pieces, clear lines."
+    "d": "Fit falling pieces, clear lines.",
+    "thumb": "../thumbs/PhoneGameLab--52-tetris.jpg"
    },
    {
     "n": 53,
     "slug": "53-block-blast",
     "t": "Block Blast",
-    "d": "Place blocks to clear full rows/cols."
+    "d": "Place blocks to clear full rows/cols.",
+    "thumb": "../thumbs/PhoneGameLab--53-block-blast.jpg"
    },
    {
     "n": 54,
     "slug": "54-maze",
     "t": "Maze",
-    "d": "Find the path from start to goal."
+    "d": "Find the path from start to goal.",
+    "thumb": "../thumbs/PhoneGameLab--54-maze.jpg"
    },
    {
     "n": 55,
     "slug": "55-laser-mirror",
     "t": "Laser Mirror",
-    "d": "Rotate mirrors to hit the target."
+    "d": "Rotate mirrors to hit the target.",
+    "thumb": "../thumbs/PhoneGameLab--55-laser-mirror.jpg"
    },
    {
     "n": 56,
     "slug": "56-lights-out",
     "t": "Lights Out",
-    "d": "Toggle cells to turn off every light."
+    "d": "Toggle cells to turn off every light.",
+    "thumb": "../thumbs/PhoneGameLab--56-lights-out.jpg"
    },
    {
     "n": 57,
     "slug": "57-minesweeper",
     "t": "Minesweeper",
-    "d": "Use number hints to find safe cells."
+    "d": "Use number hints to find safe cells.",
+    "thumb": "../thumbs/PhoneGameLab--57-minesweeper.jpg"
    },
    {
     "n": 58,
     "slug": "58-word-search",
     "t": "Word Search",
-    "d": "Drag through the grid to find hidden words."
+    "d": "Drag through the grid to find hidden words.",
+    "thumb": "../thumbs/PhoneGameLab--58-word-search.jpg"
    },
    {
     "n": 59,
     "slug": "59-nonogram",
     "t": "Nonogram",
-    "d": "Use hints to fill the correct cells."
+    "d": "Use hints to fill the correct cells.",
+    "thumb": "../thumbs/PhoneGameLab--59-nonogram.jpg"
    },
    {
     "n": 60,
     "slug": "60-sudoku",
     "t": "Mini Sudoku",
-    "d": "Fill the 4×4 grid — no row/col/box repeats."
+    "d": "Fill the 4×4 grid — no row/col/box repeats.",
+    "thumb": "../thumbs/PhoneGameLab--60-sudoku.jpg"
    }
   ]
  },
@@ -399,37 +459,43 @@ window.LAB_GAMES = [
     "n": 61,
     "slug": "61-snake",
     "t": "Snake",
-    "d": "Eat fruit — don't bite yourself."
+    "d": "Eat fruit — don't bite yourself.",
+    "thumb": "../thumbs/PhoneGameLab--61-snake.jpg"
    },
    {
     "n": 62,
     "slug": "62-slither",
     "t": "Slither",
-    "d": "Eat dots, grow long, dodge the snake."
+    "d": "Eat dots, grow long, dodge the snake.",
+    "thumb": "../thumbs/PhoneGameLab--62-slither.jpg"
    },
    {
     "n": 63,
     "slug": "63-agar",
     "t": "Agar.io",
-    "d": "Eat smaller blobs, dodge bigger ones."
+    "d": "Eat smaller blobs, dodge bigger ones.",
+    "thumb": "../thumbs/PhoneGameLab--63-agar.jpg"
    },
    {
     "n": 64,
     "slug": "64-tower-defense",
     "t": "Tower Defense",
-    "d": "Place turrets to stop the waves."
+    "d": "Place turrets to stop the waves.",
+    "thumb": "../thumbs/PhoneGameLab--64-tower-defense.jpg"
    },
    {
     "n": 65,
     "slug": "65-idle-clicker",
     "t": "Idle Clicker",
-    "d": "Tap, buy upgrades, automate income."
+    "d": "Tap, buy upgrades, automate income.",
+    "thumb": "../thumbs/PhoneGameLab--65-idle-clicker.jpg"
    },
    {
     "n": 66,
     "slug": "66-merge-idle",
     "t": "Merge Idle",
-    "d": "Merge generators for compounding income."
+    "d": "Merge generators for compounding income.",
+    "thumb": "../thumbs/PhoneGameLab--66-merge-idle.jpg"
    }
   ]
  },
@@ -440,25 +506,29 @@ window.LAB_GAMES = [
     "n": 67,
     "slug": "67-cooking-serve",
     "t": "Cook & Serve",
-    "d": "Drag the right ingredients to each order."
+    "d": "Drag the right ingredients to each order.",
+    "thumb": "../thumbs/PhoneGameLab--67-cooking-serve.jpg"
    },
    {
     "n": 68,
     "slug": "68-sort-baskets",
     "t": "Sort Baskets",
-    "d": "Fling falling items into the right basket."
+    "d": "Fling falling items into the right basket.",
+    "thumb": "../thumbs/PhoneGameLab--68-sort-baskets.jpg"
    },
    {
     "n": 69,
     "slug": "69-piano-tiles",
     "t": "Piano Tiles",
-    "d": "Tap the black tiles — never miss one."
+    "d": "Tap the black tiles — never miss one.",
+    "thumb": "../thumbs/PhoneGameLab--69-piano-tiles.jpg"
    },
    {
     "n": 70,
     "slug": "70-rhythm-lane",
     "t": "Rhythm Lane",
-    "d": "Hit notes in their lanes in time with the beat."
+    "d": "Hit notes in their lanes in time with the beat.",
+    "thumb": "../thumbs/PhoneGameLab--70-rhythm-lane.jpg"
    }
   ]
  }

@@ -1,31 +1,286 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Jelly Drift</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Flappy Tap", instructions:"Tap to flap. Pass through pipe gaps.", restart:start});
-let bird,pipes,t,spawn,score,dead;
-function start(){
-  bird={x:Lab.W*0.3,y:Lab.H/2,vy:0,r:14};
-  pipes=[]; t=0; spawn=0; score=0; dead=false; Lab.setScore(0);
-  Lab.input.onTap=[()=>{ if(!dead){ bird.vy=-380; Lab.beep(700,.04);}}];
-  Lab.loop(dt=>{
-    if(dead) return;
-    bird.vy+=1200*dt; bird.y+=bird.vy*dt;
-    t+=dt; spawn-=dt;
-    if(spawn<=0){ spawn=1.3; const gap=140; const cy=Lab.rand(140,Lab.H-200); pipes.push({x:Lab.W+30, cy, gap, scored:false});}
-    for(const p of pipes) p.x-=170*dt;
-    pipes=pipes.filter(p=>p.x>-80);
-    for(const p of pipes){
-      if(!p.scored && p.x<bird.x){ p.scored=true; score++; Lab.setScore(score); Lab.beep(900,.05);}
-      if(Math.abs(p.x-bird.x)<35){
-        if(bird.y-bird.r<p.cy-p.gap/2 || bird.y+bird.r>p.cy+p.gap/2){ dead=true; Lab.gameover({title:"Splat",message:"Score: "+score}); return; }
+(function(){ "use strict";
+/* JELLY DRIFT — a moon jelly threads a coral reef.  Tap = one pulse upward.  The twist on the flap: HOLD after a pulse
+ * and the bell spreads like a parachute, so you drift down slowly instead of sinking — a second verb that the reef is
+ * built around (sliding sea-whips you wait for, long rock tunnels you must glide through level).
+ * Depth: every gap holds a pearl on its centre line; threading pearls in a row builds a THREAD combo (+1…+5 per pearl,
+ * rising chime ladder), tunnels carry three.  A rare bubble shield floats off the safe line — a detour that buys one hit.
+ * Identity: bright turquoise shallows sinking tier by tier to a glowing trench; soft bloop sounds; laid-back music.   */
+Lab.init({
+  title: "Jelly Drift", tagline: "Pulse up, drift down, thread the reef.", category: "Runner & Movement",
+  howto: ["Tap to pulse upward", "Hold to spread your bell and drift down slowly", "Thread pearls in a row for a combo"],
+  theme: { bg: "#0d6a8a", bg2: "#7fdfe0", accent: "#ff8fb8", accent2: "#ffe08a" },
+  orient: "portrait", music: { style: "chill", key: "Eb", bpm: 96, vol: .5 }, restart: start, attract: (dt, t) => { if (!J) setup(); ambient(dt); render(t); },
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, mix = Lab.color.mix;
+const G = 980, PULSE = -345, MAXFALL = 460, GLIDE = 62, R = 13, TIER = 8;
+const ZONES = [
+  { n: "Sunlit Shallows", a: "#93ece4", b: "#1c8fb4" }, { n: "Kelp Garden", a: "#78dcae", b: "#116c78" },
+  { n: "Twilight Shelf", a: "#6f9be2", b: "#25347c" }, { n: "Glow Trench", a: "#4b3a96", b: "#100c34" },
+];
+let S, jx, ceilY, floorY, Hu;                       // layout: 1u = S px; y is measured in u below the surface
+let J, gates, pickups, amb, fish, kelp, dist, speed, started, alive, score, passed, thread, bestThread, pearls, shield,
+  tier, zoneF, gateN, lastCy, lastType, time, held, wasGlide, deathT;
+
+function layout() {
+  const oldH = Hu;
+  S = Math.min(Lab.W / 390, Lab.play.h / 700); jx = Lab.W * .29; ceilY = Lab.play.y + 2; floorY = Lab.H - Lab.safe.bottom - 44 * S; Hu = (floorY - ceilY) / S;
+  if (J && oldH) { J.y *= Hu / oldH; lastCy *= Hu / oldH; }
+}
+Lab.onResize(layout);
+const X = u => jx + u * S, Y = u => ceilY + u * S;
+
+function setup() {
+  Hu = 0; J = null; layout();
+  J = { y: Hu * .45, vy: 0, sq: 0, open: 0, tilt: 0, blink: 2, inv: 0, since: 9, rot: 0, tent: [-12, -4, 4, 12].map(ax => ({ ax, p: Array.from({ length: 6 }, (_, i) => ({ x: ax - i * 4, y: 6 + i * 8 })) })) };
+  gates = []; pickups = []; dist = 0; speed = 150; started = false; alive = true; score = 0; passed = 0; thread = 0; bestThread = 0; pearls = 0; shield = false;
+  tier = 0; zoneF = 0; gateN = 0; lastCy = Hu * .45; lastType = 0; time = 0; held = false; wasGlide = false; deathT = 0;
+  amb = Array.from({ length: 16 }, () => ({ x: Math.random(), y: Math.random(), r: Lab.rand(1.5, 5), v: Lab.rand(.03, .09), p: Lab.rand(0, TAU) }));
+  fish = Array.from({ length: 6 }, (_, i) => ({ x: Math.random(), y: Lab.rand(.12, .8), s: Lab.rand(.6, 1.2), v: Lab.rand(.02, .05), p: Lab.rand(0, TAU) }));
+  kelp = Array.from({ length: 7 }, (_, i) => ({ x: i * 150 + Lab.rand(0, 80), h: Lab.rand(.25, .6), p: Lab.rand(0, TAU) }));
+}
+function start() {
+  setup(); Lab.setScore(0);
+  Lab.input.onDown = [() => pulse()];
+  Lab.input.onKey = [k => { if (k === " " || k === "ArrowUp" || k === "w" || k === "W") pulse(); }];
+  Lab.expose({
+    get y() { return J.y; }, get vy() { return J.vy; }, get score() { return score; }, get passed() { return passed; }, get thread() { return thread; },
+    get pearls() { return pearls; }, get alive() { return alive; }, get shield() { return shield; }, get tier() { return tier; }, get started() { return started; },
+    get height() { return Hu; }, get gliding() { return wasGlide; }, pulse, setHold(v) { held = !!v; }, giveShield() { shield = true; },
+    next() { const g = gates.find(g => g.x + g.w / 2 > -R); return g ? { x: g.x, w: g.w, cy: gateCy(g), gap: g.gap, type: g.type } : null; },
+  });
+  Lab.loop(frame);
+}
+function pulse() {
+  if (!alive || Lab.paused || !J) return;
+  started = true; J.vy = PULSE; J.sq = 1; J.since = 0;
+  Lab.sfx("bubble", { pitch: .8 + Math.min(thread, 6) * .03, vary: .08 });
+  fx.burst(X(0), Y(J.y) + 14 * S, { n: 4, color: "rgba(255,255,255,.7)", speed: 70, life: .5, size: 3 * S, gravity: -160, spread: 1.6, angle: Math.PI / 2, shape: "ring" });
+}
+const gateCy = g => g.cyF * Hu + g.amp * Math.sin(g.ph + time * g.om);
+function spawnGate() {
+  const n = gateN++, tr = Math.floor(n / TIER), last = gates[gates.length - 1];
+  let type = 0;
+  if (tr >= 2 && n % TIER !== 0) { const r = Math.random(); if (tr >= 3 && r < .26 && lastType !== 2) type = 2; else if (r < (tr >= 3 ? .56 : .4)) type = 1; }
+  const gap = [236, 208, 188, 172, 160, 150, 142, 136][Math.min(tr, 7)] + (type === 2 ? 16 : 0) + (n < 2 ? 30 : 0);
+  const amp = type === 1 ? Math.min(58, 30 + tr * 5) : 0, w = type === 2 ? 190 : 62;
+  const lo = gap / 2 + 30 + amp, hi = Hu - gap / 2 - 30 - amp, reach = n < 2 ? 36 : Math.min(230, 100 + tr * 32);
+  const cy = Lab.clamp(lastCy + Lab.rand(-reach, reach), lo, Math.max(lo, hi));
+  const x = last ? last.x + last.w / 2 + (180 - Math.min(tr, 5) * 6) + w / 2 : (Lab.W - jx) / S + 70;
+  gates.push({ x, w, cyF: cy / Hu, gap, type, amp, ph: Lab.rand(0, TAU), om: 2.1, passed: false, n, pearls: (type === 2 ? [-60, 0, 60] : [0]).map(dx => ({ dx, taken: false, pop: 0 })) });
+  lastCy = cy; lastType = type;
+  if (n % 11 === 6 && !shield && !pickups.length) pickups.push({ x: x + w / 2 + 88, yF: cy / Hu < .5 ? .82 : .18, taken: false });
+}
+function hit(floor) {
+  if (!alive) return;
+  if (shield) {
+    shield = false; J.inv = 1.4; if (floor) J.vy = PULSE * 1.1;
+    Lab.sfx("pop"); Lab.sfx("glass", { pitch: .8 }); Lab.shake(6, .2); Lab.buzz(25);
+    fx.ring(X(0), Y(J.y), { r0: 20 * S, r1: 80 * S, color: "#dff", width: 5 }); fx.burst(X(0), Y(J.y), { n: 14, color: "rgba(230,255,255,.9)", speed: 220, life: .5, size: 4 * S, shape: "ring", gravity: -80 });
+    fx.text(X(0), Y(J.y) - 44 * S, "bubble popped!", { size: 15 * S, color: "#e8ffff" });
+    return;
+  }
+  if (J.inv > 0) { if (floor) J.vy = PULSE; return; }
+  alive = false; J.vy = -220; thread = 0;
+  Lab.sfx("hurt"); Lab.sfx("splash", { pitch: .7 }); Lab.shake(11, .35); Lab.hitstop(.07); Lab.flash("#fff", .12, .35); Lab.buzz(60);
+  fx.burst(X(0), Y(J.y), { n: 22, colors: ["#5b3a8c", "#3a2a66", "#8a5fc0"], speed: 170, life: .9, size: 7 * S, gravity: 60, drag: 2.4 });
+  fx.burst(X(0), Y(J.y), { n: 10, color: "rgba(255,255,255,.8)", speed: 240, life: .7, size: 3.5 * S, shape: "ring", gravity: -200 });
+  Lab.after(.9, () => Lab.gameover({ title: "Snagged on the reef", score, stats: [["Gaps", passed], ["Best thread", "×" + bestThread], ["Pearls", pearls]] }));
+}
+
+function ambient(dt) {
+  time += dt;
+  for (const b of amb) { b.y -= b.v * dt; if (b.y < -.05) { b.y = 1.05; b.x = Math.random(); } }
+  for (const f of fish) { f.x -= f.v * dt * (1 + (started && alive ? .6 : 0)); if (f.x < -.2) { f.x = 1.2; f.y = Lab.rand(.12, .8); } }
+  J.blink -= dt; if (J.blink < -.12) J.blink = Lab.rand(1.5, 4.5);
+  J.sq = Lab.damp(J.sq, 0, 9, dt); zoneF = Lab.damp(zoneF, Math.min(tier, ZONES.length - 1), 1.2, dt);
+  // tentacles trail opposite to the motion through the water
+  const sp = started && alive ? speed : 60, dx = -sp * .55, dy = 110 - J.vy * .36, dl = Math.hypot(dx, dy) || 1, ux = dx / dl, uy = dy / dl;
+  for (const tn of J.tent) {
+    let px = tn.ax * (1 + J.open * .45), py = 5;
+    tn.p.forEach((n, i) => {
+      const wig = Math.sin(time * 6 + i * .9 + tn.ax) * 2.2, tx = px + ux * 8.5 - uy * wig, ty = py + uy * 8.5 + ux * wig, l = 26 - i * 3;
+      n.x = Lab.damp(n.x, tx, l, dt); n.y = Lab.damp(n.y, ty, l, dt); px = n.x; py = n.y;
+    });
+  }
+}
+function frame(dt, t) {
+  held = Lab.input.down || !!(Lab.input.keys[" "] || Lab.input.keys.ArrowUp || Lab.input.keys.KeyW);
+  if (alive && !started) J.y = Hu * .45 + Math.sin(t * 2.4) * 7;
+  if (alive && started) {
+    J.since += dt; if (J.inv > 0) J.inv -= dt;
+    const glide = held && J.vy > 0 && J.since > .1;
+    if (glide && !wasGlide) Lab.sfx("swish", { pitch: .55 });
+    wasGlide = glide;
+    J.vy += G * (glide ? .16 : 1) * dt; if (glide && J.vy > GLIDE) J.vy = Lab.damp(J.vy, GLIDE, 12, dt);
+    J.vy = Math.min(J.vy, MAXFALL); J.y += J.vy * dt;
+    if (J.y < R) { J.y = R; if (J.vy < 0) J.vy *= -.15; }
+    J.open = Lab.damp(J.open, glide ? 1 : 0, 14, dt); J.tilt = Lab.damp(J.tilt, Lab.clamp(J.vy / 900, -.32, .42) * (glide ? .3 : 1), 12, dt);
+    // world
+    const mv = speed * dt; dist += mv;
+    for (const g of gates) g.x -= mv; for (const p of pickups) p.x -= mv;
+    const right = (Lab.W - jx) / S + 60, last = gates[gates.length - 1];
+    if (!last || last.x + last.w / 2 < right) spawnGate();
+    while (gates.length && gates[0].x + gates[0].w / 2 < -jx / S - 40) gates.shift();
+    while (pickups.length && (pickups[0].x < -jx / S - 40 || pickups[0].taken)) pickups.shift();
+    for (const g of gates) {
+      const cy = gateCy(g), hw = g.w / 2 - 3;
+      for (const p of g.pearls) if (!p.taken && Math.abs(g.x + p.dx) < 21 && Math.abs(J.y - cy) < 25) takePearl(g, p, cy);
+      if (Math.abs(g.x) < hw + R * .8 && (J.y - R < cy - g.gap / 2 || J.y + R > cy + g.gap / 2)) hit(false);
+      if (!g.passed && g.x + g.w / 2 < -R) {
+        g.passed = true; passed++; score++; Lab.setScore(score); Lab.sfx("tick", { pitch: 1 + tier * .04 });
+        if (g.pearls.some(p => !p.taken)) { if (thread >= 2) fx.text(X(30), Y(J.y) - 30 * S, "thread lost", { size: 14 * S, color: "#ffd0dd" }); thread = 0; }
+        if (passed % TIER === 0) tierUp();
       }
     }
-    if(bird.y<0||bird.y>Lab.H){ dead=true; Lab.gameover({title:"Splat",message:"Score: "+score}); return; }
-    const c=Lab.ctx; c.fillStyle="#5dd"; c.fillRect(0,0,Lab.W,Lab.H);
-    for(const p of pipes){ c.fillStyle="#3a8a3a"; c.fillRect(p.x-35,0,70,p.cy-p.gap/2); c.fillRect(p.x-35,p.cy+p.gap/2,70,Lab.H-p.cy-p.gap/2);}
-    c.beginPath(); c.fillStyle="#ffd35a"; c.arc(bird.x,bird.y,bird.r,0,Lab.TAU); c.fill();
-    c.beginPath(); c.fillStyle="#fff"; c.arc(bird.x+5,bird.y-4,3,0,Lab.TAU); c.fill();
+    for (const p of pickups) if (!p.taken && Math.hypot(p.x, p.yF * Hu - J.y) < 32) {
+      p.taken = true; shield = true; Lab.sfx("powerup", { pitch: 1.2 }); Lab.buzz(15);
+      fx.ring(X(0), Y(J.y), { r0: 60 * S, r1: 26 * S, color: "#e8ffff", width: 4, life: .35 }); fx.text(X(0), Y(J.y) - 46 * S, "bubble shield", { size: 15 * S, color: "#e8ffff" });
+    }
+    if (J.y > Hu - R) { J.y = Hu - R; hit(true); }
+    Lab.music.intensity(.25 + Math.min(tier, 5) * .1 + Math.min(thread, 5) * .05);
+  } else if (!alive) {
+    deathT += dt; J.vy += G * .45 * dt; J.y = Math.min(Hu - 6, J.y + J.vy * dt); J.rot += dt * 2.6; J.open = Lab.damp(J.open, 0, 6, dt);
+  }
+  ambient(dt); render(t);
+}
+function takePearl(g, p, cy) {
+  p.taken = true; pearls++; thread++; bestThread = Math.max(bestThread, thread);
+  const gain = Math.min(thread, 5); score += gain; Lab.setScore(score); if (thread >= 3) Lab.bumpScore();
+  Lab.audio.combo(Math.min(thread - 1, 11), { vol: .2 }); Lab.sfx("pickup", { pitch: 1.4 });
+  const px = X(g.x + p.dx), py = Y(cy);
+  fx.burst(px, py, { n: 7 + gain, colors: ["#fff", "#ffe6f2", "#ffe08a"], speed: 150, life: .45, size: 3.2 * S, gravity: -40, glow: 6 });
+  fx.text(px, py - 22 * S, "+" + gain, { size: (15 + gain * 2) * S, color: thread >= 5 ? "#ffe08a" : "#fff" });
+}
+function tierUp() {
+  tier = passed / TIER; speed = 150 + Math.min(tier, 7) * 10;
+  Lab.banner("DEPTH " + (tier + 1), { color: "#e8ffff", ms: 1200 }); Lab.sfx("levelup", { pitch: .9 }); Lab.bumpScore();
+  if (tier < ZONES.length) fx.text(Lab.W / 2, Lab.play.y + Lab.play.h * .47, ZONES[tier].n, { size: 16 * S, life: 1.5, color: "#e8ffff" });
+  else if (tier === 4) fx.text(Lab.W / 2, Lab.play.y + Lab.play.h * .47, "the reef tightens", { size: 16 * S, life: 1.5, color: "#e8ffff" });
+}
+
+/* ---------------------------------------------------------------- art */
+const PILLAR = [
+  { a: "#ff9db0", b: "#e0607f", spot: "#ffd0da", line: "#b7405f", cap: "#ffb3c2" },      // coral
+  { a: "#a98cf5", b: "#6b4bd0", spot: "#d9ffea", line: "#4a30a3", cap: "#c4b0ff" },      // sliding sea-whip
+  { a: "#f6b76c", b: "#c97a3c", spot: "#8f5226", line: "#8f5226", cap: "#ffd08f" },      // rock tunnel
+];
+function pillar(type, w) {
+  const pw = Math.round(w * S), ph = Math.ceil(floorY - ceilY + 30), ov = Math.round(7 * S), k = PILLAR[type];
+  return Lab.sprite("pil" + type + ":" + pw + "x" + ph, pw + ov * 2, ph, g => {
+    const r = Lab.rng(type * 31 + 7), gr = g.createLinearGradient(ov, 0, ov + pw, 0);
+    gr.addColorStop(0, k.b); gr.addColorStop(.3, k.a); gr.addColorStop(.75, k.a); gr.addColorStop(1, k.b);
+    g.fillStyle = gr; g.fillRect(ov, 10 * S, pw, ph);
+    if (type === 1) { g.fillStyle = "rgba(255,255,255,.14)"; for (let y = 34 * S; y < ph; y += 30 * S) g.fillRect(ov, y, pw, 9 * S); }
+    for (let i = 0; i < ph / (type === 2 ? 26 : 34) / S * (type === 2 ? 2 : 1); i++) {
+      const x = ov + 8 * S + r() * (pw - 16 * S), y = 30 * S + r() * (ph - 30 * S), rr = (type === 2 ? 3 + r() * 5 : 2.5 + r() * 3) * S;
+      g.fillStyle = k.spot; g.globalAlpha = type === 2 ? .5 : .75; g.beginPath(); g.arc(x, y, rr, 0, TAU); g.fill();
+    }
+    g.globalAlpha = 1; g.strokeStyle = k.line; g.lineWidth = 2; g.strokeRect(ov, 10 * S, pw, ph);
+    // lip at the gap end: scalloped coral heads
+    const n = type === 2 ? 7 : 3, cw = (pw + ov * 2) / n;
+    g.fillStyle = k.cap; g.strokeStyle = k.line; draw.rr(g, 1, 6 * S, pw + ov * 2 - 2, 20 * S, 9 * S); g.fill(); g.stroke();
+    for (let i = 0; i < n; i++) { g.beginPath(); g.arc(cw * (i + .5), 9 * S, cw * .46, Math.PI, 0); g.fill(); g.stroke(); }
+    g.fillStyle = k.cap; g.fillRect(3, 8 * S, pw + ov * 2 - 6, 12 * S);
+    g.fillStyle = "rgba(255,255,255,.35)"; for (let i = 0; i < n; i++) { g.beginPath(); g.ellipse(cw * (i + .38), 6 * S, cw * .16, 2.4 * S, -.3, 0, TAU); g.fill(); }
   });
 }
-start();
+function reef() {
+  const w = Math.ceil(Lab.W * 1.4), h = Math.ceil(240 * S);
+  return Lab.sprite("reef:" + w + "x" + h, w, h, g => {
+    const r = Lab.rng(41); g.fillStyle = "rgba(8,52,76,.34)";
+    g.beginPath(); g.moveTo(0, h); for (let x = 0; x <= w; x += 6) g.lineTo(x, h * (.62 - .2 * Math.sin(x / w * TAU * 2 + 1) - .1 * Math.sin(x / w * TAU * 7))); g.lineTo(w, h); g.fill();
+    for (let i = 0; i < 9; i++) { const x = r() * w, y = h * (.45 + r() * .2), s = (20 + r() * 26) * S; for (let b = -2; b <= 2; b++) { g.beginPath(); g.moveTo(x, y + s); g.quadraticCurveTo(x + b * s * .25, y + s * .3, x + b * s * .45, y - s * (.6 - Math.abs(b) * .14)); g.lineWidth = 5 * S; g.strokeStyle = "rgba(8,52,76,.34)"; g.lineCap = "round"; g.stroke(); } }
+  });
+}
+function urchin() {
+  return Lab.sprite("urchin:" + Math.round(S * 100), 40 * S, 30 * S, g => {
+    g.strokeStyle = "#3b2a5c"; g.lineWidth = 2 * S; g.lineCap = "round";
+    for (let i = 0; i < 9; i++) { const a = Math.PI + i * Math.PI / 8; g.beginPath(); g.moveTo(20 * S, 26 * S); g.lineTo(20 * S + Math.cos(a) * 18 * S, 26 * S + Math.sin(a) * 22 * S); g.stroke(); }
+    g.fillStyle = "#3b2a5c"; g.beginPath(); g.arc(20 * S, 28 * S, 9 * S, Math.PI, 0); g.fill();
+  });
+}
+function drawJelly(c, t) {
+  const x = X(0), y = Y(J.y), u = S;
+  if (J.inv > 0 && Math.sin(t * 40) > 0) c.globalAlpha = .45;
+  if (!alive) c.globalAlpha = Lab.clamp(1.2 - deathT * .6, .3, 1);
+  draw.glow(c, x, y, 50 * u, "#ffb7dd", alive ? .3 : .1);
+  c.save(); c.translate(x, y); c.rotate(J.tilt + J.rot);
+  c.strokeStyle = "rgba(255,186,220,.85)"; c.lineWidth = 3 * u; c.lineCap = "round"; c.lineJoin = "round";
+  for (const tn of J.tent) { c.beginPath(); c.moveTo(tn.ax * (1 + J.open * .45) * u, 4 * u); for (const n of tn.p) c.lineTo(n.x * u, n.y * u); c.stroke(); }
+  const bw = 22 * (1 + J.sq * .28 + J.open * .34) * u, bh = 22 * (1 - J.sq * .3 - J.open * .22) * u;
+  const gr = c.createRadialGradient(-bw * .3, -bh * .7, 2, 0, -bh * .2, bw * 1.2);
+  gr.addColorStop(0, "#fff3fa"); gr.addColorStop(.5, "#ffb3d6"); gr.addColorStop(1, "#f070b0");
+  c.fillStyle = gr; c.beginPath(); c.moveTo(-bw, 5 * u); c.bezierCurveTo(-bw * 1.05, -bh * 1.25, bw * 1.05, -bh * 1.25, bw, 5 * u);
+  for (let i = 0; i < 4; i++) { const x1 = bw - (i + 1) * bw / 2; c.quadraticCurveTo(x1 + bw / 4, 11 * u, x1, 5 * u); }
+  c.closePath(); c.fill(); c.strokeStyle = "rgba(255,255,255,.75)"; c.lineWidth = 1.6 * u; c.stroke();
+  c.fillStyle = "rgba(255,255,255,.5)"; c.beginPath(); c.ellipse(-bw * .42, -bh * .62, bw * .24, bh * .13, -.6, 0, TAU); c.fill();
+  // face
+  const ey = -bh * .22, ex = 7 * u, ink = "#3a2456";
+  if (!alive) { c.strokeStyle = ink; c.lineWidth = 1.8 * u; for (const s of [-1, 1]) for (const d of [-1, 1]) { c.beginPath(); c.moveTo(s * ex - 2.4 * u, ey - 2.4 * u * d); c.lineTo(s * ex + 2.4 * u, ey + 2.4 * u * d); c.stroke(); } }
+  else if (J.blink < 0 || J.open > .6) { c.strokeStyle = ink; c.lineWidth = 1.8 * u; for (const s of [-1, 1]) { c.beginPath(); c.arc(s * ex, ey - 1 * u, 2.6 * u, .15 * Math.PI, .85 * Math.PI); c.stroke(); } }
+  else for (const s of [-1, 1]) { draw.circle(c, s * ex, ey, 2.7 * u * (J.vy > 250 ? 1.2 : 1), ink); draw.circle(c, s * ex + .8 * u, ey - 1 * u, .9 * u, "#fff"); }
+  c.strokeStyle = ink; c.lineWidth = 1.6 * u; c.beginPath();
+  if (J.vy > 250 && alive) c.arc(0, ey + 6 * u, 2 * u, 0, TAU); else c.arc(0, ey + 3.5 * u, 3.2 * u, .15 * Math.PI, .85 * Math.PI);
+  c.stroke();
+  c.fillStyle = "rgba(255,90,140,.3)"; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(s * 12 * u, ey + 4 * u, 3.2 * u, 2 * u, 0, 0, TAU); c.fill(); }
+  c.restore(); c.globalAlpha = 1;
+  if (shield) bubble(c, x, y, 36 * u + Math.sin(t * 5) * 1.5 * u, .8);
+}
+function bubble(c, x, y, r, a) {
+  c.globalAlpha = a; draw.circle(c, x, y, r, "rgba(200,255,255,.12)", "rgba(235,255,255,.85)", 2.2 * S);
+  c.strokeStyle = "#fff"; c.lineWidth = 2.5 * S; c.lineCap = "round"; c.beginPath(); c.arc(x, y, r * .72, Math.PI * 1.1, Math.PI * 1.45); c.stroke(); c.globalAlpha = 1;
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, P = Lab.play;
+  const zi = Math.floor(zoneF), zn = Math.min(zi + 1, ZONES.length - 1), zb = zoneF - zi, deep = Lab.clamp(zoneF / 3, 0, 1);
+  draw.bg(c, mix(ZONES[zi].a, ZONES[zn].a, zb), mix(ZONES[zi].b, ZONES[zn].b, zb));
+  // light shafts from the surface
+  c.fillStyle = "#fff";
+  for (let i = 0; i < 5; i++) { const x0 = W * (i * .26 - .1) + Math.sin(t * .4 + i) * 20 - (dist * .05 * S) % (W * .26), w0 = (26 + i % 3 * 16) * S; c.globalAlpha = (.07 + .03 * Math.sin(t * .9 + i * 2)) * (1 - deep * .6); c.beginPath(); c.moveTo(x0, 0); c.lineTo(x0 + w0, 0); c.lineTo(x0 + w0 * 2.4 - W * .3, H); c.lineTo(x0 - w0 - W * .3, H); c.fill(); }
+  c.globalAlpha = 1;
+  const rf = reef(), rx = -((dist * .22 * S) % rf.w); c.drawImage(rf, rx, floorY - rf.h + 10, rf.w, rf.h); c.drawImage(rf, rx + rf.w, floorY - rf.h + 10, rf.w, rf.h);
+  // fish silhouettes
+  c.fillStyle = deep > .6 ? "rgba(160,220,255,.22)" : "rgba(10,60,90,.25)";
+  for (const f of fish) { const fxp = f.x * W, fy = ceilY + f.y * (floorY - ceilY) + Math.sin(t + f.p) * 6, s = 9 * f.s * S, wg = Math.sin(t * 9 + f.p) * s * .35; c.beginPath(); c.ellipse(fxp, fy, s, s * .45, 0, 0, TAU); c.fill(); c.beginPath(); c.moveTo(fxp + s * .8, fy); c.lineTo(fxp + s * 1.7, fy - s * .5 + wg); c.lineTo(fxp + s * 1.7, fy + s * .5 + wg); c.fill(); }
+  // kelp
+  c.lineCap = "round"; const span = 7 * 150;
+  for (const k of kelp) {
+    const kx = (((k.x - dist * .5) % span) + span) % span * S - 60 * S, kh = k.h * (floorY - ceilY);
+    c.strokeStyle = deep > .6 ? "rgba(70,60,150,.55)" : "rgba(16,110,96,.5)"; c.lineWidth = 9 * S; c.beginPath(); c.moveTo(kx, floorY + 6);
+    for (let i = 1; i <= 6; i++) c.lineTo(kx + Math.sin(t * 1.3 + k.p + i * .8) * i * 3.2 * S, floorY - kh * i / 6);
+    c.stroke();
+  }
+  // surface shimmer
+  c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = 3; c.beginPath(); for (let x = -10; x <= W + 10; x += 14) { const y = ceilY + 2 + Math.sin(x * .05 + t * 2.2) * 2.5; x < 0 ? c.moveTo(x, y) : c.lineTo(x, y); } c.stroke();
+  // gates
+  for (const g of gates) {
+    const sp = pillar(g.type, g.w), cy = gateCy(g), x0 = X(g.x) - sp.w / 2, yb = Y(cy + g.gap / 2), yt = Y(cy - g.gap / 2), hb = Math.max(0, floorY + 8 - yb), ht = Math.max(0, yt - ceilY + 8), k = sp.height / sp.h;
+    if (hb > 0) c.drawImage(sp, 0, 0, sp.width, hb * k, x0, yb, sp.w, hb);
+    c.save(); c.translate(0, yt); c.scale(1, -1); c.drawImage(sp, 0, 0, sp.width, ht * k, x0, 0, sp.w, ht); c.restore();
+    if (g.type === 1) { const up = Math.cos(g.ph + time * g.om) < 0 ? -1 : 1; c.fillStyle = "rgba(255,255,255,.8)"; for (const yy of [yb + 34 * S, yt - 34 * S]) { c.beginPath(); c.moveTo(X(g.x), yy + up * 8 * S); c.lineTo(X(g.x) - 8 * S, yy - up * 5 * S); c.lineTo(X(g.x) + 8 * S, yy - up * 5 * S); c.fill(); } }
+    for (const p of g.pearls) if (!p.taken) { const px = X(g.x + p.dx), py = Y(cy) + Math.sin(t * 3 + g.n + p.dx) * 2 * S; draw.glow(c, px, py, 20 * S, "#fff6c8", .5); draw.circle(c, px, py, 7.5 * S, "#fff8ee", "rgba(255,190,215,.9)", 1.5 * S); draw.circle(c, px - 2.2 * S, py - 2.4 * S, 2 * S, "#fff"); }
+  }
+  for (const p of pickups) if (!p.taken) { const px = X(p.x), py = Y(p.yF * Hu) + Math.sin(t * 2.5) * 5 * S; draw.glow(c, px, py, 44 * S, "#dff", .35); bubble(c, px, py, 22 * S, .95); draw.text(c, "+1", px, py + 1, { size: 13 * S, color: "#fff", stroke: "rgba(20,90,120,.5)" }); }
+  drawJelly(c, t);
+  // seabed (lethal: urchins all along it)
+  const sandTop = floorY;
+  draw.vgrad(c, 0, sandTop, W, H - sandTop, [mix("#f6e3b0", "#6a5aa8", deep * .8), mix("#d9bd80", "#3a2f72", deep * .8)]);
+  c.fillStyle = "rgba(255,255,255,.35)"; c.fillRect(0, sandTop, W, 3);
+  const ur = urchin(), off = (dist * S) % (86 * S);
+  for (let x = -off - 20 * S; x < W + 40; x += 86 * S) c.drawImage(ur, x, sandTop - ur.h * .62, ur.w, ur.h);
+  // drifting bubbles (foreground)
+  for (const b of amb) { const bx = ((b.x * W - dist * .3 * S) % W + W) % W + Math.sin(t * 2 + b.p) * 6, by = ceilY + b.y * (H - ceilY); c.globalAlpha = .45; draw.circle(c, bx, by, b.r * S, null, "#fff", 1.2); } c.globalAlpha = 1;
+  draw.vignette(c, .16 + deep * .2);
+  // HUD bits
+  if (thread >= 2) { const n = Math.min(thread, 5); draw.rect(c, 12, P.y + 8 * S, 112 * S, 28 * S, 14 * S, "rgba(10,40,70,.45)"); draw.text(c, "THREAD +" + n, 12 + 56 * S, P.y + 22 * S + .5, { size: 13 * S, color: n >= 5 ? "#ffe08a" : "#fff" }); }
+  if (shield) { bubble(c, W - 30 * S, P.y + 24 * S, 12 * S, 1); }
+  if (!started && alive) { draw.text(c, "tap to pulse", W / 2, Y(Hu * .45) + 74 * S, { size: 19 * S, color: "#fff", stroke: "rgba(10,60,90,.55)" }); draw.text(c, "hold to drift down slowly", W / 2, Y(Hu * .45) + 100 * S, { size: 13.5 * S, color: "rgba(255,255,255,.9)", stroke: "rgba(10,60,90,.45)" }); }
+}
+Lab.boot();
+})();
 </script></body></html>

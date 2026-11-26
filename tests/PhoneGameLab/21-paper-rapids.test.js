@@ -47,7 +47,7 @@ module.exports = {
     // --- crash twice → capsized
     await pilot(2500, 'crash');
     let hullSeen = await game(g => g.hull);
-    for (let i = 0; i < 40 && !(await state()).over; i++) { await pilot(500, 'crash'); hullSeen = Math.min(hullSeen, await game(g => g.hull)); }
+    for (let i = 0; i < 40 && !(await state()).over; i++) { await pilot(400, 'crash'); await wait(150); hullSeen = Math.min(hullSeen, await game(g => g.hull)); }
     const s = await state(); expect(s.over, 'two crashes end the run'); expect(hullSeen <= 1, 'hull dropped before sinking');
     expect(s.best >= s.score && s.best > 0, 'best score recorded');
     await wait(1400); await page.keyboard.press('Enter'); await wait(500);

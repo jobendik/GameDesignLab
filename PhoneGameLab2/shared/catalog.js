@@ -7,481 +7,561 @@ window.LAB_GAMES = [
     "n": 1,
     "slug": "2048",
     "t": "2048",
-    "d": "Swipe to merge equal tiles up to 2048."
+    "d": "Swipe to merge equal tiles up to 2048.",
+    "thumb": "../thumbs/PhoneGameLab2--2048.jpg"
    },
    {
     "n": 2,
     "slug": "balloon-splash",
     "t": "Balloon Splash",
-    "d": "Throw water balloons at moving targets."
+    "d": "Throw water balloons at moving targets.",
+    "thumb": "../thumbs/PhoneGameLab2--balloon-splash.jpg"
    },
    {
     "n": 3,
     "slug": "basketball",
     "t": "Basketball",
-    "d": "Flick shots into the hoop against the clock."
+    "d": "Flick shots into the hoop against the clock.",
+    "thumb": "../thumbs/PhoneGameLab2--basketball.jpg"
    },
    {
     "n": 4,
     "slug": "berry-bounce",
     "t": "Berry Bounce",
-    "d": "Bounce a berry off platforms into a basket."
+    "d": "Bounce a berry off platforms into a basket.",
+    "thumb": "../thumbs/PhoneGameLab2--berry-bounce.jpg"
    },
    {
     "n": 5,
     "slug": "brick-blast",
     "t": "Brick Blast",
-    "d": "Tap groups of same-colored bricks to pop them."
+    "d": "Tap groups of same-colored bricks to pop them.",
+    "thumb": "../thumbs/PhoneGameLab2--brick-blast.jpg"
    },
    {
     "n": 6,
     "slug": "brick-breaker",
     "t": "Brick Breaker",
-    "d": "Paddle a ball to smash a wall of bricks."
+    "d": "Paddle a ball to smash a wall of bricks.",
+    "thumb": "../thumbs/PhoneGameLab2--brick-breaker.jpg"
    },
    {
     "n": 7,
     "slug": "bridge",
     "t": "Bridge",
-    "d": "Hold to grow a bridge that exactly crosses the gap."
+    "d": "Hold to grow a bridge that exactly crosses the gap.",
+    "thumb": "../thumbs/PhoneGameLab2--bridge.jpg"
    },
    {
     "n": 8,
     "slug": "bubble-shooter",
     "t": "Bubble Shooter",
-    "d": "Shoot bubbles to match 3+ and clear the board."
+    "d": "Shoot bubbles to match 3+ and clear the board.",
+    "thumb": "../thumbs/PhoneGameLab2--bubble-shooter.jpg"
    },
    {
     "n": 9,
     "slug": "bubble-up",
     "t": "Bubble Up",
-    "d": "Float upward in a bubble, dodging falling spikes."
+    "d": "Float upward in a bubble, dodging falling spikes.",
+    "thumb": "../thumbs/PhoneGameLab2--bubble-up.jpg"
    },
    {
     "n": 10,
     "slug": "building-block-puzzle",
     "t": "Block Puzzle",
-    "d": "Place tetromino pieces and clear full lines."
+    "d": "Place tetromino pieces and clear full lines.",
+    "thumb": "../thumbs/PhoneGameLab2--building-block-puzzle.jpg"
    },
    {
     "n": 11,
     "slug": "bumper-park",
     "t": "Bumper Park",
-    "d": "Ram opponents off the arena in a bumper car."
+    "d": "Ram opponents off the arena in a bumper car.",
+    "thumb": "../thumbs/PhoneGameLab2--bumper-park.jpg"
    },
    {
     "n": 12,
     "slug": "busy-bugs",
     "t": "Busy Bugs",
-    "d": "Swipe bugs away before they reach the food."
+    "d": "Swipe bugs away before they reach the food.",
+    "thumb": "../thumbs/PhoneGameLab2--busy-bugs.jpg"
    },
    {
     "n": 13,
     "slug": "cake-tower",
     "t": "Cake Tower",
-    "d": "Drop swinging cake layers to build a balanced tower."
+    "d": "Drop swinging cake layers to build a balanced tower.",
+    "thumb": "../thumbs/PhoneGameLab2--cake-tower.jpg"
    },
    {
     "n": 14,
     "slug": "candy-connect",
     "t": "Candy Connect",
-    "d": "Draw a line through matching candies to clear them."
+    "d": "Draw a line through matching candies to clear them.",
+    "thumb": "../thumbs/PhoneGameLab2--candy-connect.jpg"
    },
    {
     "n": 15,
     "slug": "castle-craft",
     "t": "Castle Craft",
-    "d": "Sandbox: place blocks to build your toy castle."
+    "d": "Sandbox: place blocks to build your toy castle.",
+    "thumb": "../thumbs/PhoneGameLab2--castle-craft.jpg"
    },
    {
     "n": 16,
     "slug": "cats-and-cans",
     "t": "Cats & Cans",
-    "d": "Classic shell game — track the cup hiding the cat."
+    "d": "Classic shell game — track the cup hiding the cat.",
+    "thumb": "../thumbs/PhoneGameLab2--cats-and-cans.jpg"
    },
    {
     "n": 17,
     "slug": "clean-the-ocean",
     "t": "Clean the Ocean",
-    "d": "Drop a claw to grab trash and keep the ocean clean."
+    "d": "Drop a claw to grab trash and keep the ocean clean.",
+    "thumb": "../thumbs/PhoneGameLab2--clean-the-ocean.jpg"
    },
    {
     "n": 18,
     "slug": "climber-tom",
     "t": "Climber Tom",
-    "d": "Climb a wall by jumping between sides; dodge spikes."
+    "d": "Climb a wall by jumping between sides; dodge spikes.",
+    "thumb": "../thumbs/PhoneGameLab2--climber-tom.jpg"
    },
    {
     "n": 19,
     "slug": "connect",
     "t": "Connect",
-    "d": "Draw paths to link same-colored dots without crossing."
+    "d": "Draw paths to link same-colored dots without crossing.",
+    "thumb": "../thumbs/PhoneGameLab2--connect.jpg"
    },
    {
     "n": 20,
     "slug": "cupid-tom",
     "t": "Cupid Tom",
-    "d": "Shoot arrows at flying hearts cupid-style."
+    "d": "Shoot arrows at flying hearts cupid-style.",
+    "thumb": "../thumbs/PhoneGameLab2--cupid-tom.jpg"
    },
    {
     "n": 21,
     "slug": "destroy-aliens",
     "t": "Destroy Aliens",
-    "d": "Hold off waves of descending alien invaders."
+    "d": "Hold off waves of descending alien invaders.",
+    "thumb": "../thumbs/PhoneGameLab2--destroy-aliens.jpg"
    },
    {
     "n": 22,
     "slug": "donut-spin",
     "t": "Donut Spin",
-    "d": "Throw knives into a spinning donut without hitting them."
+    "d": "Throw knives into a spinning donut without hitting them.",
+    "thumb": "../thumbs/PhoneGameLab2--donut-spin.jpg"
    },
    {
     "n": 23,
     "slug": "dress-up",
     "t": "Dress Up",
-    "d": "Drag hats, glasses and outfits onto the character."
+    "d": "Drag hats, glasses and outfits onto the character.",
+    "thumb": "../thumbs/PhoneGameLab2--dress-up.jpg"
    },
    {
     "n": 24,
     "slug": "face-designer",
     "t": "Face Designer",
-    "d": "Paint face make-up on a character with your finger."
+    "d": "Paint face make-up on a character with your finger.",
+    "thumb": "../thumbs/PhoneGameLab2--face-designer.jpg"
    },
    {
     "n": 25,
     "slug": "find-pattern",
     "t": "Find Pattern",
-    "d": "Watch the sequence, then repeat it perfectly."
+    "d": "Watch the sequence, then repeat it perfectly.",
+    "thumb": "../thumbs/PhoneGameLab2--find-pattern.jpg"
    },
    {
     "n": 26,
     "slug": "fishtastic",
     "t": "Fishtastic",
-    "d": "Swim through the sea and catch the requested fish."
+    "d": "Swim through the sea and catch the requested fish.",
+    "thumb": "../thumbs/PhoneGameLab2--fishtastic.jpg"
    },
    {
     "n": 27,
     "slug": "fishy-frenzy",
     "t": "Fishy Frenzy",
-    "d": "Eat smaller fish to grow; flee the bigger ones."
+    "d": "Eat smaller fish to grow; flee the bigger ones.",
+    "thumb": "../thumbs/PhoneGameLab2--fishy-frenzy.jpg"
    },
    {
     "n": 28,
     "slug": "flappy-tom",
     "t": "Flappy Tom",
-    "d": "Tap to flap through narrow gaps between pipes."
+    "d": "Tap to flap through narrow gaps between pipes.",
+    "thumb": "../thumbs/PhoneGameLab2--flappy-tom.jpg"
    },
    {
     "n": 29,
     "slug": "football",
     "t": "Football",
-    "d": "Swipe to shoot the ball past the goalkeeper."
+    "d": "Swipe to shoot the ball past the goalkeeper.",
+    "thumb": "../thumbs/PhoneGameLab2--football.jpg"
    },
    {
     "n": 30,
     "slug": "fruit-boom",
     "t": "Fruit Boom",
-    "d": "Swipe to slice flying fruit, fruit-ninja style."
+    "d": "Swipe to slice flying fruit, fruit-ninja style.",
+    "thumb": "../thumbs/PhoneGameLab2--fruit-boom.jpg"
    },
    {
     "n": 31,
     "slug": "go-up",
     "t": "Go Up",
-    "d": "Hop from a moving platform to the next to climb."
+    "d": "Hop from a moving platform to the next to climb.",
+    "thumb": "../thumbs/PhoneGameLab2--go-up.jpg"
    },
    {
     "n": 32,
     "slug": "goal",
     "t": "Goal!",
-    "d": "Precision shot — hit the target inside the goal."
+    "d": "Precision shot — hit the target inside the goal.",
+    "thumb": "../thumbs/PhoneGameLab2--goal.jpg"
    },
    {
     "n": 33,
     "slug": "guitar-ace",
     "t": "Guitar Ace",
-    "d": "Tap the falling notes in time with the rhythm."
+    "d": "Tap the falling notes in time with the rhythm.",
+    "thumb": "../thumbs/PhoneGameLab2--guitar-ace.jpg"
    },
    {
     "n": 34,
     "slug": "happy-connect",
     "t": "Happy Connect",
-    "d": "Draw lines to match identical happy faces."
+    "d": "Draw lines to match identical happy faces.",
+    "thumb": "../thumbs/PhoneGameLab2--happy-connect.jpg"
    },
    {
     "n": 35,
     "slug": "happy-face",
     "t": "Happy Face",
-    "d": "Find the odd face out before time runs out."
+    "d": "Find the odd face out before time runs out.",
+    "thumb": "../thumbs/PhoneGameLab2--happy-face.jpg"
    },
    {
     "n": 36,
     "slug": "hit-the-road",
     "t": "Hit The Road",
-    "d": "Switch lanes to dodge traffic and grab coins."
+    "d": "Switch lanes to dodge traffic and grab coins.",
+    "thumb": "../thumbs/PhoneGameLab2--hit-the-road.jpg"
    },
    {
     "n": 37,
     "slug": "hole-chase",
     "t": "Hole Chase",
-    "d": "Move a black hole to swallow objects and grow."
+    "d": "Move a black hole to swallow objects and grow.",
+    "thumb": "../thumbs/PhoneGameLab2--hole-chase.jpg"
    },
    {
     "n": 38,
     "slug": "hungry-fish",
     "t": "Hungry Fish",
-    "d": "Guide a hungry fish to its food, past hazards."
+    "d": "Guide a hungry fish to its food, past hazards.",
+    "thumb": "../thumbs/PhoneGameLab2--hungry-fish.jpg"
    },
    {
     "n": 39,
     "slug": "ice-cream-shop",
     "t": "Ice Cream Shop",
-    "d": "Serve the right ice cream to impatient customers."
+    "d": "Serve the right ice cream to impatient customers.",
+    "thumb": "../thumbs/PhoneGameLab2--ice-cream-shop.jpg"
    },
    {
     "n": 40,
     "slug": "ice-smash",
     "t": "Ice Smash",
-    "d": "Tap to shatter all the ice before moves run out."
+    "d": "Tap to shatter all the ice before moves run out.",
+    "thumb": "../thumbs/PhoneGameLab2--ice-smash.jpg"
    },
    {
     "n": 41,
     "slug": "jigsaw-puzzles",
     "t": "Jigsaw Puzzles",
-    "d": "Drag scrambled pieces back into the picture."
+    "d": "Drag scrambled pieces back into the picture.",
+    "thumb": "../thumbs/PhoneGameLab2--jigsaw-puzzles.jpg"
    },
    {
     "n": 42,
     "slug": "jump",
     "t": "Jump",
-    "d": "Time your jumps between platforms to survive."
+    "d": "Time your jumps between platforms to survive.",
+    "thumb": "../thumbs/PhoneGameLab2--jump.jpg"
    },
    {
     "n": 43,
     "slug": "jungle-shot",
     "t": "Jungle Shot",
-    "d": "Slingshot projectiles at jungle targets."
+    "d": "Slingshot projectiles at jungle targets.",
+    "thumb": "../thumbs/PhoneGameLab2--jungle-shot.jpg"
    },
    {
     "n": 44,
     "slug": "make-a-kite",
     "t": "Make a Kite",
-    "d": "Decorate a kite, then fly it through the wind."
+    "d": "Decorate a kite, then fly it through the wind.",
+    "thumb": "../thumbs/PhoneGameLab2--make-a-kite.jpg"
    },
    {
     "n": 45,
     "slug": "marble-mix-up",
     "t": "Marble Mix Up",
-    "d": "Shoot marbles into the line to match three (Zuma)."
+    "d": "Shoot marbles into the line to match three (Zuma).",
+    "thumb": "../thumbs/PhoneGameLab2--marble-mix-up.jpg"
    },
    {
     "n": 46,
     "slug": "maze",
     "t": "Maze",
-    "d": "Find the way out of the maze."
+    "d": "Find the way out of the maze.",
+    "thumb": "../thumbs/PhoneGameLab2--maze.jpg"
    },
    {
     "n": 47,
     "slug": "memory",
     "t": "Memory",
-    "d": "Flip cards two at a time and find the pairs."
+    "d": "Flip cards two at a time and find the pairs.",
+    "thumb": "../thumbs/PhoneGameLab2--memory.jpg"
    },
    {
     "n": 48,
     "slug": "monkey-catch",
     "t": "Monkey Catch",
-    "d": "Catch falling bananas; dodge bombs."
+    "d": "Catch falling bananas; dodge bombs.",
+    "thumb": "../thumbs/PhoneGameLab2--monkey-catch.jpg"
    },
    {
     "n": 49,
     "slug": "mower",
     "t": "Mower",
-    "d": "Drive the mower so it covers every patch of grass."
+    "d": "Drive the mower so it covers every patch of grass.",
+    "thumb": "../thumbs/PhoneGameLab2--mower.jpg"
    },
    {
     "n": 50,
     "slug": "pinata-drop",
     "t": "Piñata Drop",
-    "d": "Catch candy raining down from a smashed piñata."
+    "d": "Catch candy raining down from a smashed piñata.",
+    "thumb": "../thumbs/PhoneGameLab2--pinata-drop.jpg"
    },
    {
     "n": 51,
     "slug": "planet-hop",
     "t": "Planet Hop",
-    "d": "Tap to leap from one spinning planet to the next."
+    "d": "Tap to leap from one spinning planet to the next.",
+    "thumb": "../thumbs/PhoneGameLab2--planet-hop.jpg"
    },
    {
     "n": 52,
     "slug": "race-car",
     "t": "Race Car",
-    "d": "Top-down race: weave through opponents to the finish."
+    "d": "Top-down race: weave through opponents to the finish.",
+    "thumb": "../thumbs/PhoneGameLab2--race-car.jpg"
    },
    {
     "n": 53,
     "slug": "rainbows",
     "t": "Rainbows",
-    "d": "Connect dots with rainbow arcs across the screen."
+    "d": "Connect dots with rainbow arcs across the screen.",
+    "thumb": "../thumbs/PhoneGameLab2--rainbows.jpg"
    },
    {
     "n": 54,
     "slug": "rocket-fun",
     "t": "Rocket Fun",
-    "d": "Steer a rocket between asteroids in space."
+    "d": "Steer a rocket between asteroids in space.",
+    "thumb": "../thumbs/PhoneGameLab2--rocket-fun.jpg"
    },
    {
     "n": 55,
     "slug": "rolling-ball",
     "t": "Rolling Ball",
-    "d": "Tilt-style: drag a ball through a tight maze."
+    "d": "Tilt-style: drag a ball through a tight maze.",
+    "thumb": "../thumbs/PhoneGameLab2--rolling-ball.jpg"
    },
    {
     "n": 56,
     "slug": "sky-high",
     "t": "Sky High",
-    "d": "Drop sliding floors to build the tallest tower."
+    "d": "Drop sliding floors to build the tallest tower.",
+    "thumb": "../thumbs/PhoneGameLab2--sky-high.jpg"
    },
    {
     "n": 57,
     "slug": "sky-race",
     "t": "Sky Race",
-    "d": "Race a hoverboard through the sky, dodging walls."
+    "d": "Race a hoverboard through the sky, dodging walls.",
+    "thumb": "../thumbs/PhoneGameLab2--sky-race.jpg"
    },
    {
     "n": 58,
     "slug": "sky-skater",
     "t": "Sky Skater",
-    "d": "Skate over sky-borne gaps; nail the jump timing."
+    "d": "Skate over sky-borne gaps; nail the jump timing.",
+    "thumb": "../thumbs/PhoneGameLab2--sky-skater.jpg"
    },
    {
     "n": 59,
     "slug": "sleepy-bugs",
     "t": "Sleepy Bugs",
-    "d": "Logic puzzle: pair each bug with its matching bed."
+    "d": "Logic puzzle: pair each bug with its matching bed.",
+    "thumb": "../thumbs/PhoneGameLab2--sleepy-bugs.jpg"
    },
    {
     "n": 60,
     "slug": "slice-and-sip",
     "t": "Slice and Sip",
-    "d": "Slice fruit so it lands in the blender below."
+    "d": "Slice fruit so it lands in the blender below.",
+    "thumb": "../thumbs/PhoneGameLab2--slice-and-sip.jpg"
    },
    {
     "n": 61,
     "slug": "sliding-pets",
     "t": "Sliding Pets",
-    "d": "Slide pets out of the way to free the hero."
+    "d": "Slide pets out of the way to free the hero.",
+    "thumb": "../thumbs/PhoneGameLab2--sliding-pets.jpg"
    },
    {
     "n": 62,
     "slug": "snack-baskets",
     "t": "Snack Baskets",
-    "d": "Sort falling snacks into the matching baskets."
+    "d": "Sort falling snacks into the matching baskets.",
+    "thumb": "../thumbs/PhoneGameLab2--snack-baskets.jpg"
    },
    {
     "n": 63,
     "slug": "snake-trails",
     "t": "Snake Trails",
-    "d": "Slither.io-style: eat dots and grow, dodge rivals."
+    "d": "Slither.io-style: eat dots and grow, dodge rivals.",
+    "thumb": "../thumbs/PhoneGameLab2--snake-trails.jpg"
    },
    {
     "n": 64,
     "slug": "snakes-and-ladders",
     "t": "Snakes & Ladders",
-    "d": "Classic board game — roll the dice to the finish."
+    "d": "Classic board game — roll the dice to the finish.",
+    "thumb": "../thumbs/PhoneGameLab2--snakes-and-ladders.jpg"
    },
    {
     "n": 65,
     "slug": "snappy-frog",
     "t": "Snappy Frog",
-    "d": "Aim the frog's tongue to snap up flying flies."
+    "d": "Aim the frog's tongue to snap up flying flies.",
+    "thumb": "../thumbs/PhoneGameLab2--snappy-frog.jpg"
    },
    {
     "n": 66,
     "slug": "space-piano",
     "t": "Space Piano",
-    "d": "Tap the falling black tiles in rhythm."
+    "d": "Tap the falling black tiles in rhythm.",
+    "thumb": "../thumbs/PhoneGameLab2--space-piano.jpg"
    },
    {
     "n": 67,
     "slug": "space-trails",
     "t": "Space Trails",
-    "d": "Draw routes that get every ship to its target."
+    "d": "Draw routes that get every ship to its target.",
+    "thumb": "../thumbs/PhoneGameLab2--space-trails.jpg"
    },
    {
     "n": 68,
     "slug": "splashy",
     "t": "Splashy",
-    "d": "Time taps to splash from puddle to puddle."
+    "d": "Time taps to splash from puddle to puddle.",
+    "thumb": "../thumbs/PhoneGameLab2--splashy.jpg"
    },
    {
     "n": 69,
     "slug": "spooky-train",
     "t": "Spooky Train",
-    "d": "Steer a train at junctions through a haunted land."
+    "d": "Steer a train at junctions through a haunted land.",
+    "thumb": "../thumbs/PhoneGameLab2--spooky-train.jpg"
    },
    {
     "n": 70,
     "slug": "spray-paint",
     "t": "Spray Paint",
-    "d": "Spray-paint a stencil — stay inside the lines."
+    "d": "Spray-paint a stencil — stay inside the lines.",
+    "thumb": "../thumbs/PhoneGameLab2--spray-paint.jpg"
    },
    {
     "n": 71,
     "slug": "sub-adventure",
     "t": "Sub Adventure",
-    "d": "Pilot a sub through narrow undersea caves."
+    "d": "Pilot a sub through narrow undersea caves.",
+    "thumb": "../thumbs/PhoneGameLab2--sub-adventure.jpg"
    },
    {
     "n": 72,
     "slug": "super-balloons",
     "t": "Super Balloons",
-    "d": "Pop the rising balloons as fast as you can."
+    "d": "Pop the rising balloons as fast as you can.",
+    "thumb": "../thumbs/PhoneGameLab2--super-balloons.jpg"
    },
    {
     "n": 73,
     "slug": "tap-tap",
     "t": "Tap Tap",
-    "d": "Pure reflex: tap the target enough times in time."
+    "d": "Pure reflex: tap the target enough times in time.",
+    "thumb": "../thumbs/PhoneGameLab2--tap-tap.jpg"
    },
    {
     "n": 74,
     "slug": "tiny-puzzles",
     "t": "Tiny Puzzles",
-    "d": "Rotate the tiles until the picture is whole."
+    "d": "Rotate the tiles until the picture is whole.",
+    "thumb": "../thumbs/PhoneGameLab2--tiny-puzzles.jpg"
    },
    {
     "n": 75,
     "slug": "tom-run",
     "t": "Tom Run",
-    "d": "Endless runner: swipe to jump, slide and dodge."
+    "d": "Endless runner: swipe to jump, slide and dodge.",
+    "thumb": "../thumbs/PhoneGameLab2--tom-run.jpg"
    },
    {
     "n": 76,
     "slug": "totem-blast",
     "t": "Totem Blast",
-    "d": "Tap matching totem groups before the tower rises out of view."
+    "d": "Tap matching totem groups before the tower rises out of view.",
+    "thumb": "../thumbs/PhoneGameLab2--totem-blast.jpg"
    },
    {
     "n": 77,
     "slug": "unicorns",
     "t": "Unicorns",
-    "d": "Fly a unicorn through floating rings."
+    "d": "Fly a unicorn through floating rings.",
+    "thumb": "../thumbs/PhoneGameLab2--unicorns.jpg"
    },
    {
     "n": 78,
     "slug": "water-rush",
     "t": "Water Rush",
-    "d": "Rotate pipes so water flows from source to sink."
+    "d": "Rotate pipes so water flows from source to sink.",
+    "thumb": "../thumbs/PhoneGameLab2--water-rush.jpg"
    },
    {
     "n": 79,
     "slug": "whack-a-mouse",
     "t": "Whack-A-Mouse",
-    "d": "Whack mice; avoid hitting the mouse traps."
+    "d": "Whack mice; avoid hitting the mouse traps.",
+    "thumb": "../thumbs/PhoneGameLab2--whack-a-mouse.jpg"
    },
    {
     "n": 80,
     "slug": "wire-ball",
     "t": "Wire Ball",
-    "d": "Drag a ring along a wire without touching it."
+    "d": "Drag a ring along a wire without touching it.",
+    "thumb": "../thumbs/PhoneGameLab2--wire-ball.jpg"
    }
   ]
  }
