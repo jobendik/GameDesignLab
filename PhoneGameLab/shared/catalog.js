@@ -94,14 +94,16 @@ window.LAB_GAMES = [
     "slug": "46-live-wires",
     "t": "Live Wires",
     "d": "Link every pair. Cover the board.",
-    "v2": true
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--46-live-wires.jpg"
    },
    {
     "n": 47,
-    "slug": "47-pipe-rotate",
-    "t": "Pipe Rotate",
-    "d": "Rotate pipes so water reaches the end.",
-    "thumb": "../thumbs/PhoneGameLab--47-pipe-rotate.jpg"
+    "slug": "47-fountain-court",
+    "t": "Fountain Court",
+    "d": "Turn the tiles. Wake every fountain.",
+    "v2": true
    },
    {
     "n": 48,
@@ -119,10 +121,10 @@ window.LAB_GAMES = [
    },
    {
     "n": 50,
-    "slug": "50-screw-puzzle",
-    "t": "Screw Puzzle",
-    "d": "Unscrew bolts in the right order to free parts.",
-    "thumb": "../thumbs/PhoneGameLab--50-screw-puzzle.jpg"
+    "slug": "50-bolt-hole",
+    "t": "Bolt Hole",
+    "d": "Unscrew, re-park, let the plates drop.",
+    "v2": true
    },
    {
     "n": 51,
@@ -144,13 +146,6 @@ window.LAB_GAMES = [
     "t": "Block Blast",
     "d": "Place blocks to clear full rows/cols.",
     "thumb": "../thumbs/PhoneGameLab--53-block-blast.jpg"
-   },
-   {
-    "n": 54,
-    "slug": "54-maze",
-    "t": "Maze",
-    "d": "Find the path from start to goal.",
-    "thumb": "../thumbs/PhoneGameLab--54-maze.jpg"
    },
    {
     "n": 55,
@@ -575,6 +570,17 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--37-star-jar.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Minigame",
+  "items": [
+   {
+    "n": 54,
+    "slug": "54-hedgeroll",
+    "t": "Maze",
+    "d": "Swipe to move to the goal."
    }
   ]
  },

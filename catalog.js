@@ -226,6 +226,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--furniture-forts.jpg"
   },
   {
@@ -696,13 +698,16 @@ window.GDL_CATALOG = {
    "path": "games/power-wash-royale.html",
    "collection": "arcade",
    "title": "Power Wash Royale",
-   "desc": "Relaxing cleaning simulator sketch.",
+   "desc": "Blast the grime off a hidden mural faster than three rival washers — keep the stream on dirt to build pressure, switch to the jet for stains, and don",
    "genre": [
-    "Casual"
+    "Arcade",
+    ".io",
+    "Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "thumb": "thumbs/games--power-wash-royale.jpg"
   },
@@ -1953,24 +1958,27 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 46,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--46-live-wires.jpg"
   },
   {
-   "id": "PhoneGameLab/47-pipe-rotate",
-   "path": "PhoneGameLab/games/47-pipe-rotate/index.html",
+   "id": "PhoneGameLab/47-fountain-court",
+   "path": "PhoneGameLab/games/47-fountain-court/index.html",
    "collection": "PhoneGameLab",
-   "title": "Pipe Rotate",
-   "desc": "Rotate pipes so water reaches the end.",
+   "title": "Fountain Court",
+   "desc": "Turn the tiles. Wake every fountain.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 47,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--47-pipe-rotate.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/48-water-sort",
@@ -2007,21 +2015,21 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--49-ball-sort.jpg"
   },
   {
-   "id": "PhoneGameLab/50-screw-puzzle",
-   "path": "PhoneGameLab/games/50-screw-puzzle/index.html",
+   "id": "PhoneGameLab/50-bolt-hole",
+   "path": "PhoneGameLab/games/50-bolt-hole/index.html",
    "collection": "PhoneGameLab",
-   "title": "Screw Puzzle",
-   "desc": "Unscrew bolts in the right order to free parts.",
+   "title": "Bolt Hole",
+   "desc": "Unscrew, re-park, let the plates drop.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 50,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--50-screw-puzzle.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/51-15-puzzle",
@@ -2075,21 +2083,20 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--53-block-blast.jpg"
   },
   {
-   "id": "PhoneGameLab/54-maze",
-   "path": "PhoneGameLab/games/54-maze/index.html",
+   "id": "PhoneGameLab/54-hedgeroll",
+   "path": "PhoneGameLab/games/54-hedgeroll/index.html",
    "collection": "PhoneGameLab",
    "title": "Maze",
-   "desc": "Find the path from start to goal.",
+   "desc": "Swipe to move to the goal.",
    "genre": [
-    "Puzzle & Logic"
+    "Minigame"
    ],
    "controls": [
     "touch",
     "mouse"
    ],
    "n": 54,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--54-maze.jpg"
+   "v2": false
   },
   {
    "id": "PhoneGameLab/55-laser-mirror",
