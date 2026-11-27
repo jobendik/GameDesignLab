@@ -119,6 +119,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--brink-reactor.jpg"
   },
   {
@@ -2515,23 +2517,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--bubble-shooter.jpg"
   },
   {
-   "id": "PhoneGameLab2/bumper-park",
-   "path": "PhoneGameLab2/games/bumper-park/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Bumper Park",
-   "desc": "Ram opponents off the arena in a bumper car.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 11,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--bumper-park.jpg"
-  },
-  {
    "id": "PhoneGameLab2/busy-bugs",
    "path": "PhoneGameLab2/games/busy-bugs/index.html",
    "collection": "PhoneGameLab2",
@@ -3268,6 +3253,22 @@ window.GDL_CATALOG = {
    "status": "transformed"
   },
   {
+   "id": "PhoneGameLab2/pier-pressure",
+   "path": "PhoneGameLab2/games/pier-pressure/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Pier Pressure",
+   "desc": "Bumper cars on a sinking pier. Bonk your pals into the bay.",
+   "genre": [
+    "Arcade"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true
+  },
+  {
    "id": "PhoneGameLab2/pinata-drop",
    "path": "PhoneGameLab2/games/pinata-drop/index.html",
    "collection": "PhoneGameLab2",
@@ -3349,7 +3350,9 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/rocket-fun",

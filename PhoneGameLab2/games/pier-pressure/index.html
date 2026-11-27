@@ -1,0 +1,246 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Pier Pressure</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PIER PRESSURE — Pip's bumper-car ride floats on the bay, and the deck is sinking one plank ring at a time.
+ * Core idea kept: drive a bumper car, ram the others off the arena.
+ * Made a game:  real top-down car physics — heading, grip, drift after a hit, mass, bouncy bumpers: a square hit hands
+ *               over your momentum, a glancing one only its share. Let go to brake. TAP = DASH, the knock-out punch
+ *               (and the quickest way to drive yourself into the sea).
+ *               Rivals with personalities: Bun (light, flees, panics), Momo (heavy centre-squatter), Nori (flanks you and
+ *               lines up outward shoves), Olli (picks on whoever is nearest the edge), Bolt (computes… then charges).
+ *               Rounds: more/smarter rivals, a faster-sinking deck, pinball bumpers, rolling waves that push everyone.
+ * Identity: sunny teal bay, round wooden ride with painted rings, candy cars, pals bobbing in swim rings once dunked. */
+let demo = false;
+Lab.init({
+  title: "Pier Pressure", tagline: "Bumper cars on a sinking pier. Bonk your pals into the bay.", category: "Arcade", kicker: "Pocket Pals",
+  howto: ["Drag anywhere to steer Pip's bumper car", "Tap to dash — ram pals off the deck", "The deck keeps sinking. Stay dry!"],
+  theme: { bg: "#2792bd", bg2: "#5fd0e6", accent: "#e9475b", accent2: "#ffd23f" },
+  orient: "any", music: { style: "bounce", key: "D", vol: .4 }, restart: start, attract,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, shade = Lab.color.shade, INK = Pals.ink, ad = Lab.angleDiff;
+const RW = 180, CR = 19, RINGS = [1, .86, .72, .58, .45, .33], REST = .6;
+const SPEC = { pip: { m: 1, pow: 430, col: "#e9475b", fear: 1 }, bun: { m: .75, pow: 450, col: "#ffd23f", fear: 1.5 }, momo: { m: 1.7, pow: 300, col: "#ff8fb8", fear: 1 }, nori: { m: 1, pow: 420, col: "#ffa62b", fear: .9 }, olli: { m: 1.05, pow: 380, col: "#8f76e6", fear: 1.3 }, bolt: { m: 1.15, pow: 440, col: "#3ec5ff", fear: .5 } };
+const ROSTER = [["bun", "momo"], ["nori", "bun", "bolt"], ["olli", "momo", "bolt"], ["nori", "olli", "bun", "bolt"], ["nori", "momo", "olli", "bolt"]];
+let P, cx, cy, U, cars, me, floats, posts, R, ringI, ringT, sink, round, hearts, kos, combo, comboT, bestCombo, score, phase, phaseT, over, clock, hold, wave, waveT, engine, respawnT, bonks, warned;
+
+function layout() { P = Lab.play; const r = Math.min(P.w * .47, P.h * (P.w > P.h ? .46 : .37)); U = r / RW; cx = P.x + P.w / 2; cy = P.y + P.h * (P.w > P.h ? .5 : .47); Lab.sprite.clear("pp"); }
+Lab.onResize(() => { if (cars) layout(); });
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+const SX = x => cx + x * U, SY = y => cy + y * U;
+function mkCar(id, ang, player) { const s = SPEC[id]; return { id, x: Math.cos(ang) * RW * .6, y: Math.sin(ang) * RW * .6, vx: 0, vy: 0, a: ang + Math.PI, m: s.m, pow: s.pow, alive: true, player: !!player, skid: 0, dashCd: 1, dashT: 0, bump: 0, dizzy: 0, joy: 0, fall: 0, lastBy: null, lastT: -9, inv: 0, skill: clamp(.3 + round * .12, 0, 1), ai: { t: rand(.3, 1), st: "think", dx: 0, dy: 0, seed: rand(0, 9) } }; }
+function setup(n) {
+  round = n; const ids = n <= ROSTER.length ? ROSTER[n - 1] : Lab.shuffle(["nori", "momo", "olli", "bolt", "bun"]).slice(0, 4);
+  me = mkCar("pip", Math.PI / 2, true); cars = [me]; ids.forEach((id, i) => cars.push(mkCar(id, Math.PI / 2 + (i + 1) * TAU / (ids.length + 1))));
+  posts = []; const np = n === 3 ? 1 : n >= 5 ? (n % 2 ? 3 : 1) : 0;
+  if (np === 1) posts.push({ x: 0, y: 0, r: 15, hit: 0 }); else for (let i = 0; i < np; i++) posts.push({ x: Math.cos(i * TAU / 3 - .5) * RW * .36, y: Math.sin(i * TAU / 3 - .5) * RW * .36, r: 13, hit: 0 });
+  floats = []; R = RW; ringI = 0; ringT = Math.max(6, 11.5 - n); sink = null; wave = null; waveT = n >= 4 ? 6 : 1e9; phase = "intro"; phaseT = 1.7; respawnT = 0; warned = false;
+  if (!demo) { Lab.banner("ROUND " + n, { color: "#ffd23f", ms: 1300, y: .2 }); if (n === 3) Lab.toast("Mind the bumper!", 1600, { y: .28 }); if (n === 4) Lab.toast("Waves incoming!", 1600, { y: .28 }); snd("whistle", { vol: .5 }); }
+}
+function reset() { floats = []; hearts = 3; kos = 0; combo = 0; comboT = 0; bestCombo = 0; score = 0; over = false; clock = 0; hold = false; bonks = 0; setup(1); }
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0);
+  engine = Lab.audio.loop({ type: "sawtooth", f: 70, lp: 420, vol: 0 });
+  Lab.input.onDown = [() => { if (Lab.input.pointers.length > 1) dash(me); }];
+  Lab.input.onTap = [() => dash(me)];
+  Lab.input.onKey = [k => { if (k === " " || k === "Space" || k === "Shift") dash(me); }];
+  Lab.hint("Drag to steer · tap to dash");
+  Lab.expose({
+    get score() { return score; }, get round() { return round; }, get hearts() { return hearts; }, set hearts(v) { hearts = v; }, get kos() { return kos; }, get phase() { return phase; }, get R() { return R; }, get over() { return over; },
+    get geo() { return { cx, cy, U }; }, get bonks() { return bonks; }, get ringI() { return ringI; }, get posts() { return posts.length; },
+    cars() { return cars.map(c => ({ id: c.id, x: c.x, y: c.y, vx: c.vx, vy: c.vy, a: c.a, alive: c.alive && !c.fall, player: c.player, dashCd: c.dashCd })); },
+    put(id, o) { const c = cars.find(q => q.id === id); Object.assign(c, { vx: 0, vy: 0, skid: 0, dashT: 0 }, o); }, hold(v) { hold = v; }, go() { phase = "play"; phaseT = 0; }, shrink() { ringT = .3; }, dash() { dash(me); },
+    waveNow(a) { wave = { ang: a, t: -.2 }; }, setRound(n) { setup(n); },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- driving ---------- */
+function dash(c) {
+  if (!c || !c.alive || c.fall || c.dashCd > 0 || phase !== "play" || over) return false;
+  c.vx += Math.cos(c.a) * 250; c.vy += Math.sin(c.a) * 250; c.dashT = .35; c.dashCd = 2.4;
+  if (c.player) { snd("whoosh", { pitch: 1.2 }); Lab.buzz(10); } else snd("whoosh", { pitch: .8, vol: .35 });
+  return true;
+}
+function drive(c, ix, iy, dt) {
+  const mag = Math.min(1, Math.hypot(ix, iy));
+  if (mag > .08) c.a += clamp(ad(c.a, Math.atan2(iy, ix)), -7.5 * dt, 7.5 * dt);
+  const fx2 = Math.cos(c.a), fy = Math.sin(c.a), align = mag > .08 ? Math.max(0, (ix * fx2 + iy * fy) / Math.hypot(ix, iy)) : 0, acc = c.pow * mag * (.3 + .7 * align);
+  c.vx += fx2 * acc * dt; c.vy += fy * acc * dt;
+  let vf = c.vx * fx2 + c.vy * fy, vl = -c.vx * fy + c.vy * fx2; const sk = c.skid > 0;
+  vl *= Math.exp(-(sk ? 1.6 : 6) * dt); vf *= Math.exp(-(sk ? 1.6 : c.dashT > 0 ? 1.2 : mag > .08 ? 2.2 : 3.6) * dt);
+  c.vx = fx2 * vf - fy * vl; c.vy = fy * vf + fx2 * vl;
+}
+function think(c, dt) {
+  const sp = SPEC[c.id], d = Math.hypot(c.x, c.y) || 1, ai = c.ai, others = cars.filter(o => o !== c && o.alive && !o.fall); let ix = 0, iy = 0, wantDash = false; ai.t -= dt;
+  const to = (x, y) => { const l = Math.hypot(x - c.x, y - c.y) || 1; return [(x - c.x) / l, (y - c.y) / l, l]; };
+  let near = null, nd = 1e9; for (const o of others) { const l = Math.hypot(o.x - c.x, o.y - c.y); if (l < nd) { nd = l; near = o; } }
+  const ram = (T, dashAt) => {
+    const td = Math.hypot(T.x, T.y) || 1; let ox = T.x / td, oy = T.y / td; const [dx, dy, l] = to(T.x + T.vx * .2, T.y + T.vy * .2); if (td < R * .22) { ox = dx; oy = dy; }
+    if (dx * ox + dy * oy > .5 || l < CR * 2.6) { ix = dx; iy = dy; if (l < CR * 6 && td > R * dashAt && dx * Math.cos(c.a) + dy * Math.sin(c.a) > .92) wantDash = true; }
+    else { const q = to(T.x - ox * CR * 3.2, T.y - oy * CR * 3.2); ix = q[0]; iy = q[1]; }
+  };
+  const kind = c.player ? "nori" : c.id;
+  if (kind === "nori") { const T = others.find(o => o.player) || near; if (T) ram(T, .35); }
+  else if (kind === "olli") { let T = null, best = R * .5; for (const o of others) { const l = Math.hypot(o.x, o.y); if (l > best) { best = l; T = o; } } if (T) ram(T, .6); else { const q = to(Math.cos(clock * .8 + ai.seed) * R * .3, Math.sin(clock * .8 + ai.seed) * R * .3); ix = q[0] * .7; iy = q[1] * .7; } }
+  else if (kind === "momo") { if (near && nd < CR * 5.5) ram(near, 9); else if (d > CR * 1.6) { ix = -c.x / d * .6; iy = -c.y / d * .6; } }
+  else if (kind === "bun") {
+    let fx2 = -c.x / R * 1.3 * (d / R), fy = -c.y / R * 1.3 * (d / R), prey = null;
+    for (const o of others) { const l = Math.hypot(o.x - c.x, o.y - c.y); if (l < CR * 7) { fx2 += (c.x - o.x) / l * (CR * 7 - l) / (CR * 3); fy += (c.y - o.y) / l * (CR * 7 - l) / (CR * 3); } if (l < CR * 4.5 && Math.hypot(o.x, o.y) > R - CR * 1.7 && Math.hypot(o.x, o.y) > d) prey = o; }
+    if (prey) ram(prey, 9); else { const l = Math.hypot(fx2, fy); if (l > .15) { ix = fx2 / l; iy = fy / l; } if (near && nd < CR * 2.9 && d < R * .6) wantDash = true; }
+  } else if (kind === "bolt") {
+    if (ai.st === "charge") { ix = ai.dx; iy = ai.dy; if (ai.t <= 0) { ai.st = "think"; ai.t = rand(.5, .9) * (1.5 - c.skill * .5); } else if (ad(c.a, Math.atan2(iy, ix)) ** 2 < .05) wantDash = true; }
+    else if (ai.t <= 0 && others.length) { const T = Lab.choose(others), q = to(T.x + T.vx * .3, T.y + T.vy * .3); ai.dx = q[0]; ai.dy = q[1]; ai.st = "charge"; ai.t = rand(.8, 1.2); }
+  }
+  ix += Math.sin(clock * 1.7 + ai.seed) * .3 * (1 - c.skill); iy += Math.cos(clock * 1.3 + ai.seed * 2) * .3 * (1 - c.skill);
+  const px = c.x + c.vx * .38, py = c.y + c.vy * .38, lim = R - CR * (1.1 + sp.fear * .5), far = Math.max(Math.hypot(px, py), d);
+  if (far > lim) { const w = clamp((far - lim) / (CR * 1.5), 0, 1) * (kind === "bolt" && ai.st === "charge" ? .45 : 1) * Math.min(1.3, .6 + sp.fear * .5); ix = lerp(ix, -c.x / d, Math.min(1, w)); iy = lerp(iy, -c.y / d, Math.min(1, w)); if (w > .5) wantDash = false; }
+  const k = .72 + .28 * c.skill; if (wantDash && c.dashCd <= 0 && Math.random() < c.skill * 7 * dt) dash(c);
+  return [ix * k, iy * k];
+}
+function dunk(c) {
+  c.alive = false; const sx = SX(c.x), sy = SY(c.y); if (!demo) { fx.ring(sx, sy, { r0: 6, r1: 50 * U, color: "#fff", life: .5, width: 4 }); fx.burst(sx, sy, { n: 16, colors: ["#fff", "#c9f3ff"], speed: 260 * U, gravity: 700, life: .6, size: 4 * U, angle: -Math.PI / 2, spread: 1.7 }); snd("splash", { pitch: c.m > 1.4 ? .7 : 1 }); }
+  const l = Math.hypot(c.x, c.y) || 1, fr = RW + 30; floats.push({ id: c.id, x: clamp(c.x / l * fr, -(cx - P.x) / U + 22, (P.x + P.w - cx) / U - 22), y: clamp(c.y / l * fr, -RW - 70, RW + 70), t: 0, player: c.player });
+  if (c.player) {
+    hearts--; combo = 0; if (demo) { hearts = 3; respawnT = 1.4; return; } Lab.shake(10, .35); Lab.buzz(50); snd("hurt"); engine.set({ vol: 0 });
+    if (hearts <= 0) { over = true; Lab.music.intensity(0); Lab.after(1.3, () => Lab.gameover({ title: "Splash!", message: "Pip went for a swim in round " + round + ".", score, stats: [["Round", round], ["Knock-outs", kos], ["Best combo", "×" + Math.max(1, bestCombo)]] })); }
+    else { respawnT = 1.5; Lab.toast(hearts === 1 ? "Last life!" : "Splash! " + hearts + " lives left", 1200, { y: .28 }); }
+  } else if (c.lastBy === me && clock - c.lastT < 4 && me.alive) {
+    kos++; combo = comboT > 0 ? combo + 1 : 1; comboT = 4; bestCombo = Math.max(bestCombo, combo); const pts = 100 * combo; score += pts; me.joy = 1.4;
+    if (!demo) { fx.text(sx, sy - 24 * U, (combo > 1 ? "COMBO ×" + combo + "  " : "") + "+" + pts, { color: "#ffd23f", size: 22 * U + 4 }); Lab.audio.combo(2 + combo * 2); snd("coin"); Lab.bumpScore(); Lab.hitstop(.07); }
+  }
+}
+function collide(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy); if (d >= CR * 2 || d === 0) return;
+  const nx = dx / d, ny = dy / d, ia = 1 / (a.inv > 0 ? 40 : a.m), ib = 1 / (b.inv > 0 ? 40 : b.m), ov = CR * 2 - d; a.x -= nx * ov * ia / (ia + ib); a.y -= ny * ov * ia / (ia + ib); b.x += nx * ov * ib / (ia + ib); b.y += ny * ov * ib / (ia + ib);
+  const rv = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny; if (rv <= 0) return;
+  const j = ((1 + REST) * rv + 40) / (ia + ib); a.vx -= j * ia * nx; a.vy -= j * ia * ny; b.vx += j * ib * nx; b.vy += j * ib * ny;
+  a.lastBy = b; b.lastBy = a; a.lastT = b.lastT = clock; a.bump = b.bump = Math.min(1, rv / 250);
+  if (rv > 70) { a.skid = b.skid = .35; const da = j * ia, db = j * ib; if (da > 150) a.dizzy = .8; if (db > 150) b.dizzy = .8; if (da < db * .6) a.joy = Math.max(a.joy, .7); if (db < da * .6) b.joy = Math.max(b.joy, .7); }
+  if (demo) return; const mine = a.player || b.player, sx = SX(a.x + nx * CR), sy = SY(a.y + ny * CR);
+  Lab.sfx(rv > 230 ? "hit" : "bounce", { pitch: clamp(1.5 - rv / 400, .6, 1.5) / Math.sqrt(Math.max(a.m, b.m)), vol: clamp(rv / 260, .15, 1) * (mine ? 1 : .5) });
+  if (rv > 90) fx.burst(sx, sy, { n: 4 + Math.floor(rv / 50), colors: ["#fff", "#ffe27a"], speed: rv * 1.1 * U, life: .3, size: 3 * U, shape: "star" });
+  if (mine && rv > 150) { bonks++; Lab.shake(3 + rv / 60, .18); Lab.buzz(15); if (rv > 260) { Lab.hitstop(.05); fx.text(sx, sy - 20 * U, "BONK!", { color: "#fff", size: 18 * U + 4 }); score += 10; } }
+}
+
+/* ---------- update ---------- */
+function step(dt) {
+  for (const c of cars) {
+    if (!c.alive) continue;
+    if (c.fall) { c.fall += dt / .45; c.x += c.vx * dt; c.y += c.vy * dt; c.a += dt * 4; if (c.fall >= 2) dunk(c); continue; }
+    let ix = 0, iy = 0;
+    if (phase === "play") {
+      if (c.player && !demo) { ix = Lab.input.axisX(); iy = Lab.input.axisY(); const I = Lab.input; if (I.down) { const dx = I.x - I.startX, dy = I.y - I.startY, l = Math.hypot(dx, dy); if (l > 7) { const k = Math.min(1, l / 44) / l; ix = dx * k; iy = dy * k; } } }
+      else if (!hold) { const q = think(c, dt); ix = q[0]; iy = q[1]; }
+    }
+    drive(c, ix, iy, dt);
+    if (wave && wave.t > 0) { c.vx += Math.cos(wave.ang) * 170 * dt; c.vy += Math.sin(wave.ang) * 170 * dt; }
+    c.x += c.vx * dt; c.y += c.vy * dt;
+    for (const p of posts) { const dx = c.x - p.x, dy = c.y - p.y, d = Math.hypot(dx, dy); if (d < CR + p.r && d > 0) { const nx = dx / d, ny = dy / d, vn = c.vx * nx + c.vy * ny; c.x = p.x + nx * (CR + p.r); c.y = p.y + ny * (CR + p.r); if (vn < 0) { const out = Math.max(110, -vn * 1.15); c.vx += nx * (out - vn); c.vy += ny * (out - vn); c.skid = .25; p.hit = 1; c.bump = .6; snd("boing", { pitch: 1.2, vol: c.player ? 1 : .5 }); } } }
+    if (Math.hypot(c.x, c.y) > R + 1 && phase === "play") { c.fall = 1; if (c.player && !demo) snd("slide", { pitch: .6 }); }
+  }
+  for (let i = 0; i < cars.length; i++) for (let j = i + 1; j < cars.length; j++) { const a = cars[i], b = cars[j]; if (a.alive && b.alive && !a.fall && !b.fall) collide(a, b); }
+}
+function update(dt) {
+  clock += dt; comboT -= dt;
+  for (const c of cars) { c.skid -= dt; c.dashT -= dt; c.dashCd -= dt; c.bump = Math.max(0, c.bump - dt * 4); c.dizzy -= dt; c.joy -= dt; c.inv -= dt; }
+  for (const p of posts) p.hit = Math.max(0, p.hit - dt * 4);
+  for (const f of floats) f.t += dt;
+  step(dt / 2); step(dt / 2);
+  if (phase === "intro") { if ((phaseT -= dt) <= 0) { phase = "play"; if (!demo) { Lab.banner("GO!", { color: "#fff", ms: 600, y: .2 }); snd("whistle", { pitch: 1.3 }); } } }
+  else if (phase === "play" && !over) {
+    if (!hold) {
+      ringT -= dt;
+      if (ringI < RINGS.length - 1) {
+        if (ringT < 2.5 && !warned) { warned = true; snd("warn", { vol: .6 }); }
+        if (ringT <= 0) { sink = { r: R, t: 0 }; ringI++; R = RINGS[ringI] * RW; ringT = Math.max(6, 11.5 - round) * (ringI >= 3 ? .8 : 1); warned = false; posts = posts.filter(p => Math.hypot(p.x, p.y) + p.r < R - 4); if (!demo) { snd("drop", { pitch: .7 }); snd("splash", { vol: .5, pitch: .8 }); Lab.shake(5, .25); Lab.music.intensity(.25 + ringI * .15); for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; fx.puff(SX(Math.cos(a) * sink.r), SY(Math.sin(a) * sink.r), { color: "rgba(255,255,255,.8)", size: 6 * U }); } } }
+      }
+      if ((waveT -= dt) <= 0) { waveT = rand(7.5, 10) - Math.min(2.5, round * .3); wave = { ang: rand(0, TAU), t: -1.6 }; if (!demo) snd("swish", { pitch: .5 }); }
+    }
+    if (wave) { const was = wave.t; wave.t += dt; if (was <= 0 && wave.t > 0 && !demo) { snd("splash", { pitch: .6, vol: .7 }); Lab.shake(4, .3); } if (wave.t > 1.3) wave = null; }
+    if (respawnT > 0 && (respawnT -= dt) <= 0) {
+      Object.assign(me, { alive: true, fall: 0, x: 0, y: posts.some(p => Math.hypot(p.x, p.y) < CR * 2) ? Math.min(R - CR * 1.5, CR * 2.6) : 0, vx: 0, vy: 0, inv: 1.8, bump: 1, dashCd: .5, skid: 0 }); floats = floats.filter(f => !f.player);
+      for (const o of cars) if (o !== me && o.alive && !o.fall) { const l = Math.hypot(o.x - me.x, o.y - me.y) || 1; if (l < CR * 4) { o.vx += (o.x - me.x) / l * 130; o.vy += (o.y - me.y) / l * 130; } }
+      if (!demo) { snd("land"); fx.ring(SX(me.x), SY(me.y), { r0: 8, r1: CR * 4 * U, color: "#fff", life: .4 }); }
+    }
+    if (!cars.some(c => !c.player && c.alive) && (me.alive && !me.fall || demo)) {
+      phase = "clear"; phaseT = 2.3; const bonus = 150 * round + 50 * hearts; score += bonus; me.joy = 2.3;
+      if (!demo) { Lab.banner("ROUND CLEAR  +" + bonus, { color: "#ffd23f", ms: 1500, y: .2 }); snd("levelup"); Lab.bumpScore(); fx.burst(SX(me.x), SY(me.y), { n: 24, colors: ["#ffd23f", "#fff", "#e9475b", "#3ec5ff"], speed: 320 * U, life: .8, size: 5 * U, shape: "star", gravity: 300 }); }
+    }
+    if (demo && !me.alive && !cars.some(c => !c.player && c.alive && !c.fall)) { phase = "clear"; phaseT = 1.5; }
+  } else if (phase === "clear") { if ((phaseT -= dt) <= 0) setup(demo ? 2 + (round % 3) : round + 1); }
+  if (sink) { sink.t += dt; if (sink.t > .7) sink = null; }
+  if (!demo) { Lab.setScore(score); const sp = Math.hypot(me.vx, me.vy); engine.set({ vol: me.alive && !over && phase === "play" ? .035 + Math.min(.06, sp / 4000) : 0, f: 60 + sp * .25 }); }
+}
+function frame(dt) { update(dt); render(); }
+function attract(dt) { if (!demo) { demo = true; layout(); reset(); setup(2); phaseT = .3; } update(dt); render(); }
+
+/* ---------- art ---------- */
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("ppbg" + W + "x" + H, W, H, g => {
+    draw.vgrad(g, 0, 0, W, H, ["#58cbe2", "#2a93c0"]); g.strokeStyle = "rgba(255,255,255,.22)"; g.lineWidth = 2.5; g.lineCap = "round";
+    for (let i = 0; i < 46; i++) { const x = (i * .618 % 1) * W, y = (i * .377 % 1) * H, w = 16 + (i * 13) % 22; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + w / 2, y - 6, x + w, y); g.quadraticCurveTo(x + w * 1.5, y + 6, x + w * 2, y); g.stroke(); }
+    g.fillStyle = "rgba(20,70,110,.22)"; g.beginPath(); g.ellipse(cx + 40, cy + 40 + 10 * U, RW * U * 1.02, RW * U * 1.02, 0, 0, TAU); g.fill();
+  });
+}
+function deckSprite() {
+  const sz = Math.ceil(RW * U * 2 + 8);
+  return Lab.sprite("ppdeck" + sz, sz, sz, (g, w) => {
+    const r = RW * U, c0 = w / 2; g.save(); g.beginPath(); g.arc(c0, c0, r, 0, TAU); g.clip();
+    const pw = 17 * U; for (let i = 0, y = c0 - r; y < c0 + r; i++, y += pw) { g.fillStyle = i % 2 ? "#e3b57c" : "#d9a96c"; g.fillRect(0, y, w, pw); g.fillStyle = "rgba(120,75,30,.28)"; g.fillRect(0, y, w, 1.5); for (let x = (i * 53) % 70; x < w; x += 70 + (i % 3) * 22) { g.fillRect(x, y, 1.5, pw); g.fillStyle = "rgba(90,55,20,.4)"; g.fillRect(x + 4, y + pw / 2 - 1, 2, 2); g.fillStyle = "rgba(120,75,30,.28)"; } }
+    g.restore(); g.lineWidth = 3 * U; g.setLineDash([9 * U, 8 * U]); g.strokeStyle = "rgba(255,255,255,.75)"; for (let i = 1; i < RINGS.length; i++) { g.beginPath(); g.arc(c0, c0, RINGS[i] * r, 0, TAU); g.stroke(); } g.setLineDash([]);
+    g.fillStyle = "rgba(233,71,91,.5)"; g.beginPath(); g.arc(c0, c0, r * .2, 0, TAU); g.fill(); g.fillStyle = "rgba(255,255,255,.7)"; g.beginPath(); g.arc(c0, c0, r * .13, 0, TAU); g.fill(); draw.star(g, c0, c0, r * .1, "rgba(233,71,91,.75)", 5, .45);
+  });
+}
+function drawCar(c, car) {
+  const id = car.id, sp = SPEC[id], fk = car.fall ? clamp(car.fall - 1, 0, 1) : 0, sc = (1 - fk * .5) * (1 + car.bump * .14), near = Math.hypot(car.x, car.y) > R - CR * 1.9, blink = car.inv > 0 && Math.sin(clock * 30) > 0 ? .45 : 1;
+  c.save(); c.translate(car.x, car.y); c.globalAlpha = (1 - fk * .6) * blink; c.scale(sc, sc);
+  if (!car.fall) { c.fillStyle = "rgba(60,30,10,.25)"; c.beginPath(); c.ellipse(2, 5, CR * 1.08, CR * .98, 0, 0, TAU); c.fill(); }
+  if (car.player) { c.strokeStyle = "rgba(255,255,255,.9)"; c.lineWidth = 2.5; c.beginPath(); c.arc(0, 0, CR + 5, 0, TAU); c.stroke(); if (car.dashCd > 0 && !car.fall) { c.strokeStyle = "#ffd23f"; c.lineWidth = 3.5; c.beginPath(); c.arc(0, 0, CR + 5, -Math.PI / 2, -Math.PI / 2 + TAU * (1 - clamp(car.dashCd / 2.4, 0, 1))); c.stroke(); } }
+  c.rotate(car.a);
+  c.strokeStyle = shade(sp.col, -.35); c.lineWidth = 2.5; c.lineCap = "round"; c.beginPath(); c.moveTo(-CR * .5, 0); c.lineTo(-CR * 1.32, 0); c.stroke(); draw.circle(c, -CR * 1.36, 0, 3, "#fff6c9", INK, 1.2);
+  c.fillStyle = INK; c.beginPath(); c.ellipse(0, 0, CR * 1.1, CR * .98, 0, 0, TAU); c.fill(); c.fillStyle = "#4a4368"; c.beginPath(); c.ellipse(0, 0, CR * 1.0, CR * .88, 0, 0, TAU); c.fill();
+  c.fillStyle = sp.col; c.beginPath(); c.ellipse(0, 0, CR * .84, CR * .72, 0, 0, TAU); c.fill(); c.fillStyle = shade(sp.col, .3); c.beginPath(); c.ellipse(CR * .34, 0, CR * .36, CR * .5, 0, 0, TAU); c.fill();
+  c.fillStyle = shade(sp.col, -.3); c.beginPath(); c.arc(-CR * .12, 0, CR * .46, 0, TAU); c.fill();
+  c.fillStyle = car.dashT > 0 ? "#fff" : "#fff6c9"; for (const d of [-1, 1]) { c.beginPath(); c.arc(CR * .68, d * CR * .34, CR * .12, 0, TAU); c.fill(); }
+  c.rotate(-car.a);
+  const mood = car.fall ? "wow" : car.dizzy > 0 ? "dizzy" : car.joy > 0 ? "joy" : near ? "scared" : car.dashT > 0 || (id === "bolt" && car.ai.st === "charge") ? "angry" : id === "bolt" && !car.player ? "focus" : "happy";
+  Pals.draw(c, id, -Math.cos(car.a) * CR * .12, -CR * .5 - Math.sin(car.a) * CR * .1, CR * 1.75, { t: clock + car.ai.seed, mood, look: [Math.cos(car.a), Math.sin(car.a) * .8], shadow: false, clipY: CR * .42, arms: car.fall || car.joy > 0 ? "up" : "down", tilt: clamp((car.vx) / 900, -.25, .25) + (car.dizzy > 0 ? Math.sin(clock * 20) * .15 : 0), squash: car.bump * .12 });
+  c.restore();
+}
+function render() {
+  const c = Lab.ctx, bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // water sparkle + incoming wave
+  c.strokeStyle = "rgba(255,255,255,.35)"; c.lineWidth = 2.5; c.lineCap = "round"; for (let i = 0; i < 8; i++) { const x = ((i * 137 + clock * (10 + i * 2)) % (Lab.W + 60)) - 30, y = (i * 97 + 40) % Lab.H; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 18, y); c.stroke(); }
+  c.save(); c.translate(cx, cy); c.scale(U, U);
+  if (wave) {
+    const k = wave.t < 0 ? 1 + wave.t / 1.6 : 1, pos = wave.t < 0 ? lerp(-RW * 2.6, -RW * 1.15, k) : lerp(-RW * 1.15, RW * 2.4, wave.t / 1.3);
+    c.save(); c.rotate(wave.ang); c.strokeStyle = "rgba(255,255,255,.85)"; c.lineWidth = 9; c.beginPath(); c.arc(pos - RW * 2.5, 0, RW * 2.5, -.75, .75); c.stroke(); c.strokeStyle = "rgba(255,255,255,.35)"; c.lineWidth = 22; c.beginPath(); c.arc(pos - RW * 2.5 - 16, 0, RW * 2.5, -.75, .75); c.stroke();
+    if (wave.t < 0) { c.fillStyle = `rgba(255,255,255,${.5 + .4 * Math.sin(clock * 16)})`; for (let i = -1; i <= 1; i++) { const x = -R * .2 + i * 44; c.beginPath(); c.moveTo(x + 16, 0); c.lineTo(x - 8, -16); c.lineTo(x - 8, 16); c.fill(); } } c.restore();
+  }
+  // deck (with the ring that is about to go, and the one going)
+  const dk = deckSprite(), dw = dk.w / U, tilt = wave && wave.t > 0 ? Math.sin(wave.t / 1.3 * Math.PI) * 5 : 0, tx = wave ? Math.cos(wave.ang) * tilt : 0, ty = wave ? Math.sin(wave.ang) * tilt : 0;
+  if (sink) { const k = sink.t / .7; c.save(); c.globalAlpha = 1 - k; c.translate(0, k * 16); c.beginPath(); c.arc(0, 0, sink.r, 0, TAU); c.arc(0, 0, R, 0, TAU, true); c.clip("evenodd"); c.drawImage(dk, -dw / 2, -dw / 2, dw, dw); c.fillStyle = "rgba(40,120,170,.5)"; c.fillRect(-RW, -RW, RW * 2, RW * 2); c.restore(); }
+  c.save(); c.translate(tx, ty); c.fillStyle = "#9a6a3c"; c.beginPath(); c.arc(0, 5, R + 2, 0, TAU); c.fill();
+  c.save(); c.beginPath(); c.arc(0, 0, R, 0, TAU); c.clip(); c.drawImage(dk, -dw / 2, -dw / 2, dw, dw);
+  if (ringI < RINGS.length - 1 && ringT < 2.5 && phase === "play" && !hold) { c.fillStyle = `rgba(233,71,91,${.25 + .25 * Math.sin(clock * (ringT < 1 ? 26 : 13))})`; c.beginPath(); c.arc(0, 0, R, 0, TAU); c.arc(0, 0, RINGS[ringI + 1] * RW, 0, TAU, true); c.fill("evenodd"); }
+  c.restore(); c.strokeStyle = "#fff8ea"; c.lineWidth = 4; c.beginPath(); c.arc(0, 0, R - 1, 0, TAU); c.stroke(); c.strokeStyle = "#e9475b"; c.setLineDash([12, 12]); c.lineDashOffset = 0; c.beginPath(); c.arc(0, 0, R - 1, 0, TAU); c.stroke(); c.setLineDash([]);
+  for (const p of posts) { const s = 1 + p.hit * .25; c.fillStyle = "rgba(60,30,10,.25)"; c.beginPath(); c.ellipse(p.x + 2, p.y + 5, p.r * 1.05, p.r * .9, 0, 0, TAU); c.fill(); draw.circle(c, p.x, p.y, p.r * s, "#fff8ea", INK, 2.5); draw.circle(c, p.x, p.y, p.r * s * .68, p.hit > .1 ? "#ffd23f" : "#3ec5ff"); draw.star(c, p.x, p.y, p.r * s * .42, "#fff", 5, .45); }
+  // cars sorted by y, dunked pals in swim rings
+  for (const f of floats) { const bob = Math.sin(clock * 2.4 + f.x) * 2.5, pop = Lab.ease.outBack(clamp(f.t / .5, 0, 1)); c.save(); c.translate(f.x, f.y + bob); c.scale(pop, pop); Pals.draw(c, f.id, 0, -9, 30, { t: clock, mood: f.t < 1.6 ? "dizzy" : f.player ? "sad" : "happy", shadow: false, clipY: 7, wet: 1, arms: f.t > 1.6 && !f.player ? "wave" : "down" }); c.lineWidth = 6; c.strokeStyle = "#fff8ea"; c.beginPath(); c.ellipse(0, 0, 17, 7, 0, 0, Math.PI); c.stroke(); c.strokeStyle = "#e9475b"; c.setLineDash([7, 9]); c.beginPath(); c.ellipse(0, 0, 17, 7, 0, 0, Math.PI); c.stroke(); c.setLineDash([]); c.restore(); }
+  const order = cars.filter(q => q.alive).sort((a, b) => a.y - b.y); for (const car of order) { if (car.dashT > 0 && !demo && !car.fall) fx.burst(SX(car.x - Math.cos(car.a) * CR), SY(car.y - Math.sin(car.a) * CR), { n: 1, color: "rgba(255,255,255,.7)", speed: 30, life: .25, size: 5 * U }); drawCar(c, car); }
+  if (!demo && me.alive && !me.fall && phase === "intro") { const y = me.y - CR * 2.6 + Math.sin(clock * 8) * 3; c.fillStyle = "#fff"; c.beginPath(); c.moveTo(me.x, y + 9); c.lineTo(me.x - 8, y - 3); c.lineTo(me.x + 8, y - 3); c.fill(); draw.text(c, "YOU", me.x, y - 12, { size: 12, color: "#fff", weight: 800 }); }
+  c.restore(); c.restore();
+  if (demo) return;
+  // HUD: hearts, round, rivals left; thumb stick
+  const s = Math.max(.8, Math.min(1.2, U)), hx = P.x + 16 * s, hy = P.y + 46 * s;
+  for (let i = 0; i < 3; i++) draw.heart(c, hx + 9 * s + i * 24 * s, hy, 9 * s, i < hearts ? "#ff6b81" : "rgba(255,255,255,.25)");
+  draw.text(c, "Round " + round, P.x + P.w - 16 * s, hy - 4 * s, { size: 16 * s, color: "#fff", weight: 800, align: "right" }); const left = cars.filter(q => !q.player && q.alive).length; draw.text(c, left + (left === 1 ? " rival" : " rivals") + " left", P.x + P.w - 16 * s, hy + 14 * s, { size: 11 * s, color: "rgba(255,255,255,.85)", weight: 700, align: "right" });
+  const I = Lab.input; if (I.down && I.pointerType !== "mouse" || I.down && Math.hypot(I.x - I.startX, I.y - I.startY) > 7) { const dx = I.x - I.startX, dy = I.y - I.startY, l = Math.hypot(dx, dy) || 1, k = Math.min(44, l) / l; draw.circle(c, I.startX, I.startY, 44, "rgba(255,255,255,.14)", "rgba(255,255,255,.5)", 2); draw.circle(c, I.startX + dx * k, I.startY + dy * k, 18, "rgba(255,255,255,.75)"); }
+}
+Lab.boot();
+})();
+</script></body></html>

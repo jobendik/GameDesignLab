@@ -11,13 +11,6 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--bubble-shooter.jpg"
    },
    {
-    "n": 11,
-    "slug": "bumper-park",
-    "t": "Bumper Park",
-    "d": "Ram opponents off the arena in a bumper car.",
-    "thumb": "../thumbs/PhoneGameLab2--bumper-park.jpg"
-   },
-   {
     "n": 12,
     "slug": "busy-bugs",
     "t": "Busy Bugs",
@@ -547,6 +540,12 @@ window.LAB_GAMES = [
     "score": 8
    },
    {
+    "slug": "pier-pressure",
+    "t": "Pier Pressure",
+    "d": "Bumper cars on a sinking pier. Bonk your pals into the bay.",
+    "v2": true
+   },
+   {
     "slug": "sunny-soak",
     "t": "Sunny Soak",
     "d": "Lob water balloons. Cool your pals down.",
@@ -584,7 +583,8 @@ window.LAB_GAMES = [
     "slug": "ramp-scamp",
     "t": "Ramp Scamp",
     "d": "Tilt the ramp. Pip is not slowing down.",
-    "v2": true
+    "v2": true,
+    "score": 8
    }
   ]
  }
