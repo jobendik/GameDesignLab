@@ -19,7 +19,7 @@ twist, and the stars are *our* characters.) `shared/pals.js` draws them procedur
 
 ## API
 `Pals.draw(ctx, who, x, y, size, opts)` — centred on (x, y); `size` is the body height in px (ears/antenna extend above).
-- `mood`: `happy` `joy` `wow` `sad` `angry` `sleepy` `focus` `dizzy` `scared`
+- `mood`: `happy` `joy` `wow` `sad` `angry` `sleepy` `focus` (stern, brows down) `think` (gentle concentration — use this while aiming) `dizzy` `scared`
 - `t`: pass the game clock for automatic blinking + breathing · `look:[x,y]` (−1..1) eye direction · `blink:0..1`
 - `squash` (−.4…+.4; positive = flattened, pivot at the feet — use on landings/jumps) · `tilt` (radians) · `flip`
 - `arms`: `down` `up` `wave` `cheer` `hold` · `talk:0..1` mouth open · `shadow:false` · `alpha` · `tint`

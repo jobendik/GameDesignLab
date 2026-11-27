@@ -44,6 +44,8 @@ Lab.boot();                           // splash → start().  (v1 games called s
   (fades on the next touch; `Lab.hint(text,{sticky:true})` stays until replaced);
   `Lab.toast(text, ms, {y})`; `Lab.banner("LEVEL 3", {color, ms, y})` (`y` = fraction of stage height, to keep them off your focal point).
 
+- Call `Lab.setScore(score)` after *every* change to your score variable (late bonuses included) — the HUD only shows what you last passed.
+- `Lab.fx.auto` is reset to `true` by nothing: if you set it `false`, do it once at top level and always draw `Lab.fx.draw(ctx)` yourself.
 - `Lab.setTheme({fg,accent,…,light})` retints the HUD at runtime (the HUD score is DOM text: keep it readable when your sky changes).
 - Testing tip: the win/game-over card appears 0.35–0.6 s after `Lab.gameover` and ignores Enter/tap for a further ~0.4 s
   (accidental-restart guard) — wait ~1.5 s before pressing Enter in tests.
@@ -94,7 +96,7 @@ Test at 390×844 and 844×390 (and 1280×800 desktop).
 `rr, rect(c,x,y,w,h,r,fill,stroke,lw), circle, line, star, poly, heart, text(c,str,x,y,{size,color,align,weight,stroke,shadow}), vgrad,
 glow(c,x,y,r,color,alpha), bg(c,top,bottom,mid?), shadow(c,x,y,rx,ry,alpha), vignette(c,strength)` ·
 `Lab.sprite(key,w,h,(g,w,h)=>{…})` caches expensive procedural art (draw with `drawImage(s,x,y,s.w,s.h)`; `Lab.sprite.clear('prefix')` evicts by key prefix) ·
-`Lab.color.{shade(col,±amt),mix,alpha,hsl}` · `Lab.font(size,weight)`.
+`Lab.color.{shade(col,amt),mix,alpha,hsl}` (`amt` is a fraction −1..1: −.2 darkens 20%, not −20) · `Lab.font(size,weight)`.
 A sprite has a logical size (`s.w`,`s.h`); to bake a full-stage background that survives screen shake, bake it at
 `W+80 × H+80` (inside the bake, `g.translate(40,40)` first so you can draw in screen coordinates) and draw it at `(-40,-40, s.w, s.h)` — never stretch a `W×H` sprite. Rebuild on `Lab.onResize`.
 Avoid per-frame `shadowBlur` on many objects and per-frame gradient creation for many objects — bake into sprites.

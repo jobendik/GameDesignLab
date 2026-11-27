@@ -1,7 +1,7 @@
 /* Pocket Pals — the original mascot cast of Phone Game Lab 2 (documented in shared/PALS.md).
  * Pure Canvas 2D, no assets.  Pals.draw(ctx, who, x, y, size, opts)  draws a pal centred on (x, y); size = body height.
  *   who:  'pip' fox · 'bun' bunny · 'momo' frog · 'nori' penguin · 'olli' owl · 'bolt' robot
- *   opts: { mood:'happy'|'joy'|'wow'|'sad'|'angry'|'sleepy'|'focus'|'dizzy'|'scared', look:[x,y] (-1..1), t (seconds → auto blink + breathing),
+ *   opts: { mood:'happy'|'joy'|'wow'|'sad'|'angry'|'sleepy'|'focus'|'think'|'dizzy'|'scared', look:[x,y] (-1..1), t (seconds → auto blink + breathing),
  *           blink:0..1, squash:-.4...4 (>0 = squashed flat), tilt (rad), flip, arms:'down'|'up'|'wave'|'cheer'|'hold', talk:0..1 (mouth open),
  *           shadow:true, alpha, tint (overrides body colour), pose:'lie' (belly-slide, head toward +x; combine with flip),
  *           hot:0..1 (flushed + sweat), wet:0..1 (drips), clipY (local y in px from the pal's centre: nothing is drawn below it — peek from behind things) }
@@ -120,6 +120,7 @@
       const mw = s * (frog ? .42 : .17);
       if (mood === 'wow' || mood === 'scared' || talk > .3) { ell(c, 0, my + s * .05, mw * (frog ? .5 : .75), s * (.07 + Math.max(talk, mood === 'wow' || mood === 'scared' ? .6 : 0) * .12)); c.fill(); }
       else if (mood === 'sad') { c.beginPath(); c.arc(0, my + s * .16, mw, Math.PI * 1.2, Math.PI * 1.8); c.stroke(); }
+      else if (mood === 'think') { c.beginPath(); c.moveTo(-mw * .45, my + s * .08); c.quadraticCurveTo(0, my + s * .03, mw * .5, my + s * .1); c.stroke(); } // gentle concentration: small off-centre mouth, no brows
       else if (mood === 'angry' || mood === 'focus' || mood === 'dizzy') { c.beginPath(); c.moveTo(-mw * .8, my + s * .06); c.lineTo(mw * .8, my + s * .06); c.stroke(); }
       else if (mood === 'joy') { c.beginPath(); c.moveTo(-mw, my); c.quadraticCurveTo(0, my + s * .3, mw, my); c.closePath(); c.fill(); c.fillStyle = '#ff8fa3'; ell(c, 0, my + s * .11, mw * .45, s * .05); c.fill(); }
       else { c.beginPath(); c.arc(0, my - s * .02, mw, Math.PI * .15, Math.PI * .85); c.stroke(); }

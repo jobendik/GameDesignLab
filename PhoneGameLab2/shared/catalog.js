@@ -4,20 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 8,
-    "slug": "bubble-shooter",
-    "t": "Bubble Shooter",
-    "d": "Shoot bubbles to match 3+ and clear the board.",
-    "thumb": "../thumbs/PhoneGameLab2--bubble-shooter.jpg"
-   },
-   {
-    "n": 12,
-    "slug": "busy-bugs",
-    "t": "Busy Bugs",
-    "d": "Swipe bugs away before they reach the food.",
-    "thumb": "../thumbs/PhoneGameLab2--busy-bugs.jpg"
-   },
-   {
     "n": 13,
     "slug": "cake-tower",
     "t": "Cake Tower",
@@ -507,6 +493,14 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--bedtime-stacks.jpg"
    },
    {
+    "slug": "fish-fizz",
+    "t": "Fish Fizz",
+    "d": "Pop the bubbles under the ice and free the fish.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--fish-fizz.jpg"
+   },
+   {
     "slug": "pack-ice",
     "t": "Pack Ice",
     "d": "Slide ice blocks in from any side. Fill a line to crack it.",
@@ -518,7 +512,35 @@ window.LAB_GAMES = [
     "t": "Stew Patch",
     "d": "Pull the veg, let the neighbours creep in, feed the queue.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--stew-patch.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Skill",
+  "items": [
+   {
+    "slug": "flicknic",
+    "t": "Flicknic",
+    "d": "Flick the bugs off the blanket. Save Bun's cake.",
+    "v2": true
+   },
+   {
+    "slug": "jampoline",
+    "t": "Jampoline",
+    "d": "Draw springy leaves. Bounce berries to Bun.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--jampoline.jpg"
+   },
+   {
+    "slug": "ramp-scamp",
+    "t": "Ramp Scamp",
+    "d": "Tilt the ramp. Pip is not slowing down.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--ramp-scamp.jpg"
    }
   ]
  },
@@ -537,13 +559,15 @@ window.LAB_GAMES = [
     "t": "Lilypad Lunch",
     "d": "Bounce Momo off the lily pad and gulp the fruit.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--lilypad-lunch.jpg"
    },
    {
     "slug": "pier-pressure",
     "t": "Pier Pressure",
     "d": "Bumper cars on a sinking pier. Bonk your pals into the bay.",
-    "v2": true
+    "v2": true,
+    "score": 8
    },
    {
     "slug": "sunny-soak",
@@ -565,26 +589,6 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--ice-dunk.jpg"
-   }
-  ]
- },
- {
-  "cat": "Skill",
-  "items": [
-   {
-    "slug": "jampoline",
-    "t": "Jampoline",
-    "d": "Draw springy leaves. Bounce berries to Bun.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--jampoline.jpg"
-   },
-   {
-    "slug": "ramp-scamp",
-    "t": "Ramp Scamp",
-    "d": "Tilt the ramp. Pip is not slowing down.",
-    "v2": true,
-    "score": 8
    }
   ]
  }

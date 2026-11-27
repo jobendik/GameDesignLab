@@ -1,0 +1,248 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Flicknic</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* FLICKNIC — Bun baked a strawberry cake for the picnic. The bugs heard.
+ * Core idea kept: bugs converge on the food; get rid of them with your finger before they reach it.
+ * Made a game (direct action, no towers):
+ *   FLICK  — swipe through a bug and it flies off the way you swiped. Harder swipes fly further; weak ones only stun.
+ *   BOWL   — a flying bug knocks the next one flying (×2), which knocks the next (×3)… lines of ants are bowling alleys.
+ *   RESCUE — a bug that reaches the plate walks off with a slice. Flick the thief and the slice sails back to Bun.
+ *            The run ends only when all eight slices have left the blanket.
+ *   Cast   — ants; beetles (first flick only flips them, the second sends a heavy bowling ball); grasshoppers (cannot be
+ *            flicked mid-hop); wasps (fast, circle then dive); ladybirds are friends — leave them be and they bring a slice back.
+ *   BUN    — shoos fill her jam jar; when it is full, tap Bun and she bangs her pan: every bug on the blanket goes flying.
+ * Identity: top-down gingham blanket on bright grass, strawberry cake, hand-drawn bugs; "march" music for the ant columns. */
+let demo = false, demoT = 0;
+Lab.init({
+  title: "Flicknic", tagline: "Flick the bugs off the blanket. Save Bun's cake.", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Swipe through a bug to flick it away", "Flick one bug into another for a chain", "Flick a thief to win the slice back"],
+  theme: { bg: "#79c267", bg2: "#c9efb0", accent: "#ff6b81", accent2: "#ffb52e", fg: "#2b2340", muted: "#4d5d48", light: true },
+  orient: "any", music: { style: "march", key: "C", vol: .36 }, restart: start, attract,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const TY = { ant: { r: 11, pts: 10, T: 1 }, beetle: { r: 16, pts: 30, T: 1.35 }, hopper: { r: 12, pts: 20, T: .95 }, wasp: { r: 12, pts: 40, T: 1 }, lady: { r: 12, pts: 0, T: 1.15 } };
+let P, S, cx, cy, plateR, bun, bugs, has, lost, score, wave, queue, waveT, gapT, perfect, jam, shooed, rescued, bestChain, over, clock, hold, frozen, trail, last, spd, flying, bunJoy, bunSad, bunBang, friends, told, buzz, tipQ, tipT;
+
+function layout() { P = Lab.play; S = clamp(Math.min(P.w, P.h) / 390, .8, 1.5); cx = P.x + P.w / 2; cy = P.y + P.h * .54; plateR = 58 * S; bun = { x: cx, y: cy - plateR - 38 * S }; Lab.sprite.clear("fk"); }
+Lab.onResize(() => { if (bugs) layout(); });
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function tip(text) { if (!demo) tipQ.push(text); }
+function slices() { return has.filter(Boolean).length; }
+function edgeDist(a) { const dx = Math.cos(a), dy = Math.sin(a); return Math.min(dx > 0 ? (Lab.W + 30 - cx) / dx : dx < 0 ? (-30 - cx) / dx : 1e9, dy > 0 ? (Lab.H + 30 - cy) / dy : dy < 0 ? (-30 - cy) / dy : 1e9); }
+function ang0() { let a; do a = rand(0, TAU); while (Math.abs(Lab.angleDiff(a, -Math.PI / 2)) < .62); return a; }   // never straight over Bun
+function spawn(type, a, back) {
+  const d = edgeDist(a), T = Math.max(5.2, 9.2 - wave * .3) * TY[type].T, b = { type, r: TY[type].r * S, x: cx + Math.cos(a) * (d + (back || 0)), y: cy + Math.sin(a) * (d + (back || 0)), ang: a + Math.PI, sp: d / T, st: "walk", t: 0, vx: 0, vy: 0, chain: 0, carry: false, rot: 0, ph: rand(0, 9), cd: 0, hopD: d / 8 };
+  if (type === "wasp") { b.st = "in"; b.dir = Lab.chance(.5) ? 1 : -1; b.sp = (d - 125 * S) / 1.1; }
+  if (type === "lady") { const side = Lab.chance(.5) ? 1 : -1, a2 = a + Math.PI + side * rand(.5, .9); b.way = [[cx + Math.cos(a + side * 1.5) * (plateR + 70 * S), cy + Math.sin(a + side * 1.5) * (plateR + 70 * S)], [cx + Math.cos(a2) * (edgeDist(a2) + 20), cy + Math.sin(a2) * (edgeDist(a2) + 20)]]; b.sp = d * 2 / T; }
+  bugs.push(b); return b;
+}
+function buildWave(n) {
+  const q = []; let t = .8; const add = (type, a, dt, back) => { q.push({ t, type, a, back: back || 0 }); t += dt; }, gap = Math.max(.6, 1.55 - n * .08);
+  const line = (a, k, lead) => { if (lead) add(lead, a, 0); for (let j = 0; j < k; j++) add("ant", a, 0, (j + (lead ? 1.2 : 0)) * 36 * S); t += gap * 1.3; };
+  if (n === 1) { for (let i = 0; i < 5; i++) add("ant", ang0(), 1.6); return q; }
+  if (n === 2) line(ang0(), 3); if (n === 3) line(ang0(), 2, "beetle"); if (n === 5) { add("hopper", ang0(), 1.2); add("hopper", ang0(), 1.5); } if (n === 6) add("wasp", ang0(), 2);
+  const count = Math.min(26, 4 + n * 2); let i = 0;
+  while (i < count) {
+    const r = Math.random();
+    if (r < .28) { const k = Lab.randInt(3, Math.min(5, 2 + (n >> 1))); line(ang0(), k); i += k; }
+    else if (n >= 3 && r < .42) { line(ang0(), 2, "beetle"); i += 3; }
+    else if (n >= 4 && r < .54) { const a = ang0(); for (let j = 0; j < 3; j++) { add("ant", a, 0, j * 36 * S); if (Math.abs(Lab.angleDiff(a + Math.PI, -Math.PI / 2)) > .62) add("ant", a + Math.PI, 0, j * 36 * S); } t += gap * 1.5; i += 6; }
+    else if (n >= 5 && r < .68) { add("hopper", ang0(), gap * .8); i++; }
+    else if (n >= 6 && r < .8) { add("wasp", ang0(), gap); i++; }
+    else if (n >= 7 && r < .87) { for (let j = 0; j < 7; j++) { const a = j * TAU / 7 + .2; if (Math.abs(Lab.angleDiff(a, -Math.PI / 2)) > .62) add("ant", a, 0); } t += gap * 1.8; i += 6; }
+    else { add("ant", ang0(), gap); i++; }
+  }
+  if (n % 2 === 0) q.push({ t: t * .45, type: "lady", a: ang0(), back: 0 });
+  return q.sort((a, b) => a.t - b.t);
+}
+function reset() {
+  bugs = []; has = Array(8).fill(true); lost = 0; score = 0; wave = 1; queue = buildWave(1); waveT = 0; gapT = 0; perfect = true; jam = 0; shooed = 0; rescued = 0; bestChain = 0; over = false; clock = 0; hold = false; frozen = false;
+  trail = []; last = null; spd = 0; flying = []; bunJoy = bunSad = bunBang = 0; friends = 0; told = {}; tipQ = []; tipT = 0;
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0); buzz = Lab.audio.loop({ type: "sawtooth", f: 170, lp: 900, vol: 0 });
+  Lab.input.onDown = [(x, y) => { last = { x, y, t: performance.now() }; spd = 0; trail = [{ x, y, t: clock }]; }];
+  Lab.input.onMove = [(x, y) => { if (!Lab.input.down || !last || over) return; const now = performance.now(), d = Math.hypot(x - last.x, y - last.y); if (d < 2) return; spd = Math.max(d / Math.max(8, now - last.t) * 1000, spd * .6); swipe(last.x, last.y, x, y, spd); last = { x, y, t: now }; trail.push({ x, y, t: clock }); if (trail.length > 14) trail.shift(); }];
+  Lab.input.onUp = [() => { last = null; }];
+  Lab.input.onTap = [(x, y) => { if (over) return; if (jam >= 1 && Math.hypot(x - bun.x, y - bun.y) < 52 * S) return bang(); for (const b of bugs) if (canFlick(b) && Math.hypot(x - b.x, y - b.y) < b.r + 16 * S) { const l = Math.hypot(b.x - cx, b.y - cy) || 1; flick(b, (b.x - cx) / l, (b.y - cy) / l, 0); break; } }];
+  Lab.hint("Swipe through a bug to flick it away");
+  Lab.expose({
+    get score() { return score; }, get slices() { return slices(); }, get lost() { return lost; }, get wave() { return wave; }, get jam() { return jam; }, set jam(v) { jam = v; }, get shooed() { return shooed; }, get rescued() { return rescued; },
+    get bestChain() { return bestChain; }, get over() { return over; }, get friends() { return friends; }, get geo() { return { cx, cy, S, plateR, bun, W: Lab.W, H: Lab.H }; },
+    bugs() { return bugs.map(b => ({ type: b.type, x: b.x, y: b.y, st: b.st, carry: b.carry, chain: b.chain })); }, hold(v) { hold = v; }, freeze(v) { frozen = v; }, endWave() { queue = []; }, clear() { bugs = []; flying = []; },
+    add(type, x, y) { const b = spawn(type, Math.atan2(y - cy, x - cx), 0); b.x = x; b.y = y; if (type === "wasp") { b.st = "orbit"; b.t = 0; } return bugs.length; },
+    thief(x, y) { const b = spawn("ant", Math.atan2(y - cy, x - cx), 0); b.x = x; b.y = y; grab(b); return slices(); },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- flicking ---------- */
+function canFlick(b) { return b.st !== "air" && b.st !== "gone" && b.st !== "flee" && b.cd <= 0; }
+function segD(px, py, ax, ay, bx, by) { const dx = bx - ax, dy = by - ay, k = clamp(((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy || 1), 0, 1); return Math.hypot(px - ax - dx * k, py - ay - dy * k); }
+function swipe(x0, y0, x1, y1, speed) { const l = Math.hypot(x1 - x0, y1 - y0) || 1; for (const b of bugs) if (canFlick(b) && segD(b.x, b.y, x0, y0, x1, y1) < b.r + 13 * S) flick(b, (x1 - x0) / l, (y1 - y0) / l, speed); }
+function flick(b, dx, dy, speed) {
+  const v = clamp(speed * .62, 400 * S, 1050 * S); b.cd = .18;
+  if (b.type === "lady") { b.st = "flee"; b.vx = dx * 420 * S; b.vy = dy * 420 * S; jam = 0; friends++; bunSad = 1.4; if (!demo) { snd("error"); fx.text(b.x, b.y - 20 * S, "Oops — a friend!", { color: "#d2334b", size: 16 * S, outline: "#fff" }); tip("Ladybirds are friends: the jam jar spilled"); } return; }
+  if (b.type === "beetle" && b.st !== "flip" && b.st !== "fly") { flipBeetle(b, dx, dy); return; }
+  snd("swish", { pitch: clamp(.7 + v / (900 * S), .8, 1.8), vol: .7 }); if (!demo) { fx.sparks(b.x, b.y, Math.atan2(dy, dx), { n: 5, color: "#fff", speed: 260 * S }); Lab.buzz(8); }
+  launch(b, dx * v, dy * v, 1);
+}
+function flipBeetle(b, dx, dy) { b.st = "flip"; b.t = 2.8; b.vx = dx * 150 * S; b.vy = dy * 150 * S; b.cd = .25; if (b.carry) rescue(b); snd("flip", { pitch: .8 }); if (!demo) { fx.text(b.x, b.y - 22 * S, "flipped!", { color: "#1f7f72", size: 14 * S, outline: "#fff" }); if (!told.beetle) { told.beetle = 1; tip("Beetle on its back — flick it again!"); } } }
+function launch(b, vx, vy, chain) { if (b.carry) rescue(b); b.st = "fly"; b.vx = vx; b.vy = vy; b.chain = chain; b.t = 0; }
+function rescue(b) { b.carry = false; rescued++; score += 25; bunJoy = 1; flying.push({ x: b.x, y: b.y, x0: b.x, y0: b.y, k: 0 }); snd("pickup"); if (!demo) fx.text(b.x, b.y - 24 * S, "saved! +25", { color: "#d2334b", size: 15 * S, outline: "#fff" }); }
+function grab(b) {
+  const a = Math.atan2(b.y - cy, b.x - cx); let best = -1, bd = 9; for (let i = 0; i < 8; i++) if (has[i]) { const d = Math.abs(Lab.angleDiff((i + .5) * TAU / 8, a)); if (d < bd) { bd = d; best = i; } }
+  b.ang = a; if (best < 0) { b.st = "steal"; return; } has[best] = false; b.carry = true; b.st = "steal"; bunSad = Math.max(bunSad, .7); snd("hurt", { vol: .5, pitch: 1.3 }); if (!demo) { Lab.shake(3, .15); if (!told.thief) { told.thief = 1; tip("Thief! Flick it to win the slice back"); } }
+}
+function shoo(b) {
+  b.st = "gone"; if (b.type === "lady") return; shooed++; const pts = TY[b.type].pts * b.chain; score += pts; bestChain = Math.max(bestChain, b.chain); jam = Math.min(1, jam + .06 + .05 * (b.chain - 1));
+  if (demo) return; const x = clamp(b.x, 30, Lab.W - 30), y = clamp(b.y, P.y + 20, Lab.H - 30); fx.text(x, y, "+" + pts, { color: b.chain > 1 ? "#d9761a" : "#2b2340", size: (15 + b.chain * 2) * S, outline: "#fff" }); snd("pop", { pitch: 1 + b.chain * .15, vol: .7 }); Lab.bumpScore();
+  if (jam >= 1 && !told.jam) { told.jam = 1; tip("Jam jar full — tap Bun!"); snd("powerup"); }
+}
+function bang() {
+  jam = 0; told.jam = 0; bunBang = .7; let n = 0; for (const b of bugs) if (b.type !== "lady" && b.st !== "fly" && b.st !== "gone") { const l = Math.hypot(b.x - cx, b.y - cy) || 1; if (b.type === "beetle") b.st = "flip"; launch(b, (b.x - cx) / l * 860 * S, (b.y - cy) / l * 860 * S, 1); n++; }
+  if (!demo) { snd("boom", { vol: .7 }); snd("glass", { pitch: 1.6, vol: .5 }); Lab.shake(9, .3); Lab.flash("#fff", .15, .35); fx.ring(bun.x, bun.y, { r0: 20, r1: Math.max(Lab.W, Lab.H) * .7, color: "#fff", life: .55, width: 8 }); Lab.buzz(40); }
+  return n;
+}
+
+/* ---------- update ---------- */
+function update(dt) {
+  clock += dt; bunJoy -= dt; bunSad -= dt; bunBang -= dt;
+  if ((tipT -= dt) <= 0 && tipQ.length && !over) { Lab.toast(tipQ.shift(), 1700, { y: .16 }); tipT = 2; }
+  if (!hold && !over) {
+    waveT += dt; while (queue.length && queue[0].t <= waveT) { const q = queue.shift(); spawn(q.type, q.a, q.back); }
+    if (!queue.length && !bugs.some(b => b.type !== "lady")) {
+      if ((gapT += dt) > 1.4) { const bonus = perfect ? 50 * wave : 0; if (bonus) { score += bonus; if (!demo) fx.text(cx, cy + plateR + 40 * S, "No crumbs lost! +" + bonus, { color: "#d9761a", size: 17 * S, outline: "#fff" }); } wave++; queue = buildWave(wave); waveT = 0; gapT = 0; perfect = true; if (!demo) { Lab.banner("WAVE " + wave, { color: "#ff6b81", ms: 1100, y: .16 }); snd("levelup", { vol: .7 }); Lab.music.intensity(Math.min(1, .15 + wave * .1)); const nw = { 2: "Flick one bug into the next!", 3: "Beetles need two flicks", 5: "Grasshoppers: flick them when they land", 6: "Wasps dive fast — swat them!" }[wave]; if (nw) tip(nw); } }
+    }
+  }
+  let wasps = 0;
+  for (const b of bugs) {
+    b.cd -= dt; b.ph += dt; const dx = cx - b.x, dy = cy - b.y, d = Math.hypot(dx, dy) || 1;
+    if (b.st === "fly" || b.st === "flee") {
+      const n = Math.ceil(Math.hypot(b.vx, b.vy) * dt / (12 * S)) || 1, h = dt / n;
+      for (let s = 0; s < n && b.st === "fly"; s++) { b.x += b.vx * h; b.y += b.vy * h; hitOthers(b); const dd = Math.hypot(b.x - cx, b.y - cy); if (dd < plateR + b.r) { const nx = (b.x - cx) / dd, ny = (b.y - cy) / dd, vn = b.vx * nx + b.vy * ny; if (vn < 0) { b.vx -= 1.7 * vn * nx; b.vy -= 1.7 * vn * ny; snd("knock", { pitch: 1.4, vol: .5 }); } b.x = cx + nx * (plateR + b.r); b.y = cy + ny * (plateR + b.r); } }
+      if (b.st === "flee") { b.x += b.vx * dt; b.y += b.vy * dt; } else { const k = Math.exp(-(b.type === "beetle" ? .9 : 1.25) * dt); b.vx *= k; b.vy *= k; b.rot += dt * 16; if (Math.hypot(b.vx, b.vy) < 150 * S) { b.st = "dizzy"; b.t = .9; b.chain = 0; } }
+      if (b.x < -24 || b.x > Lab.W + 24 || b.y < -24 || b.y > Lab.H + 24) shoo(b);
+      continue;
+    }
+    if (frozen) continue;
+    if (b.st === "dizzy") { if ((b.t -= dt) <= 0) b.st = b.type === "wasp" ? "dive" : "walk"; continue; }
+    if (b.st === "flip") { b.x += b.vx * dt; b.y += b.vy * dt; b.vx *= Math.exp(-4 * dt); b.vy *= Math.exp(-4 * dt); b.rot += dt * 2; if ((b.t -= dt) <= 0) { b.st = "walk"; b.rot = 0; } continue; }
+    if (b.type === "lady") { const w = b.way[0], lx = w[0] - b.x, ly = w[1] - b.y, l = Math.hypot(lx, ly) || 1; b.ang = Math.atan2(ly, lx) + Math.sin(b.ph * 3) * .25; b.x += lx / l * b.sp * dt; b.y += ly / l * b.sp * dt; if (l < 8) { b.way.shift(); if (!b.way.length) { b.st = "gone"; ladyGift(); } } continue; }
+    if (b.type === "wasp") {
+      wasps++; b.t += dt;
+      if (b.st === "in") { b.ang = Math.atan2(dy, dx); b.x += dx / d * b.sp * dt; b.y += dy / d * b.sp * dt; if (d < 130 * S) { b.st = "orbit"; b.t = 0; } }
+      else if (b.st === "orbit") { const a = Math.atan2(-dy, -dx) + b.dir * 2.3 * dt, rr = lerp(d, 125 * S, .1); b.x = cx + Math.cos(a) * rr; b.y = cy + Math.sin(a) * rr; b.ang = a + b.dir * Math.PI / 2; if (b.t > 1.7) b.st = "dive"; }
+      else if (b.st === "dive") { b.ang = Math.atan2(dy, dx); b.x += dx / d * 300 * S * dt; b.y += dy / d * 300 * S * dt; if (d < plateR * .8) grab(b); }
+      else { b.x += Math.cos(b.ang) * 250 * S * dt; b.y += Math.sin(b.ang) * 250 * S * dt; }
+    } else if (b.type === "hopper") {
+      b.t += dt; const out = b.st === "steal" || b.st === "air2";
+      if (b.st === "air" || b.st === "air2") { const dir = b.st === "air2" ? -1 : 1; b.x += dx / d * dir * b.hopD / .32 * dt; b.y += dy / d * dir * b.hopD / .32 * dt; if (b.t > .32) { b.st = out ? "steal" : "walk"; b.t = 0; if (!out && d < plateR * .9) grab(b); } }
+      else if (b.t > .8) { b.st = out ? "air2" : "air"; b.t = 0; if (!out) b.ang = Math.atan2(dy, dx); snd("jump", { vol: .25, pitch: 1.5 }); }
+      else if (!out && d < plateR * .85) grab(b);
+    } else if (b.st === "walk") { b.ang = Math.atan2(dy, dx); b.x += dx / d * b.sp * dt; b.y += dy / d * b.sp * dt; if (d < plateR * .8) grab(b); }
+    else if (b.st === "steal") { b.x += Math.cos(b.ang) * b.sp * .8 * dt; b.y += Math.sin(b.ang) * b.sp * .8 * dt; }
+    if ((b.st === "steal" || b.st === "air2") && (b.x < -20 || b.x > Lab.W + 20 || b.y < -20 || b.y > Lab.H + 20)) { b.st = "gone"; if (b.carry) { lost++; perfect = false; bunSad = 1.6; if (!demo) { snd("thud", { pitch: .7 }); fx.text(clamp(b.x, 50, Lab.W - 50), clamp(b.y, P.y + 30, Lab.H - 40), "slice lost!", { color: "#d2334b", size: 16 * S, outline: "#fff" }); Lab.shake(5, .25); } } }
+  }
+  bugs = bugs.filter(b => b.st !== "gone");
+  for (const f of flying) { f.k += dt / .5; const k = Lab.ease.inOutQuad(clamp(f.k, 0, 1)); f.x = lerp(f.x0, cx, k); f.y = lerp(f.y0, cy, k) - Math.sin(k * Math.PI) * 60 * S; if (f.k >= 1) { f.dead = true; const i = has.indexOf(false); if (i >= 0) has[i] = true; snd("chime", { vol: .6 }); } }
+  flying = flying.filter(f => !f.dead);
+  if (buzz && !demo) buzz.set({ vol: wasps && !over ? .05 : 0, f: 165 + Math.sin(clock * 30) * 25 });
+  if (!over && slices() === 0 && !flying.length && !bugs.some(b => b.carry)) {
+    over = true; if (demo) { reset(); wave = 4; queue = buildWave(4); return; } bunSad = 9; buzz.set({ vol: 0 }); Lab.music.intensity(0);
+    Lab.after(1.1, () => Lab.gameover({ title: "All gone!", message: "The bugs carried off the whole cake in wave " + wave + ".", score, stats: [["Bugs flicked", shooed], ["Best chain", "×" + Math.max(1, bestChain)], ["Slices saved", rescued]] }));
+  }
+  if (!demo) Lab.setScore(score);
+}
+function hitOthers(b) {
+  for (const o of bugs) {
+    if (o === b || o.st === "fly" || o.st === "gone" || o.st === "air" || o.st === "air2" || o.st === "flee" || o.type === "lady") continue;
+    const dx = o.x - b.x, dy = o.y - b.y, d = Math.hypot(dx, dy); if (d > b.r + o.r || d === 0) continue; const nx = dx / d, ny = dy / d, vn = b.vx * nx + b.vy * ny; if (vn <= 0) continue;
+    const heavy = b.type === "beetle";
+    if (o.type === "beetle" && o.st !== "flip") { flipBeetle(o, nx, ny); if (!heavy) { b.vx -= 1.6 * vn * nx; b.vy -= 1.6 * vn * ny; } continue; }
+    const tv = Math.max(vn * (heavy ? 1.2 : 1.05), 440 * S), ch = b.chain + 1; launch(o, nx * tv, ny * tv, ch); if (heavy) { b.vx *= .9; b.vy *= .9; } else { b.vx -= vn * nx; b.vy -= vn * ny; }
+    jam = Math.min(1, jam + .08); bunJoy = Math.max(bunJoy, .6); if (demo) continue;
+    Lab.audio.combo(ch * 2); snd("knock", { pitch: .9 + ch * .12 }); fx.burst((b.x + o.x) / 2, (b.y + o.y) / 2, { n: 6, colors: ["#fff", "#ffe27a"], speed: 200 * S, life: .3, size: 3 * S, shape: "star" }); fx.text(o.x, o.y - 22 * S, "×" + ch, { color: "#d9761a", size: (16 + ch * 2) * S, outline: "#fff" }); if (ch >= 3) Lab.hitstop(.04);
+  }
+}
+function ladyGift() { const i = has.indexOf(false); if (i >= 0) { flying.push({ x: bun.x + 60 * S, y: bun.y - 30 * S, x0: bun.x + 60 * S, y0: bun.y - 30 * S, k: 0 }); bunJoy = 1.2; if (!demo) tip("The ladybird brought a slice back!"); } else { score += 50; if (!demo) fx.text(cx, cy - plateR - 80 * S, "Lucky ladybird +50", { color: "#d2334b", size: 15 * S, outline: "#fff" }); } snd("chime"); }
+function frame(dt) { update(dt); render(); }
+function attract(dt) {
+  if (!demo) { demo = true; layout(); reset(); wave = 4; queue = buildWave(4); }
+  if ((demoT -= dt) < 0) { demoT = .45; let best = null, bd = 1e9; for (const b of bugs) if (b.type !== "lady" && canFlick(b) && b.st !== "fly") { const d = Math.hypot(b.x - cx, b.y - cy); if (d < bd && d < 260 * S) { bd = d; best = b; } } if (best) { const a = Math.atan2(best.y - cy, best.x - cx) + rand(-.5, .5); flick(best, Math.cos(a), Math.sin(a), 1200 * S); trail = [{ x: best.x - Math.cos(a) * 40 * S, y: best.y - Math.sin(a) * 40 * S, t: clock }, { x: best.x + Math.cos(a) * 40 * S, y: best.y + Math.sin(a) * 40 * S, t: clock }]; } }
+  update(dt); render();
+}
+
+/* ---------- art ---------- */
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80, o = 40;
+  return Lab.sprite("fkbg" + W + "x" + H, W, H, g => {
+    draw.vgrad(g, 0, 0, W, H, ["#8fd47a", "#6fbb62"]); g.strokeStyle = "rgba(60,140,70,.45)"; g.lineWidth = 2.5; g.lineCap = "round";
+    for (let i = 0; i < 150; i++) { const x = (i * .618 % 1) * W, y = (i * .377 % 1) * H; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 3, y - 9); g.moveTo(x + 5, y); g.lineTo(x + 9, y - 7); g.stroke(); }
+    const m = 16 * S, x0 = o + m, y0 = o + Lab.play.y - 30, w = Lab.W - m * 2, h = Lab.H - (Lab.play.y - 30) - m, q = 30 * S;
+    g.fillStyle = "rgba(30,90,40,.22)"; draw.rr(g, x0 + 4, y0 + 8, w, h, 20 * S); g.fill(); g.save(); draw.rr(g, x0, y0, w, h, 20 * S); g.clip(); g.fillStyle = "#fff8ec"; g.fillRect(x0, y0, w, h);
+    g.fillStyle = "rgba(255,107,129,.2)"; for (let x = o + cx % (q * 2) - q * 2.5; x < W; x += q * 2) g.fillRect(x, 0, q, H); for (let y = o + cy % (q * 2) - q * 2.5; y < H; y += q * 2) g.fillRect(0, y, W, q); g.restore();
+    g.strokeStyle = "rgba(255,107,129,.6)"; g.lineWidth = 2.5; g.setLineDash([8, 7]); draw.rr(g, x0 + 7, y0 + 7, w - 14, h - 14, 15 * S); g.stroke(); g.setLineDash([]);
+  });
+}
+function legs(c, n, len, wig, lw, col) { c.strokeStyle = col; c.lineWidth = lw; c.lineCap = "round"; for (let i = 0; i < n; i++) { const x = (i - (n - 1) / 2) * len * .5, w = Math.sin(wig + i * 2.1) * len * .28; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(x, d * len * .2); c.lineTo(x + w * d, d * len); c.stroke(); } } }
+function drawBug(c, b) {
+  const s = b.r / 11, air = b.st === "air" || b.st === "air2", fly = b.st === "fly", wig = frozen || b.st === "dizzy" ? 0 : b.ph * (b.st === "flip" ? 16 : 13), lift = b.type === "wasp" && !fly && b.st !== "dizzy" ? 12 * S : air ? Math.sin(clamp(b.t / .32, 0, 1) * Math.PI) * 22 * S : 0;
+  if (lift || fly) { c.fillStyle = "rgba(40,30,20,.16)"; c.beginPath(); c.ellipse(b.x + 3, b.y + (fly ? 9 * S : lift * .6 + 4), b.r, b.r * .6, 0, 0, TAU); c.fill(); }
+  c.save(); c.translate(b.x, b.y - lift); c.rotate(b.ang + (fly ? b.rot : 0)); c.scale(s * (air ? 1.2 : 1), s * (air ? 1.2 : 1)); c.lineJoin = "round";
+  if (b.type === "ant") {
+    legs(c, 3, 12, wig, 1.8, "#4a2f27"); c.strokeStyle = "#4a2f27"; c.lineWidth = 1.4; c.beginPath(); c.moveTo(9, -2); c.lineTo(15, -6); c.moveTo(9, 2); c.lineTo(15, 6); c.stroke();
+    c.fillStyle = "#4a2f27"; c.beginPath(); c.ellipse(-8, 0, 7, 5.5, 0, 0, TAU); c.fill(); c.beginPath(); c.arc(0, 0, 4, 0, TAU); c.fill(); c.beginPath(); c.arc(7.5, 0, 4.8, 0, TAU); c.fill();
+    c.fillStyle = "rgba(255,255,255,.28)"; c.beginPath(); c.ellipse(-9, -2, 3.5, 1.8, 0, 0, TAU); c.fill(); c.fillStyle = "#fff"; c.beginPath(); c.arc(9, -2.2, 1.5, 0, TAU); c.arc(9, 2.2, 1.5, 0, TAU); c.fill();
+  } else if (b.type === "beetle") {
+    const up = b.st === "flip" || (fly && b.carry === false && b.flipped); legs(c, 3, 13, wig, 2.6, INK);
+    if (b.st === "flip") { c.rotate(b.rot); c.fillStyle = "#f3e2c0"; c.strokeStyle = INK; c.lineWidth = 2; c.beginPath(); c.ellipse(0, 0, 10.5, 8.5, 0, 0, TAU); c.fill(); c.stroke(); c.lineWidth = 1.2; for (const x of [-4, 0, 4]) { c.beginPath(); c.moveTo(x, -7); c.lineTo(x, 7); c.stroke(); } }
+    else { c.fillStyle = INK; c.beginPath(); c.arc(8, 0, 5, 0, TAU); c.fill(); c.fillStyle = "#2a9d8f"; c.strokeStyle = INK; c.lineWidth = 2; c.beginPath(); c.ellipse(-1, 0, 10.5, 8.5, 0, 0, TAU); c.fill(); c.stroke(); c.lineWidth = 1.4; c.beginPath(); c.moveTo(-11, 0); c.lineTo(7, 0); c.stroke(); c.strokeStyle = "rgba(255,255,255,.6)"; c.lineWidth = 2; c.beginPath(); c.arc(-1, 0, 6.5, -2.4, -1.2); c.stroke(); c.fillStyle = "#fff"; c.beginPath(); c.arc(10, -2.2, 1.3, 0, TAU); c.arc(10, 2.2, 1.3, 0, TAU); c.fill(); } void up;
+  } else if (b.type === "hopper") {
+    c.strokeStyle = "#5c8f2a"; c.lineWidth = 2.2; c.lineCap = "round"; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(-3, d * 3); c.lineTo(air ? -15 : -9, d * (air ? 5 : 11)); c.lineTo(air ? -19 : -1, d * (air ? 9 : 13)); c.stroke(); c.beginPath(); c.moveTo(5, d * 3); c.lineTo(8, d * 8); c.stroke(); }
+    c.fillStyle = "#9bd14b"; c.strokeStyle = "#5c8f2a"; c.lineWidth = 1.8; c.beginPath(); c.ellipse(0, 0, 12, 4.8, 0, 0, TAU); c.fill(); c.stroke(); c.beginPath(); c.arc(10, 0, 4.4, 0, TAU); c.fill(); c.stroke(); c.fillStyle = INK; c.beginPath(); c.arc(11.5, -2.4, 1.4, 0, TAU); c.arc(11.5, 2.4, 1.4, 0, TAU); c.fill();
+  } else if (b.type === "wasp") {
+    const fl = Math.sin(clock * 60) * .4; c.fillStyle = "rgba(255,255,255,.7)"; for (const d of [-1, 1]) { c.beginPath(); c.ellipse(-1, d * 8, 5, 8, d * (.5 + fl), 0, TAU); c.fill(); }
+    c.fillStyle = "#ffcf3a"; c.strokeStyle = INK; c.lineWidth = 1.8; c.beginPath(); c.moveTo(-15, 0); c.quadraticCurveTo(-6, -8, 4, -5); c.lineTo(4, 5); c.quadraticCurveTo(-6, 8, -15, 0); c.fill(); c.stroke(); c.fillStyle = INK; c.fillRect(-9, -5, 3, 10); c.fillRect(-3, -6, 3, 12); c.beginPath(); c.arc(7, 0, 4.6, 0, TAU); c.fill(); c.fillStyle = "#fff"; c.beginPath(); c.arc(8.8, -2, 1.3, 0, TAU); c.arc(8.8, 2, 1.3, 0, TAU); c.fill();
+  } else {
+    legs(c, 3, 10, wig, 1.6, INK); c.fillStyle = INK; c.beginPath(); c.arc(7, 0, 5, 0, TAU); c.fill(); c.fillStyle = "#ff4d5e"; c.strokeStyle = INK; c.lineWidth = 1.8; c.beginPath(); c.arc(-1, 0, 9.5, 0, TAU); c.fill(); c.stroke(); c.beginPath(); c.moveTo(-10, 0); c.lineTo(7, 0); c.stroke();
+    c.fillStyle = INK; for (const [x, y] of [[-5, -4.5], [-5, 4.5], [1.5, -5], [1.5, 5], [-2, 0]]) { c.beginPath(); c.arc(x, y, 1.9, 0, TAU); c.fill(); } c.fillStyle = "#fff"; c.beginPath(); c.arc(9, -2, 1.3, 0, TAU); c.arc(9, 2, 1.3, 0, TAU); c.fill();
+  }
+  c.restore();
+  if (b.carry) drawSlice(c, b.x, b.y - lift - 7 * S, 15 * S, b.ang + Math.PI);
+  if (b.st === "dizzy") for (let i = 0; i < 2; i++) draw.star(c, b.x + Math.cos(clock * 7 + i * Math.PI) * b.r, b.y - b.r - 3 * S + Math.sin(clock * 7 + i * Math.PI) * 3 * S, 4 * S, "#ffd23f", 5, .45);
+  if (b.type === "lady" && b.st !== "flee") draw.heart(c, b.x, b.y - b.r - 9 * S + Math.sin(clock * 5) * 2 * S, 4.5 * S, "#ff6b81");
+}
+function drawSlice(c, x, y, r, a) { c.save(); c.translate(x, y); c.rotate(a); wedge(c, r, -TAU / 16, TAU / 16); c.restore(); }
+function wedge(c, r, a0, a1) {
+  c.lineJoin = "round"; c.fillStyle = "#fff3dc"; c.strokeStyle = "#d9a066"; c.lineWidth = Math.max(1.5, r * .05); c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, r, a0, a1); c.closePath(); c.fill(); c.stroke();
+  c.fillStyle = "#ffb3c7"; c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, r * .8, a0 + .06, a1 - .06); c.closePath(); c.fill(); const m = (a0 + a1) / 2; draw.circle(c, Math.cos(m) * r * .55, Math.sin(m) * r * .55, r * .13, "#ff4d5e", "#b82a3c", 1);
+}
+function render() {
+  const c = Lab.ctx, bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // plate + cake
+  c.fillStyle = "rgba(60,40,30,.18)"; c.beginPath(); c.ellipse(cx + 3, cy + 6 * S, plateR * 1.02, plateR * 1.0, 0, 0, TAU); c.fill(); draw.circle(c, cx, cy, plateR, "#ffffff", "#9fd3f2", 3 * S); draw.circle(c, cx, cy, plateR * .84, "#f4fbff");
+  c.save(); c.translate(cx, cy); for (let i = 0; i < 8; i++) if (has[i]) wedge(c, plateR * .76, i * TAU / 8 + .03, (i + 1) * TAU / 8 - .03); else { c.fillStyle = "#e8c9a0"; for (let k = 0; k < 3; k++) { const a = (i + .25 + k * .25) * TAU / 8, rr = plateR * (.3 + k * .17); c.beginPath(); c.arc(Math.cos(a) * rr, Math.sin(a) * rr, 1.6 * S, 0, TAU); c.fill(); } } c.restore();
+  // Bun
+  let near = null, nd = 1e9, threat = false; for (const b of bugs) if (b.type !== "lady" && b.st !== "fly") { const d = Math.hypot(b.x - cx, b.y - cy); if (d < nd) { nd = d; near = b; } if (b.carry || d < plateR + 60 * S) threat = true; }
+  const full = jam >= 1, mood = over ? "sad" : bunBang > 0 ? "angry" : bunSad > 0 ? "sad" : bunJoy > 0 ? "joy" : threat ? "scared" : full ? "focus" : "happy", bsz = 72 * S, bounce = full && bunBang <= 0 ? Math.abs(Math.sin(clock * 5)) * 4 * S : 0;
+  const an = Pals.draw(c, "bun", bun.x, bun.y - bounce, bsz, { t: clock, mood, look: near ? [clamp((near.x - bun.x) / 160, -1, 1), clamp((near.y - bun.y) / 160, -1, 1)] : [0, .3], arms: bunBang > 0 || bunJoy > 0 ? "cheer" : full ? "hold" : threat ? "up" : "down", squash: bunBang > 0 ? Math.sin(bunBang / .7 * Math.PI) * .2 : threat ? Math.sin(clock * 22) * .02 : 0, tilt: threat && !full ? Math.sin(clock * 26) * .03 : 0 });
+  if (full || bunBang > 0) { const h = an.handR, g = an.handL; draw.circle(c, h[0] + 8 * S, h[1] - 6 * S, 13 * S, "#8c93a8", INK, 2 * S); draw.circle(c, h[0] + 8 * S, h[1] - 6 * S, 8.5 * S, "#aab1c4"); c.strokeStyle = INK; c.lineWidth = 4 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(h[0], h[1]); c.lineTo(h[0] - 3 * S, h[1] + 3 * S); c.stroke(); c.strokeStyle = "#c98a4b"; c.lineWidth = 3.5 * S; c.beginPath(); c.moveTo(g[0], g[1]); c.lineTo(g[0] - 4 * S, g[1] - 16 * S); c.stroke(); draw.circle(c, g[0] - 4 * S, g[1] - 18 * S, 4.5 * S, "#e2b077", INK, 1.5 * S); }
+  if (full && bunBang <= 0 && !demo && !over) { const bx = bun.x + 62 * S, by = bun.y - 30 * S; Pals.bubble(c, bx, by, 74 * S, 26 * S, { tailX: bun.x + 20 * S, tailY: bun.y - 16 * S }); draw.text(c, "Tap me!", bx, by + 1, { size: 12.5 * S, color: INK, weight: 800 }); }
+  // bugs (walkers under flyers), returning slices, swipe trail
+  for (const b of bugs) if (b.st !== "fly") drawBug(c, b); for (const b of bugs) if (b.st === "fly") drawBug(c, b);
+  for (const f of flying) drawSlice(c, f.x, f.y, 17 * S, f.k * 9);
+  if (trail.length > 1) { c.lineCap = "round"; for (let i = 1; i < trail.length; i++) { const a = 1 - (clock - trail[i].t) / .22; if (a <= 0) continue; c.strokeStyle = `rgba(255,255,255,${a * .85})`; c.lineWidth = (3 + 9 * a) * S; c.beginPath(); c.moveTo(trail[i - 1].x, trail[i - 1].y); c.lineTo(trail[i].x, trail[i].y); c.stroke(); } }
+  if (demo) return;
+  // HUD: jam jar + wave
+  const jx = P.x + 22 * S, jy = P.y + 34 * S, jw = 104 * S, jh = 16 * S;
+  draw.rect(c, jx + 22 * S, jy - jh / 2, jw, jh, jh / 2, "rgba(255,255,255,.85)", INK, 2); if (jam > 0) draw.rect(c, jx + 24 * S, jy - jh / 2 + 2, Math.max(jh - 4, (jw - 4) * jam), jh - 4, jh / 2 - 2, full ? (Math.sin(clock * 10) > 0 ? "#ff4d6a" : "#ff8fa3") : "#ff6b81");
+  draw.rect(c, jx - 4 * S, jy - 13 * S, 26 * S, 27 * S, 7 * S, full ? "#ff6b81" : "#ffb3c1", INK, 2); draw.rect(c, jx - 6 * S, jy - 17 * S, 30 * S, 8 * S, 3 * S, "#fff3dc", INK, 2); draw.circle(c, jx + 9 * S, jy + 2 * S, 4 * S, "#ff4d5e");
+  draw.text(c, "Wave " + wave, P.x + P.w - 22 * S, jy - 2 * S, { size: 16 * S, color: INK, weight: 800, align: "right" }); draw.text(c, slices() + " slices left", P.x + P.w - 22 * S, jy + 15 * S, { size: 11 * S, color: "#4d5d48", weight: 700, align: "right" });
+}
+Lab.boot();
+})();
+</script></body></html>

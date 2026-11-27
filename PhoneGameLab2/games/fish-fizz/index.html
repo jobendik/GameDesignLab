@@ -1,0 +1,213 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Fish Fizz</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* FISH FIZZ — Nori the penguin has dived under the ice. Coloured bubbles fizz up and crowd beneath the ice sheet, some
+ * with a fish stuck inside. Nori blows bubbles up at them: three or more of a colour touching burst.
+ * Core idea kept: aim, shoot, match 3+.  What changed: there is NO GRID. Every bubble is a buoyant body: the crowd
+ * squashes against the ice, jostles when hit, and when a cluster bursts everything below floats up to fill the hole —
+ * so new clusters form by themselves and one good shot can set off a FIZZ CHAIN (×2, ×3 …). A shot shoves what it hits.
+ *   • fish in a burst bubble swim down to Nori (+25 × chain)          • a chain of 3 earns a PUFFER (bomb) as the next shot
+ *   • every few shots the ice creaks and a new row seeps in (chains hold it back)    • tap Nori to swap the two bubbles he holds
+ *   • later: more colours, ice chunks (break when a neighbour bursts), drifting jellyfish that bounce shots, faster seeps
+ *   • a bubble that stays below the rope for too long ends the dive
+ * Identity: teal under-ice water with light shafts, a white ice ceiling the HUD sits on, glassy glyph-marked bubbles;
+ *           watery plops whose pitch climbs with the chain, "chill-less" bright puzzle music. */
+let demo = false, demoT = 0;
+Lab.init({
+  title: "Fish Fizz", tagline: "Pop the bubbles under the ice and free the fish.", category: "Puzzle", kicker: "Pocket Pals",
+  howto: ["Drag to aim, let go to blow a bubble", "3+ of a colour burst; the rest float up", "Chain bursts for big fizz — tap Nori to swap"],
+  theme: { bg: "#d8f1ff", bg2: "#1f7f9c", fg: "#173a5e", muted: "#4d7391", accent: "#ffa62b", accent2: "#4fdfae", light: true },
+  orient: "any", music: { style: "puzzle", key: "A", vol: .34 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const BUB = ["#ff6b8b", "#ffd23f", "#4fdfae", "#6fb7ff", "#c79bff", "#ff9a4d"], ICE = 6, PUFF = 7, STEP = 1 / 120;
+let S, P, R, Lx, Rx, iceY, floorY, lineY, nori = { x: 0, y: 0, size: 0 }, muz = { x: 0, y: 0 };
+let bodies, shot, cur, next, aim, aiming, swapArm, reload, score, chain, chainT, bestChain, popped, fish, level, misses, pending, lastPop, over, dangerT, swims, jellies,
+  pufferQ, checkT, clock, acc, joyT, blowT, gulpT, creak, kbAim;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() {
+  const o = P ? { Lx, w: Rx - Lx, iceY, h: floorY - iceY } : null; P = Lab.play; S = Math.min(P.w / 390, P.h / 700); if (P.w > P.h * 1.15) S = P.h / 400;
+  R = clamp(Math.sqrt(P.w * P.h) / 26, 12, 30); Lx = P.x + 4; Rx = P.x + P.w - 4; iceY = P.y + 10; floorY = Lab.H - Lab.safe.bottom - 14 * S; lineY = iceY + (floorY - iceY) * .62;
+  nori.size = Math.min(70 * S, (floorY - lineY) * .5); nori.x = P.x + P.w / 2; nori.y = floorY - nori.size / 2 - 4; muz.x = nori.x; muz.y = nori.y - nori.size * .5 - R * 1.25;
+  if (o && bodies) for (const b of bodies) { b.x = Lx + (b.x - o.Lx) / o.w * (Rx - Lx); b.y = iceY + (b.y - o.iceY) / o.h * (floorY - iceY); b.r = R * b.rk; }
+  Lab.sprite.clear("ff");
+}
+Lab.onResize(() => { if (bodies) { layout(); shot = null; } });
+const nCol = () => level < 2 ? 4 : level < 4 ? 5 : 6, interval = () => Math.max(3, 6 - Math.floor(level / 2)), cols = () => Math.floor((Rx - Lx) / (2 * R));
+function mk(x, y, k, fishy) { return { x, y, vx: 0, vy: 0, k, fish: !!fishy, rk: k === ICE ? .96 : 1, r: R * (k === ICE ? .96 : 1), grow: 1, arm: 0, age: 2, ph: rand(0, TAU), wob: 0 }; }
+function pickColour() { const have = [...new Set(bodies.filter(b => b.k < ICE).map(b => b.k))]; return have.length ? Lab.choose(have) : Lab.randInt(0, nCol() - 1); }
+function reset() {
+  bodies = []; shot = null; aim = -Math.PI / 2; aiming = false; swapArm = false; reload = 0; score = 0; chain = 0; chainT = 0; bestChain = 0; popped = 0; fish = 0; level = 1; misses = 0; pending = []; lastPop = -9;
+  over = false; dangerT = 0; swims = []; jellies = []; pufferQ = false; checkT = 0; clock = 0; acc = 0; joyT = 0; blowT = 0; gulpT = 0; creak = 0; kbAim = false;
+  const n = cols(), rows = clamp(Math.round((lineY - iceY) / (2 * R) * .4), 2, 5);
+  for (let j = 0; j < rows; j++) for (let i = 0; i < n - (j % 2); i++) {
+    const x = Lx + (Rx - Lx - n * 2 * R) / 2 + R + i * 2 * R + (j % 2 ? R : 0), y = iceY + R + j * R * 1.74, near = bodies.filter(b => Math.hypot(b.x - x, b.y - y) < R * 2.3);
+    const ok = []; for (let k = 0; k < 4; k++) { const same = near.filter(b => b.k === k); if (!same.length || same.length === 1 && !same[0].pair) ok.push(k); }
+    const k = ok.length ? Lab.choose(ok) : 0, b = mk(x, y, k, Lab.chance(.14)); near.forEach(q => { if (q.k === k) q.pair = b.pair = true; }); bodies.push(b);
+  }
+  cur = pickColour(); next = pickColour();
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0); Lab.music.intensity(.25);
+  const nearNori = (x, y) => Math.hypot(x - nori.x, y - nori.y) < nori.size * .75;
+  Lab.input.onDown = [(x, y) => { kbAim = false; if (nearNori(x, y)) swapArm = true; else { aiming = true; setAim(x, y); } }];
+  Lab.input.onMove = [(x, y) => { if (Lab.input.down) { if (swapArm && !nearNori(x, y)) { swapArm = false; aiming = true; } if (aiming) setAim(x, y); } else if (Lab.input.pointerType === "mouse" && y < muz.y) setAim(x, y); }];
+  Lab.input.onUp = [(x, y) => { if (swapArm) swap(); else if (aiming) { setAim(x, y); shoot(); } swapArm = aiming = false; }];
+  Lab.input.onKey = [k => { if (k === " " || k === "ArrowUp" || k === "Enter") shoot(); else if (k === "ArrowDown" || k === "s" || k === "x") swap(); }];
+  Lab.expose({
+    get score() { return score; }, get chain() { return chain; }, get level() { return level; }, get misses() { return misses; }, get interval() { return interval(); }, get fish() { return fish; }, get popped() { return popped; },
+    get cur() { return cur; }, get next() { return next; }, get aim() { return aim; }, get n() { return bodies.length; }, get cols() { return cols(); }, get R() { return R; }, get muz() { return [muz.x, muz.y]; }, get nori() { return [nori.x, nori.y]; },
+    get iceY() { return iceY; }, get lineY() { return lineY; }, get box() { return [Lx, Rx]; }, get flying() { return !!shot; },
+    bodies() { return bodies.map(b => ({ x: b.x, y: b.y, k: b.k, fish: b.fish })); }, clear() { bodies = []; shot = null; pending = []; misses = 0; jellies = []; }, add(x, y, k, fishy) { bodies.push(mk(x, y, k, fishy)); },
+    setCur(k, n) { cur = k; if (n != null) next = n; reload = 0; }, shoot(a) { if (a != null) aim = a; return shoot(); }, auto(on) { demo = on ? "auto" : false; },
+  });
+  Lab.loop(frame);
+}
+/* ---------- play ---------- */
+function setAim(x, y) { aim = clamp(Math.atan2(Math.min(y, muz.y - 4) - muz.y, x - muz.x), -Math.PI + .2, -.2); }
+function swap() { if (over || cur == null) return; const t = cur; cur = next; next = t; snd("flip", { vol: .6 }); blowT = .15; }
+function shoot() {
+  if (over || shot || cur == null || reload > 0) return false; const v = 1150 * S;
+  shot = { x: muz.x, y: muz.y, vx: Math.cos(aim) * v, vy: Math.sin(aim) * v, k: cur, t: 0 }; cur = null; reload = .28; blowT = .3; chain = 0; chainT = 0;
+  snd("bubble", { pitch: 1.2 }); snd("whoosh", { vol: .35, pitch: 1.4 }); Lab.buzz(6); fx.burst(muz.x, muz.y, { n: 5, color: "rgba(255,255,255,.7)", speed: 90, life: .5, size: 3, gravity: -160 });
+  return true;
+}
+function attach() {
+  const s = shot; shot = null;
+  if (s.k === PUFF) { pufferQ = false; const hit = bodies.filter(b => Math.hypot(b.x - s.x, b.y - s.y) < R * 3.3); snd("boom", { vol: .7 }); Lab.shake(9, .3); fx.ring(s.x, s.y, { r0: R, r1: R * 3.6, color: "#ffe9a8", width: 6 }); burst(hit, true); return; }
+  const b = mk(s.x, s.y, s.k); b.vx = s.vx * .22; b.vy = s.vy * .22; b.age = 0; b.wob = 1; bodies.push(b); pending.push({ t: clock, best: 0 }); snd("knock", { pitch: 1.6, vol: .5 });
+  for (const q of bodies) { const d = Math.hypot(q.x - s.x, q.y - s.y); if (q !== b && d < R * 3) { q.wob = Math.max(q.wob, .6); } }
+}
+function burst(list, bomb) {
+  if (!list.length) return; chain = chainT > 0 ? chain + 1 : 1; chainT = 1.5; bestChain = Math.max(bestChain, chain); lastPop = clock; for (const q of pending) q.best = Math.max(q.best, chain); let pts = 0, cx = 0, cy = 0;
+  const gone = new Set(list); for (const b of list) for (const q of bodies) if (q.k === ICE && !gone.has(q) && Math.hypot(q.x - b.x, q.y - b.y) < (q.r + b.r) * 1.12) gone.add(q);
+  for (const b of gone) {
+    cx += b.x / gone.size; cy += b.y / gone.size; popped++; pts += (b.k === ICE ? 5 : 10) * chain;
+    fx.burst(b.x, b.y, { n: 6, colors: [b.k === ICE ? "#eaf7ff" : BUB[b.k], "#fff"], speed: 170, life: .45, size: 4, gravity: -120, shape: b.k === ICE ? "shard" : "circle" }); fx.ring(b.x, b.y, { r0: b.r * .5, r1: b.r * 1.5, color: "rgba(255,255,255,.8)", width: 2.5, life: .28 });
+    if (b.fish) swims.push({ x: b.x, y: b.y, t: 0, ph: rand(0, TAU), chain });
+  }
+  pts += Math.max(0, list.length - 3) * 5 * chain; bodies = bodies.filter(b => !gone.has(b)); score += pts;
+  for (const b of bodies) { const d = Math.hypot(b.x - cx, b.y - cy); if (d < R * 5) b.wob = Math.max(b.wob, .5); }
+  fx.text(cx, cy, "+" + pts + (chain > 1 ? "  ×" + chain : ""), { color: chain > 1 ? "#ffe066" : "#fff", size: (17 + Math.min(chain, 6) * 3) * Math.max(S, .8) });
+  if (!demo || demo === "auto") { Lab.setScore(score); if (chain > 1) Lab.bumpScore(); } if (!demo) { Lab.audio.combo(chain + Math.min(list.length, 6) - 2, { vol: .22 }); Lab.music.intensity(clamp(.25 + chain * .15 + level * .05, 0, 1)); }
+  snd("pop", { pitch: .9 + chain * .12 }); snd("bubble", { pitch: .8 + chain * .1, vol: .6 }); Lab.buzz(10 + chain * 4); if (chain >= 2) { joyT = 1; Lab.shake(2 + chain * 1.5, .2); if (chain >= 3) Lab.hitstop(.04); }
+  if (chain >= 3 && !pufferQ && next !== PUFF && cur !== PUFF) { pufferQ = true; next = PUFF; if (!demo) Lab.toast("Puffer earned!", 1000, { y: .5 }); snd("powerup"); }
+  const lv = 1 + Math.floor(popped / 45); if (lv > level) { level = lv; if (!demo) { Lab.banner("Deeper! Level " + level, { color: "#ffa62b", ms: 1100, y: .4 }); snd("levelup"); } }
+  if (bodies.length < cols() * 1.2) { if (bodies.length < 6) { score += 100; fx.text(P.x + P.w / 2, iceY + R * 3, "Clear ice! +100", { color: "#ffe066", size: 22 * Math.max(S, .8) }); if (!demo || demo === "auto") Lab.setScore(score); } seep(); }
+}
+function seep() {
+  const n = cols(), span = Rx - Lx - 2 * R; creak = 1; misses = 0; snd("crunch", { pitch: .6, vol: .6 }); snd("glass", { vol: .3, pitch: .7 }); Lab.shake(4, .25);
+  for (let i = 0; i < n; i++) { const ice = level >= 2 && Lab.chance(.14), b = mk(Lx + R + (n > 1 ? i / (n - 1) : .5) * span + rand(-2, 2), iceY + R * .7, ice ? ICE : Lab.randInt(0, nCol() - 1), !ice && Lab.chance(.15)); b.grow = 0; b.age = 0; bodies.push(b); }
+  const want = level >= 5 ? 2 : level >= 3 ? 1 : 0; while (jellies.length < want) jellies.push({ ph: rand(0, TAU), sp: rand(.35, .55) * (jellies.length ? -1 : 1), v: .25 + jellies.length * .3, x: 0, y: 0, wob: 0 });
+}
+function phys(h) {
+  const B = 1500 * S, d = Math.exp(-3.4 * h);
+  for (const b of bodies) {
+    b.age += h; if (b.grow < 1) b.grow = Math.min(1, b.grow + h * 1.6); b.vy -= B * h; b.vx *= d; b.vy *= d; b.x += b.vx * h; b.y += b.vy * h; const r = b.r * (.25 + .75 * b.grow); b.er = r;
+    if (b.x < Lx + r) { b.x = Lx + r; b.vx = Math.abs(b.vx) * .2; } if (b.x > Rx - r) { b.x = Rx - r; b.vx = -Math.abs(b.vx) * .2; } if (b.y < iceY + r) { b.y = iceY + r; if (b.vy < 0) b.vy *= -.1; }
+  }
+  for (let it = 0; it < 3; it++) for (let i = 0; i < bodies.length; i++) { const a = bodies[i]; for (let j = i + 1; j < bodies.length; j++) {
+    const b = bodies[j], dx = b.x - a.x, dy = b.y - a.y, rr = a.er + b.er; if (dx > rr || dx < -rr || dy > rr || dy < -rr) continue; const d2 = dx * dx + dy * dy; if (d2 >= rr * rr) continue;
+    const dd = Math.sqrt(d2) || .01, nx = dx / dd, ny = dy / dd, ov = (rr - dd) * .5; a.x -= nx * ov; a.y -= ny * ov; b.x += nx * ov; b.y += ny * ov;
+    const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny; if (vn < 0) { const jn = -vn * .52; a.vx -= jn * nx; a.vy -= jn * ny; b.vx += jn * nx; b.vy += jn * ny; }
+  } }
+}
+function clusters() {
+  const live = bodies.filter(b => b.k < ICE && b.grow >= 1), seen = new Set(), out = [];
+  for (const s of live) { if (seen.has(s)) continue; const g = [s]; seen.add(s); for (let i = 0; i < g.length; i++) for (const q of live) if (!seen.has(q) && q.k === s.k && Math.hypot(q.x - g[i].x, q.y - g[i].y) < (q.r + g[i].r) * 1.09) { seen.add(q); g.push(q); } if (g.length >= 3) out.push(g); else g.forEach(b => b.arm = 0); }
+  return out;
+}
+function update(dt, t) {
+  clock += dt; if (over) return;
+  if (kbAim || Lab.input.axisX()) { kbAim = true; aim = clamp(aim + Lab.input.axisX() * 1.5 * dt, -Math.PI + .2, -.2); }
+  if (demo && (demoT -= dt) <= 0 && !shot && cur != null) { demoT = demo === "auto" ? .5 : 1.1; const tg = bodies.filter(b => b.k === cur).sort((a, b) => b.y - a.y)[0]; aim = tg ? clamp(Math.atan2(tg.y - muz.y, tg.x - muz.x) + rand(-.03, .03), -Math.PI + .2, -.2) : rand(-2.4, -.7); shoot(); }
+  if (reload > 0 && (reload -= dt) <= 0 && cur == null) { cur = next; next = pickColour(); }
+  // the flying bubble: swept in small steps
+  if (shot) { const sp = Math.hypot(shot.vx, shot.vy), n = Math.ceil(sp * dt / (R * .3)); for (let i = 0; i < n && shot; i++) {
+    const s = shot, h = dt / n; s.x += s.vx * h; s.y += s.vy * h; s.t += h;
+    if (s.x < Lx + R) { s.x = Lx + R; s.vx = Math.abs(s.vx); snd("tick", { vol: .5 }); } if (s.x > Rx - R) { s.x = Rx - R; s.vx = -Math.abs(s.vx); snd("tick", { vol: .5 }); }
+    for (const j of jellies) { const dx = s.x - j.x, dy = s.y - j.y, d = Math.hypot(dx, dy), rr = R + 20 * S; if (d < rr) { const nx = dx / d, ny = dy / d, vn = s.vx * nx + s.vy * ny; if (vn < 0) { s.vx -= 2 * vn * nx; s.vy -= 2 * vn * ny; if (s.vy > -sp * .25) { s.vy = -sp * .25; const k = Math.sqrt(sp * sp - s.vy * s.vy); s.vx = Math.sign(s.vx || 1) * k; } j.wob = 1; snd("boing", { pitch: 1.4, vol: .5 }); } s.x = j.x + nx * rr; s.y = j.y + ny * rr; } }
+    if (s.y - R <= iceY || bodies.some(b => Math.hypot(b.x - s.x, b.y - s.y) < R + b.er - 2) || s.t > 4) attach();
+  } }
+  acc = Math.min(acc + dt, .05); while (acc >= STEP) { phys(STEP); acc -= STEP; }
+  if ((checkT -= dt) <= 0) { checkT = .11; for (const g of clusters()) { g.forEach(b => b.arm++); if (g.some(b => b.arm >= 2)) burst(g); } }
+  if (chainT > 0) chainT -= dt;
+  for (let i = pending.length - 1; i >= 0; i--) if (clock - pending[i].t > 1 && chainT <= 0) { if (pending[i].best < 2) { misses++; if (misses >= interval()) seep(); else if (misses === interval() - 1) { creak = .6; snd("crunch", { pitch: 1.2, vol: .35 }); } } pending.splice(i, 1); }
+  for (const j of jellies) { j.x = P.x + P.w * (.5 + .42 * Math.sin(t * j.sp + j.ph)); j.y = lineY + (muz.y - lineY) * j.v + Math.sin(t * 1.7 + j.ph) * 8 * S; j.wob = Math.max(0, j.wob - dt * 3); }
+  for (let i = swims.length - 1; i >= 0; i--) { const f = swims[i]; f.t += dt / .8; if (f.t >= 1) { swims.splice(i, 1); fish++; score += 25 * f.chain; gulpT = .4; joyT = Math.max(joyT, .6); if (!demo || demo === "auto") Lab.setScore(score); snd("coin", { pitch: 1 + Math.min(fish, 20) * .02 }); fx.text(nori.x, nori.y - nori.size * .9, "+" + 25 * f.chain, { color: "#ffa62b", size: 17 * Math.max(S, .8) }); } }
+  // danger: a settled bubble hanging below the rope
+  const low = bodies.some(b => b.age > 1.2 && b.grow >= 1 && b.y + b.r > lineY);
+  dangerT = low ? dangerT + dt : Math.max(0, dangerT - dt * 2);
+  if (dangerT > 1.8 && demo !== true) { over = true; snd("splash"); Lab.gameover({ title: "Brr!", message: "The fizz crowded Nori out. Up for air!", score, stats: [["Fish freed", fish], ["Best fizz chain", "×" + bestChain], ["Bubbles burst", popped]] }); }
+  else if (dangerT > 1.8) reset();
+  for (const b of bodies) if (b.wob > 0) b.wob = Math.max(0, b.wob - dt * 2.5);
+  joyT = Math.max(0, joyT - dt); blowT = Math.max(0, blowT - dt); gulpT = Math.max(0, gulpT - dt); creak = Math.max(0, creak - dt * .8);
+}
+function frame(dt, t) { update(dt, t); render(t); }
+function attract(dt, t) { if (!demo) { demo = true; layout(); reset(); demoT = 1; } update(dt, t); render(t); }
+
+/* ---------- drawing ---------- */
+function ell(g, x, y, rx, ry, rot) { g.beginPath(); g.ellipse(x, y, Math.max(0, rx), Math.max(0, ry), rot || 0, 0, TAU); }
+function fishShape(g, x, y, s, col) { g.fillStyle = col; ell(g, x, y, s, s * .58); g.fill(); g.beginPath(); g.moveTo(x - s * .8, y); g.lineTo(x - s * 1.6, y - s * .55); g.lineTo(x - s * 1.6, y + s * .55); g.fill(); g.fillStyle = "#fff"; ell(g, x + s * .45, y - s * .12, s * .2, s * .2); g.fill(); g.fillStyle = INK; ell(g, x + s * .5, y - s * .12, s * .1, s * .1); g.fill(); }
+function bubSpr(k, fishy) {
+  const s = Math.ceil(R * 2.3); return Lab.sprite("ffb" + k + (fishy ? "f" : "") + "_" + s, s, s, g => {
+    g.translate(s / 2, s / 2); const r = R;
+    if (k === ICE) { g.fillStyle = "#e6f5ff"; g.beginPath(); for (let i = 0; i < 7; i++) { const a = i / 7 * TAU + .2, q = r * (i % 2 ? .98 : .86); g.lineTo(Math.cos(a) * q, Math.sin(a) * q); } g.fill(); g.fillStyle = "#bfe0f5"; g.beginPath(); g.moveTo(-r * .2, -r * .8); g.lineTo(r * .5, -r * .1); g.lineTo(-r * .1, r * .7); g.lineTo(-r * .6, 0); g.fill(); g.fillStyle = "rgba(255,255,255,.8)"; g.beginPath(); g.moveTo(-r * .5, -r * .5); g.lineTo(-r * .1, -r * .6); g.lineTo(-r * .4, -r * .1); g.fill(); return; }
+    if (k === PUFF) { g.fillStyle = "#e9b94a"; for (let i = 0; i < 12; i++) { const a = i / 12 * TAU; g.beginPath(); g.moveTo(Math.cos(a - .16) * r * .7, Math.sin(a - .16) * r * .7); g.lineTo(Math.cos(a) * r * 1.08, Math.sin(a) * r * 1.08); g.lineTo(Math.cos(a + .16) * r * .7, Math.sin(a + .16) * r * .7); g.fill(); } g.fillStyle = "#ffd978"; ell(g, 0, 0, r * .78, r * .78); g.fill(); g.fillStyle = "#fff6d8"; ell(g, 0, r * .25, r * .5, r * .38); g.fill(); for (const d of [-1, 1]) { g.fillStyle = "#fff"; ell(g, d * r * .3, -r * .15, r * .18, r * .2); g.fill(); g.fillStyle = INK; ell(g, d * r * .3, -r * .13, r * .09, r * .1); g.fill(); } g.fillStyle = "#e0764a"; ell(g, 0, r * .2, r * .1, r * .08); g.fill(); return; }
+    const c = BUB[k]; g.fillStyle = Lab.color.alpha(c, .78); ell(g, 0, 0, r * .97, r * .97); g.fill(); g.strokeStyle = Lab.color.shade(c, .35); g.lineWidth = r * .1; ell(g, 0, 0, r * .92, r * .92); g.stroke();
+    g.fillStyle = Lab.color.alpha(Lab.color.shade(c, -.25), .35); g.beginPath(); g.arc(0, 0, r * .86, .3, 2.5); g.arc(0, -r * .35, r * 1.05, 2.1, .9, true); g.fill();
+    if (fishy) fishShape(g, r * .12, r * .08, r * .4, "#ff8a3d");
+    else { g.fillStyle = "rgba(255,255,255,.55)"; g.strokeStyle = "rgba(255,255,255,.6)"; g.lineWidth = r * .13; const q = r * .3;
+      if (k === 0) { ell(g, 0, r * .1, q * .7, q * .7); g.fill(); } else if (k === 1) { ell(g, 0, r * .1, q * .85, q * .85); g.stroke(); } else if (k === 2) { g.beginPath(); g.moveTo(0, r * .1 - q); g.lineTo(q, r * .1 + q * .8); g.lineTo(-q, r * .1 + q * .8); g.fill(); }
+      else if (k === 3) { g.beginPath(); g.moveTo(0, r * .1 - q); g.lineTo(q, r * .1); g.lineTo(0, r * .1 + q); g.lineTo(-q, r * .1); g.fill(); } else if (k === 4) draw.star(g, 0, r * .1, q * 1.15, "rgba(255,255,255,.6)", 5); else { g.beginPath(); g.moveTo(-q, r * .1); g.lineTo(q, r * .1); g.moveTo(0, r * .1 - q); g.lineTo(0, r * .1 + q); g.stroke(); } }
+    g.fillStyle = "rgba(255,255,255,.75)"; ell(g, -r * .4, -r * .46, r * .24, r * .14, -.6); g.fill(); g.fillStyle = "rgba(255,255,255,.5)"; ell(g, r * .42, r * .5, r * .1, r * .07, -.6); g.fill();
+  });
+}
+function drawBub(c, k, fishy, x, y, r, sx, sy) { const sp = bubSpr(k, fishy), w = sp.w * r / R; c.drawImage(sp, x - w * (sx || 1) / 2, y - w * (sy || 1) / 2, w * (sx || 1), w * (sy || 1)); }
+function drawBg(c, t) {
+  const W = Lab.W, H = Lab.H, bg = Lab.sprite("ffbg" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40); draw.vgrad(g, -40, -40, W + 80, H + 80, [[0, "#9fe3ee"], [.12, "#5cc4d8"], [.6, "#2f93b3"], [1, "#1f6f95"]]);
+    g.fillStyle = "rgba(255,255,255,.07)"; for (let i = 0; i < 5; i++) { const x = W * (.1 + i * .2); g.beginPath(); g.moveTo(x - 20 * S, iceY); g.lineTo(x + 34 * S, iceY); g.lineTo(x + 130 * S + i * 14, H); g.lineTo(x - 10 * S + i * 14, H); g.fill(); }
+    g.fillStyle = "#e9d7a8"; g.beginPath(); g.moveTo(-40, H + 40); for (let x = -40; x <= W + 40; x += 20) g.lineTo(x, floorY + 6 * S + Math.sin(x * .02) * 5 * S); g.lineTo(W + 40, H + 40); g.fill();
+    const rng = Lab.rng(9); for (let i = 0; i < 7; i++) { const x = rng() * W; if (Math.abs(x - W / 2) < 70 * S) continue; g.strokeStyle = i % 2 ? "#2fa37a" : "#3fbf8a"; g.lineWidth = 7 * S; g.lineCap = "round"; g.beginPath(); g.moveTo(x, floorY + 10 * S); g.bezierCurveTo(x - 16 * S, floorY - 30 * S, x + 18 * S, floorY - 60 * S, x + (rng() - .5) * 20 * S, floorY - (70 + rng() * 50) * S); g.stroke(); }
+    for (let i = 0; i < 6; i++) { g.fillStyle = i % 2 ? "#ffb3c6" : "#fff3d6"; ell(g, rng() * W, floorY + (10 + rng() * 8) * S, 6 * S, 4 * S); g.fill(); }
+    // the ice sheet (the HUD sits on it)
+    draw.vgrad(g, -40, -40, W + 80, iceY + 40, ["#f4fbff", "#d5eefb"]); g.fillStyle = "#bfe3f5"; g.beginPath(); g.moveTo(-40, iceY - 4); for (let x = -40; x <= W + 40; x += 14) g.lineTo(x, iceY + (rng() * 5 - 1) * S); g.lineTo(W + 40, iceY - 4); g.fill();
+    g.strokeStyle = "rgba(120,180,215,.5)"; g.lineWidth = 1.5; for (let i = 0; i < 9; i++) { const x = rng() * W; g.beginPath(); g.moveTo(x, iceY - 2); g.lineTo(x + (rng() - .5) * 30, iceY - 14 - rng() * 22); g.lineTo(x + (rng() - .5) * 50, iceY - 30 - rng() * 20); g.stroke(); }
+  });
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W; drawBg(c, t);
+  for (let i = 0; i < 9; i++) { const u = (t * (.05 + i * .008) + i * .37) % 1; c.fillStyle = "rgba(255,255,255,.25)"; ell(c, (i * 137.5) % W + Math.sin(t + i) * 6, floorY - u * (floorY - iceY), 2 + i % 3, 2 + i % 3); c.fill(); }
+  if (creak > 0) { c.fillStyle = `rgba(255,255,255,${creak * .5})`; c.fillRect(-40, iceY - 3, W + 80, 7 * S); }
+  // rope (danger line)
+  const warn = clamp(dangerT / 1.8, 0, 1), near = bodies.some(b => b.y + b.r > lineY - R * 1.5 && b.age > 1);
+  c.strokeStyle = warn > 0 ? `rgba(255,${120 - warn * 60},${110 - warn * 60},${.6 + Math.sin(t * 14) * .3})` : near ? "rgba(255,214,150,.85)" : "rgba(255,255,255,.4)"; c.lineWidth = 2.5 * S; c.setLineDash([10 * S, 8 * S]); c.beginPath(); c.moveTo(Lx, lineY); c.lineTo(Rx, lineY); c.stroke(); c.setLineDash([]);
+  for (const j of jellies) { const q = 20 * S, k = 1 + ease.pulse(j.wob) * .25 + Math.sin(t * 3 + j.ph) * .06; c.strokeStyle = "rgba(255,170,210,.7)"; c.lineWidth = 3 * S; c.lineCap = "round"; for (let i = -1; i <= 1; i++) { c.beginPath(); c.moveTo(j.x + i * q * .5, j.y + q * .2); c.quadraticCurveTo(j.x + i * q * .5 + Math.sin(t * 4 + i + j.ph) * 6 * S, j.y + q, j.x + i * q * .6, j.y + q * 1.6); c.stroke(); } c.fillStyle = "rgba(255,150,200,.85)"; c.beginPath(); c.ellipse(j.x, j.y + q * .2, q * k, q * 1.05 / k, 0, Math.PI, TAU); c.fill(); c.fillStyle = "rgba(255,255,255,.5)"; ell(c, j.x - q * .35, j.y - q * .4, q * .2, q * .12, -.5); c.fill(); for (const d of [-1, 1]) { c.fillStyle = INK; ell(c, j.x + d * q * .3, j.y - q * .1, q * .08, q * .1); c.fill(); } }
+  for (const b of bodies) { const w = b.wob > 0 ? Math.sin(b.wob * 18) * .12 * b.wob : 0, hot = b.arm > 0 ? 1.08 : 1; drawBub(c, b.k, b.fish, b.x, b.y + Math.sin(t * 2 + b.ph) * .8, b.er * hot || b.r, 1 + w, 1 - w); }
+  // seep pips: shots left before the ice lets another row through
+  const iv = interval(); for (let i = 0; i < iv; i++) { const x = Rx - 12 * S - i * 13 * S, on = i < iv - misses; c.fillStyle = on ? "rgba(255,255,255,.9)" : "rgba(255,255,255,.22)"; c.save(); c.translate(x, lineY + 14 * S); c.rotate(TAU / 8); c.fillRect(-4 * S, -4 * S, 8 * S, 8 * S); c.restore(); }
+  // aim guide
+  if (cur != null && !shot && !over && !demo) {
+    let x = muz.x, y = muz.y, vx = Math.cos(aim), vy = Math.sin(aim), n = 0, hit = false; const st = R * .5; c.fillStyle = "rgba(255,255,255,.8)";
+    for (let i = 0; i < 260 && !hit; i++) { x += vx * st; y += vy * st; if (x < Lx + R) { x = Lx + R; vx = -vx; } if (x > Rx - R) { x = Rx - R; vx = -vx; } hit = y - R <= iceY || bodies.some(b => Math.hypot(b.x - x, b.y - y) < R + b.r - 2); if (i % 3 === 2 && !hit) { n++; c.globalAlpha = clamp(1.1 - n * .035, .15, 1); ell(c, x, y, 3.2 * S, 3.2 * S); c.fill(); } }
+    c.globalAlpha = .45; draw.circle(c, x, y, R * .95, null, "#fff", 2); c.globalAlpha = 1;
+  }
+  if (shot) drawBub(c, shot.k, false, shot.x, shot.y, R);
+  for (const f of swims) { const u = ease.inOutQuad(clamp(f.t, 0, 1)), x = lerp(f.x, nori.x, u) + Math.sin(f.t * 9 + f.ph) * 14 * S * (1 - u), y = lerp(f.y, nori.y - nori.size * .2, u); c.save(); c.translate(x, y); c.rotate(Math.atan2(nori.y - f.y, (nori.x - f.x) || .01)); fishShape(c, 0, 0, R * .42, "#ff8a3d"); c.restore(); }
+  // Nori, the bubble he is about to blow and the spare one
+  const scared = warn > .15, mood = over ? "sad" : scared ? "scared" : joyT > 0 ? "joy" : near ? "wow" : "happy", lookA = [Math.cos(aim) * .9, Math.sin(aim) * .9];
+  Pals.draw(c, "nori", nori.x, nori.y, nori.size, { t, mood, look: swims.length ? [0, -.8] : lookA, squash: ease.pulse(clamp(blowT / .3, 0, 1)) * -.14 + (gulpT > 0 ? .08 : 0), arms: joyT > 0 ? "cheer" : aiming || blowT > 0 ? "up" : "down", talk: blowT > 0 || gulpT > 0 ? 1 : 0, tilt: (aim + Math.PI / 2) * .12 });
+  if (cur != null) { const k = ease.outBack(clamp(1 - reload / .28, 0, 1)); drawBub(c, cur, false, muz.x, muz.y + Math.sin(t * 3) * 1.5, R * k); }
+  const nx = nori.x + nori.size * .78, ny = nori.y + nori.size * .22; c.fillStyle = "#f6c9d6"; c.beginPath(); c.ellipse(nx, ny + R * .55, R * .85, R * .5, 0, 0, Math.PI); c.fill(); drawBub(c, next, false, nx, ny, R * .7);
+  if (!demo && popped === 0 && clock > 4 && !shot) draw.text(c, "tap Nori to swap", nori.x, floorY + 4 * S, { size: 12 * Math.max(S, .85), color: "rgba(23,58,94,.75)", weight: 700 });
+  draw.text(c, "Level " + level, Lx + 8 * S, lineY + 14 * S, { size: 13 * Math.max(S, .85), color: "rgba(255,255,255,.85)", align: "left", weight: 700 });
+}
+Lab.boot();
+})();
+</script></body></html>

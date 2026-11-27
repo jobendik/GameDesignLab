@@ -273,13 +273,15 @@ window.GDL_CATALOG = {
    "path": "games/kosmisk-slange.html",
    "collection": "arcade",
    "title": "Kosmisk Slange",
-   "desc": "Snake-style slither arena.",
+   "desc": "A serene Norwegian-language serpent arena: slingshot around suns, lay your body across the constellations to light them, and own the sky before dawn burns it away.",
    "genre": [
-    ".io"
+    ".io",
+    "Arcade"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "thumb": "thumbs/games--kosmisk-slange.jpg"
   },
@@ -417,14 +419,16 @@ window.GDL_CATALOG = {
    "id": "games/neon-burst",
    "path": "games/neon-burst.html",
    "collection": "arcade",
-   "title": "Neon Burst - Dopamine Rush",
-   "desc": "Neon burst dopamine rush action experiment.",
+   "title": "Neon Burst — One-Spark Chain Reaction",
+   "desc": "Place one spark and light the whole board: plan a chain reaction through rings, sliding rows, darts and armoured shells, beat the quota and keep your multiplier alive.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Puzzle"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "thumb": "thumbs/games--neon-burst.jpg"
   },
@@ -2500,40 +2504,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--bedtime-stacks.jpg"
   },
   {
-   "id": "PhoneGameLab2/bubble-shooter",
-   "path": "PhoneGameLab2/games/bubble-shooter/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Bubble Shooter",
-   "desc": "Shoot bubbles to match 3+ and clear the board.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 8,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--bubble-shooter.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/busy-bugs",
-   "path": "PhoneGameLab2/games/busy-bugs/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Busy Bugs",
-   "desc": "Swipe bugs away before they reach the food.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 12,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--busy-bugs.jpg"
-  },
-  {
    "id": "PhoneGameLab2/cake-tower",
    "path": "PhoneGameLab2/games/cake-tower/index.html",
    "collection": "PhoneGameLab2",
@@ -2755,6 +2725,25 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--find-pattern.jpg"
   },
   {
+   "id": "PhoneGameLab2/fish-fizz",
+   "path": "PhoneGameLab2/games/fish-fizz/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Fish Fizz",
+   "desc": "Pop the bubbles under the ice and free the fish.",
+   "genre": [
+    "Puzzle"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--fish-fizz.jpg"
+  },
+  {
    "id": "PhoneGameLab2/fishtastic",
    "path": "PhoneGameLab2/games/fishtastic/index.html",
    "collection": "PhoneGameLab2",
@@ -2804,6 +2793,21 @@ window.GDL_CATALOG = {
    "n": 28,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--flappy-tom.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/flicknic",
+   "path": "PhoneGameLab2/games/flicknic/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Flicknic",
+   "desc": "Flick the bugs off the blanket. Save Bun's cake.",
+   "genre": [
+    "Skill"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": true
   },
   {
    "id": "PhoneGameLab2/football",
@@ -3131,7 +3135,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--lilypad-lunch.jpg"
   },
   {
    "id": "PhoneGameLab2/make-a-kite",
@@ -3266,7 +3271,9 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/pinata-drop",
@@ -3352,7 +3359,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--ramp-scamp.jpg"
   },
   {
    "id": "PhoneGameLab2/rocket-fun",
@@ -3659,7 +3667,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--stew-patch.jpg"
   },
   {
    "id": "PhoneGameLab2/sub-adventure",
