@@ -1,0 +1,274 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Live Wires</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* LIVE WIRES — route a coloured wire between each pair of terminals on a little circuit board. Wires may not cross
+ * and the board only powers up when every pad is covered.
+ * Identity: matte green PCB, gold pads, cream silkscreen, enamel-bright wires that carry travelling pulses once live.
+ * Levels:   generated forever from the level number (always solvable: the generator builds the full routing first,
+ *           then hides it). Boards grow 4×4 → 7×9; fewer, longer wires make later boards harder.
+ * Depth:    stroke par (one stroke per wire = ★★★), inline bulbs that only accept their own colour, live re-routing
+ *           (crossing another wire cuts it until you back off), undo / clear / hint (a hint costs a star).        */
+Lab.init({
+  title: "Live Wires", tagline: "Link every pair. Cover the board.", category: "Puzzle & Logic",
+  howto: ["Drag from a terminal to its twin", "Wires can't cross — cover every pad", "One stroke per wire earns three stars"],
+  theme: { bg: "#0a2a24", bg2: "#14513f", accent: "#ffd166", accent2: "#4de0c0" },
+  orient: "any", music: { style: "puzzle", key: "E", vol: .38 }, restart: start, formatScore: n => "Lv " + n,
+  attract(dt, t) { if (!sol) { prog = { stars: {} }; load(9); paths = sol.map(p => p.slice()); recut(); mode = "demo"; } tick(dt); render(t); },
+});
+const { draw, fx } = Lab, TAU = Lab.TAU;
+const PAL = ["#ff5a5f", "#ff8f2e", "#ffe14d", "#8ee04a", "#28d7b5", "#45b6ff", "#9a86ff", "#ff7fd0", "#f3efe0"];
+const TABLE = [[4, 4, 3], [4, 4, 4], [4, 5, 4], [5, 5, 4], [5, 5, 5], [5, 6, 5], [5, 6, 6], [6, 6, 6], [6, 6, 5], [6, 7, 6], [6, 7, 7], [6, 7, 6], [6, 8, 7], [6, 8, 6], [7, 8, 8], [7, 8, 7], [7, 9, 8], [7, 9, 7]];
+let cols, rows, N, K, level, sol, colr, endAt, led, paths, own, cov, covC, prog;
+let act = -1, pre, strokes, lastCol, hints, hist, mode, winT, flagT, auto, introT, moved;
+let flip, vc, vr, cell, gx, gy, bw, bh, ui, pop, doneT, ptr, pressT = {}, land;
+
+/* ------------------------------------------------------------------ generator */
+function spec(n) { return n <= TABLE.length ? TABLE[n - 1] : [7, 9, 7 + n % 3]; }
+/* Start from a board tiled by straight wires and mutate it: an end of one wire steals the neighbouring end of another,
+ * wires merge end-to-end or split. Every step keeps a full, non-self-touching cover, so the result is a valid solution. */
+function gen(cols, rows, k, rnd) {
+  const N = cols * rows, ri = n => (rnd() * n) | 0;
+  const nb = i => { const c = i % cols, o = []; if (i >= cols) o.push(i - cols); if (c < cols - 1) o.push(i + 1); if (i < N - cols) o.push(i + cols); if (c > 0) o.push(i - 1); return o; };
+  const P = [];
+  if (Math.abs(rows - k) <= Math.abs(cols - k)) for (let r = 0; r < rows; r++) P.push(Array.from({ length: cols }, (_, c) => r * cols + c));
+  else for (let c = 0; c < cols; c++) P.push(Array.from({ length: rows }, (_, r) => r * cols + c));
+  const o = new Int8Array(N), mark = () => P.forEach((p, i) => p.forEach(x => o[x] = i)); mark();
+  const clean = p => { for (let j = 0; j < p.length; j++) for (const n of nb(p[j])) if (n !== p[j - 1] && n !== p[j + 1] && p.indexOf(n) >= 0) return false; return true; };
+  for (let it = 0, IT = 2400 + N * 90; it < IT; it++) {
+    const pi = ri(P.length), A = P[pi], roll = rnd();
+    if (roll < .12 && P.length < k && A.length >= 6) { P.push(A.splice(3 + ri(A.length - 5))); mark(); continue; }
+    if (rnd() < .5) A.reverse(); const h = A[A.length - 1], ns = nb(h), n = ns[ri(ns.length)], qi = o[n]; if (qi === pi) continue;
+    const Q = P[qi]; if (Q[0] !== n && Q[Q.length - 1] !== n) continue; if (Q[0] !== n) Q.reverse();
+    if (P.length > k && roll > .7) { const M = A.concat(Q); if (clean(M)) { P[pi] = M; P.splice(qi, 1); mark(); } continue; }
+    if (Q.length <= 3) continue;
+    A.push(n); if (clean(A)) { Q.shift(); o[n] = pi; } else A.pop();
+  }
+  return P;
+}
+const bends = p => { let b = 0; for (let j = 2; j < p.length; j++) if (p[j] - p[j - 1] !== p[j - 1] - p[j - 2]) b++; return b; };
+function load(n) {
+  level = n; const sp = spec(n); cols = sp[0]; rows = sp[1]; N = cols * rows;
+  let bestS = -1e9; sol = null;
+  for (let a = 0; a < 5; a++) { const p = gen(cols, rows, sp[2], Lab.rng(n * 7919 + a * 131 + 17)), s = p.reduce((s, x) => s + (bends(x) || -5), 0); if (s > bestS) { bestS = s; sol = p; } }
+  K = sol.length; const rnd = Lab.rng(n * 313 + 5), ids = PAL.map((_, i) => i);
+  for (let i = ids.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0, t = ids[i]; ids[i] = ids[j]; ids[j] = t; }
+  colr = sol.map((_, i) => ids[i]);
+  endAt = new Int8Array(N).fill(-1); led = new Int8Array(N).fill(-1); own = new Int8Array(N).fill(-1); cov = new Float32Array(N); covC = new Int8Array(N);
+  sol.forEach((p, c) => { endAt[p[0]] = c; endAt[p[p.length - 1]] = c; });
+  let nl = N >= 56 ? 3 : N >= 42 ? 2 : N >= 30 ? 1 : 0; if (n > 22) nl--; if (n > 34) nl--;
+  sol.map((p, c) => c).sort((a, b) => sol[b].length - sol[a].length).slice(0, Math.max(0, nl)).forEach(c => { const p = sol[c]; if (p.length >= 7) led[p[(p.length / 2) | 0]] = c; });
+  paths = sol.map(() => []); hist = []; strokes = 0; lastCol = -1; hints = 0; act = -1; pre = null; auto = null; mode = "play"; winT = 0; flagT = 0; introT = 0; moved = false;
+  pop = sol.map(() => 0); doneT = sol.map(() => 0); layout();
+}
+const isDone = p => p.length > 1 && endAt[p[p.length - 1]] >= 0;
+const covered = () => { let n = 0; for (let i = 0; i < N; i++) if (own[i] >= 0) n++; return n; };
+const same = (a, b) => a.length === b.length && (a.every((v, i) => v === b[i]) || a.every((v, i) => v === b[b.length - 1 - i]));
+
+/* ------------------------------------------------------------------ layout */
+function layout() {
+  const p = Lab.play; land = p.w > p.h * 1.15; flip = land && rows > cols; vc = flip ? rows : cols; vr = flip ? cols : rows;
+  const U = Lab.clamp(Math.min(Lab.W, Lab.H) / 390, .85, 1.3);
+  if (land) {
+    const side = Lab.clamp(p.w * .2, 118, 190);
+    cell = Math.min((p.w - side * 2 - 12) / vc, (p.h - 26) / vr, 82); bw = vc * cell; bh = vr * cell; gx = p.x + (p.w - bw) / 2; gy = p.y + (p.h - bh) / 2;
+    const lx = (p.x + gx) / 2, rx = (gx + bw + p.x + p.w) / 2, my = p.y + p.h / 2, w = Math.min(120, side - 22), h = Math.min(48, (p.h - 50) / 3);
+    ui = { tx: lx, ty: my - 46, iy: my - 18, sy: my + 8, prev: { x: lx - 52, y: my + 30, w: 48, h: 46 }, next: { x: lx + 4, y: my + 30, w: 48, h: 46 },
+      btn: ["undo", "clear", "hint"].map((id, i) => ({ id, x: rx - w / 2, y: my + (i - 1) * (h + 12) - h / 2, w, h })), fs: 13 };
+  } else {
+    const top = 62 * U, bot = 76 * U;
+    cell = Math.min((p.w - 26) / vc, (p.h - top - bot - 26) / vr, 80); bw = vc * cell; bh = vr * cell; gx = p.x + (p.w - bw) / 2; gy = p.y + top + (p.h - top - bot - bh) / 2;
+    const w = Math.min(118, (p.w - 48) / 3), h = 48, x0 = Lab.W / 2 - (w * 3 + 20) / 2, y = p.y + p.h - bot / 2 - h / 2 - 2;
+    ui = { tx: Lab.W / 2, ty: p.y + 15 * U, iy: p.y + 38 * U, sy: p.y + 56 * U, prev: { x: Lab.W / 2 - 130, y: p.y + 2, w: 48, h: 48 }, next: { x: Lab.W / 2 + 82, y: p.y + 2, w: 48, h: 48 },
+      btn: ["undo", "clear", "hint"].map((id, i) => ({ id, x: x0 + i * (w + 10), y, w, h })), fs: 14 };
+  }
+  ui.prev.id = "prev"; ui.next.id = "next";
+}
+Lab.onResize(() => { if (sol) { if (act >= 0) up(); layout(); } });
+const CX = i => gx + ((flip ? (i / cols) | 0 : i % cols) + .5) * cell, CY = i => gy + ((flip ? i % cols : (i / cols) | 0) + .5) * cell;
+function pick(x, y, snap) {
+  let a = Math.floor((x - gx) / cell), b = Math.floor((y - gy) / cell);
+  if (snap) { a = Lab.clamp(a, 0, vc - 1); b = Lab.clamp(b, 0, vr - 1); } else if (a < 0 || b < 0 || a >= vc || b >= vr) return -1;
+  return flip ? a * cols + b : b * cols + a;
+}
+const hit = (x, y) => [ui.prev, ui.next].concat(ui.btn).find(b => x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 4 && y <= b.y + b.h + 4);
+
+/* ------------------------------------------------------------------ wiring */
+function recut() {   // other wires come back from the stroke snapshot, then get cut where the live wire crosses them
+  if (act >= 0 && pre) { const P = paths[act];
+    for (let c = 0; c < K; c++) { if (c === act) continue; const q = pre[c]; let n = q.length;
+      for (let j = 0; j < q.length; j++) if (P.indexOf(q[j]) >= 0) { n = j; break; }
+      if (n !== paths[c].length) { if (n < paths[c].length) { Lab.sfx("snap", { vol: .5, pitch: 1.2 }); fx.sparks(CX(q[n]), CY(q[n]), -Math.PI / 2, { n: 6, color: PAL[colr[c]], speed: 120 }); } paths[c] = q.slice(0, n); } } }
+  own.fill(-1); for (let c = 0; c < K; c++) for (const i of paths[c]) own[i] = c;
+}
+function step(n) {
+  const P = paths[act], L = P.length;
+  if (L > 1 && P[L - 2] === n) { P.pop(); Lab.sfx("tick", { pitch: .7, vol: .5 }); recut(); return true; }
+  const idx = P.indexOf(n); if (idx >= 0) { P.length = idx + 1; recut(); return true; }
+  if (isDone(P) || (endAt[n] >= 0 && endAt[n] !== act) || (led[n] >= 0 && led[n] !== act)) return false;
+  P.push(n); recut();
+  if (endAt[n] === act) { Lab.audio.tone({ f: 660, dur: .09, vol: .16, type: "triangle" }); Lab.audio.tone({ f: 990, dur: .2, vol: .15, type: "triangle", delay: .08 }); Lab.buzz(12); pop[act] = 1.3; fx.ring(CX(n), CY(n), { r0: cell * .2, r1: cell * .8, color: PAL[colr[act]], width: 3, life: .4 }); }
+  else if (led[n] === act) { Lab.sfx("chime", { vol: .5, pitch: 1.3 }); fx.burst(CX(n), CY(n), { n: 8, color: PAL[colr[act]], speed: 90, life: .4, size: 2.5 }); }
+  else Lab.sfx("tick", { pitch: Math.min(2, .85 + L * .055), vol: .7 });
+  return true;
+}
+function down(x, y) {
+  if (mode !== "play" || auto || act >= 0) return;
+  const b = hit(x, y); if (b) { pressT[b.id] = 1; ({ undo, clear, hint, prev: () => go(level - 1), next: () => go(level + 1) })[b.id](); return; }
+  const i = pick(x, y); if (i < 0) return; const c = endAt[i] >= 0 ? endAt[i] : own[i]; if (c < 0) return;
+  pre = paths.map(p => p.slice()); act = c; ptr = { x, y };
+  if (endAt[i] === c) paths[c] = [i]; else paths[c].length = paths[c].indexOf(i) + 1;
+  recut(); Lab.sfx("tick", { pitch: 1 }); pop[c] = Math.max(pop[c], .7); Lab.buzz(6);
+}
+function move(x, y) {
+  if (act < 0 || auto) return; ptr = { x, y };
+  const tgt = pick(x, y, true);
+  for (let guard = 0; guard < 24; guard++) {   // walk the wire head towards the finger one pad at a time (fast drags skip pads)
+    const P = paths[act], h = P[P.length - 1]; if (h === tgt) break;
+    const dc = tgt % cols - h % cols, dr = ((tgt / cols) | 0) - ((h / cols) | 0), a = dc ? h + Math.sign(dc) : -1, b = dr ? h + Math.sign(dr) * cols : -1;
+    const first = Math.abs(dc) >= Math.abs(dr) ? a : b, second = first === a ? b : a;
+    if (!(first >= 0 && step(first)) && !(second >= 0 && step(second))) break;
+  }
+}
+function up() {
+  if (act < 0 || auto) return; const c = act; act = -1;
+  if (paths.some((p, i) => p.length !== pre[i].length || p.some((v, j) => v !== pre[i][j]))) {
+    hist.push({ paths: pre, strokes, lastCol }); if (hist.length > 80) hist.shift();
+    if (lastCol !== c) { strokes++; lastCol = c; } moved = true; check();
+  }
+  pre = null;
+}
+function check() {
+  if (!paths.every(isDone)) return;
+  if (covered() === N) return win();
+  flagT = 1.8; Lab.toast("Cover every pad", 1200, { y: .13 }); Lab.sfx("warn", { vol: .5 });
+}
+function undo() { if (!hist.length) return Lab.sfx("tick", { pitch: .5, vol: .5 }); const h = hist.pop(); paths = h.paths; strokes = h.strokes; lastCol = h.lastCol; recut(); Lab.sfx("swish", { pitch: 1.3, vol: .6 }); }
+function clear() { if (!covered() && !strokes) return Lab.sfx("tick", { pitch: .5, vol: .5 }); paths = sol.map(() => []); hist = []; strokes = 0; lastCol = -1; recut(); Lab.sfx("slide", { vol: .6 }); }
+function hint() {
+  if (mode !== "play" || auto || act >= 0) return;
+  let c = paths.findIndex((p, i) => !isDone(p) && !same(p, sol[i])); if (c < 0) c = paths.findIndex((p, i) => !same(p, sol[i])); if (c < 0) return;
+  hist.push({ paths: paths.map(p => p.slice()), strokes, lastCol }); hints++; pre = paths.map(p => p.slice()); act = c; paths[c] = [sol[c][0]]; recut();
+  auto = { i: 1, t: 0 }; Lab.sfx("chime", { pitch: .9 }); if (hints === 1) Lab.toast("Hint used: −1 star", 1100, { y: .13 });
+}
+function go(n) { if (n < 1 || n > prog.max) return Lab.sfx("tick", { pitch: .5, vol: .5 }); prog.lvl = n; Lab.store.set("prog", prog); load(n); Lab.setScore(n); Lab.sfx("flip"); }
+const rating = () => Math.max(1, Math.min(strokes <= K ? 3 : strokes <= K + 2 ? 2 : 1, 3 - hints));
+function win() {
+  mode = "won"; winT = 0; const st = rating(), lv = level;
+  prog.stars[lv] = Math.max(prog.stars[lv] || 0, st); prog.max = Math.max(prog.max, lv + 1); prog.lvl = lv + 1; Lab.store.set("prog", prog);
+  for (let c = 0; c < K; c++) Lab.after(.12 + c * .1, () => { pop[c] = 1.5; Lab.audio.combo(c, { vol: .16 }); for (const e of [sol[c][0], sol[c][sol[c].length - 1]]) fx.burst(CX(e), CY(e), { n: 7, color: PAL[colr[c]], speed: 130, life: .5, size: 3 }); });
+  const total = Object.values(prog.stars).reduce((a, b) => a + b, 0);
+  Lab.after(.75 + K * .1, () => Lab.win({ title: st === 3 ? "Flawless routing" : "Board is live", message: st === 3 ? "Every wire laid in a single stroke." : hints ? "Solved with a little help." : "One stroke per wire earns the third star.",
+    score: lv, scoreLabel: "Board", button: "Next board", stats: [["Strokes", strokes + " / par " + K], ["Rating", "★".repeat(st) + "☆".repeat(3 - st)], ["Stars banked", total]] }));
+}
+
+function start() {
+  prog = Lab.store.get("prog", null) || { lvl: 1, max: 1, stars: {} };
+  load(prog.lvl); Lab.setScore(level);
+  Lab.input.onDown = [down]; Lab.input.onMove = [move]; Lab.input.onUp = [up];
+  Lab.input.onKey = [k => { if (mode !== "play") return; k = k.toLowerCase(); if (k === "z" || k === "backspace") undo(); else if (k === "c") clear(); else if (k === "h") hint(); else if (k === "arrowleft") go(level - 1); else if (k === "arrowright") go(level + 1); }];
+  Lab.expose({ get level() { return level; }, get cols() { return cols; }, get rows() { return rows; }, get pairs() { return K; }, get strokes() { return strokes; }, get hints() { return hints; }, get mode() { return mode; },
+    get paths() { return paths.map(p => p.slice()); }, get solution() { return sol.map(p => p.slice()); }, get done() { return paths.filter(isDone).length; }, get covered() { return covered(); },
+    get progress() { return JSON.parse(JSON.stringify(prog)); }, get buttons() { return [ui.prev, ui.next].concat(ui.btn).map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); },
+    get leds() { return Array.from(led); }, xy(i) { return [CX(i), CY(i)]; }, rating, go });
+  if (level === 1) Lab.hint("Drag from a terminal to its matching twin");
+  else if (led.some(v => v >= 0) && !prog.bulb) { prog.bulb = 1; Lab.store.set("prog", prog); Lab.hint("Bulbs only light for a wire of their own colour"); }
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+
+/* ------------------------------------------------------------------ update + draw */
+function tick(dt) {
+  if (auto) { auto.t += dt; while (auto && auto.t > .05) { auto.t -= .05; step(sol[act][auto.i++]); if (auto.i >= sol[act].length) { auto = null; act = -1; pre = null; lastCol = -1; moved = true; check(); } } }
+  for (let i = 0; i < N; i++) { cov[i] = Lab.damp(cov[i], own[i] >= 0 ? 1 : 0, 14, dt); if (own[i] >= 0) covC[i] = own[i]; }
+  for (let c = 0; c < K; c++) { pop[c] = Lab.damp(pop[c], 0, 6, dt); doneT[c] = isDone(paths[c]) ? doneT[c] + dt : 0; }
+  for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5);
+  flagT = Math.max(0, flagT - dt); introT += dt; if (mode === "won") winT += dt;
+  if (mode !== "demo") Lab.music.intensity(.15 + .7 * covered() / N);
+}
+function bg() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("lw-bg:" + W + "x" + H, W, H, (g, w, h) => {
+    draw.vgrad(g, 0, 0, w, h, ["#17594a", "#0d382f", "#08241f"]);
+    const r = Lab.rng(11); g.lineCap = "round"; g.lineJoin = "round";
+    for (let i = 0; i < 46; i++) {   // decorative etched traces
+      let x = r() * w, y = r() * h; const a = .05 + r() * .06; g.strokeStyle = `rgba(150,235,190,${a})`; g.fillStyle = `rgba(150,235,190,${a + .03})`; g.lineWidth = 2 + r() * 3;
+      g.beginPath(); g.moveTo(x, y); for (let s = 0; s < 3; s++) { const d = 30 + r() * 110, k = (r() * 8) | 0; x += Math.cos(k * TAU / 8) * d; y += Math.sin(k * TAU / 8) * d; g.lineTo(x, y); } g.stroke();
+      g.beginPath(); g.arc(x, y, 4 + r() * 3, 0, TAU); g.fill();
+    }
+    g.fillStyle = "rgba(240,236,220,.07)"; g.font = Lab.font(11, 700);
+    for (let i = 0; i < 16; i++) g.fillText(["R", "C", "U", "Q", "D", "J"][(r() * 6) | 0] + ((r() * 40) | 0), r() * w, r() * h);
+  });
+}
+function glyph(c, k, x, y, r) {   // a shape per colour so pairs never rely on hue alone
+  c.fillStyle = c.strokeStyle = "rgba(20,30,28,.62)"; c.lineWidth = r * .34; c.lineCap = "round";
+  if (k === 0) draw.circle(c, x, y, r * .55, c.fillStyle); else if (k === 1) c.fillRect(x - r * .5, y - r * .5, r, r);
+  else if (k === 2) draw.poly(c, x, y + r * .1, r * .72, 3, -Math.PI / 2, c.fillStyle); else if (k === 3) draw.poly(c, x, y, r * .72, 4, 0, c.fillStyle);
+  else if (k === 4) { c.beginPath(); c.moveTo(x - r * .6, y); c.lineTo(x + r * .6, y); c.moveTo(x, y - r * .6); c.lineTo(x, y + r * .6); c.stroke(); }
+  else if (k === 5) draw.star(c, x, y, r * .8, c.fillStyle, 5, .45); else if (k === 6) { c.beginPath(); c.moveTo(x - r * .6, y); c.lineTo(x + r * .6, y); c.stroke(); }
+  else if (k === 7) { c.beginPath(); c.arc(x, y, r * .5, 0, TAU); c.stroke(); } else { c.beginPath(); c.moveTo(x - r * .5, y - r * .5); c.lineTo(x + r * .5, y + r * .5); c.moveTo(x + r * .5, y - r * .5); c.lineTo(x - r * .5, y + r * .5); c.stroke(); }
+}
+function trace(c, P, ex) { c.beginPath(); for (let i = 0; i < P.length; i++) c[i ? "lineTo" : "moveTo"](CX(P[i]), CY(P[i])); if (ex) c.lineTo(ex.x, ex.y); }
+function button(c, b, label, on) {
+  const p = pressT[b.id] || 0, s = 1 - p * .07; c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2); c.scale(s, s); c.globalAlpha = on ? 1 : .38;
+  draw.rect(c, -b.w / 2, -b.h / 2 + 3, b.w, b.h, 12, "rgba(4,20,17,.5)"); draw.rect(c, -b.w / 2, -b.h / 2, b.w, b.h, 12, p > .1 ? "#2a7a64" : "#1c5a4a", "rgba(240,236,220,.55)", 1.6);
+  draw.text(c, label, 0, label.length < 2 ? -2 : 1, { size: label.length < 2 ? 30 : ui.fs, color: "#f3efe0", weight: 800 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, s = bg(); c.drawImage(s, -40, -40, s.w, s.h);
+  const intro = Lab.ease.outCubic(Lab.clamp(introT / .35, 0, 1)), pad = 12, lw = cell * .3;
+  c.save(); c.globalAlpha = intro; c.translate(0, (1 - intro) * 14);
+  // the board
+  draw.rect(c, gx - pad, gy - pad + 5, bw + pad * 2, bh + pad * 2, 16, "rgba(0,0,0,.28)");
+  draw.rect(c, gx - pad, gy - pad, bw + pad * 2, bh + pad * 2, 16, "#1b5e4c", "#0a2a24", 2);
+  draw.rect(c, gx - pad + 5, gy - pad + 5, bw + pad * 2 - 10, bh + pad * 2 - 10, 12, null, "rgba(240,236,220,.28)", 1.4);
+  for (const [a, b] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { const x = gx - pad + 5 + a * (bw + pad * 2 - 10), y = gy - pad + 5 + b * (bh + pad * 2 - 10); draw.circle(c, x, y, 5, "#d9b35a"); draw.circle(c, x, y, 2.2, "#0a2a24"); }
+  c.strokeStyle = "rgba(255,255,255,.05)"; c.lineWidth = 1; c.beginPath();
+  for (let i = 1; i < vc; i++) { c.moveTo(gx + i * cell, gy + 4); c.lineTo(gx + i * cell, gy + bh - 4); } for (let i = 1; i < vr; i++) { c.moveTo(gx + 4, gy + i * cell); c.lineTo(gx + bw - 4, gy + i * cell); } c.stroke();
+  for (let i = 0; i < N; i++) {
+    const x = CX(i), y = CY(i);
+    if (cov[i] > .02) { c.globalAlpha = intro * cov[i] * .2; draw.rect(c, x - cell / 2 + 2.5, y - cell / 2 + 2.5, cell - 5, cell - 5, cell * .16, PAL[colr[covC[i]]]); c.globalAlpha = intro; }
+    if (endAt[i] < 0) { draw.circle(c, x, y, cell * .1, "#0a2a24", "rgba(190,230,205,.3)", 1.5);
+      if (flagT > 0 && own[i] < 0) draw.circle(c, x, y, cell * (.26 + .08 * Math.sin(t * 12)), null, `rgba(255,236,170,${Math.min(1, flagT)})`, 2.5); }
+  }
+  // tutorial ghost: a dot runs the first wire until the player makes a stroke
+  if (mode === "play" && level === 1 && !moved && act < 0) { const p = sol[0], u = (t * .8) % 1.4, f = Math.min(.999, u) * (p.length - 1), i = f | 0, k = f - i;
+    draw.circle(c, Lab.lerp(CX(p[i]), CX(p[i + 1]), k), Lab.lerp(CY(p[i]), CY(p[i + 1]), k), cell * .17, `rgba(255,255,255,${u > 1 ? (1.4 - u) * 1.2 : .5})`); }
+  // wires: shadow pass, then bodies, then pulses on live ones
+  c.lineCap = "round"; c.lineJoin = "round";
+  for (let c2 = 0; c2 < K; c2++) { const P = paths[c2]; if (P.length < 2 && c2 !== act) continue; c.save(); c.translate(0, 3); trace(c, P); c.strokeStyle = "rgba(3,18,15,.42)"; c.lineWidth = lw + 3; c.stroke(); c.restore(); }
+  for (let c2 = 0; c2 < K; c2++) {
+    const P = paths[c2], col = PAL[colr[c2]], live = isDone(P); if (P.length < 1) continue;
+    let ex = null; if (c2 === act && ptr && !auto && !live) { const h = P[P.length - 1], dx = ptr.x - CX(h), dy = ptr.y - CY(h), d = Math.hypot(dx, dy) || 1, m = Math.min(d, cell * .46); ex = { x: CX(h) + dx / d * m, y: CY(h) + dy / d * m }; }
+    trace(c, P, ex); c.strokeStyle = Lab.color.shade(col, -.28); c.lineWidth = lw + (c2 === act ? 3 : 0); c.stroke();
+    c.strokeStyle = col; c.lineWidth = lw * .72; c.stroke();
+    c.save(); c.translate(-lw * .12, -lw * .14); trace(c, P, ex); c.strokeStyle = "rgba(255,255,255,.3)"; c.lineWidth = lw * .16; c.stroke(); c.restore();
+    if (live) { trace(c, P); c.setLineDash([cell * .22, cell * 1.5]); c.lineDashOffset = -(t * cell * 3.2 + c2 * 17); c.strokeStyle = `rgba(255,255,255,${mode === "won" ? .95 : .75})`; c.lineWidth = lw * .34; c.stroke(); c.setLineDash([]); }
+    else if (c2 === act && ex) draw.circle(c, ex.x, ex.y, lw * .78, null, "rgba(255,255,255,.7)", 2);
+  }
+  // inline bulbs + terminals
+  for (let i = 0; i < N; i++) {
+    const x = CX(i), y = CY(i);
+    if (led[i] >= 0) { const col = PAL[colr[led[i]]], on = own[i] === led[i]; if (on) draw.glow(c, x, y, cell * .6, col, .5 + .2 * Math.sin(t * 6));
+      draw.rect(c, x - cell * .2, y - cell * .2, cell * .4, cell * .4, cell * .08, "#e8e2cf", "#0a2a24", 1.5); draw.circle(c, x, y, cell * .13, on ? Lab.color.shade(col, .35) : Lab.color.shade(col, -.45), on ? "#fff" : null, 1.5); }
+    const e = endAt[i]; if (e < 0) continue;
+    const col = PAL[colr[e]], live = isDone(paths[e]), r = cell * .33 * (1 + pop[e] * .22) * (mode === "won" ? 1 + .05 * Math.sin(t * 9 + e) : 1);
+    if (live) draw.glow(c, x, y, r * 2.3, col, .38 + .14 * Math.sin(t * 5 + e));
+    draw.circle(c, x, y + 2.5, r, "rgba(3,18,15,.45)"); draw.circle(c, x, y, r, "#d9b35a", "#8a6a2a", 1.5);
+    draw.circle(c, x, y, r * .76, live || e === act ? col : Lab.color.shade(col, -.12)); draw.circle(c, x - r * .22, y - r * .26, r * .2, "rgba(255,255,255,.4)");
+    glyph(c, colr[e], x, y, r * .5);
+  }
+  c.restore();
+  if (mode === "demo") return;
+  // labels + buttons
+  const best = prog.stars[level] || 0;
+  draw.text(c, "BOARD " + level, ui.tx, ui.ty, { size: 19, color: "#f3efe0", weight: 800 });
+  for (let i = 0; i < 3; i++) draw.star(c, ui.tx + (i - 1) * 19, ui.iy, 7.5, i < best ? "#ffd166" : "rgba(240,236,220,.22)", 5, .5);
+  draw.text(c, "strokes " + strokes + "  ·  par " + K, ui.tx, ui.sy, { size: 12.5, color: strokes > K ? "#ffb38a" : "rgba(240,236,220,.75)", weight: 700 });
+  button(c, ui.prev, "‹", level > 1); button(c, ui.next, "›", level < prog.max);
+  button(c, ui.btn[0], "UNDO", hist.length > 0); button(c, ui.btn[1], "CLEAR", covered() > 0); button(c, ui.btn[2], "HINT", mode === "play" && !auto);
+}
+Lab.boot();
+})();
+</script></body></html>

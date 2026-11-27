@@ -1895,7 +1895,8 @@ window.GDL_CATALOG = {
    "n": 43,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--43-plumpling.jpg"
   },
   {
    "id": "PhoneGameLab/44-haberdash",
@@ -1914,7 +1915,8 @@ window.GDL_CATALOG = {
    "n": 44,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--44-haberdash.jpg"
   },
   {
    "id": "PhoneGameLab/45-shoo",
@@ -1931,24 +1933,27 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 45,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--45-shoo.jpg"
   },
   {
-   "id": "PhoneGameLab/46-connect-dots",
-   "path": "PhoneGameLab/games/46-connect-dots/index.html",
+   "id": "PhoneGameLab/46-live-wires",
+   "path": "PhoneGameLab/games/46-live-wires/index.html",
    "collection": "PhoneGameLab",
-   "title": "Connect Dots",
-   "desc": "Draw lines between pairs — no crossings.",
+   "title": "Live Wires",
+   "desc": "Link every pair. Cover the board.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 46,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--46-connect-dots.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/47-pipe-rotate",

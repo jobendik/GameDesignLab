@@ -120,8 +120,8 @@
 <div class="ov" id="ovMenu"><div class="card">
   <h1>FURNITURE<br>FORTS</h1>
   <p>Sir Biscuit is asleep. The house is not.</p>
-  <ol><li><b>Drag furniture</b> into a fort around him.</li><li>Check <b>tonight's trouble</b>, then hit READY.</li><li>If he hits the <b>floor</b> he wakes up. Three wake-ups and it's morning.</li></ol>
-  <p class="keys">Taller, cozier forts score more &middot; R or right-click turns a held piece &middot; P pause &middot; M mute</p>
+  <ol><li><b>Drag furniture</b> into a fort around him.</li><li>Check <b>tonight's trouble</b>, then hit READY.</li><li>If anything <b>hits him</b>, or he falls to the <b>floor</b>, he wakes. Three wake-ups and it's morning.</li></ol>
+  <p class="keys">Tall forts and cushions snug around him score more &middot; R or right-click turns a held piece &middot; P pause &middot; M mute</p>
   <button class="big" id="bPlay">PLAY</button>
   <p class="keys">Best <b id="mBest">0</b></p>
 </div></div>
@@ -134,7 +134,7 @@
 </div></div>
 <script>
 (() => { 'use strict';
-const { Engine, Bodies, Body, Composite, Events, Query } = Matter;
+const { Engine, Bodies, Body, Composite, Constraint, Events, Query } = Matter;
 const Q = new URLSearchParams(location.search), AUTOSTART = Q.get('autostart') === '1', NOPAUSE = Q.get('nopause') === '1';
 const REDUCED = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const BEST_KEY = 'gdl:best:games/furniture-forts', TAU = Math.PI * 2, INK = '#1b1633';
@@ -148,7 +148,7 @@ function rnd() { rs = (rs + 0x6D2B79F5) >>> 0; let t = rs; t = Math.imul(t ^ t >
 let best = 0; try { best = +JSON.parse(localStorage.getItem(BEST_KEY)) || 0; } catch (e) { }
 
 const TYPES = {
-  table:   { w: 164, h: 98,  d: .0015, fr: .75, ch: 2,  wood: 1, name: 'Table' },
+  table:   { w: 150, h: 64,  d: .0015, fr: .75, ch: 2,  wood: 1, name: 'Low table' },
   shelf:   { w: 52,  h: 122, d: .0026, fr: .75, ch: 3,  wood: 1, name: 'Bookcase' },
   chest:   { w: 76,  h: 52,  d: .0020, fr: .8,  ch: 5,  wood: 1, name: 'Toy chest' },
   beanbag: { w: 88,  h: 54,  d: .0026, fr: 1,   ch: 22, wood: 0, name: 'Beanbag' },
@@ -228,7 +228,7 @@ function resetWorld() {
 }
 function makePiece(type, x, y, ang) {
   const T = TYPES[type], o = { density: T.d, friction: T.fr, frictionStatic: .8, restitution: .02, frictionAir: .012, collisionFilter: { category: C_FURN, mask: MASK_F } }; let b;
-  if (type === 'table') { const po = { density: T.d, chamfer: { radius: 2 } }; b = Body.create(Object.assign({ parts: [Bodies.rectangle(x, y - 42, 164, 14, po), Bodies.rectangle(x - 76, y + 7, 12, 84, po), Bodies.rectangle(x + 76, y + 7, 12, 84, po)] }, o)); }
+  if (type === 'table') { const po = { density: T.d, chamfer: { radius: 2 } }; b = Body.create(Object.assign({ parts: [Bodies.rectangle(x, y - 25, 150, 14, po), Bodies.rectangle(x - 69, y + 7, 12, 50, po), Bodies.rectangle(x + 69, y + 7, 12, 50, po)] }, o)); }
   else b = Bodies.rectangle(x, y, T.w, T.h, Object.assign({ chamfer: { radius: T.ch } }, o));
   b.gd = { kind: 'piece', type, id: ++uid, off: { x: x - b.position.x, y: y - b.position.y }, pop: 1, ghost: false };
   if (ang) Body.setAngle(b, ang);
@@ -241,7 +241,7 @@ function solids(except) { const l = [stool, teddy]; for (const p of G.pieces) if
 /* ───────────── run flow ───────────── */
 function startRun() {
   reseed(); resetWorld(); uid = 0;
-  Object.assign(G, { mode: 'build', night: 1, score: 0, hearts: 3, tray: {}, simT: 0, t: 0, height: 0, cozy: 0, tallest: 0, safeNights: 0, placed: 0, shownOver: false });
+  Object.assign(G, { mode: 'build', night: 1, score: 0, hearts: 3, tray: {}, simT: 0, t: 0, height: 0, cozy: 0, tallest: 0, safeNights: 0, placed: 0, stolen: 0, shownOver: false, newBest: false });
   for (const k of ORDER) G.tray[k] = 0;
   Object.assign(G.tray, { table: 1, shelf: 2, cushion: 2, bolster: 1, plank: 1 });
   shown = 0; dark = 0; paused = false; timeScale = 1; slowT = 0;
@@ -262,7 +262,7 @@ function beginBuild(first) {
   G.plan = planNight(G.night); measure(); renderTray(got); renderFore();
   $('dock').classList.remove('off'); $('bReady').classList.remove('dim'); $('bReady').textContent = 'READY';
   AU.music('calm'); banner('NIGHT ' + G.night, '');
-  setHint(G.night === 1 ? 'Drag furniture from the shelf and build a fort around Sir Biscuit' : G.night === 2 ? 'Fix it up — everything still standing is yours to keep' : '');
+  setHint(G.night === 1 ? 'Drag furniture from the shelf to build a fort around Sir Biscuit' : G.night === 2 ? 'Fix it up — everything still standing is yours to keep' : '');
 }
 function startSiege() {
   if (G.mode !== 'build') return; if (drag) endDrag();
@@ -276,7 +276,7 @@ function planNight(n) {
   const ev = [], kinds = [], add = (t, fn) => ev.push({ t, fn }), side = rnd() < .5 ? -1 : 1;
   const pillows = (t0, cnt, sd) => { kinds.push({ k: 'pillows', side: sd }); const gap = Math.max(.4, .95 - .05 * n);
     for (let i = 0; i < cnt; i++) { const s = sd === 0 ? (i % 2 ? 1 : -1) : sd, lob = n >= 3 && i % 3 === 2, t = t0 + i * gap; add(t - .5, () => warn(s, lob)); add(t, () => throwPillow(s, lob, n)); } return t0 + cnt * gap + .8; };
-  const dog = (t0, sd) => { kinds.push({ k: 'dog', side: sd }); add(t0 - .9, () => { warn(sd, false, true); AU.bark(); }); add(t0, () => spawnDog(sd, n)); return t0 + 3.2; };
+  const dog = (t0, sd) => { kinds.push({ k: 'dog', side: sd }); add(t0 - .9, () => { warn(sd, false, true); AU.bark(); }); add(t0, () => spawnDog(sd, n)); return t0 + 4; };
   const quake = t0 => { kinds.push({ k: 'quake', side: 0 }); add(t0, () => startQuake(n)); return t0 + Math.min(5, 3 + .15 * n) + .6; };
   const toys = t0 => { kinds.push({ k: 'toys', side: 0 }); const cnt = Math.min(26, 6 + 2 * n); for (let i = 0; i < cnt; i++) add(t0 + i * .14, () => dropToy(n)); return t0 + cnt * .14 + 1.4; };
   let t = 1.3;
@@ -294,7 +294,9 @@ function stepSiege() {
   G.siegeT += DT; const ev = G.plan.ev;
   while (G.ei < ev.length && ev[G.ei].t <= G.siegeT) ev[G.ei++].fn();
   if (G.dog) stepDog();
-  if (G.quake) { const q = G.quake; q.t += DT; const env = Math.min(1, q.t / .4, (q.dur - q.t) / .5), a = q.A * env * Math.sin(q.t * TAU * q.f);
+  if (G.quake) { const q = G.quake; q.t += DT; q.ph += TAU * (.8 + .9 * q.t / q.dur) * DT; const env = clamp(Math.min(q.t / .4, (q.dur - q.t) / .5), 0, 1), a = q.A * env * Math.sin(q.ph);
+    q.hop -= DT; if (q.hop <= 0) { q.hop = .42; const J = q.J * env; shake = Math.max(shake, 3 + J * 1.5);
+      for (const b of G.pieces.concat(teddy)) if (Math.abs(b.velocity.y) < 1.5) Body.setVelocity(b, { x: b.velocity.x, y: b.velocity.y - J * (.6 + .5 * rnd()) }); }
     for (const b of G.pieces) Body.applyForce(b, b.position, { x: b.mass * .001 * a, y: 0 });
     Body.applyForce(teddy, teddy.position, { x: teddy.mass * .001 * a, y: 0 }); for (const b of G.proj) Body.applyForce(b, b.position, { x: b.mass * .001 * a, y: 0 });
     quakeX = -a * 16; if (Math.random() < .3) dust((Math.random() * 2 - 1) * RW, 0, 1);
@@ -304,9 +306,9 @@ function stepSiege() {
 }
 function endSiege() {
   for (const b of G.proj) { puff(b.position.x, b.position.y, 3); Composite.remove(world, b); } G.proj = [];
-  if (G.dog) { Composite.remove(world, G.dog.b); G.dog = null; } G.quake = null; quakeX = 0; warns.length = 0;
+  if (G.dog) { dogRelease(); Composite.remove(world, G.dog.b); G.dog = null; } G.quake = null; quakeX = 0; warns.length = 0;
   measure(); G.mode = 'tally'; G.t = 0; const n = G.night; G.tallest = Math.max(G.tallest, G.height);
-  if (!G.breached) { const sp = 100 * n, hp = Math.round(G.height * n / 2), cp = Math.round(G.cozy * 100 * n / 2);
+  if (!G.breached) { const sp = 100 * n, hp = Math.round(G.height * n / 2), cp = Math.round(G.cozy * 100) * n;
     G.gain = sp + hp + cp; G.score += G.gain; G.safeNights++;
     floatText(0, -G.height - 96, 'SAFE +' + sp, '#9df0a8', 0); floatText(0, -G.height - 66, 'HEIGHT +' + hp, '#ffd166', .35); floatText(0, -G.height - 36, 'COZY +' + cp, '#bfe3ff', .7);
     banner('SAFE & SNUG!', 'good'); AU.safe(); for (let i = 0; i < 3; i++) AU.coin(i + 3); confetti(); }
@@ -314,10 +316,10 @@ function endSiege() {
   AU.music('calm'); saveBest();
 }
 function afterTally() { if (G.hearts <= 0) return gameOver(); G.night++; beginBuild(false); }
-function breach() {
+function breach(word) {
   if (G.breached) return; G.breached = true; G.breachT = 0; G.hearts--; teddy.gd.fallen = true; teddy.gd.ouch = 1;
   if (!REDUCED) { timeScale = .25; slowT = .7; } shake = Math.max(shake, 14); AU.squeak();
-  for (let i = 0; i < 10; i++) star(teddy.position.x, teddy.position.y - 10); floatText(teddy.position.x, teddy.position.y - 50, 'BONK!', '#ff7a6b');
+  for (let i = 0; i < 10; i++) star(teddy.position.x, teddy.position.y - 10); floatText(teddy.position.x, teddy.position.y - 50, word || 'BONK!', '#ff7a6b');
 }
 function gameOver() {
   G.mode = 'over'; G.t = 0; G.shownOver = false; const nb = saveBest(); G.newBest = nb || G.newBest; AU.music('off'); AU.over(); $('dock').classList.add('off'); setHint('');
@@ -336,7 +338,7 @@ function throwPillow(side, lob, n) {
   const pw = 1 + .14 * n, sz = Math.min(1.5, 1 + .04 * n), x0 = side * (RW + 30), y0 = -(70 + rnd() * 150);
   let tx = teddy.position.x + (rnd() - .5) * 26, ty = teddy.position.y + (rnd() - .5) * 26; if (teddy.gd.fallen) ty = -60;
   const N = lob ? 78 : Math.max(30, 58 - 2.5 * n);
-  const b = Bodies.rectangle(x0, y0, 38 * sz, 26 * sz, { chamfer: { radius: 10 }, density: .0013 * pw, restitution: .25, friction: .5, frictionAir: .001, collisionFilter: { category: C_PROJ, mask: MASK_P } });
+  const b = Bodies.rectangle(x0, y0, 38 * sz, 26 * sz, { chamfer: { radius: 10 }, density: .002 * pw, restitution: .25, friction: .5, frictionAir: .001, collisionFilter: { category: C_PROJ, mask: MASK_P } });
   b.gd = { kind: 'pillow', age: 0, sq: 0, sz, life: 5.5, hue: n >= 6 ? 1 : 0 };
   Body.setVelocity(b, { x: (tx - x0) / N, y: (ty - y0) / N - .5 * GR * N }); Body.setAngularVelocity(b, -side * .06);
   Composite.add(world, b); G.proj.push(b); AU.whoosh(n);
@@ -351,25 +353,41 @@ function dropToy(n) {
 function spawnDog(side, n) {
   const b = Bodies.circle(side * (RW + 50), -23, 22, { density: .006, friction: .05, frictionAir: .02, restitution: .05, inertia: Infinity, collisionFilter: { category: C_PROJ, mask: MASK_P } });
   b.gd = { kind: 'dog' }; Composite.add(world, b);
-  G.dog = { b, dir: -side, P: 9 + 3.5 * n, vmax: Math.min(8, 4.6 + .22 * n), t: 0, stuck: 0, prog: 5, state: 'run', jumps: n >= 6 ? 2 : 1, jv: Math.min(11, 7 + .4 * n) };
+  G.dog = { b, dir: -side, P: 12 + 4 * n, vmax: Math.min(8, 4.6 + .22 * n), t: 0, stuck: 0, prog: 5, state: 'run', jumps: 1, jv: Math.min(10, 7 + .3 * n), touch: null, c: null, grab: null };
+}
+function dogRelease(lost) {
+  const d = G.dog; if (!d || !d.grab) return; Composite.remove(world, d.c); const p = d.grab; d.c = d.grab = null;
+  if (lost || Math.abs(p.position.x) > RW - 10) { puff(p.position.x, p.position.y, 6); removePiece(p); G.stolen++; floatText(clamp(p.position.x, -RW + 80, RW - 80), -96, 'STOLEN!', '#ff7a6b'); renderTray(); }
+  else p.collisionFilter.mask = MASK_F;
 }
 function stepDog() {
   const d = G.dog, b = d.b; d.t += DT; d.prog = d.prog * .93 + Math.abs(b.velocity.x) * .07;
-  if (Math.abs(b.velocity.x) < d.vmax || b.velocity.x * d.dir < 0) Body.applyForce(b, b.position, { x: d.dir * (.001 * (.75 * d.P + .1 * b.mass)), y: 0 });
+  const vm = d.state === 'drag' ? d.vmax * .6 : d.vmax, leave = () => { d.state = 'leave'; b.collisionFilter.mask = C_WORLD; if (b.position.x * d.dir > 0 === false) { } };
+  if (Math.abs(b.velocity.x) < vm || b.velocity.x * d.dir < 0) Body.applyForce(b, b.position, { x: d.dir * .001 * (.8 * d.P + .1 * b.mass), y: 0 });
   if (d.state === 'run') { if (d.t > .5 && d.prog < .5) d.stuck += DT; else d.stuck = 0;
-    if (d.stuck > .55) { d.stuck = 0; if (d.jumps > 0) { d.jumps--; Body.setVelocity(b, { x: d.dir * 4.5, y: -d.jv }); d.prog = 4; AU.bark(); } else { d.state = 'leave'; d.dir = -d.dir; b.collisionFilter.mask = C_WORLD; AU.whine(); floatText(b.position.x, -70, '...', '#fff3d6'); } }
-    if (d.t > 6.5) { d.state = 'leave'; b.collisionFilter.mask = C_WORLD; } }
-  if (Math.abs(b.position.x) > RW + 70 && b.position.x * d.dir > 0) { Composite.remove(world, b); G.dog = null; }
+    if (d.stuck > .5) { d.stuck = 0; const p = d.touch;
+      if (p && p.gd.kind === 'piece' && G.pieces.indexOf(p) >= 0) {                      // blocked by furniture: he steals it
+        d.state = 'drag'; d.grab = p; d.dir = -d.dir; d.prog = 4; d.dragT = 0; p.collisionFilter.mask = MASK_F & ~C_WALL;
+        d.c = Constraint.create({ bodyA: b, bodyB: p, length: Math.hypot(p.position.x - b.position.x, p.position.y - b.position.y), stiffness: .35, damping: .1 }); Composite.add(world, d.c);
+        AU.bark(); floatText(b.position.x, b.position.y - 54, 'MINE!', '#e8a95c'); }
+      else if (d.jumps > 0) { d.jumps--; Body.setVelocity(b, { x: d.dir * 4.5, y: -d.jv }); d.prog = 4; AU.bark(); }
+      else { d.dir = -d.dir; leave(); AU.whine(); } }
+    if (d.t > 7) leave(); }
+  else if (d.state === 'drag') { d.dragT += DT; if (d.dragT > .6 && d.prog < .4) d.stuck += DT; else d.stuck = 0;
+    if (d.stuck > 1.2) { dogRelease(); leave(); AU.whine(); floatText(b.position.x, b.position.y - 54, 'too heavy...', '#fff3d6'); } }
+  if (Math.abs(b.position.x) > RW + 70 && b.position.x * d.dir > 0) { dogRelease(true); Composite.remove(world, b); G.dog = null; }
 }
-function startQuake(n) { G.quake = { t: 0, dur: Math.min(5, 3 + .15 * n), A: Math.min(1.25, .3 + .065 * n), f: 2.1 }; AU.rumble(G.quake.dur, G.quake.A); banner('SPIN CYCLE!', 'bad'); }
+function startQuake(n) { G.quake = { t: 0, dur: Math.min(5, 3 + .15 * n), A: Math.min(1.3, .34 + .07 * n), ph: 0, hop: .3, J: Math.min(4.5, .8 + .22 * n) }; AU.rumble(G.quake.dur, G.quake.A); banner('SPIN CYCLE!', 'bad'); }
 function stepProj() {
   for (let i = G.proj.length - 1; i >= 0; i--) { const b = G.proj[i], g = b.gd; g.age += DT; if (g.sq) g.sq = Math.max(0, g.sq - DT * 5);
     if (g.age > g.life || Math.abs(b.position.x) > RW + 160 || b.position.y > 60) { if (g.age > g.life) puff(b.position.x, b.position.y, 3); Composite.remove(world, b); G.proj.splice(i, 1); } }
 }
 function onCollide(ev) {
   for (const pr of ev.pairs) { const A = pr.bodyA.parent, B = pr.bodyB.parent, ga = A.gd || {}, gb = B.gd || {};
-    if (G.mode === 'siege' && ((A === teddy && B === floor) || (B === teddy && A === floor))) breach();
-    const rel = Math.hypot(A.velocity.x - B.velocity.x, A.velocity.y - B.velocity.y); if (rel < 1.5) continue;
+    const rel = Math.hypot(A.velocity.x - B.velocity.x, A.velocity.y - B.velocity.y);
+    if (A === teddy || B === teddy) { const o = A === teddy ? B : A, k = (o.gd || {}).kind; if (G.mode === 'siege' && (o === floor || ((k === 'pillow' || k === 'toy' || k === 'dog') && rel > 1))) breach(k === 'dog' ? 'WOOF!' : o === floor ? 'THUD!' : 'BONK!'); }
+    if (G.dog && (ga.kind === 'dog' || gb.kind === 'dog')) { const o = ga.kind === 'dog' ? B : A; if (o.gd && (o.gd.kind === 'piece' || o.gd.kind === 'stool')) G.dog.touch = o; }
+    if (rel < 1.5) continue;
     const mov = A.isStatic ? B : B.isStatic ? A : (A.mass < B.mass ? A : B), gm = mov.gd || {}, sp = pr.collision.supports[0] || mov.position, v = rel / 11;
     if (A === teddy || B === teddy) teddy.gd.ouch = Math.max(teddy.gd.ouch, .7);
     if (gm.kind === 'pillow') { gm.sq = 1; if (fxBudget > 0) { fxBudget--; AU.pomf(v); feathers(sp.x, sp.y, rel > 5 ? 5 : 2); if (rel > 6) shake = Math.max(shake, 3); } continue; }
@@ -381,11 +399,13 @@ function onCollide(ev) {
 }
 
 /* ───────────── scoring probes ───────────── */
-function measure() {
+const probe = { x: 0, y: 0 };
+function firstHit(list, o, dx, dy) { for (let d = 20; d <= 130; d += 6) { probe.x = o.x + dx * d; probe.y = o.y + dy * d; const h = Query.point(list, probe); if (h.length) return h[0]; } return null; }
+function measure() {                                          // HEIGHT = tallest thing standing; COZY = share of rays from Sir Biscuit that land on something soft first
   let top = 0; const list = [];
   for (const b of G.pieces) { if (b.gd.ghost || (drag && drag.body === b)) continue; list.push(b); if (b.speed < 2.5) top = Math.max(top, -b.bounds.min.y); }
-  G.height = Math.round(top); let hit = 0; const o = { x: 0, y: SEAT_Y - 24 };
-  if (list.length) for (let i = 0; i < RAYS; i++) { const a = Math.PI * i / (RAYS - 1); if (Query.ray(list, o, { x: o.x + Math.cos(a) * 230, y: o.y - Math.sin(a) * 230 }, 2).length) hit++; }
+  G.height = Math.round(top); let hit = 0; const o = { x: 0, y: SEAT_Y - 14 };
+  if (list.length) for (let i = 0; i < RAYS; i++) { const a = Math.PI * i / (RAYS - 1), h = firstHit(list, o, Math.cos(a), -Math.sin(a)); if (h && !TYPES[h.gd.type].wood) hit++; }
   G.cozy = hit / RAYS;
 }
 
@@ -470,7 +490,7 @@ function drawType(c, type, id) {
   if (type === 'cushion') { const k = CUSH[id % CUSH.length]; box(c, -28, -28, 56, 56, 13, k[0]); c.strokeStyle = k[1]; c.lineWidth = 2; rr(c, -21, -21, 42, 42, 9); c.stroke(); for (let i = 0; i < 4; i++) { const a = i * TAU / 4 + .785; line(c, Math.cos(a) * 5, Math.sin(a) * 5, Math.cos(a) * 15, Math.sin(a) * 15); } circ(c, 0, 0, 3.6, k[1], false); }
   else if (type === 'bolster') { box(c, -62, -18, 124, 36, 15, '#57c7b8'); c.strokeStyle = '#2f9486'; c.lineWidth = 3; for (let x = -40; x <= 40; x += 20) line(c, x, -13, x, 13); c.strokeStyle = 'rgba(255,255,255,.5)'; line(c, -46, -11, 46, -11); }
   else if (type === 'plank') { box(c, -88, -8, 176, 16, 3, '#e0ad6a'); c.strokeStyle = '#b9824d'; c.lineWidth = 1.5; line(c, -76, -2, -10, -2); line(c, 10, 3, 78, 3); line(c, -50, 3, -24, 3); }
-  else if (type === 'table') { box(c, -82, -36, 12, 85, 2, '#b9793f'); box(c, 70, -36, 12, 85, 2, '#b9793f'); box(c, -82, -49, 164, 14, 3, '#d49652'); c.strokeStyle = '#a86a2c'; c.lineWidth = 1.5; line(c, -66, -42, -10, -42); line(c, 20, -42, 64, -42); }
+  else if (type === 'table') { box(c, -75, -19, 12, 51, 2, '#b9793f'); box(c, 63, -19, 12, 51, 2, '#b9793f'); box(c, -75, -32, 150, 14, 3, '#d49652'); c.strokeStyle = '#a86a2c'; c.lineWidth = 1.5; line(c, -60, -25, -10, -25); line(c, 20, -25, 58, -25); }
   else if (type === 'shelf') { box(c, -26, -61, 52, 122, 4, '#7a5ad0'); c.fillStyle = '#3c2a78'; c.fillRect(-20, -55, 40, 110); c.lineWidth = 2;
     for (let r = 0; r < 4; r++) { const y0 = -55 + r * 27.5; let x = -19, k = id * 7 + r * 3; while (x < 14) { const w = 6 + (k * 5 % 4), h = 16 + (k * 3 % 7); c.fillStyle = BOOKS[k % BOOKS.length]; c.fillRect(x, y0 + 25 - h, w, h); x += w + 1; k++; } c.fillStyle = '#7a5ad0'; c.fillRect(-20, y0 + 25, 40, 2.5); } }
   else if (type === 'chest') { box(c, -38, -26, 76, 52, 6, '#f2b84b'); c.strokeStyle = INK; line(c, -38, -8, 38, -8); c.fillStyle = '#d2452f'; c.fillRect(-36, -8, 72, 4); box(c, -6, -13, 12, 13, 2, '#fff3d6'); c.fillStyle = '#d79a1e'; for (const x of [-24, 24]) { c.beginPath(); for (let i = 0; i < 10; i++) { const a = i * TAU / 10 - 1.57, r = i % 2 ? 3 : 7; c.lineTo(x + Math.cos(a) * r, 10 + Math.sin(a) * r); } c.fill(); } }
@@ -540,7 +560,7 @@ function draw(t) {
       if (k.k === 'quake') { c.strokeStyle = 'rgba(255,122,107,.8)'; c.lineWidth = 4; c.beginPath(); for (let x = -RW + 20; x <= RW - 20; x += 10) c.lineTo(x, 16 + Math.sin(x * .12 + t * 9) * 4); c.stroke(); }
       else if (k.k === 'toys') { for (const x of [-90, 0, 90]) chevrons(c, x, -Math.min(CEIL - 20, (cam.y - 110) / cam.s), 0, 1, t, col); }
       else for (const sd of (k.side === 0 ? [-1, 1] : [k.side])) chevrons(c, sd * (RW - 6), k.k === 'dog' ? -24 : -110, -sd, k.k === 'dog' ? 0 : .25, t, col); }
-    if (G.night === 1 && G.tray.table > 0 && !drag) { c.save(); c.globalAlpha = .35 + Math.sin(t * 4) * .15; c.setLineDash([9, 7]); c.lineWidth = 3; c.strokeStyle = '#fff3d6'; c.translate(0, -49); rr(c, -82, -49, 164, 14, 3); c.stroke(); rr(c, -82, -36, 12, 85, 2); c.stroke(); rr(c, 70, -36, 12, 85, 2); c.stroke(); c.restore(); }
+    if (G.night === 1 && G.placed < 3) { c.save(); c.globalAlpha = .4 + Math.sin(t * 4) * .15; c.setLineDash([9, 7]); c.lineWidth = 3; c.strokeStyle = '#fff3d6'; rr(c, -98, -122, 52, 122, 4); c.stroke(); rr(c, 46, -122, 52, 122, 4); c.stroke(); rr(c, -88, -138, 176, 16, 3); c.stroke(); c.restore(); }
   }
   drawStool(c); drawTeddy(c, t);
   for (const b of G.pieces) if (!drag || drag.body !== b) drawPiece(c, b);
@@ -627,14 +647,14 @@ function frame(now) {
   hud(); draw(now / 1000);
 }
 function demoFort() { resetWorld(); G.mode = 'menu'; G.plan = { ev: [], kinds: [], end: 0 }; for (const k of ORDER) G.tray[k] = 0;
-  makePiece('table', 0, -50); makePiece('shelf', -118, -62); makePiece('shelf', 118, -62); makePiece('plank', 0, -108); makePiece('cushion', -30, -146); makePiece('cushion', 30, -146); makePiece('bolster', 0, -194); for (const b of G.pieces) b.gd.pop = 0; }
+  makePiece('shelf', -72, -61); makePiece('shelf', 72, -61); makePiece('plank', 0, -130); makePiece('table', 0, -170); makePiece('bolster', 0, -220); makePiece('cushion', -128, -28); makePiece('cushion', 128, -28); for (const b of G.pieces) b.gd.pop = 0; }
 initDock(); demoFort(); layout(); renderTray(); $('mBest').textContent = best; $('ovMenu').classList.add('on');
 if (AUTOSTART) startRun();
 requestAnimationFrame(t => { lastT = t; requestAnimationFrame(frame); });
 
 /* inert test hook */
 window.__gdl = {
-  get state() { return { mode: G.mode, night: G.night, score: G.score, hearts: G.hearts, best, paused, buildLeft: G.buildLeft, height: G.height, cozy: G.cozy, breached: !!G.breached, safeNights: G.safeNights, tallest: G.tallest,
+  get state() { return { mode: G.mode, night: G.night, score: G.score, hearts: G.hearts, best, paused, buildLeft: G.buildLeft, height: G.height, cozy: G.cozy, breached: !!G.breached, safeNights: G.safeNights, tallest: G.tallest, stolen: G.stolen | 0,
     tray: Object.assign({}, G.tray), held: drag ? drag.body.gd.id : null, heldAngle: drag ? drag.ang : 0, forecast: G.plan.kinds.map(k => k.k), proj: G.proj.length, dog: !!G.dog, quake: !!G.quake,
     teddy: { x: teddy.position.x, y: teddy.position.y, fallen: teddy.gd.fallen }, pieces: G.pieces.map(b => ({ id: b.gd.id, type: b.gd.type, x: b.position.x + b.gd.off.x, y: b.position.y + b.gd.off.y, angle: b.angle, ghost: b.gd.ghost })) }; },
   advance(sec) { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) step(); },

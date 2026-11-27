@@ -86,14 +86,15 @@ window.LAB_GAMES = [
     "t": "Plumpling",
     "d": "Slide, squish and serve the tray.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--43-plumpling.jpg"
    },
    {
     "n": 46,
-    "slug": "46-connect-dots",
-    "t": "Connect Dots",
-    "d": "Draw lines between pairs — no crossings.",
-    "thumb": "../thumbs/PhoneGameLab--46-connect-dots.jpg"
+    "slug": "46-live-wires",
+    "t": "Live Wires",
+    "d": "Link every pair. Cover the board.",
+    "v2": true
    },
    {
     "n": 47,
@@ -353,14 +354,17 @@ window.LAB_GAMES = [
     "t": "Haberdash",
     "d": "Swap buttons, fill the orders.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--44-haberdash.jpg"
    },
    {
     "n": 45,
     "slug": "45-shoo",
     "t": "Shoo!",
     "d": "Scatter the flocks. Sweep the roof.",
-    "v2": true
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--45-shoo.jpg"
    }
   ]
  },

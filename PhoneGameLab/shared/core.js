@@ -658,7 +658,7 @@
       ptrs.delete(e.pointerId); sync();
       const p = xy(e), now = performance.now();
       if (e.pointerId === primary) { primary = null; input.down = false; input.justUp = true; input.x = p.x; input.y = p.y; }
-      if (paused) return;
+      if (paused) { fire(input.onUp, p.x, p.y, e.pointerId); fireAuto('up', p.x, p.y, e.pointerId); return; } // releases still arrive while paused so hold-to-charge games never get a stuck press (no tap/swipe though)
       const dt = now - rec.t0, dx = p.x - rec.startX, dy = p.y - rec.startY, dd = Math.hypot(dx, dy);
       if (dt < 300 && dd < 14) { input.taps.push({ x: p.x, y: p.y, t: now }); if (input.taps.length > 16) input.taps.shift(); fire(input.onTap, p.x, p.y, e.pointerId); fireAuto('tap', p.x, p.y, e.pointerId); }
       else if (dd > 30 && !rec.swiped) { fire(input.onSwipe, dx, dy, dt, p.x, p.y); fireAuto('swipe', dx, dy, dt, p.x, p.y); }
