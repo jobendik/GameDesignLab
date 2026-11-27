@@ -118,7 +118,7 @@
 (() => { 'use strict';
 /* KOSMISK SLANGE — en stjerneslange på nattehimmelen.
  * Kjerne: styr fritt, spis stjernestøv, voks; hodet mot en annens kropp = du slokner. Fart koster lengde.
- * Vri 1: STJERNEBILDER — en stjerne lyser så lenge kroppen din ligger over den (+2 s). Lyser alle samtidig, er bildet ditt.
+ * Vri 1: STJERNEBILDER — en stjerne lyser så lenge kroppen din ligger over den (+2,5 s). Lyser alle samtidig, er bildet ditt.
  *        Lengden er altså rekkevidden din: store bilder krever lang kropp (eller fart på riktig tidspunkt).
  * Vri 2: TYNGDEKRAFT — soler og det svarte hullet trekker i alt, gir gratis fart og har ringer av rikt støv, men kjernen dreper.
  * Bue: én natt på tre minutter. Skumring → midnatt (meteorregn) → daggry: dagslyset spiser himmelen innover og tærer på den som
@@ -134,8 +134,9 @@ const TOUCH = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in windo
 const BEST_KEY = 'gdl:best:games/kosmisk-slange';
 let best = 0; try { best = +JSON.parse(localStorage.getItem(BEST_KEY)) || 0; } catch (e) { }
 
-const DT = 1 / 60, NIGHT = 180, DAWN_AT = 118, RW = 2000, RDAWN = 900, GAP = 7, CAP = 1024, NMAX = 640, N0 = 18, SPEED = 150, BOOST = 272, GRACE = 2,
-  OFF = RW + 240, SCELL = 56, SG = Math.ceil(2 * OFF / SCELL), PCELL = 80, PG = Math.ceil(2 * OFF / PCELL), SN = 12, PBASE = 520, PMAX = 1500;
+const NIGHT = clamp(+Q.get('night') || 180, 30, 600), DAWN_AT = NIGHT * .655;   // ?night=<s> forkorter natten (kun for tester)
+const DT = 1 / 60, RW = 2000, RDAWN = 900, GAP = 7, CAP = 1024, NMAX = 640, N0 = 18, SPEED = 150, BOOST = 272, GRACE = 2.5,
+  OFF = RW + 240, SCELL = 56, SG = Math.ceil(2 * OFF / SCELL), PCELL = 80, PG = Math.ceil(2 * OFF / PCELL), SN = 12, PBASE = 760, PMAX = 1500;
 const PHASES = ['Skumring', 'Midnatt', 'Daggry'];
 const NAMES = ['Tuva', 'Brage', 'Ylva', 'Sindre', 'Runa', 'Halvor', 'Idunn', 'Embla', 'Varg', 'Aslak', 'Mjøll', 'Vetle', 'Eir', 'Torje', 'Signe', 'Ravn'];
 const HUES = [188, 268, 330, 145, 212, 12, 300, 165, 235, 95, 350];
@@ -154,7 +155,7 @@ const SHAPES = [
   ['Nøkkelen', [[0, 0], [.9, .1], [1.8, 0], [2.4, -.5], [2.9, .1], [2.4, .6]]], ['Harpen', [[0, 0], [.2, 1.2], [1, 1.6], [1.6, .9], [1.2, 0]]],
   ['Båten', [[0, 0], [.5, .6], [1.5, .6], [2, 0], [1, -.9]]],
 ];
-const CSIZE = [430, 620, 780, 900, 1000, 1180, 1380];
+const CSIZE = [380, 600, 740, 860, 960, 1100, 1260];
 
 // ───────── audio: myk pentatonisk klang; tonehøyde = spiserekke / stjerne nr.
 const AU = (() => {
@@ -222,8 +223,8 @@ function newGame(attract) {
   const seed = ((seedBase != null ? seedBase : Math.random() * 4294967296) >>> 0) || 1; rnd = mk(seed);
   for (const c of pgrid) c.length = 0; pcount = pbase = 0; drops = [];
   for (let i = 0; i < stouched.length; i++) sgrid[stouched[i]].length = 0; stouched.length = 0; parts.length = 0; floats.length = 0;
-  const g = G = { seed, mode: attract ? 'menu' : 'play', t: attract ? 60 : 0, time: 0, R: RW, phase: 0, score: 0, dust: 0, conPts: 0, bonus: 0, nearPts: 0, kills: 0, owned: 0, combo: 0, comboT: 0, snakes: [], wells: [], cons: [], met: null,
-    nextMet: [44 + rnd() * 8, 88 + rnd() * 10], rush: null, deadT: 0, cause: '', toasts: [], shake: 0, hint: '', hintT: 0, tips: {}, rank: 0, won: false, lbT: 0, sweepT: 0, starter: null, tick10: 0 };
+  const g = G = { seed, mode: attract ? 'menu' : 'play', t: attract ? NIGHT * .3 : 0, time: 0, R: RW, phase: 0, score: 0, dust: 0, conPts: 0, bonus: 0, nearPts: 0, kills: 0, owned: 0, combo: 0, comboT: 0, snakes: [], wells: [], cons: [], met: null,
+    nextMet: [NIGHT * (.25 + rnd() * .04), NIGHT * (.49 + rnd() * .05)], rush: null, deadT: 0, cause: '', toasts: [], shake: 0, hint: '', hintT: 0, tips: {}, rank: 0, won: false, lbT: 0, sweepT: 0, starter: null, tick10: 0 };
   g.wells.push({ x: 0, y: 0, rc: 30, ri: 520, pull: 150, hole: true, hue: 268, spin: .5, ring: [], cd: 0 });
   const a0 = rnd() * TAU;
   for (let i = 0; i < 4; i++) { const a = a0 + i * TAU / 4 + (rnd() - .5) * .6, d = 950 + rnd() * 480, rc = 44 + rnd() * 20; g.wells.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, rc, ri: rc * 6.4 + 70, pull: 95 + rnd() * 28, hue: [28, 205, 8, 46][i], spin: (rnd() < .5 ? -1 : 1) * (.26 + rnd() * .14), ring: [], cd: 0 }); }
@@ -241,7 +242,7 @@ function newGame(attract) {
       const stars = pts.map(p => { const ux = (p[0] - mx) * sc, uy = (p[1] - my) * sc; return { x: cx + ux * cr - uy * sr, y: cy + ux * sr + uy * cr, lt: new Float32Array(SN), tw: rnd() * TAU }; });
       let ext = 0, ok = true; for (const s of stars) { ext = Math.max(ext, Math.hypot(s.x - cx, s.y - cy)); if (Math.hypot(s.x, s.y) > RW - 130) ok = false; for (const w of g.wells) if (Math.hypot(s.x - w.x, s.y - w.y) < w.rc + 105) ok = false; }
       if (k) for (const o of g.cons) if (Math.hypot(o.cx - cx, o.cy - cy) < o.ext + ext + 110) ok = false;
-      if (ok || !k) c = { name, stars, cx, cy, ext, path: CSIZE[k], need: Math.max(10, Math.ceil((CSIZE[k] - GRACE * SPEED - 40) / GAP)), owner: -1, hue: 44, t: 0, faded: false, fade: 1 }; }
+      if (ok || !k) c = { name, stars, cx, cy, ext, path: CSIZE[k], need: Math.max(10, Math.ceil((CSIZE[k] * 1.15 - GRACE * SPEED + 40) / GAP)), owner: -1, hue: 44, t: 0, faded: false, fade: 1 }; }
     if (c) g.cons.push(c); });
   g.starter = g.cons[0];
   ROSTER.forEach((kind, i) => { const s = mkSnake(i + 1, names[i], HUES[i], kind); g.snakes.push(s); spawn(s, 16 + (rnd() * 22 | 0)); s.ghost = 1; });
@@ -348,7 +349,7 @@ function moveSnake(s) { const g = G;
   for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) { const a = pgrid[cy * PG + cx]; for (let j = a.length - 1; j >= 0; j--) { const p = a[j], dx = p.x - s.x, dy = p.y - s.y; if (dx * dx + dy * dy < reach * reach) { a[j] = a[a.length - 1]; a.pop(); p.alive = false; pcount--; if (!p.ttl) pbase--; gain(s, p.v, p.x, p.y, p.hue); } } } }
 function claim(c, s) { const g = G; c.owner = s.i; c.hue = s.hue; c.t = 0; s.own++;
   for (const st of c.stars) for (let j = 0; j < 6; j++) { const a = j * TAU / 6 + st.tw; addPel(st.x + Math.cos(a) * 46, st.y + Math.sin(a) * 46, 2, s.hue, 30); }
-  if (s.me && g.mode === 'play') { const pts = Math.round(100 * c.stars.length * (1 + .5 * g.owned)); g.owned++; g.score += pts; g.conPts += pts; toast(c.name + ' er tent', '+' + pts + ' stjernelys', 0); AU.constel(c.stars.length); g.shake = RM ? 0 : 5;
+  if (s.me && g.mode === 'play') { const pts = Math.round(100 * c.stars.length * (1 + .5 * g.owned)); g.owned++; g.score += pts; g.conPts += pts; if (g.hintT > 0) setHint(''); toast(c.name + ' er tent', '+' + pts + ' stjernelys', 0); AU.constel(c.stars.length); g.shake = RM ? 0 : 5;
     for (const st of c.stars) { fxRing(st.x, st.y, 44, 120); fxSpark(st.x, st.y, 44, 10, 150); } }
   else if (g.mode === 'play') { toast(s.name + ' tente ' + c.name, '', 1); if (onScreen(c.cx, c.cy, c.ext)) for (const st of c.stars) fxRing(st.x, st.y, s.hue, 90); } }
 function starsStep() { const g = G; for (const c of g.cons) { if (c.owner >= 0) { c.t += DT; continue; } if (c.faded) { c.fade = Math.max(0, c.fade - DT); continue; }
@@ -359,7 +360,7 @@ function starsStep() { const g = G; for (const c of g.cons) { if (c.owner >= 0) 
         if (dx * dx + dy * dy < rr * rr) { if (lt[si] <= 0 && o.me && g.mode === 'play') { let k = 0; for (const q of c.stars) if (q.lt[0] > 0) k++; AU.star(k); fxRing(st.x, st.y, 44, 60); } lt[si] = GRACE; } } } }
     for (let i = 0; i < SN; i++) { let all = true; for (const st of c.stars) if (st.lt[i] <= 0) { all = false; break; } if (all) { claim(c, g.snakes[i]); break; } } } }
 function step() { const g = G; g.time += DT; if (g.mode === 'play') g.t += DT;
-  const ph = g.t < 40 ? 0 : g.t < DAWN_AT ? 1 : 2;
+  const ph = g.t < NIGHT * .22 ? 0 : g.t < DAWN_AT ? 1 : 2;
   if (ph !== g.phase) { g.phase = ph; if (g.mode === 'play') { if (ph === 2) { toast('Daggry', 'Himmelen krymper – hold deg i mørket', 0); AU.horn(); AU.music('dawn'); } else if (ph === 1) toast('Midnatt', '', 1); } }
   if (g.t > DAWN_AT) { const k = clamp((g.t - DAWN_AT) / (NIGHT - DAWN_AT - 8), 0, 1); g.R = lerp(RW, RDAWN, k * k * (3 - 2 * k)); }
   if (g.mode === 'play' && g.t > NIGHT - 10 && (g.t | 0) !== g.tick10) { g.tick10 = g.t | 0; AU.tick(); }
@@ -444,7 +445,7 @@ function bodyPath(s, from, to) { const p = new Path2D(); if (from === 0) p.moveT
 function drawSnake(s, time) { const h = s.hue, r = s.r, n = s.n, cut = Math.max(2, n * .78 | 0), a = s.ghost > 0 ? .45 + .25 * Math.sin(time * 14) : 1;
   const P1 = bodyPath(s, 0, cut), P2 = bodyPath(s, cut - 1, n); ctx.lineCap = ctx.lineJoin = 'round'; ctx.globalAlpha = a;
   ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = `hsla(${h},90%,60%,${s.boost ? .2 : .1})`; ctx.lineWidth = r * 2 + 12; ctx.stroke(P1); ctx.lineWidth = r * 1.3 + 10; ctx.stroke(P2);
-  ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = `hsl(${h},55%,${s.me ? 20 : 17}%)`; ctx.lineWidth = r * 2; ctx.stroke(P1); ctx.lineWidth = r * 1.3; ctx.stroke(P2);
+  ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = s.me ? 'hsl(38,78%,30%)' : `hsl(${h},55%,18%)`; ctx.lineWidth = r * 2; ctx.stroke(P1); ctx.lineWidth = r * 1.3; ctx.stroke(P2);
   ctx.strokeStyle = `hsla(${h},85%,${s.boost ? 82 : 66}%,.9)`; ctx.lineWidth = Math.max(1.6, r * .3); ctx.stroke(P1); ctx.lineWidth = Math.max(1.2, r * .2); ctx.stroke(P2);
   ctx.fillStyle = `hsl(${h},100%,90%)`; ctx.beginPath(); const tw = time * 3 | 0; for (let i = 3; i < n; i += 5) { const q = ((i + tw) % 3 === 0 ? 2.6 : 1.5) * (r / 9); ctx.rect(PX(s, i) - q / 2, PY(s, i) - q / 2, q, q); } ctx.fill();
   // hode
@@ -461,7 +462,7 @@ function star4(x, y, r, rot) { ctx.beginPath(); for (let i = 0; i < 8; i++) { co
 let cardUp = true;
 function render() { const g = G, time = g.time, p = g.snakes[0], card = cardUp = g.mode === 'menu' || g.mode === 'over' || paused;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  const dk = g.phase === 2 ? clamp((g.t - DAWN_AT) / 50, 0, 1) : 0, dusk = clamp(1 - g.t / 45, 0, 1);
+  const dk = g.phase === 2 ? clamp((g.t - DAWN_AT) / (NIGHT * .28), 0, 1) : 0, dusk = clamp(1 - g.t / (NIGHT * .25), 0, 1);
   const bg = ctx.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, `rgb(${7 + 18 * dusk + 26 * dk | 0},${10 + 6 * dusk + 12 * dk | 0},${30 + 22 * dusk + 20 * dk | 0})`); bg.addColorStop(1, `rgb(${10 + 30 * dusk + 60 * dk | 0},${12 + 10 * dusk + 26 * dk | 0},${40 + 26 * dusk + 30 * dk | 0})`); ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
   for (let k = 0; k < 2; k++) { const par = k ? .32 : .14, ox = -((cam.x * par) % 512 + 512) % 512, oy = -((cam.y * par) % 512 + 512) % 512; ctx.globalAlpha = 1 - dk * .5; for (let y = oy; y < H; y += 512) for (let x = ox; x < W; x += 512) ctx.drawImage(starTiles[k], x, y); } ctx.globalAlpha = 1;
   const shx = g.shake > .3 ? (Math.random() - .5) * g.shake : 0, shy = g.shake > .3 ? (Math.random() - .5) * g.shake : 0;
@@ -496,8 +497,8 @@ function render() { const g = G, time = g.time, p = g.snakes[0], card = cardUp =
   // støv
   ctx.globalCompositeOperation = 'lighter';
   { const m = 30, x0 = Math.max(0, ((cam.x - W / 2 / cam.z - m + OFF) / PCELL) | 0), x1 = Math.min(PG - 1, ((cam.x + W / 2 / cam.z + m + OFF) / PCELL) | 0), y0 = Math.max(0, ((cam.y - H / 2 / cam.z - m + OFF) / PCELL) | 0), y1 = Math.min(PG - 1, ((cam.y + H / 2 / cam.z + m + OFF) / PCELL) | 0);
-    for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) { const a = pgrid[cy * PG + cx]; for (let j = 0; j < a.length; j++) { const q = a[j], age = time - q.born, s = (4.5 + q.v * 3.2) * (1 + .22 * Math.sin(time * 3 + q.ph)) * Math.min(1, age * 3 + .2) * (q.ttl && q.ttl - time < 3 ? Math.max(0, (q.ttl - time) / 3) : 1);
-      ctx.drawImage(glow(Math.round(q.hue / 20) * 20, 90, 68), q.x - s, q.y - s, s * 2, s * 2); } } }
+    for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) { const a = pgrid[cy * PG + cx]; for (let j = 0; j < a.length; j++) { const q = a[j], age = time - q.born, s = (6.5 + q.v * 3.6) * (1 + .22 * Math.sin(time * 3 + q.ph)) * Math.min(1, age * 3 + .2) * (q.ttl && q.ttl - time < 3 ? Math.max(0, (q.ttl - time) / 3) : 1);
+      ctx.drawImage(glow(Math.round(q.hue / 20) * 20, 95, 72), q.x - s, q.y - s, s * 2, s * 2); } } }
   if (g.met && g.met.t > 0) { const m = g.met, k = m.t, x = lerp(m.x0, m.x1, k), y = lerp(m.y0, m.y1, k); ctx.strokeStyle = 'rgba(255,240,200,.8)'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(lerp(m.x0, m.x1, Math.max(0, k - .18)), lerp(m.y0, m.y1, Math.max(0, k - .18))); ctx.lineTo(x, y); ctx.stroke(); ctx.drawImage(glow(40, 95, 70), x - 50, y - 50, 100, 100); }
   ctx.globalCompositeOperation = 'source-over';
   for (let i = g.snakes.length - 1; i >= 0; i--) { const s = g.snakes[i]; if (s.alive && Math.hypot(s.x - cam.x, s.y - cam.y) < vr + s.n * GAP + 60) drawSnake(s, time); }
@@ -513,8 +514,8 @@ function render() { const g = G, time = g.time, p = g.snakes[0], card = cardUp =
     ctx.strokeStyle = `rgba(255,236,200,${.6 + .2 * Math.sin(time * 2)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(c0.x, c0.y, r0, 0, TAU); ctx.stroke(); }
   if (card) return;
   // kantpiler: neste stjerner, meteorregn
-  const edge = (x, y, col, big) => { const s = toScreen(x, y), m = 26; if (s.x > m && s.x < W - m && s.y > 70 && s.y < H - m) return; const a = Math.atan2(s.y - H / 2, s.x - W / 2), k = Math.min((W / 2 - m) / Math.abs(Math.cos(a) || 1e-6), (H / 2 - m - 26) / Math.abs(Math.sin(a) || 1e-6)), ex = W / 2 + Math.cos(a) * k, ey = H / 2 + 12 + Math.sin(a) * k, q = big ? 11 : 8;
-    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(ex + Math.cos(a) * q, ey + Math.sin(a) * q); ctx.lineTo(ex + Math.cos(a + 2.5) * q, ey + Math.sin(a + 2.5) * q); ctx.lineTo(ex + Math.cos(a - 2.5) * q, ey + Math.sin(a - 2.5) * q); ctx.closePath(); ctx.fill(); };
+  const edge = (x, y, col, big) => { const s = toScreen(x, y), m = 26; if (s.x > m && s.x < W - m && s.y > 70 && s.y < H - m) return; const a = Math.atan2(s.y - H / 2, s.x - W / 2), k = Math.min((W / 2 - m) / Math.abs(Math.cos(a) || 1e-6), (H / 2 - m - 26) / Math.abs(Math.sin(a) || 1e-6)), ex = W / 2 + Math.cos(a) * k, ey = H / 2 + 12 + Math.sin(a) * k, q = big ? 13 : 11;
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(ex + Math.cos(a) * q, ey + Math.sin(a) * q); ctx.lineTo(ex + Math.cos(a + 2.5) * q, ey + Math.sin(a + 2.5) * q); ctx.lineTo(ex + Math.cos(a - 2.5) * q, ey + Math.sin(a - 2.5) * q); ctx.closePath(); ctx.fill(); if (!big) { star4(ex - Math.cos(a) * 22, ey - Math.sin(a) * 22, 8, time); ctx.fill(); } };
   if (g.mode === 'play') { let bc = null, bd = 1e9, prog = false; for (const c of g.cons) { if (c.owner >= 0 || c.faded) continue; let lit = 0; for (const st of c.stars) if (st.lt[0] > 0) lit++; if (lit) { prog = true; for (const st of c.stars) if (st.lt[0] <= 0) edge(st.x, st.y, 'rgba(255,225,150,.95)', 1); } else if (p.n >= c.need) { const d = Math.hypot(c.cx - p.x, c.cy - p.y); if (d < bd) { bd = d; bc = c; } } }
     if (bc && !prog) edge(bc.cx, bc.cy, `rgba(255,225,150,${.55 + .3 * Math.sin(time * 4)})`, 0); if (g.rush) edge(g.rush.x, g.rush.y, '#fff', 1); }
   // minikart

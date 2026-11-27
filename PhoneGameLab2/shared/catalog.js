@@ -525,7 +525,9 @@ window.LAB_GAMES = [
     "slug": "flicknic",
     "t": "Flicknic",
     "d": "Flick the bugs off the blanket. Save Bun's cake.",
-    "v2": true
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--flicknic.jpg"
    },
    {
     "slug": "jampoline",

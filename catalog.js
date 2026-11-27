@@ -430,6 +430,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--neon-burst.jpg"
   },
   {
@@ -2807,7 +2809,10 @@ window.GDL_CATALOG = {
     "touch",
     "mouse"
    ],
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--flicknic.jpg"
   },
   {
    "id": "PhoneGameLab2/football",

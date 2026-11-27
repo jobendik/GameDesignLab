@@ -907,6 +907,7 @@
   /* Lab.toast(text, ms, {y:.2}) — y = vertical position as a fraction of the stage (default .38) */
   Lab.toast = function (text, ms, o) {
     const t = doc.createElement('div'); t.className = 'lab-toast'; t.textContent = text; t.style.animationDuration = ((ms || 900) / 1000) + 's'; if (o && o.y != null) t.style.top = (o.y * 100) + '%';
+    const live = (stage || doc.body).querySelectorAll('.lab-toast').length; if (live) t.style.marginTop = (live * 42) + 'px'; // simultaneous toasts stack downward instead of overlapping
     (stage || doc.body).appendChild(t); setTimeout(() => t.remove(), ms || 900);
   };
   /* big centred banner: "LEVEL 3", "GO!", "PERFECT" */

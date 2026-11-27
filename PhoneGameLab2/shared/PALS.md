@@ -25,6 +25,8 @@ twist, and the stars are *our* characters.) `shared/pals.js` draws them procedur
 - `arms`: `down` `up` `wave` `cheer` `hold` · `talk:0..1` mouth open · `shadow:false` · `alpha` · `tint`
 - `pose:'lie'` belly-slide (head toward +x; combine with `flip`) · `hot:0..1` flushed + sweat · `wet:0..1` drips ·
   `clipY` (px below the pal's centre past which nothing is drawn — pals peeking from behind a counter, hedge or wall)
+- Tips: `pose:'lie'` + `tilt: ±Math.PI/2` gives a vertical belly-slide; an upright pal with `clipY` makes a convincing
+  driver/passenger bust (seated in a car, boat or basket).
 - **Returns anchors** in stage coordinates — `{handL, handR, head, mouth, feet}` as `[x,y]` — so you can draw props
   (a held balloon, a hat, a fish in the beak) that follow the pose. Draw the prop after the pal.
 - `Pals.bubble(ctx, x, y, w, h, {tailX, tailY, thought:true})` draws a speech or thought bubble; put your icon/text on top.
