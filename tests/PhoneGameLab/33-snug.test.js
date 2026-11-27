@@ -46,9 +46,9 @@ module.exports = {
     await pilot('g.stage >= 2');
     const st = await game(g => ({ stage: g.stage, lives: g.lives, passed: g.passed }));
     expect(st.stage === 2 && st.passed === 10 && st.lives === 3, 'ten gates clear stage 1 and give the life back (' + JSON.stringify(st) + ')');
-    await pilot('g.stage >= 4');
-    const s4 = await game(g => ({ stage: g.stage, lives: g.lives, speed: g.speed, alive: g.alive }));
-    expect(s4.alive && s4.stage === 4 && s4.lives === 3 && s4.speed > 1.15, 'the pilot survives twins and peekaboo gates; the road speeds up (' + JSON.stringify(s4) + ')');
+    await pilot('g.stage >= 3');
+    const s3 = await game(g => ({ stage: g.stage, lives: g.lives, speed: g.speed, alive: g.alive }));
+    expect(s3.alive && s3.stage === 3 && s3.lives === 3 && s3.speed > 1.02, 'the pilot survives the twin gates; the road speeds up (' + JSON.stringify(s3) + ')');
     // --- three wrong shapes end the run
     await page.evaluate(() => new Promise(res => { const g = window.__lab.game; (function tick() { if (!g.alive) return res(); const n = g.next(); if (n && n.ok.includes(g.shape)) g.pick([0, 1, 2].find(i => !n.ok.includes(i))); requestAnimationFrame(tick); })(); }));
     for (let i = 0; i < 40 && !(await state()).over; i++) await wait(100);

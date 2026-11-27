@@ -1,0 +1,312 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Haberdash</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* HABERDASH — a swatch of linen pinned to denim, covered in loose buttons. Swap two neighbours to line up three.
+ * Structure: each level is an ORDER ticket (collect N of a colour, mend holes in the cloth, clear yarn tangles) with a
+ *            move budget; spare moves pay a bonus, a failed order ends the run. Orders are generated forever.
+ * Specials:  4 in a row → Ribbon button (clears its row or column) · L/T → Pin button (3×3) · 5 in a row → Prism
+ *            (swap it with a colour to take every button of that colour). Specials set each other off.
+ * Feel:      real falling with squash, cascades that climb a pentatonic ladder and multiply the score, collected
+ *            buttons fly to the ticket, idle hint wiggle, automatic reshuffle when no swap exists, buffered swaps.
+ * Shapes as well as colours tell the six buttons apart (disc, square, flower, hexagon, heart, star). */
+Lab.init({
+  title: "Haberdash", tagline: "Swap buttons, fill the orders.", category: "Puzzle & Match",
+  howto: ["Drag a button onto a neighbour to match 3", "Fours and fives make power buttons", "Fill the order before moves run out"],
+  theme: { bg: "#27406e", bg2: "#4a6ea8", accent: "#ffcf5a", accent2: "#ff8a6b" },
+  orient: "any", music: { style: "chill", key: "C", vol: .45 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, shade = Lab.color.shade;
+const COLS = 7, ROWS = 8, NC = COLS * ROWS, KC = ["#e25555", "#3d8bd9", "#f2b632", "#4fae6a", "#ef7fb0", "#8e6fd6"], BROWN = "#5b4630";
+const R = i => Math.floor(i / COLS), C = i => i % COLS, I = (r, c) => r * COLS + c;
+let cs, bx, by, panel, wide, grid, holes, level, moves, movesMax, goals, score, phase, pt, cascade, bestCascade, specials, sel, drag, cursor, pending, idleT, hintMove, fliers, colours, lastSwap, after, demo, demoT, landT;
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15;
+  if (wide) { const pw = clamp(P.w * .24, 150, 250); cs = Math.min((P.h - 14) / ROWS, (P.w - pw - 44) / COLS, 84); bx = P.x + pw + 28 + (P.w - pw - 28 - cs * COLS) / 2; by = P.y + (P.h - cs * ROWS) / 2; panel = { x: bx - pw - 20, y: by + 4, w: pw, h: Math.min(cs * ROWS - 8, 330) }; }
+  else { const ph = clamp(P.h * .125, 80, 104); cs = Math.min((P.w - 18) / COLS, (P.h - ph - 34) / ROWS, 84); bx = P.x + (P.w - cs * COLS) / 2; by = P.y + ph + 18 + (P.h - ph - 34 - cs * ROWS) * .4; panel = { x: bx, y: by - ph - 12, w: cs * COLS, h: ph }; }
+  Lab.sprite.clear("hb:");
+}
+Lab.onResize(() => { if (grid) layout(); });
+const X = v => bx + (v + .5) * cs, Y = v => by + (v + .5) * cs;
+const mk = (k, r, c) => ({ k, sp: 0, r, c, x: c, y: r, vy: 0, sq: 0, dying: 0, pop: 0, fired: false, rot: Lab.rand(-.22, .22) });
+const K = i => { const t = grid[i]; return !t ? -2 : t.sp === 4 ? -1 : t.k; };
+
+/* ---------- levels */
+function levelDef(n) {
+  const col = n < 4 ? 5 : 6, p = Lab.shuffle([0, 1, 2, 3, 4, 5].slice(0, col)), kg = (k, v) => ["k", k, Math.max(10, Math.round(v))];
+  if (n === 1) return { col, moves: 14, goals: [kg(p[0], 14)], holes: 0, tangles: 0 };
+  if (n === 2) return { col, moves: 16, goals: [kg(p[0], 14), kg(p[1], 14)], holes: 0, tangles: 0 };
+  if (n === 3) return { col, moves: 18, goals: [["hole", 0, 8], kg(p[0], 14)], holes: 8, tangles: 0 };
+  if (n === 4) return { col, moves: 20, goals: [kg(p[0], 15), kg(p[1], 15), ["tangle", 0, 5]], holes: 0, tangles: 5 };
+  const mv = 18 + (n % 3) * 2, work = mv * Math.min(2.8, 1.75 + (n - 4) * .13), type = n % 4; let h = 0, tg = 0, g;
+  if (type === 1) { h = Math.min(18, 8 + n); g = [["hole", 0, h], kg(p[0], work - h * 1.5)]; }
+  else if (type === 2) { tg = Math.min(12, 4 + n); g = [["tangle", 0, tg], kg(p[0], (work - tg * 1.6) / 2), kg(p[1], (work - tg * 1.6) / 2)]; }
+  else if (type === 3) g = [kg(p[0], work / 2), kg(p[1], work / 2)];
+  else { h = Math.min(14, 6 + (n >> 1)); tg = Math.min(8, 3 + (n >> 1)); g = [["hole", 0, h], ["tangle", 0, tg], kg(p[0], work - h * 1.5 - tg * 1.6)]; }
+  return { col, moves: mv, goals: g, holes: h, tangles: tg };
+}
+function setupLevel() {
+  const d = levelDef(level); colours = d.col; moves = movesMax = d.moves; goals = d.goals.map(g => ({ type: g[0], k: g[1], left: g[2], need: g[2], shown: g[2], pulse: 0 }));
+  holes = new Array(NC).fill(0); sel = -1; pending = null; hintMove = null; idleT = 0; fliers = [];
+  do {
+    grid = new Array(NC).fill(null);
+    for (let i = 0; i < NC; i++) { const r = R(i), c = C(i); let k; do k = Lab.randInt(0, colours - 1); while ((c >= 2 && K(i - 1) === k && K(i - 2) === k) || (r >= 2 && K(i - COLS) === k && K(i - 2 * COLS) === k)); grid[i] = mk(k, r, c); }
+    for (const i of Lab.shuffle([...Array(NC).keys()].filter(i => R(i) >= 2)).slice(0, d.tangles)) grid[i].k = 6;
+  } while (!findMove());
+  for (const i of Lab.shuffle([...Array(NC).keys()].filter(i => R(i) >= 1 && grid[i].k !== 6)).slice(0, d.holes)) holes[i] = 1;
+  for (const t of grid) { t.y = t.r - ROWS - 1 - t.c * .4 - (ROWS - 1 - t.r) * .25; }
+  phase = "fall"; cascade = 0;
+  if (!demo) { Lab.banner("Order " + level, { color: "#ffcf5a", ms: 1000, y: .14 }); if (level === 3) Lab.hint("Match over the torn cells to mend them", { sticky: true }); else if (level === 4) Lab.hint("Match next to yarn tangles to clear them", { sticky: true }); else if (level > 1) Lab.hint(""); }
+}
+function start() {
+  demo = false; layout(); level = 1; score = 0; bestCascade = 0; specials = 0; cursor = -1; drag = null; landT = 0; after = null;
+  Lab.setScore(0); setupLevel(); Lab.hint("Drag a button onto its neighbour", { sticky: true });
+  Lab.input.onDown = [(x, y) => { const i = hit(x, y); cursor = -1; if (i < 0) { sel = -1; return; } if (sel >= 0 && adjacent(sel, i)) { trySwap(sel, i); return; } if (grid[i] && grid[i].k !== 6) { sel = i; drag = { i, x, y }; Lab.sfx("tap", { vol: .4 }); } }];
+  Lab.input.onMove = [(x, y) => { if (!drag || !Lab.input.down) return; const dx = x - drag.x, dy = y - drag.y; if (Math.max(Math.abs(dx), Math.abs(dy)) < cs * .32) return; const i = drag.i, r = R(i), c = C(i), h = Math.abs(dx) > Math.abs(dy), nr = r + (h ? 0 : Math.sign(dy)), nc = c + (h ? Math.sign(dx) : 0); drag = null; if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) trySwap(i, I(nr, nc)); }];
+  Lab.input.onUp = [() => { drag = null; }];
+  Lab.input.onKey = [k => {
+    const d = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] }[k];
+    if (cursor < 0) { if (d || k === " " || k === "Enter") cursor = I(4, 3); return; }
+    if (d) { const r = R(cursor) + d[0], c = C(cursor) + d[1]; if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return; if (sel === cursor) { trySwap(cursor, I(r, c)); } cursor = I(r, c); }
+    else if (k === " " || k === "Enter") sel = sel === cursor ? -1 : cursor;
+  }];
+  Lab.expose({
+    get board() { return grid.map(t => t ? t.k + t.sp * 10 : -1); }, get phase() { return phase; }, get score() { return score; }, get moves() { return moves; }, get level() { return level; }, get cascade() { return bestCascade; }, get specials() { return specials; },
+    get goals() { return goals.map(g => ({ type: g.type, k: g.k, left: g.left, need: g.need })); }, get holes() { return holes.filter(h => h === 1).length; }, hint() { const m = findMove(); return m && m.map(i => ({ r: R(i), c: C(i), x: X(C(i)), y: Y(R(i)) })); },
+    cellXY: (r, c) => ({ x: X(c), y: Y(r) }), setMoves(n) { moves = n; }, setGoals(g) { goals = g.map(q => ({ type: q[0], k: q[1], left: q[2], need: q[2], shown: q[2], pulse: 0 })); },
+    setBoard(m) { for (let i = 0; i < NC; i++) { const v = m[R(i)][C(i)], t = mk(v % 10, R(i), C(i)); t.sp = Math.floor(v / 10); t.rot = 0; grid[i] = t; } holes.fill(0); phase = "idle"; pending = null; sel = -1; }, setHole(r, c) { holes[I(r, c)] = 1; }, swap: (a, b) => trySwap(I(a[0], a[1]), I(b[0], b[1])),
+  });
+  Lab.loop((dt, t) => { update(dt); render(t); });
+}
+const hit = (x, y) => { const c = Math.floor((x - bx) / cs), r = Math.floor((y - by) / cs); return r < 0 || r >= ROWS || c < 0 || c >= COLS ? -1 : I(r, c); };
+const adjacent = (a, b) => Math.abs(R(a) - R(b)) + Math.abs(C(a) - C(b)) === 1;
+
+/* ---------- matching */
+function findMatches() {
+  const runs = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS;) { const k = K(I(r, c)); let e = c + 1; if (k >= 0 && k < 6) { while (e < COLS && K(I(r, e)) === k) e++; if (e - c >= 3) runs.push({ k, h: true, cells: Array.from({ length: e - c }, (_, j) => I(r, c + j)) }); } c = e; }
+  for (let c = 0; c < COLS; c++) for (let r = 0; r < ROWS;) { const k = K(I(r, c)); let e = r + 1; if (k >= 0 && k < 6) { while (e < ROWS && K(I(e, c)) === k) e++; if (e - r >= 3) runs.push({ k, h: false, cells: Array.from({ length: e - r }, (_, j) => I(r + j, c)) }); } r = e; }
+  const owner = new Map(), groups = [];
+  for (const run of runs) {
+    let g = null;
+    for (const i of run.cells) { const o = owner.get(i); if (!o || o === g) continue; if (!g) g = o; else { for (const j of o.cells) { owner.set(j, g); g.cells.add(j); } g.h = g.h || o.h; g.v = g.v || o.v; g.maxRun = Math.max(g.maxRun, o.maxRun); o.dead = true; } }
+    if (!g) { g = { k: run.k, cells: new Set(), h: false, v: false, maxRun: 0, cross: -1, mid: run.cells[run.cells.length >> 1] }; groups.push(g); }
+    for (const i of run.cells) { if (g.cells.has(i)) g.cross = i; g.cells.add(i); owner.set(i, g); }
+    if (run.h) g.h = true; else g.v = true; g.maxRun = Math.max(g.maxRun, run.cells.length);
+  }
+  return groups.filter(g => !g.dead);
+}
+function matchAt(i) {
+  const k = K(i); if (k < 0 || k > 5) return false; const r = R(i), c = C(i); let n = 1;
+  for (let x = c - 1; x >= 0 && K(I(r, x)) === k; x--) n++; for (let x = c + 1; x < COLS && K(I(r, x)) === k; x++) n++; if (n >= 3) return true; n = 1;
+  for (let y = r - 1; y >= 0 && K(I(y, c)) === k; y--) n++; for (let y = r + 1; y < ROWS && K(I(y, c)) === k; y++) n++; return n >= 3;
+}
+function canSwap(a, b) {
+  const ta = grid[a], tb = grid[b]; if (!ta || !tb || ta.k === 6 || tb.k === 6) return false; if (ta.sp === 4 || tb.sp === 4 || (ta.sp && tb.sp)) return true;
+  grid[a] = tb; grid[b] = ta; const ok = matchAt(a) || matchAt(b); grid[a] = ta; grid[b] = tb; return ok;
+}
+function findMove() { for (let i = 0; i < NC; i++) { if (C(i) < COLS - 1 && canSwap(i, i + 1)) return [i, i + 1]; if (R(i) < ROWS - 1 && canSwap(i, i + COLS)) return [i, i + COLS]; } return null; }
+function place(t, i, dur) { grid[i] = t; t.r = R(i); t.c = C(i); Lab.tween(t, { x: t.c, y: t.r }, dur, { ease: "outCubic" }); }
+function trySwap(a, b) {
+  if (phase !== "idle") { pending = [a, b]; return; }
+  const ta = grid[a], tb = grid[b]; sel = -1; idleT = 0; hintMove = null;
+  if (!ta || !tb || ta.k === 6 || tb.k === 6 || !adjacent(a, b)) { if (!demo) Lab.sfx("tick", { pitch: .6 }); return; }
+  lastSwap = { a, b, ok: canSwap(a, b) }; place(ta, b, .13); place(tb, a, .13); phase = "swap"; pt = .14; if (!demo) Lab.sfx("swish", { vol: .5, pitch: 1.2 });
+}
+function swapDone() {
+  const { a, b, ok } = lastSwap, ta = grid[b], tb = grid[a];
+  if (!ok) { place(ta, a, .13); place(tb, b, .13); phase = "back"; pt = .14; if (!demo) { Lab.sfx("error", { vol: .5 }); Lab.buzz(12); } return; }
+  if (!demo) { moves--; if (moves === 3) Lab.sfx("warn"); Lab.hint(""); } cascade = 0; let extra = null;
+  if (ta.sp === 4 && tb.sp === 4) { extra = [...Array(NC).keys()]; ta.fired = tb.fired = true; }
+  else if (ta.sp === 4 || tb.sp === 4) { const pr = ta.sp === 4 ? ta : tb, ot = ta.sp === 4 ? tb : ta; pr.fired = true; extra = [I(pr.r, pr.c)]; for (let i = 0; i < NC; i++) if (K(i) === ot.k) extra.push(i); prismFx(pr, ot.k); }
+  else if (ta.sp && tb.sp) extra = [a, b];
+  resolve(findMatches(), [b, a], extra);
+}
+function blast(i, t) {
+  const r = R(i), c = C(i), out = [];
+  if (t.sp === 1) for (let x = 0; x < COLS; x++) out.push(I(r, x));
+  else if (t.sp === 2) for (let y = 0; y < ROWS; y++) out.push(I(y, c));
+  else if (t.sp === 3) { for (let y = r - 1; y <= r + 1; y++) for (let x = c - 1; x <= c + 1; x++) if (y >= 0 && y < ROWS && x >= 0 && x < COLS) out.push(I(y, x)); }
+  else { const n = [0, 0, 0, 0, 0, 0]; for (let j = 0; j < NC; j++) { const k = K(j); if (k >= 0 && k < 6) n[k]++; } const k = n.indexOf(Math.max(...n)); for (let j = 0; j < NC; j++) if (K(j) === k) out.push(j); prismFx(t, k); }
+  const x = X(c), y = Y(r);
+  if (t.sp === 1 || t.sp === 2) { fx.burst(x, y, { n: 18, color: "#fff", speed: 520, life: .4, size: 4, shape: "spark", angle: t.sp === 1 ? 0 : Math.PI / 2, spread: .12 }); fx.burst(x, y, { n: 18, color: "#fff", speed: 520, life: .4, size: 4, shape: "spark", angle: t.sp === 1 ? Math.PI : -Math.PI / 2, spread: .12 }); if (!demo) Lab.sfx("zap", { pitch: .8, vol: .7 }); }
+  else if (t.sp === 3) { fx.ring(x, y, { r0: cs * .3, r1: cs * 1.8, color: "#fff", width: 6, life: .35 }); if (!demo) { Lab.sfx("explode", { vol: .5, pitch: 1.4 }); Lab.shake(6, .2); } }
+  return out;
+}
+function prismFx(t, k) { fx.ring(X(t.c), Y(t.r), { r0: cs * .3, r1: cs * 3, color: KC[k] || "#fff", width: 8, life: .5 }); if (!demo) { Lab.sfx("chime"); Lab.sfx("star"); Lab.flash(KC[k] || "#fff", .25, .25); } }
+function resolve(groups, moved, extra) {
+  const clear = new Set(extra || []), make = []; cascade++;
+  for (const g of groups) {
+    const sp = g.maxRun >= 5 ? 4 : g.h && g.v ? 3 : g.maxRun === 4 ? (g.h ? 1 : 2) : 0; let at = -1;
+    if (sp) { at = moved ? moved.find(i => g.cells.has(i) && !grid[i].sp) : undefined; if (at == null) at = g.cross >= 0 && !grid[g.cross].sp ? g.cross : g.mid; if (grid[at].sp) at = -1; else make.push({ i: at, sp }); }
+    for (const i of g.cells) if (i !== at) clear.add(i);
+    let sx = 0, sy = 0; for (const i of g.cells) { sx += X(C(i)); sy += Y(R(i)); } const n = g.cells.size, pts = n * 10 * cascade + (sp ? 40 * sp : 0); score += pts;
+    if (!demo) fx.text(sx / n, sy / n - cs * .3, "+" + pts, { color: cascade > 1 ? "#ffcf5a" : "#fff", size: 17 + Math.min(12, cascade * 3 + n) });
+  }
+  for (const i of [...clear]) { if (!grid[i] || grid[i].k === 6) continue; for (const j of [i - 1, i + 1, i - COLS, i + COLS]) if (j >= 0 && j < NC && grid[j] && grid[j].k === 6 && Math.abs(C(j) - C(i)) <= 1) clear.add(j); }
+  const q = [...clear];
+  while (q.length) { const i = q.pop(), t = grid[i]; if (!t || !t.sp) continue; if (t.fired && t.sp === 4) continue; if (t.fired) continue; t.fired = true; for (const j of blast(i, t)) if (!clear.has(j) && grid[j]) { clear.add(j); q.push(j); score += 10 * cascade; } }
+  if (!clear.size && !make.length) return endTurn();
+  for (const i of clear) {
+    const t = grid[i]; if (!t) continue; t.dying = .001;
+    fx.burst(X(t.c), Y(t.r), { n: 5, colors: [t.k === 6 ? "#c9b79c" : KC[t.k] || "#fff", "#fff"], speed: 130, life: .4, size: 3.5, gravity: 300 });
+    if (t.k === 6) count("tangle", 0, t); else if (t.sp !== 4) count("k", t.k, t);
+    if (holes[i] === 1) { holes[i] = 2; count("hole", 0, t); fx.burst(X(t.c), Y(t.r), { n: 6, color: "#ffcf5a", speed: 90, life: .5, size: 3, shape: "star" }); }
+  }
+  after = () => { for (const i of clear) if (grid[i] && grid[i].dying) grid[i] = null; for (const m of make) { const t = grid[m.i]; if (!t) continue; t.sp = m.sp; t.rot = 0; t.pop = 1; t.fired = false; specials++; } if (make.length && !demo) Lab.sfx("unlock", { pitch: 1 + make[0].sp * .1 }); collapse(); phase = "fall"; };
+  phase = "clear"; pt = .19; bestCascade = Math.max(bestCascade, cascade);
+  if (!demo) {
+    Lab.setScore(score); Lab.bumpScore(); Lab.audio.combo(cascade * 2 - 2 + Math.min(3, clear.size >> 2), { vol: .22 }); Lab.sfx("pop", { pitch: .9 + cascade * .12, vol: .7 }); Lab.buzz(8 + cascade * 4);
+    if (cascade >= 2) { Lab.shake(Math.min(7, 1 + cascade), .15); fx.text(bx + cs * COLS / 2, by - 6, "Cascade ×" + cascade, { color: "#ffcf5a", size: 18 + Math.min(10, cascade * 2), vy: -25 }); }
+  }
+}
+function count(type, k, t) {
+  const g = goals.find(g => g.type === type && (type !== "k" || g.k === k)); if (!g || g.left <= 0 || demo) return; g.left--;
+  if (fliers.length < 26) fliers.push({ x: X(t.c), y: Y(t.r), g, t: -fliers.length * .025, k: type === "k" ? k : type === "hole" ? 7 : 6 }); else g.shown--;
+}
+function collapse() {
+  for (let c = 0; c < COLS; c++) {
+    let w = ROWS - 1;
+    for (let r = ROWS - 1; r >= 0; r--) { const t = grid[I(r, c)]; if (!t) continue; if (r !== w) { grid[I(w, c)] = t; grid[I(r, c)] = null; t.r = w; } w--; }
+    for (let r = w; r >= 0; r--) { const t = mk(Lab.randInt(0, colours - 1), r, c); t.y = r - (w + 1) - .3; grid[I(r, c)] = t; }
+  }
+}
+function endTurn() {
+  if (!demo && goals.every(g => g.left <= 0)) {
+    phase = "end"; const bonus = moves * 60; score += bonus; Lab.setScore(score); Lab.bumpScore(); Lab.sfx("levelup"); Lab.banner("Order filled!", { color: "#ffcf5a", ms: 1300, y: .14 });
+    if (bonus) fx.text(bx + cs * COLS / 2, by + cs * 2, moves + " spare moves  +" + bonus, { color: "#fff", size: 20, life: 1.4 });
+    for (let i = 0; i < 5; i++) fx.burst(bx + Lab.rand(.1, .9) * cs * COLS, by + Lab.rand(.2, .8) * cs * ROWS, { n: 14, colors: KC, speed: 260, life: .9, size: 5, gravity: 400, shape: "circle" });
+    Lab.after(1.5, () => { level++; setupLevel(); }); return;
+  }
+  if (!demo && moves <= 0) { phase = "end"; Lab.sfx("thud"); Lab.after(.6, () => Lab.gameover({ title: "Out of moves", message: "Order " + level + " went unfilled.", score, stats: [["Orders filled", level - 1], ["Best cascade", "×" + bestCascade], ["Power buttons", specials]] })); return; }
+  if (!findMove()) return reshuffle();
+  phase = "idle"; idleT = 0;
+  if (pending) { const p = pending; pending = null; if (grid[p[0]] && grid[p[1]]) trySwap(p[0], p[1]); }
+}
+function reshuffle() {
+  const cells = []; for (let i = 0; i < NC; i++) if (grid[i] && grid[i].k !== 6) cells.push(i);
+  const ts = cells.map(i => grid[i]); let tries = 0;
+  do { Lab.shuffle(ts); cells.forEach((i, j) => { grid[i] = ts[j]; }); } while (++tries < 80 && (findMatches().length || !findMove()));
+  cells.forEach((i, j) => { const t = ts[j]; t.r = R(i); t.c = C(i); Lab.tween(t, { x: t.c, y: t.r }, .45, { ease: "inOutCubic" }); });
+  phase = "shuffle"; pt = .5; if (!demo) { Lab.banner("No swaps left: reshuffle", { color: "#fff", ms: 1000, y: .14 }); Lab.sfx("whoosh", { pitch: .8 }); }
+}
+function update(dt) {
+  if (phase === "swap") { if ((pt -= dt) <= 0) swapDone(); }
+  else if (phase === "back" || phase === "shuffle") { if ((pt -= dt) <= 0) { for (const t of grid) if (t) { t.x = t.c; t.y = t.r; } endTurn(); } }
+  else if (phase === "clear") { for (const t of grid) if (t && t.dying) t.dying = Math.min(1, t.dying + dt / .18); if ((pt -= dt) <= 0) { const f = after; after = null; f(); } }
+  else if (phase === "fall") {
+    let moving = false; landT -= dt;
+    for (const t of grid) if (t && (t.y < t.r || t.vy)) { t.vy = Math.min(26, t.vy + 52 * dt); t.y += t.vy * dt; if (t.y >= t.r) { t.y = t.r; if (t.vy > 4) { t.sq = Math.min(.24, t.vy * .014); if (landT <= 0 && !demo) { Lab.sfx("tap", { pitch: .7 + t.c * .05, vol: .35 }); landT = .04; } } t.vy = 0; } else moving = true; }
+    if (!moving) { const g = findMatches(); if (g.length) resolve(g); else endTurn(); }
+  } else if (phase === "idle" && !demo) { idleT += dt; if (idleT > 6 && !hintMove) hintMove = findMove(); }
+  for (const t of grid) if (t) { t.sq = Lab.damp(t.sq, 0, 12, dt); t.pop = Math.max(0, t.pop - dt * 3); }
+  for (const f of fliers) { f.t += dt / .5; if (f.t >= 1) { f.dead = true; f.g.shown = Math.max(f.g.left, f.g.shown - 1); f.g.pulse = 1; if (!demo) Lab.sfx("tick", { pitch: 1.4, vol: .4 }); } }
+  if (fliers.length && fliers.some(f => f.dead)) fliers = fliers.filter(f => !f.dead);
+  if (!demo) { for (const g of goals) g.pulse = Math.max(0, g.pulse - dt * 4); Lab.music.intensity(clamp(.25 + (1 - moves / movesMax) * .5 + (cascade > 1 && phase !== "idle" ? .25 : 0), 0, 1)); }
+}
+
+/* ---------- art */
+function shapePath(g, k, cx, cy, r) {
+  g.beginPath();
+  if (k === 0) g.arc(cx, cy, r, 0, TAU);
+  else if (k === 1) draw.rr(g, cx - r * .88, cy - r * .88, r * 1.76, r * 1.76, r * .4);
+  else if (k === 2) { for (let i = 0; i <= 60; i++) { const a = i / 60 * TAU, rr = r * (.86 + .15 * Math.cos(a * 6)); g[i ? "lineTo" : "moveTo"](cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } g.closePath(); }
+  else if (k === 3) { for (let i = 0; i < 6; i++) { const a = i * TAU / 6 + Math.PI / 6; g[i ? "lineTo" : "moveTo"](cx + Math.cos(a) * r, cy + Math.sin(a) * r); } g.closePath(); }
+  else if (k === 4) { const s = r * .98, y = cy + r * .08; g.moveTo(cx, y + s * .9); g.bezierCurveTo(cx - s * 1.5, y - s * .1, cx - s * .8, y - s * 1.1, cx, y - s * .35); g.bezierCurveTo(cx + s * .8, y - s * 1.1, cx + s * 1.5, y - s * .1, cx, y + s * .9); g.closePath(); }
+  else { for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .6 : r * 1.04; g[i ? "lineTo" : "moveTo"](cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } g.closePath(); }
+}
+function buttonSprite(k, sp, size) {
+  const s = Math.round(size), m = 5, sz = s + m * 2;
+  return Lab.sprite("hb:b:" + k + ":" + sp + ":" + s, sz, sz + 3, g => {
+    const cx = sz / 2, cy = sz / 2, r = s * .44; g.lineJoin = "round"; g.lineCap = "round";
+    if (k === 6) {   // yarn tangle
+      draw.circle(g, cx, cy + 3, r, "rgba(0,0,0,.2)"); draw.circle(g, cx, cy, r, "#cdbb9f", "#8e7a5c", s * .05);
+      g.save(); g.beginPath(); g.arc(cx, cy, r * .94, 0, TAU); g.clip(); const rnd = Lab.rng(9); g.lineWidth = s * .045;
+      for (let i = 0; i < 9; i++) { g.strokeStyle = i % 2 ? "#a8946f" : "#e6d8bf"; g.beginPath(); g.ellipse(cx + (rnd() - .5) * r * .5, cy + (rnd() - .5) * r * .5, r * (.5 + rnd() * .5), r * (.2 + rnd() * .3), rnd() * 3, 0, TAU); g.stroke(); } g.restore(); return;
+    }
+    if (sp === 4) {  // prism: every colour
+      draw.circle(g, cx, cy + 3, r, "rgba(0,0,0,.22)"); for (let i = 0; i < 6; i++) { g.fillStyle = KC[i]; g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, r, i * TAU / 6 - .01, (i + 1) * TAU / 6 + .01); g.fill(); }
+      draw.circle(g, cx, cy, r, null, "#fff", s * .07); draw.circle(g, cx, cy, r * .42, "#fff"); draw.star(g, cx, cy, r * .3, "#ffcf5a"); return;
+    }
+    const col = KC[k]; g.save(); g.translate(0, 3); shapePath(g, k, cx, cy, r); g.fillStyle = "rgba(0,0,0,.22)"; g.fill(); g.restore();
+    const gr = g.createRadialGradient(cx - r * .3, cy - r * .4, r * .1, cx, cy, r * 1.1); gr.addColorStop(0, shade(col, .32)); gr.addColorStop(.6, col); gr.addColorStop(1, shade(col, -.2));
+    shapePath(g, k, cx, cy, r); g.fillStyle = gr; g.fill(); g.strokeStyle = shade(col, -.28); g.lineWidth = s * .05; g.stroke();
+    g.save(); g.translate(cx, cy); g.scale(.62, .62); g.translate(-cx, -cy); shapePath(g, k, cx, cy, r); g.restore(); g.strokeStyle = shade(col, -.16); g.lineWidth = s * .035; g.stroke();
+    if (sp === 1 || sp === 2) {  // ribbon: white band with arrowheads along the row / column it clears
+      g.save(); g.translate(cx, cy); if (sp === 2) g.rotate(Math.PI / 2); g.fillStyle = "#fff"; g.strokeStyle = "rgba(60,40,20,.35)"; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(-r * 1.12, 0); g.lineTo(-r * .62, -r * .34); g.lineTo(-r * .62, -r * .14); g.lineTo(r * .62, -r * .14); g.lineTo(r * .62, -r * .34); g.lineTo(r * 1.12, 0); g.lineTo(r * .62, r * .34); g.lineTo(r * .62, r * .14); g.lineTo(-r * .62, r * .14); g.lineTo(-r * .62, r * .34); g.closePath(); g.fill(); g.stroke(); g.restore(); return;
+    }
+    const hs = k === 0 || k === 3 ? [[-1, -1], [1, -1], [1, 1], [-1, 1]] : [[-1, 0], [1, 0]], d = s * .075;
+    g.strokeStyle = "#fff3d6"; g.lineWidth = s * .035; g.beginPath(); if (hs.length === 4) { g.moveTo(cx - d, cy - d); g.lineTo(cx + d, cy + d); g.moveTo(cx + d, cy - d); g.lineTo(cx - d, cy + d); } else { g.moveTo(cx - d, cy); g.lineTo(cx + d, cy); } g.stroke();
+    for (const h of hs) draw.circle(g, cx + h[0] * d, cy + h[1] * d, s * .04, shade(col, -.55));
+    g.strokeStyle = "rgba(255,255,255,.5)"; g.lineWidth = s * .04; g.beginPath(); g.arc(cx, cy, r * .78, Math.PI * 1.1, Math.PI * 1.45); g.stroke();
+    if (sp === 3) { for (let i = 0; i < 8; i++) { const a = i * TAU / 8; draw.line(g, cx + Math.cos(a) * r * .55, cy + Math.sin(a) * r * .55, cx + Math.cos(a) * r * .98, cy + Math.sin(a) * r * .98, "#e9edf2", s * .03); draw.circle(g, cx + Math.cos(a) * r * 1.0, cy + Math.sin(a) * r * 1.0, s * .055, "#fff", "#c33", 1.5); } }
+  });
+}
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("hb:bg", W, H, g => {
+    draw.vgrad(g, 0, 0, W, H, ["#3a5c96", "#27406e"]);
+    g.lineWidth = 1; for (let x = -H; x < W; x += 5) { g.strokeStyle = (x / 5) % 3 ? "rgba(255,255,255,.035)" : "rgba(10,20,50,.1)"; g.beginPath(); g.moveTo(x, 0); g.lineTo(x + H, H); g.stroke(); }
+    g.setLineDash([9, 6]); g.strokeStyle = "rgba(255,207,90,.5)"; g.lineWidth = 2.5;
+    for (const o of [22, 30]) { g.beginPath(); g.moveTo(40 + o, 0); g.lineTo(40 + o, H); g.stroke(); g.beginPath(); g.moveTo(W - 40 - o, 0); g.lineTo(W - 40 - o, H); g.stroke(); } g.setLineDash([]);
+  });
+}
+function boardSprite() {
+  const w = cs * COLS, h = cs * ROWS, m = 12;
+  return Lab.sprite("hb:board", w + m * 2, h + m * 2 + 6, g => {
+    draw.rect(g, 3, 9, w + m * 2 - 6, h + m * 2 - 6, 18, "rgba(0,0,0,.28)"); draw.rect(g, 2, 2, w + m * 2 - 4, h + m * 2 - 4, 18, "#f4ead8");
+    g.setLineDash([7, 5]); draw.rr(g, 7, 7, w + m * 2 - 14, h + m * 2 - 14, 13); g.strokeStyle = "#d3ab73"; g.lineWidth = 2; g.stroke(); g.setLineDash([]);
+    for (let i = 0; i < NC; i++) if ((R(i) + C(i)) % 2) draw.rect(g, m + C(i) * cs + 2, m + R(i) * cs + 2, cs - 4, cs - 4, cs * .2, "rgba(160,120,70,.09)");
+  });
+}
+function goalIcon(c, k, x, y, s) {
+  if (k === 7) { draw.rect(c, x - s * .36, y - s * .36, s * .72, s * .72, s * .16, "#27406e", "#fff", 1.5); return; }
+  const sp = buttonSprite(k, 0, s); c.drawImage(sp, x - sp.w / 2, y - sp.w / 2, sp.w, sp.h);
+}
+const goalPos = i => wide ? { x: panel.x + panel.w * .32, y: panel.y + 132 + i * 54 } : { x: panel.x + 34 + i * Math.min(88, (panel.w - 96) / 3), y: panel.y + panel.h * .6 };
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(), bd = boardSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h); c.drawImage(bd, bx - 12, by - 12, bd.w, bd.h);
+  for (let i = 0; i < NC; i++) if (holes[i]) {
+    const x = bx + C(i) * cs, y = by + R(i) * cs;
+    if (holes[i] === 1) { c.setLineDash([4, 4]); draw.rect(c, x + 2, y + 2, cs - 4, cs - 4, cs * .2, "#2c4a80", "rgba(255,255,255,.75)", 1.5); c.setLineDash([]); }
+    else { draw.rect(c, x + 4, y + 4, cs - 8, cs - 8, cs * .16, "rgba(233,200,140,.55)"); c.setLineDash([3, 4]); draw.rr(c, x + 7, y + 7, cs - 14, cs - 14, cs * .12); c.strokeStyle = "rgba(160,110,50,.6)"; c.lineWidth = 1.5; c.stroke(); c.setLineDash([]); }
+  }
+  c.save(); c.beginPath(); c.rect(bx - 6, by - 6, cs * COLS + 12, cs * ROWS + 12); c.clip();
+  for (let pass = 0; pass < 2; pass++) for (let i = 0; i < NC; i++) {
+    const o = grid[i]; if (!o) continue; const lifted = i === sel || (lastSwap && phase === "swap" && i === lastSwap.b); if ((pass === 1) !== lifted) continue;
+    const sp = buttonSprite(o.k, o.sp, cs * .9), hint = hintMove && hintMove.includes(i) && phase === "idle";
+    let s = 1 + (i === sel ? .12 + .03 * Math.sin(t * 8) : 0) + o.pop * .3 + (o.sp ? .03 * Math.sin(t * 5 + i) : 0); if (o.dying) s *= (1 - o.dying) * (1 + .7 * o.dying);
+    c.save(); c.translate(X(o.x), Y(o.y) + cs * o.sq * .3); c.rotate(o.rot + (hint ? Math.sin(t * 14) * .16 : 0)); c.scale(s * (1 + o.sq), s * (1 - o.sq));
+    c.drawImage(sp, -sp.w / 2, -sp.w / 2, sp.w, sp.h); c.restore();
+    if (i === sel) draw.circle(c, X(o.x), Y(o.y), cs * .5, null, "#ffcf5a", 3);
+  }
+  c.restore();
+  if (cursor >= 0) { c.setLineDash([6, 5]); c.lineDashOffset = -t * 20; draw.rect(c, bx + C(cursor) * cs + 2, by + R(cursor) * cs + 2, cs - 4, cs - 4, cs * .22, null, "#27406e", 3); c.setLineDash([]); }
+  // order ticket
+  const p = panel, low = moves <= 3 && phase !== "end";
+  draw.rect(c, p.x + 2, p.y + 5, p.w, p.h, 14, "rgba(0,0,0,.25)"); draw.rect(c, p.x, p.y, p.w, p.h, 14, "#ecd9b0", "#c9a66b", 1.5);
+  draw.circle(c, p.x + p.w / 2, p.y + 1, 6, "#c7ccd4", "#7b828c", 1.5);
+  draw.text(c, "ORDER " + (level || 1), wide ? p.x + p.w / 2 : p.x + 16, p.y + (wide ? 26 : 19), { size: 12, color: "#9a7b4f", align: wide ? "center" : "left" });
+  const mx = wide ? p.x + p.w / 2 : p.x + p.w - 44, my = wide ? p.y + 72 : p.y + p.h / 2 + 2, mr = wide ? 30 : Math.min(30, p.h * .34);
+  draw.circle(c, mx, my, mr * (low ? 1 + .06 * Math.sin(t * 10) : 1), low ? "#e25555" : "#fff7e6", low ? "#a33" : "#c9a66b", 2);
+  draw.text(c, String(Math.max(0, moves || 0)), mx, my - 2, { size: mr * .95, color: low ? "#fff" : BROWN }); draw.text(c, "moves", mx, my + mr * .56, { size: mr * .32, color: low ? "#ffe2e2" : "#9a7b4f", weight: 600 });
+  (goals || []).forEach((g, i) => {
+    const q = goalPos(i), s = wide ? 42 : Math.min(40, p.h * .46), done = g.shown <= 0;
+    goalIcon(c, g.type === "k" ? g.k : g.type === "hole" ? 7 : 6, q.x, q.y, s * (1 + g.pulse * .25));
+    if (done) { draw.circle(c, q.x + s * .8, q.y, 11, "#4fae6a"); c.strokeStyle = "#fff"; c.lineWidth = 3; c.lineCap = "round"; c.beginPath(); c.moveTo(q.x + s * .8 - 5, q.y); c.lineTo(q.x + s * .8 - 1, q.y + 4); c.lineTo(q.x + s * .8 + 5, q.y - 4); c.stroke(); }
+    else draw.text(c, String(g.shown), q.x + s * .58, q.y + 1, { size: 20, color: BROWN, align: "left" });
+  });
+  for (const f of fliers) { if (f.t < 0) continue; const i = goals.indexOf(f.g), q = goalPos(i < 0 ? 0 : i), e = ease.inOutQuad(f.t); goalIcon(c, f.k, lerp(f.x, q.x, e), lerp(f.y, q.y, e) - Math.sin(e * Math.PI) * 40, cs * .5 * (1 - e * .3)); }
+}
+function attract(dt, t) {
+  if (!demo) { demo = true; layout(); level = 1; score = 0; cursor = -1; lastSwap = null; setupLevel(); moves = movesMax = 99; goals = []; demoT = 2; }
+  demoT -= dt; if (phase === "idle" && demoT <= 0) { const m = findMove(); if (m) trySwap(m[0], m[1]); demoT = 1.3; }
+  update(dt); render(t);
+}
+Lab.boot();
+})();
+</script></body></html>

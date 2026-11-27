@@ -15,7 +15,7 @@
  *          tightens as the tray fills. */
 Lab.init({
   title: "Plumpling", tagline: "Slide, squish and serve the tray.", category: "Puzzle & Logic",
-  howto: ["Swipe to slide every dumpling at once", "Equal ones squish together, and chains keep going", "Park the ordered size on the gold plate in time"],
+  howto: ["Swipe to slide every dumpling", "Equal ones squish; chains keep going", "Park the ordered size on the gold plate"],
   theme: { bg: "#241826", bg2: "#49293f", accent: "#ffb3c4", accent2: "#c3e08c" },
   orient: "any", music: { style: "puzzle", key: "A", vol: .45 }, restart: start, attract,
 });
@@ -26,7 +26,7 @@ const DIRS = { L: [0, -1], R: [0, 1], U: [-1, 0], D: [1, 0] };
 const ORD = [3, 3, 4, 3, 4, 5, 4, 5, 5, 6, 5, 6, 6, 7, 6, 7, 7, 8];
 const BUD = [0, 0, 0, 10, 13, 18, 26, 40, 64, 110, 190, 330];
 const tierFor = n => n < ORD.length ? ORD[n] : Math.min(11, 8 + Math.floor((n - ORD.length) / 3));
-let side, bx, by, cell, pad, wide, card = {}, btn = {}, grid, tiles, score, moves, served, missed, undos, snaps, queue, clock, slideEnd, events, bump, bestChain, maxTier, over, flip, order, guest, demo, demoT;
+let side, bx, by, cell, pad, wide, card = {}, btn = {}, grid, tiles, score, moves, served, missed, undos, snaps, queue, clock, slideEnd, events, bump, bestChain, maxTier, over, flip, order, guest, demo, demoT, note;
 
 function layout() {
   const P = Lab.play; wide = P.w > P.h * 1.2;
@@ -49,7 +49,7 @@ const empties = () => { const e = []; for (let r = 0; r < N; r++) for (let c = 0
 function reset() {
   layout();
   grid = Array.from({ length: N }, () => Array(N).fill(null)); tiles = []; score = 0; moves = 0; served = 0; missed = 0; undos = 2; snaps = []; queue = []; clock = 0; slideEnd = 0; events = [];
-  bump = null; bestChain = 0; maxTier = 1; over = false; flip = 0; guest = { hop: 0, huff: 0 }; order = null;
+  bump = null; bestChain = 0; maxTier = 1; over = false; flip = 0; guest = { hop: 0, huff: 0 }; order = null; note = null;
   spawn(2, 0); newOrder(false);
 }
 function start() {
@@ -154,14 +154,14 @@ function serve(t, delay) {
     const g = guestPos(); Lab.tween(t, { ox: g.x - px(c), oy: g.y - py(r), sc: .3, a: .2 }, .42, { ease: "inCubic", onDone: () => { t.dead = true; guest.hop = 1; } });
     fx.burst(px(c), py(r), { n: 16, colors: [GOLD, "#fff", "#ffb3c4"], speed: 220, life: .7, size: 4, shape: "star", gravity: 240 });
     if (!demo) { Lab.sfx("chime"); Lab.sfx("coin", { pitch: 1.1 }); fx.text(px(c), py(r) - cell * .4, "Served +" + gain, { color: GOLD, size: 22 }); Lab.buzz(14); Lab.bumpScore();
-      if (served === 2) Lab.toast("Busier now: sometimes two arrive", 1700, { y: .8 }); if (served === 6) Lab.banner("Rush hour!", { color: "#ffb3c4", ms: 1200, y: .12 }); }
+      if (served === 2) note = { text: "Busier: sometimes two arrive", t: 2.6, col: "#ffb3c4" }; if (served === 6) Lab.banner("Rush hour!", { color: "#ffb3c4", ms: 1200, y: .12 }); }
   } });
   newOrder(false);
 }
 function miss(delay) {
   missed++; const e = empties(), spot = !grid[order.r][order.c] ? [order.r, order.c] : e.length ? Lab.choose(e) : null;
   if (spot) { const b = mkTile(0, spot[0], spot[1], clock + delay); grid[spot[0]][spot[1]] = b; tiles.push(b); }
-  events.push({ at: clock + delay, fn: () => { guest.huff = 1; if (spot) fx.puff(px(spot[1]), py(spot[0]), { n: 10, color: "rgba(90,80,85,.7)", size: 9 }); if (!demo) { Lab.sfx("error"); Lab.sfx("thud", { pitch: .7 }); Lab.shake(6, .25); Lab.toast("Too slow! That one burnt", 1300, { y: .8 }); } } });
+  events.push({ at: clock + delay, fn: () => { guest.huff = 1; if (spot) fx.puff(px(spot[1]), py(spot[0]), { n: 10, color: "rgba(90,80,85,.7)", size: 9 }); if (!demo) { Lab.sfx("error"); Lab.sfx("thud", { pitch: .7 }); Lab.shake(6, .25); note = { text: "Too slow! That one burnt", t: 2.2, col: "#ff8a7a" }; } } });
   newOrder(true);
 }
 const snapshot = () => ({ m: grid.map(r => r.map(t => t ? t.tier : -1)), score, moves, served, missed, order: Object.assign({}, order), flip, maxTier, bestChain });
@@ -184,6 +184,7 @@ function frame(dt, t) {
   }
   if (tiles.some(o => o.dead)) tiles = tiles.filter(o => !o.dead);
   if (bump) { bump.t += dt / .16; if (bump.t >= 1) bump = null; }
+  if (note && (note.t -= dt) <= 0) note = null;
   guest.hop = Math.max(0, guest.hop - dt * 1.8); guest.huff = Math.max(0, guest.huff - dt * 1.2);
   if (!demo) Lab.music.intensity(clamp(.15 + (16 - empties().length) / 16 * .7 + (order.left <= 3 ? .2 : 0), 0, 1));
   render(t);
@@ -278,7 +279,7 @@ function render(t) {
   const sp = tileSprite(order.tier), ms = wide ? 58 : Math.min(56, k.h * .58), tx = wide ? k.x + 18 : g.x + gr + 22, ty = wide ? g.y + gr + 46 : k.y + k.h * .5 + 6, lx = tx + ms + 10;
   draw.text(c, "ORDER " + (served + 1), wide ? k.x + k.w / 2 : tx, wide ? g.y + gr + 14 : k.y + 15, { size: 11, color: "rgba(255,220,205,.6)", align: wide ? "center" : "left" });
   c.drawImage(sp, tx, ty - ms / 2, ms, ms * sp.h / sp.w);
-  draw.text(c, "on the gold plate", lx, ty - 11, { size: 13, color: "rgba(255,235,225,.8)", align: "left", weight: 600 });
+  draw.text(c, note ? note.text : "on the gold plate", lx, ty - 11, { size: 13, color: note ? note.col : "rgba(255,235,225,.8)", align: "left", weight: note ? 800 : 600, maxWidth: k.x + k.w - 10 - lx });
   draw.text(c, order.left + (order.left === 1 ? " move left" : " moves left"), lx, ty + 9, { size: 17, color: col, align: "left" });
   const bw = k.x + k.w - 16 - tx, bY = wide ? ty + ms / 2 + 14 : k.y + k.h - 11; draw.rect(c, tx, bY, bw, 5, 3, "rgba(255,255,255,.1)"); draw.rect(c, tx, bY, Math.max(5, bw * order.left / order.total), 5, 3, col);
   if (wide && k.h > 200) draw.text(c, "Served " + served + (missed ? "  ·  Burnt " + missed : ""), k.x + k.w / 2, k.y + k.h - 16, { size: 12, color: "rgba(255,220,205,.55)", weight: 600 });

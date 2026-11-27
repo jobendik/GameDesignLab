@@ -33,12 +33,12 @@ let x0max, K, shot, state, stateT, lives, goals, score, streak, bestStreak, stam
 /* ---------- camera ---------- */
 function layout() {
   const P = Lab.play, D0 = 21, rho = (.5 * P.h) / (.66 * Lab.W); let best = null;
-  for (let h = 1.7; h <= 11; h += .25) {                                   // pick the camera height whose framing matches the stage aspect
-    const th = Math.atan2(h - 1.1, D0 * .55 + 8), c = Math.cos(th), s = Math.sin(th), pr = (y, z) => { const dy = y - h, dz = z + 8, d = -dy * s + dz * c; return [(dy * c + dz * s) / d, 1 / d]; };
-    const a = pr(0, 0), b = pr(GH, D0), span = b[0] - a[0], wid = 2 * GW * b[1], e = Math.abs(Math.log(span / wid / rho));
-    if (!best || e < best.e) best = { e, h, c, s, span, wid, mid: (a[0] + b[0]) / 2, gd: 1 / b[1] };
+  for (const back of [8, 11, 14, 18]) for (let h = 1.3; h <= 11; h += .25) {   // pick the camera (height, distance) whose framing matches the stage aspect
+    const th = Math.atan2(h - 1.1, D0 * .55 + back), c = Math.cos(th), s = Math.sin(th), pr = (y, z) => { const dy = y - h, dz = z + back, d = -dy * s + dz * c; return [(dy * c + dz * s) / d, 1 / d]; };
+    const a = pr(0, 0), b = pr(GH, D0), span = b[0] - a[0], wid = 2 * GW * b[1], e = Math.abs(Math.log(span / wid / rho)) + back * .004;
+    if (!best || e < best.e) best = { e, h, c, s, span, wid, back, mid: (a[0] + b[0]) / 2, gd: 1 / b[1] };
   }
-  cam.y = best.h; cam.c = best.c; cam.s = best.s; cam.f = Math.min(.66 * Lab.W / best.wid, .5 * P.h / best.span);
+  cam.y = best.h; cam.z = -best.back; cam.c = best.c; cam.s = best.s; cam.f = Math.min(.66 * Lab.W / best.wid, .5 * P.h / best.span);
   cam.cx = Lab.W / 2; cam.cy = P.y + P.h * .57 + cam.f * best.mid;
   x0max = clamp((Lab.W / 2 - 12 - cam.f * GW / best.gd) * best.gd / cam.f, 0, 4.5);
 }
@@ -176,6 +176,7 @@ function update(dt) {
   if (msg) { msg.t += dt; if (msg.t > 1.3) msg = null; } if (swipeFade) { swipeFade.t += dt; if (swipeFade.t > .5) swipeFade = null; }
   for (const d of K.wall) if (d.hitT) d.hitT = Math.max(0, d.hitT - dt * 3);
   for (const s of K.stamps) if (s.hit) s.hit = Math.min(1, s.hit + dt * 3);
+  if (shot && !shot.res) { const q = proj(shot.x, shot.y, shot.z); (shot.tr = shot.tr || []).push(q[0], q[1], BR * q[2] * 1.6); if (shot.tr.length > 54) shot.tr.splice(0, 3); }
   if (shot) {
     acc = Math.min(acc + dt, .06);
     while (acc >= STEP) { acc -= STEP; const had = shot.res; stepShot(shot, STEP, demo ? null : (k, s) => { if (s > 3) Lab.sfx("bounce", { pitch: .7, vol: .5 }); }); if (!had && shot.res) { announce(); } }
@@ -192,7 +193,7 @@ function grain() {
   return Lab.sprite("ps:grain:" + Lab.W + "x" + Lab.H, w, h, g => { const r = Lab.rng(9); for (let i = 0; i < 2600; i++) { g.fillStyle = r() < .5 ? "rgba(29,42,68,.07)" : "rgba(243,234,215,.1)"; g.fillRect(r() * w, r() * h, 1.6, 1.6); } });
 }
 function crowdStrip() {
-  return Lab.sprite("ps:crowd", 400, 72, g => { g.fillStyle = INK; g.fillRect(0, 0, 400, 72); const r = Lab.rng(4), cols = [PAPER, RED, YEL, "#6f86a8", PAPER]; for (let row = 0; row < 6; row++) for (let i = 0; i < 58; i++) { g.fillStyle = cols[Math.floor(r() * cols.length)]; g.globalAlpha = .55 + r() * .45; g.beginPath(); g.arc(i * 7 + (row % 2) * 3.5 + r() * 2, 8 + row * 11 + r() * 2, 2.6, 0, TAU); g.fill(); } });
+  return Lab.sprite("ps:crowd", 1200, 110, g => { g.fillStyle = INK; g.fillRect(0, 0, 1200, 110); const r = Lab.rng(4), cols = [PAPER, RED, YEL, "#6f86a8", PAPER]; for (let row = 0; row < 7; row++) for (let i = 0; i < 110; i++) { g.fillStyle = cols[Math.floor(r() * cols.length)]; g.globalAlpha = .5 + r() * .5; g.beginPath(); g.arc(i * 11 + (row % 2) * 5.5 + r() * 3, 12 + row * 14.5 + r() * 3, 3.6, 0, TAU); g.fill(); } g.globalAlpha = 1; g.fillStyle = PAPER; g.fillRect(0, 0, 1200, 3); });
 }
 function quad(c, pts, fill) { c.beginPath(); pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.closePath(); c.fillStyle = fill; c.fill(); }
 function gline(c, x1, z1, x2, z2, w) { const a = proj(x1, 0, z1), b = proj(x2, 0, z2); c.lineWidth = Math.max(1.2, w * (a[2] + b[2]) / 2); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke(); }
@@ -213,7 +214,7 @@ function figure(c, x, y, z, o) {                                           // fl
   c.restore();
 }
 function drawBall(c, b) {
-  const g = proj(b.x, 0, b.z), p = proj(b.x, b.y, b.z), r = Math.max(2.5, BR * p[2] * 1.25);
+  const g = proj(b.x, 0, b.z), p = proj(b.x, b.y, b.z), r = Math.max(4, BR * p[2] * 1.6);
   draw.shadow(c, g[0], g[1], r * 1.05, r * .34, clamp(.3 - b.y * .05, .08, .3));
   c.save(); c.translate(p[0], p[1]); draw.circle(c, 0, 0, r, PAPER, INK, Math.max(1, r * .13));
   c.rotate(b.rot || 0); c.fillStyle = INK; draw.poly(c, 0, 0, r * .36, 5, 0, INK); for (let i = 0; i < 5; i++) { const a = i * TAU / 5 + .63; c.beginPath(); c.arc(Math.cos(a) * r * .82, Math.sin(a) * r * .82, r * .2, 0, TAU); c.fill(); }
@@ -223,8 +224,8 @@ function render(t) {
   const c = Lab.ctx, P = Lab.play, W = Lab.W, H = Lab.H, D = K.D, hz = cam.cy - cam.f * cam.s / cam.c;
   // paper sky, sun, stand, boards
   draw.bg(c, "#f7efdc", "#f1dcc0"); draw.circle(c, W * .74, hz - cam.f * .2, Math.min(W, H) * .19, "#f6c9a4"); draw.circle(c, W * .74, hz - cam.f * .2, Math.min(W, H) * .145, "#f2a98a");
-  const sa = proj(-46, 12, D + 14), sb = proj(46, 0, D + 14), cs = crowdStrip(), hop = crowd > 0 ? Math.abs(Math.sin(t * 14)) * crowd * 5 : 0;
-  c.fillStyle = INK; c.fillRect(-40, sa[1] - 6, W + 80, sb[1] - sa[1] + 8); c.drawImage(cs, sa[0], sa[1] - hop, sb[0] - sa[0], sb[1] - sa[1]);
+  const sa = proj(-60, 7.5, D + 14), sb = proj(60, 0, D + 14), cs = crowdStrip(), hop = crowd > 0 ? Math.abs(Math.sin(t * 14)) * crowd * 5 : 0;
+  c.fillStyle = INK; c.fillRect(-40, sa[1], W + 80, sb[1] - sa[1] + 2); c.drawImage(cs, sa[0], sa[1] - hop, sb[0] - sa[0], sb[1] - sa[1]);
   c.fillStyle = TEAL; c.fillRect(-40, sb[1] - 1, W + 80, H);
   const ba = proj(-46, 1.1, D + 7), bb = proj(46, 0, D + 7); c.fillStyle = RED; c.fillRect(-40, ba[1], W + 80, bb[1] - ba[1]); c.fillStyle = PAPER; for (let i = -9; i < 10; i++) { const q = proj(i * 5 + 1, 0, D + 7), w = 2.6 * q[2]; c.fillRect(q[0], ba[1] + (bb[1] - ba[1]) * .3, w, (bb[1] - ba[1]) * .4); }
   // pitch: mown bands, chalk
@@ -232,7 +233,7 @@ function render(t) {
   c.strokeStyle = "rgba(243,234,215,.9)"; c.lineCap = "butt";
   gline(c, -40, D, 40, D, .12); gline(c, -20.16, D - 16.5, 20.16, D - 16.5, .12); gline(c, -20.16, D, -20.16, D - 16.5, .12); gline(c, 20.16, D, 20.16, D - 16.5, .12);
   gline(c, -9.16, D - 5.5, 9.16, D - 5.5, .12); gline(c, -9.16, D, -9.16, D - 5.5, .12); gline(c, 9.16, D, 9.16, D - 5.5, .12);
-  const ps = proj(0, 0, D - 11); draw.circle(c, ps[0], ps[1], Math.max(1.5, .14 * ps[2]), PAPER);
+  const ps = proj(0, 0, D - 11); c.fillStyle = "rgba(243,234,215,.9)"; c.beginPath(); c.ellipse(ps[0], ps[1], Math.max(1.5, .13 * ps[2]), Math.max(1, .05 * ps[2]), 0, 0, TAU); c.fill();
   // goal: net, stamps, frame
   const nk = netKick > 0 ? Math.sin(t * 40) * netKick * .12 : 0, bl = proj(-GW, 0, D + 1.7), br = proj(GW, 0, D + 1.7), tl = proj(-GW, GH * .9, D + 1.7 + nk), tr = proj(GW, GH * .9, D + 1.7 + nk), fl = proj(-GW, 0, D), fr = proj(GW, 0, D), ftl = proj(-GW, GH, D), ftr = proj(GW, GH, D);
   quad(c, [fl, ftl, ftr, fr], "rgba(29,42,68,.22)");
@@ -261,6 +262,7 @@ function render(t) {
   for (const d of K.wall) figure(c, d.x, jh, WALL_Z, { jersey: INK, stripe: RED, skin: d.hue, hit: d.hitT || 0 });
   if (shot && shot.z < WALL_Z) drawBall(c, shot);
   if (!shot) drawBall(c, { x: K.x0, y: BR, z: 0, rot: 0 });
+  if (shot && shot.tr && !shot.res) { c.fillStyle = PAPER; for (let i = 0; i < shot.tr.length; i += 3) { c.globalAlpha = .12 + .5 * i / shot.tr.length; c.beginPath(); c.arc(shot.tr[i], shot.tr[i + 1], Math.max(1.5, shot.tr[i + 2] * (.3 + .5 * i / shot.tr.length)), 0, TAU); c.fill(); } c.globalAlpha = 1; }
   // swipe ribbon
   const sp = path || (swipeFade && swipeFade.p);
   if (sp && sp.length > 1 && !demo) { c.strokeStyle = RED; c.lineCap = "round"; c.globalAlpha = path ? .85 : .85 * (1 - swipeFade.t / .5); for (let i = 1; i < sp.length; i++) { c.lineWidth = 2 + 7 * i / sp.length; c.beginPath(); c.moveTo(sp[i - 1].x, sp[i - 1].y); c.lineTo(sp[i].x, sp[i].y); c.stroke(); } c.globalAlpha = 1; }
@@ -276,9 +278,9 @@ function render(t) {
   // HUD: lives (balls), kick info, streak, wind
   const y0 = P.y + 20;
   for (let i = 0; i < 3; i++) { c.globalAlpha = i < lives ? 1 : .22; draw.circle(c, 22 + i * 24, y0, 8.5, PAPER, INK, 2.2); draw.poly(c, 22 + i * 24, y0, 3.4, 5, 0, INK); } c.globalAlpha = 1;
-  draw.text(c, Math.round(D) + " m", W / 2, y0, { size: 15, color: INK });
-  if (streak > 1) draw.text(c, "×" + Math.min(streak, 5), W - 16, y0, { size: 20, color: RED, align: "right" });
-  if (K.wind) { const dir = Math.sign(K.wind), n = Math.abs(K.wind) > 3.4 ? 3 : Math.abs(K.wind) > 2.3 ? 2 : 1, wx = W / 2, wy = y0 + 24; draw.text(c, "WIND", wx - dir * 26, wy, { size: 11, color: INK }); c.strokeStyle = INK; c.lineWidth = 2.5; c.lineCap = "round"; c.lineJoin = "round"; for (let i = 0; i < n; i++) { const x = wx + dir * (4 + i * 9 + (t * 14) % 9 * .3); c.beginPath(); c.moveTo(x - dir * 4, wy - 5); c.lineTo(x + dir * 2, wy); c.lineTo(x - dir * 4, wy + 5); c.stroke(); } }
+  draw.text(c, Math.round(D) + " m", W / 2, y0, { size: 15, color: INK, stroke: PAPER, strokeW: 5 });
+  if (streak > 1) draw.text(c, "×" + Math.min(streak, 5), W - 16, y0, { size: 20, color: RED, align: "right", stroke: PAPER, strokeW: 5 });
+  if (K.wind) { const dir = Math.sign(K.wind), n = Math.abs(K.wind) > 3.4 ? 3 : Math.abs(K.wind) > 2.3 ? 2 : 1, wx = W / 2, wy = y0 + 24; draw.rect(c, wx - 52, wy - 11, 104, 22, 11, PAPER); draw.text(c, "WIND", wx - dir * 24, wy, { size: 11, color: INK }); c.strokeStyle = RED; c.lineWidth = 2.5; c.lineCap = "round"; c.lineJoin = "round"; for (let i = 0; i < n; i++) { const x = wx + dir * (4 + i * 9 + (t * 14) % 9 * .3); c.beginPath(); c.moveTo(x - dir * 4, wy - 5); c.lineTo(x + dir * 2, wy); c.lineTo(x - dir * 4, wy + 5); c.stroke(); } }
   if (msg) { const k = ease.outBack(clamp(msg.t / .25, 0, 1)), al = clamp((1.3 - msg.t) * 4, 0, 1); c.globalAlpha = al; c.save(); c.translate(W / 2, P.y + P.h * .19); c.rotate(-.05); c.scale(k, k); const sz = Math.min(34, W / (msg.text.length * .68)); draw.text(c, msg.text, 0, 0, { size: sz, color: msg.col, stroke: PAPER, strokeW: sz * .28 }); c.restore(); c.globalAlpha = 1; }
 }
 Lab.boot();

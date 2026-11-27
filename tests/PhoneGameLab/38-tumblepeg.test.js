@@ -11,7 +11,7 @@ module.exports = {
     // real pointer drag to a board column; returns the dry-run prediction for exactly where the chute ended up
     const dragDrop = async bx => {
       const p = await game((g, bx) => ({ x: g.sx(bx), y: g.dropY() + 120 }), bx);
-      await page.mouse.move(p.x - 40, p.y); await page.mouse.down(); await page.mouse.move(p.x, p.y, { steps: 4 }); await wait(80);
+      await page.mouse.move(p.x < 80 ? p.x + 40 : p.x - 40, p.y); await page.mouse.down(); await page.mouse.move(p.x, p.y, { steps: 4 }); await wait(80);
       const pred = await game(g => g.dry(g.aim));
       await page.mouse.up(); return pred;
     };
@@ -42,7 +42,7 @@ module.exports = {
     //    (the hook skips the two middle marbles so the test does not sit through them)
     await game(g => { g.left = 1; });
     pred = await dragDrop(await pick(true));
-    expect(await game(g => g.marble && g.marble.gold), 'the last marble is golden');
+    expect(await game(g => !!g.marble && g.marble.gold === true), 'the last marble is golden');
     expect(await until(g => g.state !== 'fall' && g.state !== 'settle', 20000), 'golden marble lands');
     expect(await game(g => g.score) === s2 + pred.pts, 'golden marble scores its doubled prediction: ' + pred.pts);
     expect(await until(g => g.round === 2 && g.state === 'aim', 8000), 'beating the quota advances to round 2');

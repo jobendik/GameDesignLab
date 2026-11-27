@@ -47,9 +47,10 @@ marble; gadgets (bumpers, catcher cup, spinner, sliding row, carousel cups); det
 
 ## Test results
 - Smoke (`node tools/smoke.js 38-tumblepeg`): pass, 61 fps headless, survives resize/blur.
-- Gameplay test `tests/PhoneGameLab/38-tumblepeg.test.js`: pass (45 s) — real mouse drag-release drop whose score equals
-  the dry-run prediction, tap + arrow-key nudges, quota cleared → round 2 with bumpers, deliberately poor marbles →
-  "Quota missed" game over, best recorded, clean restart.
+- Gameplay test `tests/PhoneGameLab/38-tumblepeg.test.js`: pass (20 s) — real mouse drag-release drop whose score equals
+  the dry-run prediction, Space drop, tap + arrow-key nudges, golden last marble (doubled, exact) carrying the round over
+  its quota → round 2 with bumpers, a deliberately poor last marble → "Quota missed" game over, best recorded, clean
+  restart. Four marbles are played in real time; a `left` test hook skips the others.
 - Screenshots inspected at 390×844 (aim, mid-fall with spinner/cup, splash) and 844×390.
 - Dry-run tuning: 300 random drops per round to set quotas (random play clears rounds 1–2 comfortably, is roughly a coin
   flip by round 4 and falls short from round 6 without glow pegs/nudges/catches).

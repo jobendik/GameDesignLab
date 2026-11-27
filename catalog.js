@@ -1715,8 +1715,8 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--34-antiquity.jpg"
   },
   {
-   "id": "PhoneGameLab/35-cake-tower",
-   "path": "PhoneGameLab/games/35-cake-tower/index.html",
+   "id": "PhoneGameLab/35-teeter-torte",
+   "path": "PhoneGameLab/games/35-teeter-torte/index.html",
    "collection": "PhoneGameLab",
    "title": "Teeter Torte",
    "desc": "Swing it, drop it, keep it standing.",
@@ -1730,7 +1730,8 @@ window.GDL_CATALOG = {
    ],
    "n": 35,
    "v2": true,
-   "thumb": "thumbs/PhoneGameLab--35-cake-tower.jpg"
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/36-sky-high",
@@ -1830,8 +1831,8 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--40-brass-pocket.jpg"
   },
   {
-   "id": "PhoneGameLab/41-goal-flick",
-   "path": "PhoneGameLab/games/41-goal-flick/index.html",
+   "id": "PhoneGameLab/41-postage-stamp",
+   "path": "PhoneGameLab/games/41-postage-stamp/index.html",
    "collection": "PhoneGameLab",
    "title": "Postage Stamp",
    "desc": "Bend free kicks into the top corner.",
@@ -1845,7 +1846,9 @@ window.GDL_CATALOG = {
    ],
    "n": 41,
    "v2": true,
-   "thumb": "thumbs/PhoneGameLab--41-goal-flick.jpg"
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--41-postage-stamp.jpg"
   },
   {
    "id": "PhoneGameLab/42-bamboo-span",
@@ -1882,24 +1885,26 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 43,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/44-match-3",
-   "path": "PhoneGameLab/games/44-match-3/index.html",
+   "id": "PhoneGameLab/44-haberdash",
+   "path": "PhoneGameLab/games/44-haberdash/index.html",
    "collection": "PhoneGameLab",
-   "title": "Match 3",
-   "desc": "Swap adjacent gems to make 3+ in a row.",
+   "title": "Haberdash",
+   "desc": "Swap buttons, fill the orders.",
    "genre": [
-    "Puzzle & Logic"
+    "Puzzle & Match"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 44,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--44-match-3.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/45-tap-clusters",

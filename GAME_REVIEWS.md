@@ -26,7 +26,7 @@ Averages: overall **7.0** · Fun 7.0 · Depth 7.0 · Feel 7.0 · Look 7.5 · Ani
 
 </details>
 
-## Phone Game Lab (`PhoneGameLab/`) — 39/70 reviewed
+## Phone Game Lab (`PhoneGameLab/`) — 42/70 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
@@ -62,21 +62,24 @@ Averages: overall **7.0** · Fun 7.0 · Depth 7.0 · Feel 7.0 · Look 7.5 · Ani
 | [Inkstride](PhoneGameLab/games/32-inkstride/index.html) | 2 → **8** | 8 | 7 | 8 | 9 | 7 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/32-inkstride.md) |
 | [Snug](PhoneGameLab/games/33-snug/index.html) | 2 → **8** | 8 | 7 | 8 | 9 | 8 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/33-snug.md) |
 | [Antiquity](PhoneGameLab/games/34-antiquity/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/34-antiquity.md) |
+| [Teeter Torte](PhoneGameLab/games/35-teeter-torte/index.html) | 2 → **8** | 8 | 8 | 8 | 9 | 8 | 7 | 8 | 8 | 8 | 8 | 8 | 8 | [record](docs/reviews/PhoneGameLab/35-teeter-torte.md) |
 | [Star Jar](PhoneGameLab/games/37-star-jar/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 8 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/37-star-jar.md) |
 | [Blacktop Buzzer](PhoneGameLab/games/39-blacktop-buzzer/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 8 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/39-blacktop-buzzer.md) |
 | [Brass Pocket](PhoneGameLab/games/40-brass-pocket/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/40-brass-pocket.md) |
 | [Bamboo Span](PhoneGameLab/games/42-bamboo-span/index.html) | 2 → **8** | 8 | 7 | 8 | 9 | 8 | 8 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/42-bamboo-span.md) |
+| [Plumpling](PhoneGameLab/games/43-plumpling/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 8 | 7 | 9 | 7 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/43-plumpling.md) |
 | [Misfired](PhoneGameLab/games/05-misfired/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/05-misfired.md) |
 | [Goat Up](PhoneGameLab/games/25-goat-up/index.html) | 2 → **7** | 7 | 6 | 8 | 8 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/25-goat-up.md) |
 | [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 8 | 8 | 8 | 6 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/38-tumblepeg.md) |
+| [Postage Stamp](PhoneGameLab/games/41-postage-stamp/index.html) | 2 → **7** | 7 | 7 | 7 | 8 | 6 | 7 | 7 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/41-postage-stamp.md) |
 
-Averages: overall **7.9** · Fun 7.9 · Depth 7.2 · Feel 8.0 · Look 8.3 · Anim 7.5 · Audio 7.2 · Ctrl 8.2 · Onb 7.9 · Replay 7.1 · Perf 8.8 · Robust 8.0 · Polish 7.9
+Averages: overall **7.9** · Fun 7.9 · Depth 7.2 · Feel 8.0 · Look 8.3 · Anim 7.5 · Audio 7.2 · Ctrl 8.1 · Onb 7.9 · Replay 7.2 · Perf 8.8 · Robust 8.0 · Polish 7.9
 
-**Below 8 — revisit first:** [Misfired](PhoneGameLab/games/05-misfired/index.html) (7), [Goat Up](PhoneGameLab/games/25-goat-up/index.html) (7), [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) (7)
+**Below 8 — revisit first:** [Misfired](PhoneGameLab/games/05-misfired/index.html) (7), [Goat Up](PhoneGameLab/games/25-goat-up/index.html) (7), [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) (7), [Postage Stamp](PhoneGameLab/games/41-postage-stamp/index.html) (7)
 
-<details><summary>31 not yet reviewed (baseline prototypes)</summary>
+<details><summary>28 not yet reviewed (baseline prototypes)</summary>
 
-`PhoneGameLab/35-cake-tower` · `PhoneGameLab/36-sky-high` · `PhoneGameLab/41-goal-flick` · `PhoneGameLab/43-plumpling` · `PhoneGameLab/44-match-3` · `PhoneGameLab/45-tap-clusters` · `PhoneGameLab/46-connect-dots` · `PhoneGameLab/47-pipe-rotate` · `PhoneGameLab/48-water-sort` · `PhoneGameLab/49-ball-sort` · `PhoneGameLab/50-screw-puzzle` · `PhoneGameLab/51-15-puzzle` · `PhoneGameLab/52-tetris` · `PhoneGameLab/53-block-blast` · `PhoneGameLab/54-maze` · `PhoneGameLab/55-laser-mirror` · `PhoneGameLab/56-lights-out` · `PhoneGameLab/57-minesweeper` · `PhoneGameLab/58-word-search` · `PhoneGameLab/59-nonogram` · `PhoneGameLab/60-sudoku` · `PhoneGameLab/61-snake` · `PhoneGameLab/62-slither` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
+`PhoneGameLab/36-sky-high` · `PhoneGameLab/44-haberdash` · `PhoneGameLab/45-tap-clusters` · `PhoneGameLab/46-connect-dots` · `PhoneGameLab/47-pipe-rotate` · `PhoneGameLab/48-water-sort` · `PhoneGameLab/49-ball-sort` · `PhoneGameLab/50-screw-puzzle` · `PhoneGameLab/51-15-puzzle` · `PhoneGameLab/52-tetris` · `PhoneGameLab/53-block-blast` · `PhoneGameLab/54-maze` · `PhoneGameLab/55-laser-mirror` · `PhoneGameLab/56-lights-out` · `PhoneGameLab/57-minesweeper` · `PhoneGameLab/58-word-search` · `PhoneGameLab/59-nonogram` · `PhoneGameLab/60-sudoku` · `PhoneGameLab/61-snake` · `PhoneGameLab/62-slither` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
 
 </details>
 

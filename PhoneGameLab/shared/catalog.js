@@ -85,14 +85,8 @@ window.LAB_GAMES = [
     "slug": "43-plumpling",
     "t": "Plumpling",
     "d": "Slide, squish and serve the tray.",
-    "v2": true
-   },
-   {
-    "n": 44,
-    "slug": "44-match-3",
-    "t": "Match 3",
-    "d": "Swap adjacent gems to make 3+ in a row.",
-    "thumb": "../thumbs/PhoneGameLab--44-match-3.jpg"
+    "v2": true,
+    "score": 8
    },
    {
     "n": 45,
@@ -330,11 +324,12 @@ window.LAB_GAMES = [
    },
    {
     "n": 41,
-    "slug": "41-goal-flick",
+    "slug": "41-postage-stamp",
     "t": "Postage Stamp",
     "d": "Bend free kicks into the top corner.",
     "v2": true,
-    "thumb": "../thumbs/PhoneGameLab--41-goal-flick.jpg"
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab--41-postage-stamp.jpg"
    },
    {
     "n": 42,
@@ -358,6 +353,13 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--10-bramble-drop.jpg"
+   },
+   {
+    "n": 44,
+    "slug": "44-haberdash",
+    "t": "Haberdash",
+    "d": "Swap buttons, fill the orders.",
+    "v2": true
    }
   ]
  },
@@ -417,11 +419,11 @@ window.LAB_GAMES = [
    },
    {
     "n": 35,
-    "slug": "35-cake-tower",
+    "slug": "35-teeter-torte",
     "t": "Teeter Torte",
     "d": "Swing it, drop it, keep it standing.",
     "v2": true,
-    "thumb": "../thumbs/PhoneGameLab--35-cake-tower.jpg"
+    "score": 8
    },
    {
     "n": 36,
