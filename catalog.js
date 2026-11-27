@@ -2211,7 +2211,8 @@ window.GDL_CATALOG = {
    "n": 58,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--58-alphabroth.jpg"
   },
   {
    "id": "PhoneGameLab/59-purlwise",

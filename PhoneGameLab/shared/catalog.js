@@ -194,7 +194,8 @@ window.LAB_GAMES = [
     "t": "Alphabroth",
     "d": "Fish every word out of the soup.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--58-alphabroth.jpg"
    },
    {
     "n": 59,
