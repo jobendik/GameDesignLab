@@ -438,6 +438,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--neon-core-ballstorm.jpg"
   },
   {
@@ -591,16 +593,19 @@ window.GDL_CATALOG = {
    "id": "games/orbit-drift-sling",
    "path": "games/orbit-drift-sling.html",
    "collection": "arcade",
-   "title": "Orbit Drift — Sling & Tap Prototype",
-   "desc": "2D orbit drift sling & tap prototype.",
+   "title": "Orbit Drift — Slingshot Voyage",
+   "desc": "One tap slings your probe from orbit to orbit: read the dotted path, ride gravity past dark stars and chain clean captures through an endless voyage of star sectors.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Physics"
    ],
    "controls": [
     "touch",
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--orbit-drift-sling.jpg"
   },
   {
@@ -846,9 +851,11 @@ window.GDL_CATALOG = {
    "id": "games/star-petal-ballstorm",
    "path": "games/star-petal-ballstorm.html",
    "collection": "arcade",
-   "title": "Star Petal Ballstorm",
-   "desc": "Pastel star-petal ballstorm shooter.",
+   "title": "Star Petal Cascade",
+   "desc": "Drop a falling star into a moonlit peg garden, steer it with a breath of wind and wake every golden moonbud before your stars run out.",
    "genre": [
+    "Puzzle",
+    "Physics",
     "Arcade"
    ],
    "controls": [
@@ -856,6 +863,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--star-petal-ballstorm.jpg"
   },
   {
@@ -2482,40 +2491,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--bedtime-stacks.jpg"
   },
   {
-   "id": "PhoneGameLab2/berry-bounce",
-   "path": "PhoneGameLab2/games/berry-bounce/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Berry Bounce",
-   "desc": "Bounce a berry off platforms into a basket.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 4,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--berry-bounce.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/brick-blast",
-   "path": "PhoneGameLab2/games/brick-blast/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Brick Blast",
-   "desc": "Tap groups of same-colored bricks to pop them.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 5,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--brick-blast.jpg"
-  },
-  {
    "id": "PhoneGameLab2/brick-breaker",
    "path": "PhoneGameLab2/games/brick-breaker/index.html",
    "collection": "PhoneGameLab2",
@@ -3107,7 +3082,10 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--ice-dunk.jpg"
   },
   {
    "id": "PhoneGameLab2/ice-smash",
@@ -3125,6 +3103,24 @@ window.GDL_CATALOG = {
    "n": 40,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--ice-smash.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/jampoline",
+   "path": "PhoneGameLab2/games/jampoline/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Jampoline",
+   "desc": "Draw springy leaves. Bounce berries to Bun.",
+   "genre": [
+    "Skill"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--jampoline.jpg"
   },
   {
    "id": "PhoneGameLab2/jigsaw-puzzles",
@@ -3635,6 +3631,22 @@ window.GDL_CATALOG = {
    "n": 70,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--spray-paint.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/stew-patch",
+   "path": "PhoneGameLab2/games/stew-patch/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Stew Patch",
+   "desc": "Pull the veg, let the neighbours creep in, feed the queue.",
+   "genre": [
+    "Puzzle"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true
   },
   {
    "id": "PhoneGameLab2/sub-adventure",

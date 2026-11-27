@@ -4,20 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 4,
-    "slug": "berry-bounce",
-    "t": "Berry Bounce",
-    "d": "Bounce a berry off platforms into a basket.",
-    "thumb": "../thumbs/PhoneGameLab2--berry-bounce.jpg"
-   },
-   {
-    "n": 5,
-    "slug": "brick-blast",
-    "t": "Brick Blast",
-    "d": "Tap groups of same-colored bricks to pop them.",
-    "thumb": "../thumbs/PhoneGameLab2--brick-blast.jpg"
-   },
-   {
     "n": 6,
     "slug": "brick-breaker",
     "t": "Brick Breaker",
@@ -554,6 +540,12 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--bedtime-stacks.jpg"
+   },
+   {
+    "slug": "stew-patch",
+    "t": "Stew Patch",
+    "d": "Pull the veg, let the neighbours creep in, feed the queue.",
+    "v2": true
    }
   ]
  },
@@ -564,7 +556,22 @@ window.LAB_GAMES = [
     "slug": "ice-dunk",
     "t": "Ice Dunk",
     "d": "Belly-slide Nori into the fishing hole.",
-    "v2": true
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--ice-dunk.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Skill",
+  "items": [
+   {
+    "slug": "jampoline",
+    "t": "Jampoline",
+    "d": "Draw springy leaves. Bounce berries to Bun.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--jampoline.jpg"
    }
   ]
  },

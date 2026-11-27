@@ -23,10 +23,15 @@ twist, and the stars are *our* characters.) `shared/pals.js` draws them procedur
 - `t`: pass the game clock for automatic blinking + breathing · `look:[x,y]` (−1..1) eye direction · `blink:0..1`
 - `squash` (−.4…+.4; positive = flattened, pivot at the feet — use on landings/jumps) · `tilt` (radians) · `flip`
 - `arms`: `down` `up` `wave` `cheer` `hold` · `talk:0..1` mouth open · `shadow:false` · `alpha` · `tint`
+- `pose:'lie'` belly-slide (head toward +x; combine with `flip`) · `hot:0..1` flushed + sweat · `wet:0..1` drips ·
+  `clipY` (px below the pal's centre past which nothing is drawn — pals peeking from behind a counter, hedge or wall)
+- **Returns anchors** in stage coordinates — `{handL, handR, head, mouth, feet}` as `[x,y]` — so you can draw props
+  (a held balloon, a hat, a fish in the beak) that follow the pose. Draw the prop after the pal.
+- `Pals.bubble(ctx, x, y, w, h, {tailX, tailY, thought:true})` draws a speech or thought bubble; put your icon/text on top.
 - `Pals.cast[id]` → `{name, kind, body, dark, belly, accent, cheek}` (build palettes from these) · `Pals.list` · `Pals.ink`
 
 `Pals.backdrop(ctx, W, H, t, {scene, ground})` draws a cozy sky + sun + drifting clouds + hills and returns the ground Y.
-Scenes: `meadow` `dusk` `night` `snow` `beach` `candy`. Use it as a base or draw your own world in the same spirit.
+Scenes: `meadow` `dusk` `night` `snow` `beach` `candy` `golden`. Use it as a base or draw your own world in the same spirit.
 
 ## House style for the collection
 - Warm, rounded, toy-like; pastel-leaning palettes with one saturated accent; chunky outlines only where needed

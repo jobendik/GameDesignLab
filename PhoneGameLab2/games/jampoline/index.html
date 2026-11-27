@@ -1,0 +1,293 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Jampoline</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* JAMPOLINE — golden hour in the orchard. Ripe berries wobble on the bramble overhead and drop; Bun the bunny waits
+ * behind her wicker basket, fretting. You DRAW springy leaves in the air: a berry bounces off a leaf exactly like a
+ * ball off a bat, and the leaf is spent.
+ * Core idea kept: bounce a berry off platforms into a basket.
+ * Hooks:   the platform is yours to draw — angle and position are the whole skill; while you drag, the berry's bounce
+ *          is traced in dots (gold when it ends in the basket) but the berry keeps falling, so reading fast matters.
+ *          Tap = a flat leaf (bounces it back up: buys time).  Two leaves may be out at once for double bounces.
+ *          Mushrooms are bouncy bumpers worth trick points; hanging logs are dull deflectors.
+ *          Six berries bake a pie (level up).  Three splats and the jam is on the lawn.
+ * Variety: mushrooms (pie 2), hanging logs + blueberries + golden berries + two at a time (3), Bun paces (4),
+ *          wind gusts + shorter trace (5), smaller basket + three at once (6+).
+ * Bun:     tracks the lowest berry, leans the basket toward a near miss, panics when one is heading for the grass,
+ *          flinches at a splat, hops when a pie is done.
+ * Identity: honey-yellow sky, sage hills, crimson berries, bright leaves; bouncy music. */
+let demo = false, demoT = 0;
+Lab.init({
+  title: "Jampoline", tagline: "Draw springy leaves. Bounce berries to Bun.", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Drag to draw a springy leaf", "Berries bounce off it — aim for the basket", "Three splats and the pie is off"],
+  theme: { bg: "#f4c463", bg2: "#fff3cf", accent: "#e0245e", accent2: "#7ac74f", fg: "#4a2c1a", muted: "#8a6a4a", light: true },
+  orient: "any", music: { style: "bounce", key: "A", vol: .36 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink;
+const G = 620, STEP = 1 / 240, PIE = 6;
+const BERRY = { red: { c: "#e0245e", d: "#a8103f", r: 12 }, blue: { c: "#5567e0", d: "#3340a8", r: 10.5 }, gold: { c: "#ffc93c", d: "#e09a10", r: 12 } };
+const INTRO = { 2: "Mushrooms are bouncy: trick points!", 3: "Logs deflect · two berries at a time", 4: "Bun can't stand still", 5: "Hold on: wind gusts", 6: "Smaller basket · three at a time" };
+let S, P, fieldL, fieldR, groundY, branchY, basketY, bw, bun, berries, leaves, shrooms, planks, splats, draft, trace, score, hearts, caught, streak, bestStreak, pies, level,
+  basketN, spawnT, over, clock, acc, wind, gust, noSpawn, leafBounces, tricks, firstDrops, heartPop, lastSpawnX;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() {
+  const old = P && { fieldL, fw: fieldR - fieldL, groundY, branchY };
+  P = Lab.play; const wide = P.w > P.h * 1.15; S = clamp(Math.min(P.w / 390, P.h / (wide ? 520 : 700)), .6, 1.45);
+  const cx = P.x + P.w / 2, half = Math.min(P.w / 2 - 6, (wide ? 330 : 260) * S); fieldL = cx - half; fieldR = cx + half;
+  groundY = Lab.H - Lab.safe.bottom - 46 * S; branchY = P.y + 34 * S; basketY = groundY - 46 * S; bw = (level >= 6 ? 64 : 78) * S;
+  if (old && bun) {
+    const mx = x => fieldL + (x - old.fieldL) / old.fw * (fieldR - fieldL), my = y => branchY + (y - old.branchY) / (old.groundY - old.branchY) * (groundY - branchY);
+    bun.x = mx(bun.x); bun.post = mx(bun.post); for (const b of berries) { b.x = mx(b.x); b.y = my(b.y); }
+    for (const l of leaves) { l.x1 = mx(l.x1); l.x2 = mx(l.x2); l.y1 = my(l.y1); l.y2 = my(l.y2); } for (const m of shrooms) { m.x = mx(m.x); m.y = my(m.y); } for (const p of planks) { p.x1 = mx(p.x1); p.x2 = mx(p.x2); p.y1 = my(p.y1); p.y2 = my(p.y2); }
+    for (const s of splats) s.x = mx(s.x); draft = null;
+  }
+  Lab.sprite.clear("jpbg");
+}
+Lab.onResize(() => { if (bun) layout(); });
+
+function reset() {
+  berries = []; leaves = []; shrooms = []; planks = []; splats = []; draft = null; trace = null; score = 0; hearts = 3; caught = 0; streak = 0; bestStreak = 0; pies = 0; level = 1; basketN = 0;
+  spawnT = .8; over = false; clock = 0; acc = 0; wind = 0; gust = { t: 6, on: 0, dir: 1 }; noSpawn = false; leafBounces = 0; tricks = 0; firstDrops = 0; heartPop = 0; lastSpawnX = 0;
+  bw = 78 * S; const c = (fieldL + fieldR) / 2; bun = { x: c, post: c, sq: 0, joy: 0, sad: 0, hop: 0, lean: 0 };
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => { if (!over) { draft = mkDraft(x, y, x, y); draft.sx = x; draft.sy = y; } }];
+  Lab.input.onMove = [(x, y) => { if (draft && !over && Lab.input.down) { const sx = draft.sx, sy = draft.sy; draft = mkDraft(sx, sy, x, y); draft.sx = sx; draft.sy = sy; } }];
+  Lab.input.onUp = [(x, y) => { if (!draft || over) { draft = null; return; } const d = mkDraft(draft.sx, draft.sy, x, y); draft = null; placeLeaf(d); }];
+  Lab.hint("Draw a leaf under the berry");
+  Lab.expose({
+    get score() { return score; }, get hearts() { return hearts; }, get caught() { return caught; }, get streak() { return streak; }, get pies() { return pies; }, get level() { return level; }, get basketN() { return basketN; },
+    get leafBounces() { return leafBounces; }, get tricks() { return tricks; }, get leaves() { return leaves.filter(l => !l.used).length; },
+    get berries() { return berries.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, state: b.state, type: b.type })); },
+    get basket() { return { x: bun.x, y: basketY, w: bw }; }, get field() { return { L: fieldL, R: fieldR, ground: groundY, branch: branchY, S }; },
+    hold(v) { noSpawn = v; }, clear() { berries = []; leaves = []; }, spawn(x, type, hang) { spawnBerry(x, type || "red", hang == null ? .05 : hang); return berries.length; },
+    addLeaf(x1, y1, x2, y2) { placeLeaf(mkDraft(x1, y1, x2, y2)); }, setShrooms(a) { shrooms = a.map(m => ({ x: m[0], y: m[1], r: 24 * S, hit: 0 })); },
+    setLevel(n) { level = n; furnish(); bw = (level >= 6 ? 64 : 78) * S; },
+    predict(x1, y1, x2, y2) { return simulate(berries[0], mkDraft(x1, y1, x2, y2)).end; },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- leaves ---------- */
+function mkDraft(x1, y1, x2, y2) {
+  const top = branchY + 34 * S, bot = basketY - 18 * S, maxL = 130 * S; x1 = clamp(x1, fieldL + 4, fieldR - 4); y1 = clamp(y1, top, bot);
+  let dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
+  if (len < 20 * S) return { x1: x1 - 38 * S, y1, x2: x1 + 38 * S, y2: y1, tap: true };       // a tap is a flat leaf
+  if (len > maxL) { dx *= maxL / len; dy *= maxL / len; }
+  return { x1, y1, x2: clamp(x1 + dx, fieldL + 2, fieldR - 2), y2: clamp(y1 + dy, top, bot) };
+}
+function placeLeaf(d) {
+  while (leaves.filter(l => !l.used).length >= 2) { const o = leaves.find(l => !l.used); o.used = .001; o.gone = true; fx.puff((o.x1 + o.x2) / 2, (o.y1 + o.y2) / 2, { n: 6, color: "#b6e388" }); }
+  leaves.push({ x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, t: 0, used: 0, born: 0 }); snd("swish", { pitch: 1.3, vol: .5 }); Lab.buzz(5);
+}
+
+/* ---------- physics (shared by play and by the trace preview) ---------- */
+function hitSeg(b, x1, y1, x2, y2, th, e, vmin) {
+  const dx = x2 - x1, dy = y2 - y1, t = clamp(((b.x - x1) * dx + (b.y - y1) * dy) / (dx * dx + dy * dy || 1), 0, 1), cx = x1 + dx * t, cy = y1 + dy * t;
+  let nx = b.x - cx, ny = b.y - cy; const d = Math.hypot(nx, ny), rr = b.r + th; if (d >= rr || d < 1e-4) return false; nx /= d; ny /= d;
+  const vn = b.vx * nx + b.vy * ny; if (vn >= 0) return false;
+  b.x = cx + nx * rr; b.y = cy + ny * rr; const out = Math.max(-vn * e, vmin); b.vx += (out - vn) * nx; b.vy += (out - vn) * ny; return true;
+}
+function stepBerry(b, h, cand, used, live) {
+  const py = b.y; b.vy += G * S * (1 + Math.min(.3, (level - 1) * .03)) * h; b.vx += wind * h; b.x += b.vx * h; b.y += b.vy * h; let ev = null;
+  if (b.x < fieldL + b.r) { b.x = fieldL + b.r; if (b.vx < 0) b.vx *= -.6; } if (b.x > fieldR - b.r) { b.x = fieldR - b.r; if (b.vx > 0) b.vx *= -.6; }
+  for (let i = -1; i < leaves.length; i++) {
+    const l = i < 0 ? cand : leaves[i]; if (!l || l.used || (used && used.has(l))) continue;
+    if (hitSeg(b, l.x1, l.y1, l.x2, l.y2, 5 * S, .74, 300 * S)) { if (live) { l.used = .001; l.hitV = Math.hypot(b.vx, b.vy); } else used.add(l); ev = l === cand ? "cand" : "leaf"; }
+  }
+  for (const p of planks) if (hitSeg(b, p.x1, p.y1, p.x2, p.y2, 7 * S, .45, 0)) ev = "plank";
+  for (const m of shrooms) {
+    let nx = b.x - m.x, ny = b.y - m.y; const d = Math.hypot(nx, ny), rr = b.r + m.r; if (d >= rr || d < 1e-4) continue; nx /= d; ny /= d; const vn = b.vx * nx + b.vy * ny; if (vn >= 0) continue;
+    b.x = m.x + nx * rr; b.y = m.y + ny * rr; const out = Math.max(-vn * .95, 340 * S); b.vx += (out - vn) * nx; b.vy += (out - vn) * ny; ev = "shroom"; if (live) m.hit = 1;
+  }
+  const bx = bun.x, hw = bw / 2;
+  if (py <= basketY && b.y > basketY && Math.abs(b.x - bx) < hw - 1 && b.vy > 0) return "catch";
+  for (const d of [-1, 1]) { let nx = b.x - (bx + d * hw), ny = b.y - basketY; const dd = Math.hypot(nx, ny), rr = b.r + 5 * S; if (dd < rr && dd > 1e-4) { nx /= dd; ny /= dd; const vn = b.vx * nx + b.vy * ny; if (vn < 0) { b.x = bx + d * hw + nx * rr; b.y = basketY + ny * rr; b.vx -= 1.5 * vn * nx; b.vy -= 1.5 * vn * ny; ev = "rim"; } } }
+  if (b.y > basketY && Math.abs(b.x - bx) < hw + b.r) { const sd = b.x < bx ? -1 : 1; b.x = bx + sd * (hw + b.r); b.vx = sd * Math.abs(b.vx) * .5; }
+  if (b.y + b.r >= groundY) return "splat";
+  return ev;
+}
+/* Where would this berry go if `cand` were placed now?  → { pts:[x,y…] after touching cand, end:'catch'|'splat'|'none' } */
+function simulate(src, cand) {
+  if (!src) return { pts: [], end: "none" };
+  const b = { x: src.x, y: src.y, vx: src.vx, vy: src.vy, r: src.r }, used = new Set(), pts = []; let touched = -1, end = "none";
+  const h = STEP, lim = (level >= 5 ? .8 : 2.4) / h;   // same step as play, so the trace is exact while nothing else moves
+  for (let i = 0; i < 1000; i++) {
+    const ev = stepBerry(b, h, cand, used, false); if (ev === "cand" && touched < 0) touched = i;
+    if (touched >= 0 && (i - touched) % 10 === 0 && i - touched <= lim) pts.push(b.x, b.y);
+    if (ev === "catch" || ev === "splat") { end = touched >= 0 ? ev : "none"; break; }
+  }
+  return { pts, end, touched: touched >= 0 };
+}
+
+/* ---------- berries ---------- */
+function spawnBerry(x, type, hang) {
+  const k = BERRY[type]; berries.push({ x, y: branchY + 20 * S, vx: 0, vy: type === "blue" ? 150 * S : 0, r: k.r * S, type, state: "hang", t: hang, hang0: hang, tricks: 0, lb: 0, rot: Lab.rand(-.3, .3), sq: 0 }); lastSpawnX = x;
+}
+function spawner(dt) {
+  const maxLive = level >= 6 ? 3 : level >= 3 ? 2 : 1; if (noSpawn || berries.length >= maxLive || (spawnT -= dt) > 0) return;
+  let x; firstDrops++;
+  if (firstDrops === 1 && !demo) x = bun.x; else { let tries = 0; do x = Lab.rand(fieldL + 30 * S, fieldR - 30 * S); while (++tries < 12 && (Math.abs(x - bun.x) < 70 * S || Math.abs(x - lastSpawnX) < 50 * S)); }
+  const u = Math.random(), type = level >= 3 && u < .1 ? "gold" : level >= 3 && u < .38 ? "blue" : "red";
+  spawnBerry(x, type, Math.max(.6, 1.0 - level * .06)); spawnT = maxLive === 1 ? .25 : Math.max(1.05, 2 - level * .1) * Lab.rand(.85, 1.15); snd("tick", { pitch: 1.6, vol: .4 });
+}
+function onCatch(b) {
+  caught++; streak++; bestStreak = Math.max(bestStreak, streak); basketN++; bun.joy = .8; bun.sq = .22;
+  const mult = Math.min(4, 1 + Math.floor(streak / 5)), gold = b.type === "gold", gain = (10 + 5 * b.tricks + (b.lb >= 2 ? 10 : 0)) * mult * (gold ? 3 : 1); score += gain;
+  fx.burst(b.x, basketY, { n: gold ? 18 : 9, colors: [BERRY[b.type].c, "#fff", "#ffe066"], speed: 170, life: .5, size: 4, gravity: 500, angle: -Math.PI / 2, spread: 1.8, shape: gold ? "star" : "circle" });
+  fx.text(bun.x, basketY - 34 * S, "+" + gain + (mult > 1 ? "  ×" + mult : ""), { size: 18 + Math.min(8, b.tricks * 2 + mult), color: gold ? "#e09a10" : "#b8123f", outline: "rgba(255,255,255,.9)" });
+  if (b.lb >= 2) fx.text(bun.x, basketY - 58 * S, "Double bounce!", { size: 14, color: "#4f9a2a", outline: "rgba(255,255,255,.9)" }); else if (b.tricks) fx.text(bun.x, basketY - 58 * S, "Trick shot!", { size: 14, color: "#2a9d8f", outline: "rgba(255,255,255,.9)" });
+  if (gold && hearts < 3) { hearts++; heartPop = 1; snd("powerup", { vol: .6 }); }
+  if (!demo) { Lab.setScore(score); Lab.bumpScore(); Lab.sfx("pop", { pitch: 1.1 + basketN * .06 }); Lab.audio.combo(Math.min(12, basketN + b.tricks), { vol: .22 }); Lab.buzz(12); }
+  if (basketN >= PIE) {
+    basketN = 0; pies++; level++; bun.hop = 1; bun.joy = 1.4; furnish();
+    if (!demo) { Lab.banner("PIE " + pies + " BAKED!", { color: "#e0245e", ms: 1100, y: .3 }); Lab.sfx("levelup", { vol: .7 }); Lab.shake(4, .2); if (INTRO[level]) Lab.after(1, () => Lab.toast(INTRO[level], 2100, { y: .22 })); }
+    fx.burst(bun.x, basketY - 10 * S, { n: 26, colors: ["#ffe066", "#e0245e", "#fff"], speed: 300, life: .9, size: 5, gravity: 500, shape: "star" }); bw = (level >= 6 ? 64 : 78) * S;
+  }
+}
+function onSplat(b) {
+  splats.push({ x: b.x, c: BERRY[b.type].c, r: b.r * Lab.rand(1.3, 1.8), t: 0 }); if (splats.length > 9) splats.shift();
+  fx.burst(b.x, groundY - 4, { n: 12, colors: [BERRY[b.type].c, BERRY[b.type].d], speed: 190, life: .5, size: 4, gravity: 700, angle: -Math.PI / 2, spread: 2.4 });
+  if (demo) return;
+  hearts--; heartPop = 1; if (streak >= 5) fx.text(b.x, groundY - 40 * S, "streak lost", { size: 13, color: "#8a6a4a", outline: "rgba(255,255,255,.9)" }); streak = 0; bun.sad = 1; bun.sq = .2;
+  fx.text(clamp(b.x, fieldL + 30, fieldR - 30), groundY - 22 * S, "splat!", { size: 16, color: "#b8123f", outline: "rgba(255,255,255,.9)" }); snd("thud", { pitch: .9 }); snd("hurt", { vol: .4 }); Lab.shake(5, .2); Lab.buzz(30);
+  if (hearts <= 0) { over = true; draft = null; Lab.after(.7, () => Lab.gameover({ title: "Oops! Jam on the lawn", message: pies ? "Bun baked " + pies + (pies === 1 ? " pie" : " pies") + " before the spill." : "Not quite a pie yet — try again?", score, stats: [["Berries", caught], ["Pies", pies], ["Best streak", bestStreak]] })); }
+}
+function furnish() {
+  shrooms = []; planks = []; const fw = fieldR - fieldL, y0 = branchY + (groundY - branchY) * .4, y1 = branchY + (groundY - branchY) * .68, L = level;
+  const sh = (u, v) => shrooms.push({ x: fieldL + fw * u, y: lerp(y0, y1, v), r: 24 * S, hit: 0, born: 0 });
+  const pl = (u, v, a, len) => { const x = fieldL + fw * u, y = lerp(y0, y1, v) - 30 * S, hx = Math.cos(a) * len * S / 2, hy = Math.sin(a) * len * S / 2; planks.push({ x1: x - hx, y1: y - hy, x2: x + hx, y2: y + hy, born: 0 }); };
+  const j = () => Lab.rand(-.06, .06), sgn = Lab.chance(.5) ? 1 : -1;
+  if (L === 2) { sh(.22 + j(), .5); sh(.78 + j(), .8); }
+  else if (L === 3) { sh(.5 + sgn * .28, .7); pl(.5 - sgn * .2, .1, sgn * .4, 96); }
+  else if (L === 4) { sh(.2 + j(), .9); sh(.8 + j(), .4); pl(.5 + j(), 0, sgn * .3, 90); }
+  else if (L >= 5) { const n = L >= 7 ? 3 : 2; for (let i = 0; i < n; i++) sh((i + .5) / n + j(), Lab.rand(.2, 1)); if (Lab.chance(.7)) pl(Lab.rand(.25, .75), 0, sgn * Lab.rand(.2, .5), 90); }
+}
+
+/* ---------- frame ---------- */
+function update(dt) {
+  clock += dt; heartPop = Math.max(0, heartPop - dt * 3);
+  if (level >= 5 && !over) {      // wind gusts: telegraphed streaks for .7 s, then a push
+    gust.t -= dt; if (gust.on <= 0 && gust.t <= 0) { gust.on = 2.9; gust.dir = Lab.chance(.5) ? 1 : -1; gust.t = Lab.rand(6, 9); snd("whoosh", { pitch: .7, vol: .5 }); }
+    if (gust.on > 0) gust.on -= dt; wind = gust.on > 0 && gust.on < 2.2 ? gust.dir * 170 * S * Math.sin(gust.on / 2.2 * Math.PI) : 0;
+  } else wind = 0;
+  if (!over) spawner(dt);
+  for (const b of berries) { b.sq = Lab.damp(b.sq, 0, 10, dt); if (b.state === "hang") { b.t -= dt; if (b.t <= 0) { b.state = "fall"; snd("drop", { pitch: b.type === "blue" ? 1.3 : 1.1, vol: .5 }); } } }
+  acc = Math.min(acc + dt, .05);
+  while (acc >= STEP) {
+    acc -= STEP;
+    for (const b of berries) {
+      if (b.state !== "fall") continue; const ev = stepBerry(b, STEP, null, null, true);
+      if (ev === "catch") { b.dead = true; onCatch(b); } else if (ev === "splat") { b.dead = true; onSplat(b); }
+      else if (ev === "leaf") { b.lb++; b.sq = .3; leafBounces++; snd("boing", { pitch: clamp(1.5 - Math.hypot(b.vx, b.vy) / (900 * S), .8, 1.5), vol: .7 }); fx.burst(b.x, b.y + b.r, { n: 5, color: "#b6e388", speed: 120, life: .35, size: 3 }); Lab.buzz(8); }
+      else if (ev === "shroom") { b.tricks++; tricks++; b.sq = .3; score += 5; if (!demo) { Lab.setScore(score); Lab.audio.combo(3 + b.tricks * 2, { vol: .2 }); } snd("bounce", { pitch: 1 + b.tricks * .15 }); fx.text(b.x, b.y - 18 * S, "+5", { size: 14, color: "#2a9d8f", outline: "rgba(255,255,255,.9)" }); }
+      else if (ev === "plank") snd("knock", { pitch: 1.1, vol: .5 }); else if (ev === "rim") snd("knock", { pitch: 1.5, vol: .5 });
+    }
+    if (berries.some(b => b.dead)) berries = berries.filter(b => !b.dead);
+  }
+  for (const b of berries) if (b.state === "fall") b.rot += b.vx * dt * .02;
+  for (const l of leaves) { l.t += dt; l.born = Math.min(1, l.born + dt * 7); if (l.used) l.used += dt; else if (l.t > 6) { l.used = .001; l.gone = true; } }
+  leaves = leaves.filter(l => !(l.used > .32));
+  for (const m of shrooms) { m.hit = Math.max(0, m.hit - dt * 3.5); m.born = Math.min(1, (m.born || 0) + dt * 3); } for (const p of planks) p.born = Math.min(1, (p.born || 0) + dt * 3);
+  for (const s of splats) s.t += dt;
+  // Bun: paces from pie 4, leans the basket toward a berry that is about to arrive
+  const fw = fieldR - fieldL, mid = (fieldL + fieldR) / 2; bun.post = level >= 4 ? mid + Math.sin(clock * .42) * fw * .27 : level === 2 ? mid - fw * .2 : level === 3 ? mid + fw * .2 : mid;
+  let low = null; for (const b of berries) if (b.state === "fall" && (!low || b.y > low.y)) low = b;
+  let want = 0;
+  if (low && basketY - low.y < 220 * S && low.y < basketY) {   // ballistic guess of where it will cross the rim → lean up to 30 px that way
+    const g = G * S * (1 + Math.min(.3, (level - 1) * .03)), tt = (-low.vy + Math.sqrt(Math.max(0, low.vy * low.vy + 2 * g * (basketY - low.y)))) / g, px = low.x + low.vx * tt;
+    if (Math.abs(px - bun.post) < bw * .5 + 44 * S) want = clamp(px - bun.post, -30 * S, 30 * S);
+  }
+  bun.lean = Lab.approach(bun.lean, want, 170 * S * dt);
+  bun.x = clamp(Lab.damp(bun.x, bun.post + bun.lean, 9, dt), fieldL + bw / 2 + 4, fieldR - bw / 2 - 4);
+  bun.sq = Lab.damp(bun.sq, 0, 9, dt); bun.joy = Math.max(0, bun.joy - dt); bun.sad = Math.max(0, bun.sad - dt); bun.hop = Math.max(0, bun.hop - dt * 1.6);
+  trace = draft && berries.length ? berries.map(b => simulate(b, draft)).filter(s => s.touched) : null;
+  if (!demo) Lab.music.intensity(clamp(.25 + level * .08 + (3 - hearts) * .15, 0, 1));
+}
+function frame(dt, t) { update(dt); render(t); }
+function attract(dt, t) {
+  if (!demo) { demo = true; layout(); reset(); level = 3; furnish(); spawnT = .2; }
+  if ((demoT -= dt) < 0) { demoT = .25; const b = berries.find(q => q.state === "fall" && q.vy > 0 && !q.aimed && q.y > branchY + 120 * S); if (b && leaves.filter(l => !l.used).length < 2) { b.aimed = true; const y = Math.min(basketY - 60 * S, b.y + 150 * S); let best = null; for (let a = -.9; a <= .9 && !best; a += .06) { const d = mkDraft(b.x - Math.cos(a) * 45 * S, y - Math.sin(a) * 45 * S, b.x + Math.cos(a) * 45 * S, y + Math.sin(a) * 45 * S); if (simulate(b, d).end === "catch") best = d; } if (best) placeLeaf(best); } }
+  update(dt); render(t);
+}
+
+/* ---------- art ---------- */
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80, o = 40;
+  return Lab.sprite("jpbg" + W + "x" + H, W, H, g => {
+    const gy = groundY + o; draw.vgrad(g, 0, 0, W, H, [[0, "#ffd27a"], [.55, "#ffe9b0"], [1, "#fff6dc"]]);
+    draw.glow(g, W * .76, gy - 150 * S, 260 * S, "#fff8d8", .9); draw.circle(g, W * .76, gy - 150 * S, 44 * S, "#fffbe6");
+    const hill = (base, amp, f, ph, col) => { g.fillStyle = col; g.beginPath(); g.moveTo(0, H); for (let x = 0; x <= W; x += 16) g.lineTo(x, base + Math.sin(x * f + ph) * amp); g.lineTo(W, H); g.fill(); };
+    hill(gy - 96 * S, 26 * S, .006, 1, "#d9dc9a"); hill(gy - 52 * S, 20 * S, .009, 3.2, "#b9cf7a");
+    const rnd = Lab.rng(31); for (let i = 0; i < 9; i++) { const x = rnd() * W, y = gy - (30 + rnd() * 40) * S, s = (16 + rnd() * 12) * S; g.fillStyle = "#8a6a4a"; g.fillRect(x - 2 * S, y, 4 * S, s); g.fillStyle = i % 2 ? "#9cbf5e" : "#8db354"; g.beginPath(); g.arc(x, y, s * .7, 0, TAU); g.arc(x - s * .5, y + s * .2, s * .5, 0, TAU); g.arc(x + s * .5, y + s * .2, s * .5, 0, TAU); g.fill(); }
+    draw.vgrad(g, 0, gy - 8 * S, W, H - gy + 8 * S, ["#8fc45a", "#6fa844"]); g.fillStyle = "#a5d76c"; g.fillRect(0, gy - 8 * S, W, 5 * S);
+    g.strokeStyle = "rgba(60,110,40,.5)"; g.lineWidth = 2; for (let i = 0; i < 90; i++) { const x = rnd() * W, y = gy + rnd() * (H - gy - 10); g.beginPath(); g.moveTo(x, y); g.lineTo(x - 3, y - 7 * S); g.moveTo(x + 4, y); g.lineTo(x + 6, y - 6 * S); g.stroke(); }
+    // bramble along the top
+    const by = branchY + o; g.strokeStyle = "#7a5230"; g.lineWidth = 9 * S; g.lineCap = "round"; g.beginPath(); g.moveTo(-10, by - 6 * S); for (let x = 0; x <= W + 40; x += 40) g.quadraticCurveTo(x + 20, by + (((x / 40) | 0) % 2 ? 9 : -9) * S, x + 40, by - 2 * S); g.stroke();
+    for (let x = 6; x < W; x += 30 * S) { const yy = by + Math.sin(x * .13) * 6 * S, a = rnd() * TAU, s = (11 + rnd() * 7) * S; g.save(); g.translate(x, yy); g.rotate(a); g.fillStyle = rnd() < .5 ? "#5f9e3a" : "#79b84a"; g.beginPath(); g.moveTo(-s, 0); g.quadraticCurveTo(0, -s * .7, s, 0); g.quadraticCurveTo(0, s * .7, -s, 0); g.fill(); g.restore(); }
+  });
+}
+function drawBerry(c, b, t) {
+  const k = BERRY[b.type], r = b.r, hang = b.state === "hang", wob = hang ? Math.sin(t * 22) * .28 * clamp(1 - b.t / Math.min(.7, b.hang0), 0, 1) : 0;
+  c.save();
+  if (hang) { c.translate(b.x, branchY + 2 * S); c.rotate(wob); c.strokeStyle = "#5f9e3a"; c.lineWidth = 2.5 * S; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, 18 * S - r); c.stroke(); c.translate(0, 18 * S); c.scale(ease.outBack(clamp((b.hang0 - b.t) * 5, 0, 1)), ease.outBack(clamp((b.hang0 - b.t) * 5, 0, 1))); }
+  else { c.translate(b.x, b.y); c.rotate(b.rot); c.scale(1 + b.sq, 1 - b.sq); }
+  if (b.type === "gold") draw.glow(c, 0, 0, r * 2.6, "#ffe066", .55);
+  c.fillStyle = k.c; c.beginPath(); c.arc(0, 0, r, 0, TAU); c.fill();
+  if (b.type !== "blue") { c.fillStyle = k.d; for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + .3; c.beginPath(); c.arc(Math.cos(a) * r * .5, Math.sin(a) * r * .5 + r * .1, r * .2, 0, TAU); c.fill(); } }
+  c.fillStyle = "rgba(255,255,255,.55)"; c.beginPath(); c.ellipse(-r * .35, -r * .4, r * .26, r * .17, -.6, 0, TAU); c.fill();
+  c.fillStyle = b.type === "blue" ? k.d : "#5f9e3a"; for (let i = -1; i <= 1; i++) { c.beginPath(); c.ellipse(i * r * .32, -r * .92, r * .2, r * .34, i * .7, 0, TAU); c.fill(); }
+  c.restore();
+}
+function drawLeaf(c, l, alpha, col) {
+  const dx = l.x2 - l.x1, dy = l.y2 - l.y1, len = Math.hypot(dx, dy), a = Math.atan2(dy, dx), u = l.used || 0, k = u ? 1 - u / .32 : 1, grow = l.born == null ? 1 : ease.outBack(l.born), bend = u && !l.gone ? Math.sin(u / .32 * Math.PI * 3) * (1 - u / .32) * 9 * S : 0, old = !u && l.t > 4.6 ? .55 + .45 * Math.sin(l.t * 16) : 1;
+  c.save(); c.translate((l.x1 + l.x2) / 2, (l.y1 + l.y2) / 2); c.rotate(a); c.globalAlpha = alpha * clamp(k * 1.4, 0, 1) * old; const hw = len / 2 * grow, th = 13 * S;
+  c.fillStyle = "rgba(60,90,30,.18)"; c.beginPath(); c.moveTo(-hw, 6 * S); c.quadraticCurveTo(0, th + 8 * S + bend, hw, 6 * S); c.quadraticCurveTo(0, -th + 8 * S + bend, -hw, 6 * S); c.fill();
+  c.fillStyle = col || "#7ed047"; c.strokeStyle = "#4f9a2a"; c.lineWidth = 2 * S; c.beginPath(); c.moveTo(-hw, 0); c.quadraticCurveTo(0, th + bend, hw, 0); c.quadraticCurveTo(0, -th + bend, -hw, 0); c.fill(); c.stroke();
+  c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = 2 * S; c.beginPath(); c.moveTo(-hw * .8, 0); c.quadraticCurveTo(0, bend, hw * .8, 0); c.stroke(); c.restore();
+}
+function drawBasket(c, t) {
+  const x = bun.x, y = basketY, hw = bw / 2, h = groundY - y, lean = bun.sq * 6 * S;
+  c.fillStyle = "rgba(40,70,20,.2)"; c.beginPath(); c.ellipse(x, groundY, hw * 1.05, 7 * S, 0, 0, TAU); c.fill();
+  for (let i = 0; i < basketN; i++) { const bx = x + ((i % 3) - 1) * hw * .5 + (i > 2 ? hw * .22 : 0), by = y + 4 * S - (i > 2 ? 9 * S : 0) + lean; c.fillStyle = i % 4 === 3 ? "#5567e0" : "#e0245e"; c.beginPath(); c.arc(bx, by, 10 * S, 0, TAU); c.fill(); c.fillStyle = "rgba(255,255,255,.5)"; c.beginPath(); c.arc(bx - 3 * S, by - 4 * S, 2.5 * S, 0, TAU); c.fill(); }
+  c.fillStyle = "#c98b4a"; c.beginPath(); c.moveTo(x - hw, y + lean); c.lineTo(x + hw, y + lean); c.lineTo(x + hw * .82, groundY); c.lineTo(x - hw * .82, groundY); c.closePath(); c.fill();
+  c.save(); c.clip(); c.strokeStyle = "rgba(120,70,20,.35)"; c.lineWidth = 2 * S; for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(x - hw, y + lean + h * i / 4); c.lineTo(x + hw, y + lean + h * i / 4); c.stroke(); } for (let i = -3; i <= 3; i++) { c.beginPath(); c.moveTo(x + i * hw * .3, y); c.lineTo(x + i * hw * .26, groundY); c.stroke(); } c.restore();
+  draw.rect(c, x - hw - 4 * S, y - 5 * S + lean, bw + 8 * S, 11 * S, 5.5 * S, "#e3ab68", "#a86f33", 2);
+  draw.rect(c, x - 19 * S, y + h * .42, 38 * S, 17 * S, 6 * S, "#fff6e3"); draw.text(c, basketN + "/" + PIE, x, y + h * .42 + 9 * S, { size: 11.5 * S, color: "#8a5a2f", weight: 700 });
+}
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(), W = Lab.W; c.drawImage(bg, -40, -40, bg.w, bg.h);
+  for (const s of splats) { c.globalAlpha = clamp(1 - (s.t - 6) / 3, 0, .8); c.fillStyle = s.c; const k = ease.outBack(clamp(s.t * 5, 0, 1)); c.beginPath(); c.ellipse(s.x, groundY + 1, s.r * 1.6 * k, s.r * .4 * k, 0, 0, TAU); c.fill(); c.beginPath(); c.arc(s.x - s.r * 1.5, groundY + 3, s.r * .25 * k, 0, TAU); c.arc(s.x + s.r * 1.7, groundY, s.r * .2 * k, 0, TAU); c.fill(); } c.globalAlpha = 1;
+  // wind streaks
+  if (gust.on > 0) { c.strokeStyle = `rgba(255,255,255,${.5 * Math.sin(clamp(gust.on / 2.9, 0, 1) * Math.PI)})`; c.lineWidth = 2.5 * S; c.lineCap = "round"; for (let i = 0; i < 7; i++) { const y = branchY + 50 * S + i * (groundY - branchY - 90 * S) / 6, x = ((t * 340 * gust.dir + i * 173) % (W + 160) + W + 160) % (W + 160) - 80; c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + 30 * S * gust.dir, y - 8 * S, x + 64 * S * gust.dir, y); c.stroke(); } }
+  // furniture: hanging logs, tall mushrooms
+  for (const p of planks) { const k = ease.outBack(p.born || 0); c.strokeStyle = "rgba(122,82,48,.55)"; c.lineWidth = 2 * S; for (const [x, y] of [[lerp(p.x1, p.x2, .15), lerp(p.y1, p.y2, .15)], [lerp(p.x1, p.x2, .85), lerp(p.y1, p.y2, .85)]]) { c.beginPath(); c.moveTo(x, branchY); c.lineTo(x, y); c.stroke(); } c.lineCap = "round"; c.strokeStyle = "#7a5230"; c.lineWidth = 15 * S * k; c.beginPath(); c.moveTo(p.x1, p.y1); c.lineTo(p.x2, p.y2); c.stroke(); c.strokeStyle = "#a9794a"; c.lineWidth = 8 * S * k; c.beginPath(); c.moveTo(p.x1, p.y1 - 2 * S); c.lineTo(p.x2, p.y2 - 2 * S); c.stroke(); }
+  for (const m of shrooms) { const k = ease.outBack(m.born || 0), sq = ease.pulse(m.hit) * .3, r = m.r * k; draw.rect(c, m.x - 7 * S, m.y, 14 * S, groundY - m.y, 6 * S, "#f6ead2", "rgba(150,120,80,.4)", 1.5); c.save(); c.translate(m.x, m.y + r * .2); c.scale(1 + sq, 1 - sq); c.fillStyle = "#35a898"; c.beginPath(); c.ellipse(0, -r * .2, r * 1.08, r, 0, Math.PI, TAU); c.lineTo(r * 1.08, -r * .05); c.quadraticCurveTo(0, r * .35, -r * 1.08, -r * .05); c.fill(); c.fillStyle = "#fff6e3"; for (const [dx, dy, s] of [[-.5, -.55, .2], [.15, -.8, .24], [.62, -.4, .16]]) { c.beginPath(); c.ellipse(dx * r, dy * r, s * r, s * r * .8, 0, 0, TAU); c.fill(); } c.restore(); }
+  // Bun behind her basket
+  let low = null; for (const b of berries) if (!low || b.y > low.y) low = b;
+  const size = 74 * S, panic = low && low.state === "fall" && low.y > branchY + (groundY - branchY) * .55 && Math.abs(low.x + low.vx * .25 - bun.x) > bw * .8 && low.vy > 0;
+  const look = low ? [clamp((low.x - bun.x) / (120 * S), -1, 1), clamp((low.y - (basketY - size * .3)) / (200 * S), -1, .4)] : [0, -.4];
+  const mood = over ? "sad" : bun.joy > 0 ? "joy" : bun.sad > 0 ? "sad" : panic ? "scared" : draft && trace && trace.some(s => s.end === "catch") ? "wow" : hearts === 1 && !demo ? "scared" : "happy", hop = Math.sin(clamp(bun.hop, 0, 1) * Math.PI * 2) ** 2 * 14 * S * (bun.hop > 0 ? 1 : 0);
+  Pals.draw(c, "bun", bun.x + (bun.sad > .7 ? Math.sin(t * 50) * 2 : 0), basketY - size * .16 - hop, size, { mood, t, look, squash: bun.sq, arms: bun.joy > 0 || panic ? "cheer" : "down", shadow: false, tear: bun.sad > 0 });
+  drawBasket(c, t);
+  // leaves, draft + bounce trace
+  for (const l of leaves) drawLeaf(c, l, 1);
+  if (draft && !demo) {
+    const good = trace && trace.some(s => s.end === "catch"); drawLeaf(c, draft, .6, good ? "#c6e94f" : "#9be07a");
+    if (trace) for (const s of trace) { c.fillStyle = s.end === "catch" ? "#e09a10" : "rgba(74,44,26,.55)"; for (let i = 0; i < s.pts.length; i += 2) { c.globalAlpha = 1 - i / s.pts.length * .6; c.beginPath(); c.arc(s.pts[i], s.pts[i + 1], (s.end === "catch" ? 3.6 : 3) * S, 0, TAU); c.fill(); } c.globalAlpha = 1; }
+  }
+  for (const b of berries) { if (b.state === "fall") draw.shadow(c, b.x, groundY + 1, b.r * clamp(1 - (groundY - b.y) / (500 * S), .3, 1), 3 * S, .14); drawBerry(c, b, t); }
+  // hearts + pies
+  if (!demo) {
+    const hy = P.y + 12 * S; for (let i = 0; i < 3; i++) { const on = i < hearts, pop = i === hearts - (bun.sad > 0 ? 0 : 1) || (i === hearts && bun.sad > 0) ? 1 + heartPop * .4 : 1; draw.heart(c, P.x + (20 + i * 24) * S, hy, 8.5 * S * pop, on ? "#e0245e" : "rgba(74,44,26,.2)"); }
+    draw.text(c, "PIES " + pies, P.x + P.w - 14 * S, hy, { size: 13 * S, color: "#7a4a1e", weight: 700, align: "right" });
+    if (streak >= 5) draw.text(c, "streak ×" + Math.min(4, 1 + Math.floor(streak / 5)), P.x + P.w / 2, hy, { size: 12.5 * S, color: "#b8123f", weight: 700 });
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

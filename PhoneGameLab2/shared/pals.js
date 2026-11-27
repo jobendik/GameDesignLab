@@ -3,7 +3,9 @@
  *   who:  'pip' fox · 'bun' bunny · 'momo' frog · 'nori' penguin · 'olli' owl · 'bolt' robot
  *   opts: { mood:'happy'|'joy'|'wow'|'sad'|'angry'|'sleepy'|'focus'|'dizzy'|'scared', look:[x,y] (-1..1), t (seconds → auto blink + breathing),
  *           blink:0..1, squash:-.4...4 (>0 = squashed flat), tilt (rad), flip, arms:'down'|'up'|'wave'|'cheer'|'hold', talk:0..1 (mouth open),
- *           shadow:true, alpha, tint (overrides body colour), prop:'none' }
+ *           shadow:true, alpha, tint (overrides body colour), pose:'lie' (belly-slide, head toward +x; combine with flip),
+ *           hot:0..1 (flushed + sweat), wet:0..1 (drips), clipY (local y in px from the pal's centre: nothing is drawn below it — peek from behind things) }
+ * Returns anchor points in canvas coordinates for props: { handL:[x,y], handR:[x,y], head:[x,y] (top), mouth:[x,y], feet:[x,y] }.
  */
 (function (global) {
   'use strict';
@@ -28,10 +30,13 @@
     if (o.t != null && !o.blink) { const ph = (t * .31 + hash(who)) % 1; if (ph > .955) blink = 1 - Math.abs((ph - .9775) / .0225); }
     if (mood === 'sleepy') blink = Math.max(blink, .62);
     const lx = o.look ? Math.max(-1, Math.min(1, o.look[0])) : 0, ly = o.look ? Math.max(-1, Math.min(1, o.look[1])) : 0;
+    const lie = o.pose === 'lie';
     c.save(); c.translate(x, y); if (o.alpha != null) c.globalAlpha *= o.alpha;
-    if (o.shadow !== false) { c.fillStyle = 'rgba(20,10,40,.18)'; ell(c, 0, s * 1.04, s * .78 * (1 + sq * .6), s * .14); c.fill(); }
+    if (o.clipY != null) { c.beginPath(); c.rect(-size * 2, -size * 3, size * 4, size * 3 + o.clipY); c.clip(); }
+    if (o.shadow !== false) { c.fillStyle = 'rgba(20,10,40,.18)'; if (lie) ell(c, 0, s * .98, s * 1.1, s * .13); else ell(c, 0, s * 1.04, s * .78 * (1 + sq * .6), s * .14); c.fill(); }
     if (o.tilt) c.rotate(o.tilt);
     if (o.flip) c.scale(-1, 1);
+    if (lie) { c.translate(0, s * .12); c.rotate(Math.PI / 2); } // belly-slide: head points toward +x (or -x when flipped)
     c.translate(0, s); c.scale(1 + sq * .7, 1 - sq); c.translate(0, -s); // squash from the feet
     c.lineCap = 'round'; c.lineJoin = 'round';
 
@@ -120,7 +125,15 @@
       else { c.beginPath(); c.arc(0, my - s * .02, mw, Math.PI * .15, Math.PI * .85); c.stroke(); }
     } else if (mood === 'joy' || mood === 'wow' || talk > .3) { c.fillStyle = '#7a2a3a'; c.beginPath(); c.moveTo(-s * .09, ey + s * .34); c.lineTo(s * .09, ey + s * .34); c.lineTo(0, ey + s * .46); c.closePath(); c.fill(); }
     if (mood === 'scared' || mood === 'sad' && o.tear) { c.fillStyle = '#8fd8ff'; ell(c, s * .62, ey - s * .1 + ((t * 1.5) % 1) * s * .3, s * .05, s * .08); c.fill(); }
+    if (o.hot) { const h = Math.min(1, o.hot); c.fillStyle = '#ff5a5a'; c.globalAlpha *= .35 * h; for (const d of [-1, 1]) { ell(c, d * s * .56, (frog ? -s * .28 : ey + s * .26), s * .2, s * .13); c.fill(); } c.globalAlpha /= .35 * h;
+      c.fillStyle = '#9fe3ff'; const k = (t * 1.2 + hash(who)) % 1; ell(c, -s * .7, -s * .55 + k * s * .5, s * .055 * h, s * .09 * h); c.fill(); if (h > .6) { const k2 = (t * 1.2 + hash(who) + .5) % 1; ell(c, s * .72, -s * .5 + k2 * s * .5, s * .05, s * .08); c.fill(); } }
+    if (o.wet) { c.fillStyle = 'rgba(120,200,255,.85)'; for (let i = 0; i < 4; i++) { const k = (t * 1.6 + i * .27 + hash(who)) % 1, dx = (i - 1.5) * s * .42; c.globalAlpha *= (1 - k) * Math.min(1, o.wet); ell(c, dx, s * (.3 + k * .75), s * .045, s * .08); c.fill(); c.globalAlpha /= (1 - k) * Math.min(1, o.wet) || 1; } }
+    // anchor points (canvas coordinates) so games can attach props
+    const M = c.getTransform(), pt = (lx2, ly2) => { const q = M.transformPoint(new DOMPoint(lx2, ly2)), i = c.getTransform(); return [q.x / (global.Lab && Lab.dpr || 1), q.y / (global.Lab && Lab.dpr || 1)]; };
+    const hand = d => { const a = d * armA(d), bx = d * s * .74, by = s * .08; return pt(bx - Math.sin(a) * s * .5, by + Math.cos(a) * s * .5); };
+    const anchors = { handL: hand(-1), handR: hand(1), head: pt(0, -s * (kind === 'bunny' ? 1.05 : 1)), mouth: pt(0, my + s * .05), feet: pt(0, s) };
     c.restore();
+    return anchors;
   }
   function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
 
@@ -133,6 +146,7 @@
     snow: { sky: ['#bfe3ff', '#f2fbff'], hill: ['#ffffff', '#dcefff'], sun: '#ffffff', cloud: 'rgba(255,255,255,.95)' },
     beach: { sky: ['#6ed3f5', '#d5f7ff'], hill: ['#ffe3a3', '#f5c871'], sun: '#fff7c2', cloud: 'rgba(255,255,255,.9)', sea: '#3fb8e0' },
     candy: { sky: ['#ffc8e8', '#fff0c9'], hill: ['#ff9ecb', '#c79bff'], sun: '#fffbe0', cloud: 'rgba(255,255,255,.85)' },
+    golden: { sky: ['#ffb347', '#ffe9b0'], hill: ['#9ec26a', '#6f9e52'], sun: '#fff6d5', cloud: 'rgba(255,250,235,.8)' },
   };
   function backdrop(c, W, H, t, o) {
     o = o || {}; const sc = SCENES[o.scene] || SCENES.meadow, gy = H * (o.ground == null ? .78 : o.ground);
@@ -145,5 +159,17 @@
     return gy;
   }
 
-  global.Pals = { draw, backdrop, cast: CAST, list: Object.keys(CAST), scenes: Object.keys(SCENES), ink: INK, colors: who => CAST[who] || CAST.pip, pick: seed => Object.keys(CAST)[Math.floor(Math.abs(seed)) % 6] };
+  /* Thought / speech bubble: Pals.bubble(ctx, x, y, w, h, {tailX, tailY, thought:true, fill, stroke}) — (x,y) is the bubble centre;
+   * the tail points at (tailX,tailY). Draw your icon/text on top afterwards. */
+  function bubble(c, x, y, w, h, o) {
+    o = o || {}; const r = Math.min(w, h) * .38, fill = o.fill || '#fffdf7', stroke = o.stroke === undefined ? INK : o.stroke, tx = o.tailX == null ? x : o.tailX, ty = o.tailY == null ? y + h : o.tailY;
+    c.save(); c.lineJoin = 'round'; c.lineWidth = o.lineWidth || 2.5; c.fillStyle = fill; if (stroke) c.strokeStyle = stroke;
+    const ang = Math.atan2(ty - y, tx - x), ex = x + Math.cos(ang) * w * .42, eyy = y + Math.sin(ang) * h * .42;
+    if (o.thought) { for (let i = 1; i <= 2; i++) { const k = i / 3, bx = ex + (tx - ex) * k, by = eyy + (ty - eyy) * k, br = r * (.34 - i * .09); ell(c, bx, by, br, br); c.fill(); if (stroke) c.stroke(); } }
+    else { const nx = -Math.sin(ang) * r * .5, ny = Math.cos(ang) * r * .5; c.beginPath(); c.moveTo(ex + nx, eyy + ny); c.lineTo(ex + (tx - ex) * .8, eyy + (ty - eyy) * .8); c.lineTo(ex - nx, eyy - ny); c.closePath(); c.fill(); if (stroke) c.stroke(); }
+    rr(c, x - w / 2, y - h / 2, w, h, r); c.fill(); if (stroke) c.stroke();
+    if (!o.thought) { const nx = -Math.sin(ang) * r * .42, ny = Math.cos(ang) * r * .42; c.beginPath(); c.moveTo(ex + nx, eyy + ny); c.lineTo(ex + (tx - ex) * .5, eyy + (ty - eyy) * .5); c.lineTo(ex - nx, eyy - ny); c.closePath(); c.fill(); }
+    c.restore();
+  }
+  global.Pals = { draw, backdrop, bubble, cast: CAST, list: Object.keys(CAST), scenes: Object.keys(SCENES), ink: INK, colors: who => CAST[who] || CAST.pip, pick: seed => Object.keys(CAST)[Math.floor(Math.abs(seed)) % 6] };
 })(window);

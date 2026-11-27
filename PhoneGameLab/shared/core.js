@@ -590,7 +590,7 @@
     if (th.accent2) root.setProperty('--accent2', th.accent2);
     if (th.muted) root.setProperty('--muted', th.muted);
     if (th.bg) { let m = doc.querySelector('meta[name=theme-color]'); if (!m) { m = doc.createElement('meta'); m.name = 'theme-color'; doc.head.appendChild(m); } m.content = th.bg; }
-    if (th.light) doc.body.classList.add('lab-light');
+    if (th.light) { doc.body.classList.add('lab-light'); if (!th.fg) root.setProperty('--fg', '#1f2333'); if (!th.muted) root.setProperty('--muted', '#5d6480'); } // light themes get dark HUD text by default
 
     stage = doc.createElement('div'); stage.className = 'lab-stage';
     canvas = doc.createElement('canvas'); canvas.className = 'lab-canvas'; canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', opts.title + ' game area');

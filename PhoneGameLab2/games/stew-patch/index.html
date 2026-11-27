@@ -1,0 +1,329 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Stew Patch</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* STEW PATCH — Bun the bunny keeps a veg patch that never stays empty, and the other pals queue at the gate for stew.
+ * Core idea kept: tap a group of touching, matching things to remove it.
+ * The twist is what happens next: nothing falls. The garden GROWS BACK. Every bare plot is taken by whichever crop
+ * touches it most (8 surrounding plots vote; the bigger patch wins a tie), creeping in two plots deep — the middle of a
+ * big pull is re-sown wild. So pulling a patch is also *planting*: weed out the two carrots between your cabbages and the
+ * cabbages close the gap. Press and hold to peek at exactly what will regrow before you commit.
+ * Orders ("6+ beets") must be filled by ONE pull at least that big; each pull costs a day, each order pays three back.
+ * Later: blueberries (5th crop), golden veg (double), molehills (flatten them with a pull of 4+ next door).
+ * Identity: sunny kitchen garden — mown lawn, wooden bed, pastel plot tiles that fuse into fields, a bubbling pot;
+ *           Bun hops out to every pull, frets when the sun gets low. Bouncy music that tightens as days run out. */
+let demo = false, demoT = 0;
+Lab.init({
+  title: "Stew Patch", tagline: "Pull the veg, let the neighbours creep in, feed the queue.", category: "Puzzle", kicker: "Pocket Pals",
+  howto: ["Tap a patch to pull it (hold to peek)", "Bare soil regrows as its neighbours", "Fill each order with one big pull"],
+  theme: { bg: "#a9dc92", bg2: "#e9f5c4", fg: "#3b2e4a", muted: "#6a6578", accent: "#ff7a59", accent2: "#8f76e6", light: true },
+  orient: "any", music: { style: "bounce", key: "G", vol: .36 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, shade = Lab.color.shade, INK = Pals.ink;
+const COLS = 6, ROWS = 7, MAXD = 12, D4 = [[1, 0], [-1, 0], [0, 1], [0, -1]], D8 = D4.concat([[1, 1], [1, -1], [-1, 1], [-1, -1]]);
+const VEG = [{ n: "carrots", c: "#ff8f3a", bed: "#ffdcb5" }, { n: "beets", c: "#e2457d", bed: "#ffc9da" }, { n: "cabbages", c: "#5fbb60", bed: "#d3efb9" },
+  { n: "corn", c: "#f2bd24", bed: "#fff1a6" }, { n: "blueberries", c: "#4f86e8", bed: "#cfdeff" }];
+const QUEUE = ["momo", "pip", "nori", "olli", "bolt"], YUM = ["Yum!", "Order up!", "Soup's on!", "Perfect!"];
+let S, wide, cell, gx, gy, gw, gh, ordR, home, pot, sunP, bunSize;
+let grid, gid, gsz, glist, bestOf, ver, orders, seq, types, days, served, score, moves, picked, maxCut, over, endT, press, cur, kb,
+  bun, fly, potB, sunB, bubble, told, moles, clock, pointer;
+
+const key = (r, c) => r * COLS + c, inb = (r, c) => r >= 0 && r < ROWS && c >= 0 && c < COLS;
+function snd(name, o) { if (!demo) Lab.sfx(name, o); }
+function say(txt, dur) { if (!demo) bubble = { txt, t: 0, dur: dur || 3 }; }
+function once(id, txt, dur) { if (!told[id]) { told[id] = 1; say(txt, dur || 4); } }
+function mk(k, delay) { return { k, born: delay ? -delay : 1, star: false, ph: rand(0, TAU) }; }
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15;
+  if (wide) {
+    cell = Math.floor(Math.min((P.h - 20) / ROWS, P.w * .46 / COLS)); gw = cell * COLS; gh = cell * ROWS; gx = P.x + (P.w - gw) / 2; gy = P.y + (P.h - gh) / 2; S = cell / 60;
+    const pw = Math.min(gx - P.x - 30, 260 * Math.max(S, .8)), ch = Math.min(gh / 2 - 10, pw * .5), lx = gx - 18 - pw, rx = gx + gw + 18;
+    ordR = [{ x: lx, y: gy + gh * .27 - ch / 2, w: pw, h: ch }, { x: lx, y: gy + gh * .73 - ch / 2, w: pw, h: ch }];
+    bunSize = Math.min(pw * .4, cell * 1.7); home = { x: rx + pw * .3, y: gy + gh * .9 }; pot = { x: rx + pw * .72, y: gy + gh * .9 }; sunP = { x: rx + pw * .5, y: gy + gh * .22, r: bunSize * .34 };
+  } else {
+    S = Math.min(P.w / 390, P.h / 720); const top = 82 * S, bot = 132 * S; cell = Math.floor(Math.min((P.w - 22) / COLS, (P.h - top - bot - 40 * S) / ROWS)); gw = cell * COLS; gh = cell * ROWS;
+    const y0 = P.y + Math.max(4, (P.h - (top + gh + bot + 34 * S)) * .45), w = (gw + 12 - 10 * S) / 2; gx = P.x + (P.w - gw) / 2; gy = y0 + top + 18 * S;
+    ordR = [{ x: gx - 6, y: y0, w, h: top }, { x: gx - 6 + w + 10 * S, y: y0, w, h: top }];
+    const by = gy + gh + 16 * S; bunSize = bot * .6; home = { x: gx + gw * .17, y: by + bot * .86 }; pot = { x: gx + gw * .5, y: by + bot * .86 }; sunP = { x: gx + gw * .85, y: by + bot * .46, r: bot * .25 };
+  }
+  Lab.sprite.clear("veg"); Lab.sprite.clear("spbg");
+}
+Lab.onResize(() => { if (grid) { layout(); bun.x = home.x; bun.y = home.y; bun.u = 1; bun.out = false; fly.length = 0; } });
+
+/* ---------- board logic ---------- */
+function scan() {
+  gid = Array.from({ length: ROWS }, () => Array(COLS).fill(-1)); gsz = []; glist = []; bestOf = [0, 0, 0, 0, 0]; ver++;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (gid[r][c] >= 0 || grid[r][c].k < 0) continue;
+    const k = grid[r][c].k, id = glist.length, cells = [[r, c]]; gid[r][c] = id;
+    for (let i = 0; i < cells.length; i++) for (const [dr, dc] of D4) { const rr = cells[i][0] + dr, cc = cells[i][1] + dc; if (inb(rr, cc) && gid[rr][cc] < 0 && grid[rr][cc].k === k) { gid[rr][cc] = id; cells.push([rr, cc]); } }
+    glist.push(cells); gsz.push(cells.length); bestOf[k] = Math.max(bestOf[k], cells.length);
+  }
+}
+/* What grows back where `cells` are pulled: Map key → {k, wave}.  k = -2 means "wild" (re-sown at random). */
+function plan(cells) {
+  const out = new Map(), pend = new Set(cells.map(([r, c]) => key(r, c)));
+  for (let wave = 0; pend.size; wave++) {
+    const fills = [];
+    if (wave < 2) for (const kk of pend) {
+      const r = kk / COLS | 0, c = kk % COLS, cnt = {}, wt = {}; let best = null;
+      for (const [dr, dc] of D8) {
+        const rr = r + dr, cc = c + dc, k2 = key(rr, cc); if (!inb(rr, cc) || pend.has(k2)) continue; let k, w;
+        if (out.has(k2)) { k = out.get(k2).k; w = out.get(k2).w; } else { k = grid[rr][cc].k; if (k < 0) continue; w = gsz[gid[rr][cc]]; }
+        cnt[k] = (cnt[k] || 0) + 1; wt[k] = Math.max(wt[k] || 0, w);
+      }
+      for (const k in cnt) if (best === null || cnt[k] > cnt[best] || cnt[k] === cnt[best] && wt[k] > wt[best]) best = k;
+      if (best !== null) fills.push([kk, +best, wt[best]]);
+    }
+    if (!fills.length) { for (const kk of pend) out.set(kk, { k: -2, w: 0, wave }); break; }
+    for (const [kk, k, w] of fills) { out.set(kk, { k, w, wave }); pend.delete(kk); }
+  }
+  return out;
+}
+function pullCells(r, c) { // the patch plus any molehills a 4+ pull flattens
+  const cells = glist[gid[r][c]].slice(), n = cells.length;
+  if (n >= 4) for (let i = 0; i < n; i++) for (const [dr, dc] of D4) { const rr = cells[i][0] + dr, cc = cells[i][1] + dc; if (inb(rr, cc) && grid[rr][cc].k === -1 && !cells.some(q => q[0] === rr && q[1] === cc)) cells.push([rr, cc]); }
+  return cells;
+}
+function sow(k, n, quiet) {
+  const cand = []; for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { const g = grid[r][c]; if (g.k >= 0 && g.k !== k && !g.star) cand.push([r, c]); }
+  if (!cand.length) return; const got = [Lab.choose(cand)];
+  for (let i = 0; got.length < n && i < 24; i++) { const b = Lab.choose(got), d = Lab.choose(D4), rr = b[0] + d[0], cc = b[1] + d[1]; if (inb(rr, cc) && grid[rr][cc].k >= 0 && grid[rr][cc].k !== k && !grid[rr][cc].star && !got.some(q => q[0] === rr && q[1] === cc)) got.push([rr, cc]); }
+  got.forEach(([r, c], j) => { grid[r][c] = mk(k, quiet ? 0 : .5 + j * .12); }); scan();
+}
+function newOrder(i, quiet) {
+  const other = orders[1 - i]; let k;
+  if (served >= 3 && types < 5) { types = 5; k = 4; if (!demo) { Lab.banner("New crop: blueberries!", { color: VEG[4].c, ms: 1400, y: .16 }); snd("unlock"); } }
+  else { const c = []; for (let j = 0; j < types; j++) if (!other || other.k !== j) c.push(j); k = Lab.choose(c); }
+  orders[i] = { k, need: Math.min(14, 4 + (seq >> 1)), pal: QUEUE[seq % QUEUE.length], t: quiet ? 1 : 0, done: 0 }; seq++;
+  sow(k, 3, quiet);
+}
+function reset() {
+  grid = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => mk(Lab.randInt(0, 3)))); ver = 0;
+  orders = [null, null]; seq = 0; types = 4; days = 7; served = 0; score = 0; moves = 0; picked = 0; maxCut = 0; over = false; endT = 0; press = null; cur = null; kb = false;
+  fly = []; potB = 0; sunB = 0; bubble = null; told = {}; moles = 0; clock = 0; pointer = null;
+  bun = { x: home.x, y: home.y, fx: 0, fy: 0, tx: 0, ty: 0, u: 1, sq: 0, stay: 0, joy: 0, wow: 0, out: false, face: 1 };
+  scan(); newOrder(0, true); newOrder(1, true);
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0); Lab.music.intensity(.2);
+  Lab.input.onDown = [(x, y) => { kb = false; pointer = [x, y]; setPress(cellAt(x, y)); }];
+  Lab.input.onMove = [(x, y) => { pointer = [x, y]; if (Lab.input.down) setPress(cellAt(x, y)); }];
+  Lab.input.onUp = [(x, y) => { const q = cellAt(x, y); if (q && press) harvest(q[0], q[1]); press = null; }];
+  Lab.input.onKey = [k => {
+    const d = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] }[k];
+    if (d) { kb = true; cur = cur ? [clamp(cur[0] + d[0], 0, ROWS - 1), clamp(cur[1] + d[1], 0, COLS - 1)] : [3, 2]; setPress(cur); }
+    else if ((k === " " || k === "Enter") && cur && kb) { harvest(cur[0], cur[1]); setPress(cur); }
+  }];
+  Lab.expose({
+    get score() { return score; }, get days() { return days; }, get served() { return served; }, get moves() { return moves; }, get types() { return types; }, get press() { return press ? press.cells.length : 0; },
+    grid() { return grid.map(r => r.map(g => g.k)); }, orders() { return orders.map(o => o && !o.done ? { k: o.k, need: o.need } : null); }, size(r, c) { return gid[r][c] < 0 ? 0 : gsz[gid[r][c]]; },
+    set(rows, o) { o = o || {}; grid = rows.map(r => r.map(k => mk(k))); if (o.days != null) days = o.days; if (o.orders) orders = o.orders.map((q, i) => ({ k: q[0], need: q[1], pal: QUEUE[i], t: 1, done: 0 })); if (o.star) grid[o.star[0]][o.star[1]].star = true; press = null; scan(); },
+    plan(r, c) { const o = {}; for (const [kk, v] of plan(pullCells(r, c))) o[(kk / COLS | 0) + "," + kk % COLS] = v.k; return o; },
+    harvest, xy(r, c) { return [gx + (c + .5) * cell, gy + (r + .5) * cell]; },
+  });
+  say("Tap a patch to pull it up!", 6);
+  Lab.loop(frame);
+}
+function cellAt(x, y) { const c = Math.floor((x - gx) / cell), r = Math.floor((y - gy) / cell); return inb(r, c) ? [r, c] : null; }
+function setPress(q) {
+  if (!q || over || grid[q[0]][q[1]].k < 0) { press = null; return; }
+  if (press && press.ver === ver && press.id === gid[q[0]][q[1]]) return;
+  const cells = pullCells(q[0], q[1]), n = glist[gid[q[0]][q[1]]].length;
+  press = { ver, id: gid[q[0]][q[1]], cells, n, k: grid[q[0]][q[1]].k, plan: plan(cells), set: new Set(cells.map(([r, c]) => key(r, c))), t: 0 };
+  snd("tick", { pitch: 1.5 - Math.min(n, 14) * .05, vol: .6 });
+}
+function harvest(r, c) {
+  if (over || !inb(r, c)) return false; const g0 = grid[r][c];
+  if (g0.k < 0) { snd("thud", { vol: .5 }); return false; }
+  const k = g0.k, n = glist[gid[r][c]].length, cells = pullCells(r, c), p = plan(cells); let star = false, cx = 0, cy = 0, flat = 0;
+  cells.forEach(([rr, cc], i) => {
+    const g = grid[rr][cc], x = gx + (cc + .5) * cell, y = gy + (rr + .5) * cell; if (g.star) star = true;
+    if (g.k < 0) { flat++; moles--; fx.puff(x, y, { color: "#a5754c", n: 8 }); }
+    else { cx += x / n; cy += y / n; if (fly.length < 60) fly.push({ k, x, y, d: .2 + i * .028, t: 0, i }); }
+    fx.burst(x, y + cell * .2, { n: 3, color: "#8a5a35", speed: 90, life: .4, size: 4, gravity: 500, spread: 2, angle: -1.57 });
+    const v = p.get(key(rr, cc)); grid[rr][cc] = mk(v.k === -2 ? Lab.randInt(0, types - 1) : v.k, .42 + v.wave * .13 + i * .012);
+  });
+  scan(); press = null; days--; moves++; picked += n; maxCut = Math.max(maxCut, n);
+  let pts = n * n * (star ? 2 : 1), col = "#fff";
+  const oi = orders.findIndex(o => o && !o.done && o.k === k && n >= o.need);
+  if (oi >= 0) {
+    const o = orders[oi]; pts += o.need * 10 + (n - o.need) * 5; days = Math.min(MAXD, days + 3); served++; o.done = .001; sunB = 1; bun.joy = 1.3; col = "#ffe066";
+    snd("chime"); snd("coin", { pitch: 1 + served * .03 }); Lab.buzz(18); say(Lab.choose(YUM), 1.6);
+    const R = ordR[oi]; fx.burst(R.x + R.w / 2, R.y + R.h / 2, { n: 18, colors: [VEG[k].c, "#fff", "#ffe066"], speed: 220, life: .7, shape: "star", size: 5, gravity: 260 });
+    if (!demo) Lab.toast("+3 days", 900, { y: .2 });
+  }
+  if (n >= 12) { days = Math.min(MAXD, days + 1); sunB = 1; bun.wow = 1.2; if (!demo) Lab.banner("Bumper crop!", { color: VEG[k].c, ms: 1000, y: .2 }); snd("powerup"); Lab.shake(6, .25); }
+  else if (n >= 7) bun.wow = .9;
+  if (star) { snd("star"); col = "#ffe066"; }
+  if (flat) { snd("thud"); Lab.shake(4, .2); }
+  score += pts; if (!demo) { Lab.setScore(score); if (pts >= 40) Lab.bumpScore(); }
+  fx.text(cx, cy - cell * .3, "+" + pts + (star ? " ×2" : ""), { color: col, size: clamp(16 + n * 1.6, 18, 40) * Math.max(S, .8) });
+  snd("crunch", { pitch: 1.5 - Math.min(n, 14) * .045, vol: .7 }); Lab.buzz(8);
+  bun.fx = bun.x; bun.fy = bun.y; bun.tx = clamp(cx, gx + cell * .4, gx + gw - cell * .4); bun.ty = cy + cell * .35; bun.u = 0; bun.stay = .55; bun.out = true; bun.face = bun.tx >= bun.x ? 1 : -1;
+  // later seasons: golden veg and molehills
+  if (served >= 2 && chanceCell(.4, g => g.star)) { const q = pick(g => g.k >= 0 && g.born >= 1); if (q) { grid[q[0]][q[1]].star = true; once("star", "Golden veg doubles a pull!"); } }
+  if (served >= 6 && moves % 4 === 0 && moles < 3) { const q = pick(g => g.k >= 0 && !g.star); if (q) { grid[q[0]][q[1]] = { k: -1, born: -.5, star: false, ph: 0 }; moles++; scan(); once("mole", "Moles! Pull 4+ beside one.", 5); } }
+  if (moves === 1) say("See? The neighbours crept in.", 4); else if (moves === 2) once("peek", "Hold a patch to peek first.", 4.5);
+  if (days <= 0) { over = true; endT = 1.5; say("The sun's gone down...", 9); }
+  else if (days <= 2) once("low" + served, "Eep, it's getting late!", 2.5);
+  if (!demo) Lab.music.intensity(clamp(1 - days / 8, .15, 1));
+  return true;
+}
+function chanceCell(p, has) { for (const row of grid) for (const g of row) if (has(g)) return false; return Lab.chance(p); }
+function pick(ok) { const c = []; for (let r = 0; r < ROWS; r++) for (let q = 0; q < COLS; q++) if (ok(grid[r][q])) c.push([r, q]); return c.length ? Lab.choose(c) : null; }
+
+/* ---------- update ---------- */
+function update(dt) {
+  clock += dt;
+  for (const row of grid) for (const g of row) if (g.born < 1) { const b = g.born; g.born = Math.min(1, g.born + dt * (g.born < 0 ? 1 : 4.5)); if (b < 0 && g.born >= 0 && Math.random() < .5) snd("bubble", { pitch: 1 + Math.random() * .5, vol: .25 }); }
+  orders.forEach((o, i) => { if (!o) return; if (o.t < 1) o.t = Math.min(1, o.t + dt * 3); if (o.done) { o.done += dt; if (o.done > .9) newOrder(i); } });
+  for (let i = fly.length - 1; i >= 0; i--) { const f = fly[i]; if ((f.d -= dt) > 0) continue; f.t += dt / .42; if (f.t >= 1) { fly.splice(i, 1); potB = 1; if (f.i < 9) snd("pop", { pitch: .9 + f.i * .09, vol: .5 }); fx.burst(pot.x, pot.y - bunSize * .5, { n: 2, color: "#fff7d6", speed: 70, life: .35, size: 3, gravity: -40 }); } }
+  potB = Math.max(0, potB - dt * 5); sunB = Math.max(0, sunB - dt * 2.2);
+  if (bun.u < 1) { bun.u = Math.min(1, bun.u + dt / .22); bun.x = lerp(bun.fx, bun.tx, bun.u); bun.y = lerp(bun.fy, bun.ty, bun.u); if (bun.u >= 1) { bun.sq = .3; fx.puff(bun.x, bun.y, { n: 4, color: "rgba(255,250,235,.7)" }); snd("land", { vol: .4 }); } }
+  else if (bun.out && (bun.stay -= dt) <= 0) { bun.out = false; bun.fx = bun.x; bun.fy = bun.y; bun.tx = home.x; bun.ty = home.y; bun.u = 0; bun.face = 1; }
+  bun.sq = Lab.damp(bun.sq, 0, 9, dt); bun.joy = Math.max(0, bun.joy - dt); bun.wow = Math.max(0, bun.wow - dt);
+  if (press) press.t += dt;
+  if (bubble && (bubble.t += dt) > bubble.dur) bubble = null;
+  if (over && endT > 0 && (endT -= dt) <= 0 && !demo) Lab.gameover({ title: "Sun's down!", message: served ? "Bun fed " + served + " hungry pal" + (served > 1 ? "s" : "") + " today." : "Tomorrow's another day in the patch.", score, neutral: true, stats: [["Orders", served], ["Biggest pull", maxCut], ["Veg picked", picked]] });
+}
+function frame(dt, t) { update(dt); render(t); }
+function attract(dt, t) {
+  if (!demo) { demo = true; layout(); reset(); demoT = 1; }
+  if ((demoT -= dt) <= 0) { demoT = 1.4; days = 7; over = false; const big = glist.filter(g => g.length >= 3), g = big.length ? Lab.choose(big) : glist[0]; if (g) harvest(g[0][0], g[0][1]); }
+  update(dt); render(t);
+}
+
+/* ---------- drawing ---------- */
+function ell(g, x, y, rx, ry, rot) { g.beginPath(); g.ellipse(x, y, rx, ry, rot || 0, 0, TAU); }
+function drawVeg(g, k, s) {
+  g.lineCap = g.lineJoin = "round";
+  if (k === 0) { // carrot
+    g.fillStyle = "#4fae56"; for (const a of [-.55, 0, .55]) { g.save(); g.translate(0, -s * .5); g.rotate(a); ell(g, 0, -s * .34, s * .15, s * .4); g.fill(); g.restore(); }
+    g.fillStyle = VEG[0].c; g.beginPath(); g.moveTo(-s * .52, -s * .38); g.quadraticCurveTo(0, -s * .78, s * .52, -s * .38); g.quadraticCurveTo(s * .36, s * .55, 0, s); g.quadraticCurveTo(-s * .36, s * .55, -s * .52, -s * .38); g.fill();
+    g.strokeStyle = "#e2701f"; g.lineWidth = s * .08; g.beginPath(); g.moveTo(-s * .3, -s * .1); g.lineTo(-s * .04, -s * .06); g.moveTo(s * .3, s * .2); g.lineTo(s * .06, s * .24); g.moveTo(-s * .17, s * .5); g.lineTo(s * .02, s * .53); g.stroke();
+    g.fillStyle = "rgba(255,255,255,.3)"; ell(g, -s * .2, -s * .3, s * .1, s * .2, .3); g.fill();
+  } else if (k === 1) { // beet
+    g.strokeStyle = "#c22f66"; g.lineWidth = s * .09; for (const d of [-1, 1]) { g.beginPath(); g.moveTo(0, -s * .3); g.quadraticCurveTo(d * s * .1, -s * .7, d * s * .42, -s * .86); g.stroke(); }
+    g.fillStyle = "#58b85c"; for (const d of [-1, 1]) { ell(g, d * s * .42, -s * .8, s * .3, s * .17, d * -.6); g.fill(); }
+    g.fillStyle = VEG[1].c; g.beginPath(); g.moveTo(0, s); g.quadraticCurveTo(-s * .12, s * .7, -s * .6, s * .42); g.bezierCurveTo(-s * 1.05, -s * .1, -s * .5, -s * .52, 0, -s * .44); g.bezierCurveTo(s * .5, -s * .52, s * 1.05, -s * .1, s * .6, s * .42); g.quadraticCurveTo(s * .12, s * .7, 0, s); g.fill();
+    g.fillStyle = "rgba(255,255,255,.3)"; ell(g, -s * .32, -s * .08, s * .16, s * .24, .5); g.fill();
+  } else if (k === 2) { // cabbage
+    g.fillStyle = "#3f9a4c"; for (let i = 0; i < 5; i++) { const a = i / 5 * TAU + .3; ell(g, Math.cos(a) * s * .42, s * .1 + Math.sin(a) * s * .42, s * .5, s * .42, a); g.fill(); }
+    g.fillStyle = VEG[2].c; ell(g, 0, s * .1, s * .68, s * .64); g.fill(); g.fillStyle = "#9fdc8a"; ell(g, -s * .06, s * .02, s * .44, s * .4); g.fill();
+    g.strokeStyle = "#5fbb60"; g.lineWidth = s * .08; g.beginPath(); g.arc(0, s * .08, s * .24, .4, 4.4); g.stroke(); g.beginPath(); g.arc(s * .08, s * .1, s * .46, -1.1, .9); g.stroke();
+  } else if (k === 3) { // corn
+    g.fillStyle = "#58b85c"; for (const d of [-1, 1]) { g.beginPath(); g.moveTo(0, s * .95); g.quadraticCurveTo(d * s * .95, s * .5, d * s * .62, -s * .5); g.quadraticCurveTo(d * s * .34, s * .3, 0, s * .95); g.fill(); }
+    g.fillStyle = VEG[3].c; ell(g, 0, -s * .04, s * .4, s * .92); g.fill();
+    g.fillStyle = "#ffe27a"; for (let r = 0; r < 5; r++) for (let q = -1; q <= 1; q++) { if (Math.abs(q) === 1 && (r === 0 || r === 4)) continue; ell(g, q * s * .21, -s * .62 + r * s * .29, s * .08, s * .1); g.fill(); }
+  } else { // blueberries
+    g.fillStyle = "#58b85c"; ell(g, s * .2, -s * .68, s * .42, s * .2, -.5); g.fill(); g.strokeStyle = "#3f9a4c"; g.lineWidth = s * .09; g.beginPath(); g.moveTo(0, -s * .2); g.lineTo(-s * .1, -s * .75); g.stroke();
+    for (const [x, y, r] of [[-s * .36, s * .34, s * .44], [s * .38, s * .3, s * .46], [0, -s * .16, s * .44]]) { g.fillStyle = VEG[4].c; ell(g, x, y, r, r); g.fill(); g.fillStyle = "#2f5fc0"; g.beginPath(); for (let i = 0; i < 5; i++) { const a = i / 5 * TAU - 1.57; g.lineTo(x + Math.cos(a) * r * .28, y + r * .1 + Math.sin(a) * r * .28); } g.fill(); g.fillStyle = "rgba(255,255,255,.35)"; ell(g, x - r * .35, y - r * .4, r * .2, r * .14, -.6); g.fill(); }
+  }
+}
+function vegSpr(k, size) { size = Math.max(8, Math.round(size)); return Lab.sprite("veg" + k + "_" + size, size, size, g => { g.translate(size / 2, size / 2); drawVeg(g, k, size * .4); }); }
+function drawBg(c) {
+  const W = Lab.W, H = Lab.H, bg = Lab.sprite("spbg" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40); draw.vgrad(g, -40, -40, W + 80, H + 80, ["#bfe8a2", "#9fd684"]);
+    g.fillStyle = "rgba(255,255,255,.1)"; const sw = Math.max(46, W / 9); for (let x = -40; x < W + 40; x += sw * 2) g.fillRect(x, -40, sw, H + 80);
+    const rng = Lab.rng(11); for (let i = 0; i < 46; i++) { const x = rng() * W, y = rng() * H, r = 2.2 + rng() * 2; g.fillStyle = "rgba(60,140,70,.25)"; ell(g, x, y + r, r * 2.2, r * .8); g.fill(); g.fillStyle = i % 3 ? "#fff" : "#ffd1e6"; for (let p = 0; p < 5; p++) { ell(g, x + Math.cos(p * 1.257) * r, y + Math.sin(p * 1.257) * r, r * .7, r * .7); g.fill(); } g.fillStyle = "#ffd23f"; ell(g, x, y, r * .6, r * .6); g.fill(); }
+  });
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+  const dusk = clamp((4 - days) / 4, 0, 1) * .3; if (dusk > 0) { c.fillStyle = `rgba(255,128,70,${dusk})`; c.fillRect(-40, -40, W + 80, H + 80); }
+}
+function render(t) {
+  const c = Lab.ctx; drawBg(c);
+  // the raised bed
+  draw.shadow(c, gx + gw / 2, gy + gh + 12, gw * .54, 14 * S, .16);
+  draw.rect(c, gx - 11, gy - 11, gw + 22, gh + 24, 18, "#8a5a35"); draw.rect(c, gx - 11, gy - 11, gw + 22, gh + 19, 18, "#c08a57"); draw.rect(c, gx - 4, gy - 4, gw + 8, gh + 8, 12, "#6f4729");
+  const gap = Math.max(2, cell * .045), rad = cell * .2;
+  for (let r = 0; r < ROWS; r++) for (let q = 0; q < COLS; q++) {
+    const g = grid[r][q], x = gx + q * cell, y = gy + r * cell, live = g.k >= 0 && g.born > 0, pr = press && press.set.has(key(r, q));
+    if (!live || pr) { draw.rect(c, x + gap, y + gap, cell - gap * 2, cell - gap * 2, rad, pr ? "#5d3a20" : "#7f5330"); continue; }
+    c.fillStyle = VEG[g.k].bed; draw.rr(c, x + gap, y + gap, cell - gap * 2, cell - gap * 2, rad); c.fill();
+    const same = (rr, cc) => inb(rr, cc) && grid[rr][cc].k === g.k && grid[rr][cc].born > 0 && !(press && press.set.has(key(rr, cc)));
+    if (same(r, q + 1)) c.fillRect(x + cell - gap - rad, y + gap, gap * 2 + rad * 2, cell - gap * 2);
+    if (same(r + 1, q)) c.fillRect(x + gap, y + cell - gap - rad, cell - gap * 2, gap * 2 + rad * 2);
+    if (same(r, q + 1) && same(r + 1, q) && same(r + 1, q + 1)) c.fillRect(x + cell - gap - rad, y + cell - gap - rad, gap * 2 + rad * 2, gap * 2 + rad * 2);
+  }
+  for (let r = 0; r < ROWS; r++) for (let q = 0; q < COLS; q++) {
+    const g = grid[r][q], x = gx + (q + .5) * cell, y = gy + (r + .5) * cell, pr = press && press.set.has(key(r, q));
+    if (g.k === -1) { const k = ease.outBack(clamp(g.born + 1, 0, 1)); c.fillStyle = "#a5754c"; ell(c, x, y + cell * .16, cell * .36 * k, cell * .26 * k); c.fill(); c.fillStyle = "#5d3a20"; ell(c, x, y + cell * .02, cell * .16 * k, cell * .1 * k); c.fill(); if (k > .9) { c.fillStyle = "#6b5a6e"; ell(c, x, y - cell * .02 + Math.sin(t * 2 + r) * 2, cell * .11, cell * .1); c.fill(); c.fillStyle = "#ff9eb5"; ell(c, x, y - cell * .08 + Math.sin(t * 2 + r) * 2, cell * .045, cell * .035); c.fill(); } continue; }
+    if (g.born <= 0) { const k = clamp(1 + g.born * 2.2, 0, 1); c.strokeStyle = "#58b85c"; c.lineWidth = cell * .06; c.lineCap = "round"; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(x, y + cell * .12); c.quadraticCurveTo(x + d * cell * .04, y, x + d * cell * .13 * k, y - cell * .06 * k); c.stroke(); } continue; }
+    if (pr) continue;
+    const sc = ease.outBack(g.born), sz = cell * .86 * sc, sp = vegSpr(g.k, cell * .86);
+    if (g.star) { draw.glow(c, x, y, cell * .62, "#ffe066", .75 + Math.sin(t * 5) * .15); }
+    c.save(); c.translate(x, y + cell * .32); c.rotate(Math.sin(t * 1.7 + g.ph) * .05); c.drawImage(sp, -sz / 2, -cell * .32 * sc - sz / 2, sz, sz); c.restore();
+    if (g.star) draw.star(c, x + cell * .28, y - cell * .28, cell * .15 + Math.sin(t * 6) * 1.5, "#fff3a0", 5);
+  }
+  if (press) drawPress(c, t);
+  if (kb && cur && !press) draw.rect(c, gx + cur[1] * cell + 2, gy + cur[0] * cell + 2, cell - 4, cell - 4, cell * .2, null, "#fff", 3);
+  orders.forEach((o, i) => o && drawOrder(c, o, ordR[i], t, i));
+  drawSun(c, t); drawPot(c, t);
+  // flying veg, then Bun on top
+  for (const f of fly) { if (f.d > 0) { const sp = vegSpr(f.k, cell * .86), up = (1 - f.d / (.2 + f.i * .028)) * cell * .25; c.drawImage(sp, f.x - sp.w / 2, f.y - sp.h / 2 - up, sp.w, sp.h); continue; } const u = ease.inOutQuad(f.t), x = lerp(f.x, pot.x, u), y = lerp(f.y - cell * .25, pot.y - bunSize * .55, u) - Math.sin(u * Math.PI) * cell * 1.3, sz = cell * (.86 - u * .4), sp = vegSpr(f.k, cell * .86); c.save(); c.translate(x, y); c.rotate(u * 5 * (f.i % 2 ? 1 : -1)); c.drawImage(sp, -sz / 2, -sz / 2, sz, sz); c.restore(); }
+  drawBun(c, t);
+}
+function drawPress(c, t) {
+  const k = ease.outBack(clamp(press.t / .14, 0, 1)), sp = vegSpr(press.k, cell * .86), ms = cell * .46; let minY = 1e9, cx = 0;
+  for (const [r, q] of press.cells) {
+    const x = gx + (q + .5) * cell, y = gy + (r + .5) * cell, v = press.plan.get(key(r, q)); minY = Math.min(minY, y); cx += x / press.cells.length;
+    if (grid[r][q].k >= 0) { c.globalAlpha = .9; const sz = cell * (.86 - .2 * k); c.drawImage(sp, x - sz / 2 - cell * .12 * k, y - sz / 2 - cell * .2 * k, sz, sz); c.globalAlpha = 1; }
+    draw.circle(c, x + cell * .2, y + cell * .2, ms * .56 * k, v.k === -2 ? "#efe3cf" : VEG[v.k].bed, "rgba(43,35,64,.35)", 1.5);
+    if (v.k === -2) draw.text(c, "?", x + cell * .2, y + cell * .22, { size: ms * .7, color: "#8a5a35", weight: 800 });
+    else { const m = vegSpr(v.k, ms); c.drawImage(m, x + cell * .2 - ms * k / 2, y + cell * .2 - ms * k / 2, ms * k, ms * k); }
+  }
+  const o = orders.find(o => o && !o.done && o.k === press.k), ok = o && press.n >= o.need, txt = press.n + (ok ? " ✓" : o ? " / " + o.need : ""), fs = 17 * Math.max(S, .85), w = fs * (txt.length * .6 + 1.3), x = clamp(cx, gx + w / 2, gx + gw - w / 2), y = Math.max(gy - 6, minY - cell * .72);
+  draw.rect(c, x - w / 2, y - fs * .85, w, fs * 1.7, fs * .85, ok ? "#3fae5a" : INK); draw.text(c, txt, x, y + 1, { size: fs, weight: 700 });
+}
+function drawOrder(c, o, R, t, i) {
+  const a = o.done ? clamp(1 - o.done / .6, 0, 1) : ease.outBack(o.t), ready = !o.done && bestOf[o.k] >= o.need, h = R.h, lift = o.done ? -o.done * 40 * S : (1 - o.t) * -30 * S;
+  c.save(); c.globalAlpha = clamp(a, 0, 1); c.translate(R.x, R.y + lift + (ready ? Math.sin(t * 6 + i) * 1.5 : 0));
+  draw.rect(c, 0, 4, R.w, h, 16, "rgba(60,40,30,.16)"); draw.rect(c, 0, 0, R.w, h, 16, "#fffaf0", ready ? "#3fae5a" : "rgba(43,35,64,.14)", ready ? 3.5 : 2);
+  const hot = press && press.k === o.k && press.n >= o.need;
+  Pals.draw(c, o.pal, R.w * .17, h * .56, h * .56, { t: t + i * 3, mood: o.done || hot ? "joy" : ready ? "wow" : "happy", look: [.6, -.1], shadow: false, arms: o.done ? "cheer" : "down" });
+  const sz = h * .58, sp = vegSpr(o.k, sz); c.drawImage(sp, R.w * .46 - sz / 2, h * .38 - sz / 2, sz, sz);
+  draw.text(c, o.need + "+", R.w * .76, h * .4, { size: h * .42, color: INK, weight: 800 });
+  const bx = R.w * .33, bw = R.w * .6, bh = Math.max(7, h * .11), by = h * .78, f = clamp(bestOf[o.k] / o.need, 0, 1);
+  draw.rect(c, bx, by, bw, bh, bh / 2, "#eadfcc"); if (f > 0) draw.rect(c, bx, by, Math.max(bh, bw * f), bh, bh / 2, ready ? "#3fae5a" : VEG[o.k].c);
+  c.restore();
+}
+function drawSun(c, t) {
+  const r = sunP.r * (1 + ease.pulse(sunB) * .25), low = days <= 2 && !over, col = low ? "#ff8a4a" : "#ffcf3f", x = sunP.x, y = sunP.y + (low ? Math.sin(t * 9) * 1.5 : 0);
+  c.fillStyle = Lab.color.alpha(col, .35); for (let i = 0; i < 10; i++) { const a = t * .4 + i * TAU / 10; c.beginPath(); c.moveTo(x + Math.cos(a - .14) * r * 1.02, y + Math.sin(a - .14) * r * 1.02); c.lineTo(x + Math.cos(a) * r * 1.45, y + Math.sin(a) * r * 1.45); c.lineTo(x + Math.cos(a + .14) * r * 1.02, y + Math.sin(a + .14) * r * 1.02); c.fill(); }
+  draw.circle(c, x, y, r, col); draw.circle(c, x, y, r * .82, low ? "#ffb07a" : "#ffe37a");
+  draw.text(c, String(Math.max(0, days)), x, y + 1, { size: r * 1.05, color: low ? "#8a2f10" : "#7a4a00", weight: 800 });
+  draw.text(c, days === 1 ? "day left" : "days left", x, y + r * 1.75, { size: Math.max(11, r * .42), color: "#3b5a2e", weight: 700 });
+}
+function drawPot(c, t) {
+  const w = bunSize * .82, hgt = bunSize * .5, x = pot.x, y = pot.y, b = ease.pulse(potB) * .12;
+  draw.shadow(c, x, y, w * .56, w * .12, .18);
+  c.save(); c.translate(x, y); c.scale(1 + b, 1 - b);
+  for (let i = 0; i < 3; i++) { const ph = (t * .45 + i / 3) % 1; c.fillStyle = `rgba(255,255,255,${.5 * (1 - ph)})`; ell(c, (i - 1) * w * .2 + Math.sin(t * 2 + i * 2) * 4, -hgt - 8 - ph * hgt * .9, w * .09 * (1 + ph), w * .09 * (1 + ph)); c.fill(); }
+  c.fillStyle = "#2f8f8a"; draw.rr(c, -w / 2, -hgt, w, hgt, hgt * .42); c.fill(); c.fillRect(-w / 2, -hgt, w, hgt * .4);
+  c.fillStyle = "#e0764a"; ell(c, 0, -hgt, w * .44, hgt * .16); c.fill(); c.fillStyle = "#ffb27a"; for (let i = 0; i < 3; i++) { ell(c, (i - 1) * w * .2, -hgt + Math.sin(t * 3 + i * 2.1) * 1.5, w * .06, hgt * .07); c.fill(); }
+  draw.rect(c, -w * .56, -hgt - hgt * .08, w * 1.12, hgt * .2, hgt * .1, "#3aa8a2");
+  c.fillStyle = "rgba(255,255,255,.22)"; ell(c, -w * .26, -hgt * .45, w * .07, hgt * .24, .2); c.fill();
+  c.restore();
+}
+function drawBun(c, t) {
+  const air = bun.u < 1, hop = air ? Math.sin(bun.u * Math.PI) * cell * .9 : 0, size = bun.out || air ? Math.min(bunSize, cell * 1.35) : bunSize;
+  const sad = over, low = days <= 2 && !over;
+  const mood = sad ? "sad" : bun.joy > 0 ? "joy" : bun.wow > 0 ? "wow" : press ? "focus" : low ? "scared" : "happy";
+  let look = [0, 0]; if (pointer && !bun.out) { const dx = pointer[0] - bun.x, dy = pointer[1] - (bun.y - size / 2), d = Math.hypot(dx, dy) || 1; look = [dx / d, dy / d]; } else if (bun.out) look = [0, .7];
+  Pals.draw(c, "bun", bun.x, bun.y - size / 2 - hop, size, { t, mood, look, squash: air ? -Math.sin(bun.u * Math.PI) * .16 : bun.sq, flip: bun.face < 0, tilt: air ? bun.face * .12 : 0, arms: bun.joy > 0 ? "cheer" : bun.out && !air ? "up" : "down", talk: bubble && bubble.t < .5 ? .7 : 0 });
+  if (bubble && !bun.out && !air) {
+    const k = ease.outBack(clamp(bubble.t / .2, 0, 1)) * clamp((bubble.dur - bubble.t) / .2, 0, 1), fs = 14.5 * Math.max(S, .9); c.font = Lab.font(fs, 700);
+    const w = c.measureText(bubble.txt).width + 22, h = fs * 2.1, x = clamp(bun.x + size * .3, Lab.play.x + 6, Lab.play.x + Lab.play.w - w - 6), y = bun.y - size * 1.52 - h;
+    c.save(); c.translate(x + w * .2, y + h); c.scale(k, k); c.translate(-(x + w * .2), -(y + h));
+    c.fillStyle = "#fffaf0"; c.beginPath(); c.moveTo(x + w * .16, y + h - 2); c.lineTo(x + w * .14, y + h + 10); c.lineTo(x + w * .3, y + h - 2); c.fill();
+    draw.rect(c, x, y, w, h, h / 2, "#fffaf0", "rgba(43,35,64,.18)", 1.5); draw.text(c, bubble.txt, x + w / 2, y + h / 2 + 1, { size: fs, color: INK, weight: 700 });
+    c.restore();
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

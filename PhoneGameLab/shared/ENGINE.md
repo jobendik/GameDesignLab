@@ -17,7 +17,7 @@ One dependency-free script. A game is a single `games/<slug>/index.html`. The ca
 Lab.init({
   title: "My Game", tagline: "One-line pitch.", category: "Arcade & Action",   // title/tagline/category feed the generated catalog
   howto: ["Drag to aim", "Release to fire"],                                  // ≤3 short lines, shown on splash + pause
-  theme: { bg:"#0d0b24", bg2:"#2a1f5c", accent:"#9b8cff", accent2:"#ff8fc7" /*, light:true for bright games */ },
+  theme: { bg:"#0d0b24", bg2:"#2a1f5c", accent:"#9b8cff", accent2:"#ff8fc7" /*, light:true for bright games (HUD text turns dark unless you pass fg/muted) */ },
   orient: "portrait",                 // 'portrait' (stage ≤ 0.68 aspect, centred on desktop) | 'landscape' | 'any' (fills window)
   music: { style:"dream", key:"D" },  // optional generative music (see Audio)
   restart: start,                     // called for every new run
