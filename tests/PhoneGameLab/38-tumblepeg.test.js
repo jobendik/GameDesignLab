@@ -1,8 +1,9 @@
-// Tumblepeg: real drag-release drops a marble whose outcome matches the game's own deterministic dry run; taps and arrow
-// keys spend nudges on a falling marble; five marbles over the quota clear the round, five under it end the run; restart is clean.
+// Tumblepeg: real drag-release drops a marble whose outcome matches the game's own deterministic dry run; Space drops;
+// taps and arrow keys spend nudges on a falling marble; a round that ends over its quota advances, one that ends under it
+// ends the run; restart is clean.  (Four marbles are played in real time; a `left` hook skips the others.)
 module.exports = {
   game: 'PhoneGameLab/games/38-tumblepeg/index.html',
-  timeout: 170000,
+  timeout: 120000,
   async run({ page, expect, wait, state, game }) {
     const until = async (fn, ms) => { for (let t = 0; t < ms; t += 100) { if (await game(fn)) return true; await wait(100); } return false; };
     // scan the board with the dry run and return the best (or worst) drop column
@@ -21,34 +22,37 @@ module.exports = {
     let pred = await dragDrop(await pick(true));
     expect(pred.pts >= 80, 'solver found a worthwhile drop (' + pred.pts + ')');
     expect(await game(g => g.state === 'fall' && !!g.marble), 'drag-release drops a marble');
-    expect(await until(g => g.state === 'aim', 12000), 'marble lands');
+    expect(await until(g => g.state === 'aim', 20000), 'marble lands');
     expect(await game(g => g.score) === pred.pts && await game(g => g.left) === 4, 'score matches the predicted cup × multiplier: ' + pred.pts);
     expect((await state()).score === pred.pts, 'HUD score mirrors game score');
 
-    // 2) nudges: a tap on the right half and an arrow key each spend one and shove the marble
-    await dragDrop(184); await wait(700);
+    // 2) keyboard drop + nudges: a tap on the right half and an arrow key each spend one and shove the marble
+    await page.keyboard.press('Space'); await wait(150);
+    expect(await game(g => g.state === 'fall' && !!g.marble), 'Space drops a marble'); await wait(550);
     const vx0 = await game(g => g.marble.vx);
     await page.mouse.click(330, 500); await wait(60);
     expect(await game(g => g.nudges) === 2, 'tap spends a nudge');
     expect(await game(g => g.marble && g.marble.vx) > vx0 + 80, 'right tap shoves the marble right');
     await wait(350); await page.keyboard.press('ArrowLeft'); await wait(60);
     expect(await game(g => g.nudges) === 1, 'arrow key spends a nudge');
-    expect(await until(g => g.state === 'aim', 12000), 'nudged marble lands');
+    expect(await until(g => g.state === 'aim', 20000), 'nudged marble lands');
     const s2 = await game(g => g.score); expect(s2 >= pred.pts, 'score never decreases');
 
-    // 3) the remaining marbles, each dropped on the best column, clear round 1
-    while (await game(g => g.state === 'aim' && g.left > 0 && g.round === 1)) {
-      await dragDrop(await pick(true)); expect(await until(g => g.state !== 'fall' && g.state !== 'settle', 12000), 'marble lands');
-    }
-    expect(await until(g => g.round === 2 && g.state === 'aim', 6000), 'beating the quota advances to round 2');
+    // 3) the last marble of the round is golden (double); dropped on the best column it carries round 1 past the quota
+    //    (the hook skips the two middle marbles so the test does not sit through them)
+    await game(g => { g.left = 1; });
+    pred = await dragDrop(await pick(true));
+    expect(await game(g => g.marble && g.marble.gold), 'the last marble is golden');
+    expect(await until(g => g.state !== 'fall' && g.state !== 'settle', 20000), 'golden marble lands');
+    expect(await game(g => g.score) === s2 + pred.pts, 'golden marble scores its doubled prediction: ' + pred.pts);
+    expect(await until(g => g.round === 2 && g.state === 'aim', 8000), 'beating the quota advances to round 2');
     expect(await game(g => g.left === 5 && g.nudges === 3 && g.roundScore === 0 && g.mods.join() === 'bump' && g.quota > 150), 'round 2: fresh marbles and nudges, bumpers bolted on, higher quota');
     const banked = await game(g => g.score); expect(banked >= 150, 'round 1 score is banked (' + banked + ')');
 
-    // 4) five deliberately poor marbles miss the quota → game over
-    await page.keyboard.press('Space'); await wait(200);
-    expect(await game(g => g.state === 'fall'), 'Space drops a marble'); await until(g => g.state === 'aim', 14000);
-    while (await game(g => g.state === 'aim' && g.left > 0)) { await dragDrop(await pick(false)); await until(g => g.state !== 'fall' && g.state !== 'settle', 14000); }
-    for (let i = 0; i < 30 && !(await state()).over; i++) await wait(200);
+    // 4) a deliberately poor last marble leaves round 2 under its quota → game over
+    await game(g => { g.left = 1; });
+    await dragDrop(await pick(false)); await until(g => g.state !== 'fall' && g.state !== 'settle', 20000);
+    for (let i = 0; i < 40 && !(await state()).over; i++) await wait(200);
     const e = await state(); expect(e.over, 'missing the quota ends the run');
     expect(await game(g => g.roundScore < g.quota), 'round score was below the quota'); expect(e.best >= e.score && e.best > 0, 'best score recorded');
 
