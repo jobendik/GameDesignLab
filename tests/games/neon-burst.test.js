@@ -21,7 +21,7 @@ module.exports = {
 
     // 1. menu → PLAY
     let s = await st(); expect(s.mode === 'menu', 'boots to the menu');
-    await page.locator('#bPlay').tap(); await wait(100); await page.evaluate(() => window.__gdl.manual(true)); s = await st();
+    await page.evaluate(() => window.__gdl.manual(true)); await page.locator('#bPlay').tap(); await wait(100); s = await st();
     expect(s.mode === 'play' && s.level === 1 && s.score === 0 && s.mult === 1 && s.spares === 2 && s.pops === 0, 'run starts on level 1 at ×1 with two spare sparks');
     expect(s.n >= 15 && s.quota >= 3 && s.quota < s.par && s.par <= s.n && s.alive === s.n, `level 1 board: pop ${s.quota} of ${s.n} (par ${s.par})`);
     const board1 = { n: s.n, quota: s.quota, par: s.par };

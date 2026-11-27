@@ -159,16 +159,19 @@ window.GDL_CATALOG = {
    "id": "games/chroma-frenzy",
    "path": "games/chroma-frenzy.html",
    "collection": "arcade",
-   "title": "Neon Dopamine Rush — Chroma Frenzy",
-   "desc": "Improved chroma-frenzy neon dopamine rush.",
+   "title": "Chroma Frenzy — Two-Ink Reflex Rush",
+   "desc": "Steer a two-ink blob down a speeding print run: flip between coral and blue to swallow what matches, graze what doesn",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Action"
    ],
    "controls": [
     "touch",
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--chroma-frenzy.jpg"
   },
   {
@@ -283,6 +286,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--kosmisk-slange.jpg"
   },
   {
@@ -2506,21 +2511,20 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--bedtime-stacks.jpg"
   },
   {
-   "id": "PhoneGameLab2/cake-tower",
-   "path": "PhoneGameLab2/games/cake-tower/index.html",
+   "id": "PhoneGameLab2/cakewalk",
+   "path": "PhoneGameLab2/games/cakewalk/index.html",
    "collection": "PhoneGameLab2",
-   "title": "Cake Tower",
-   "desc": "Drop swinging cake layers to build a balanced tower.",
+   "title": "Cakewalk",
+   "desc": "Catch the cake on Momo's head. Walk gently!",
    "genre": [
-    "Minigame"
+    "Arcade"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
-   "n": 13,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--cake-tower.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab2/candy-connect",
@@ -2572,23 +2576,6 @@ window.GDL_CATALOG = {
    "n": 16,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--cats-and-cans.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/clean-the-ocean",
-   "path": "PhoneGameLab2/games/clean-the-ocean/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Clean the Ocean",
-   "desc": "Drop a claw to grab trash and keep the ocean clean.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 17,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--clean-the-ocean.jpg"
   },
   {
    "id": "PhoneGameLab2/climber-tom",
@@ -3369,6 +3356,22 @@ window.GDL_CATALOG = {
    "score": 8,
    "status": "transformed",
    "thumb": "thumbs/PhoneGameLab2--ramp-scamp.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/reef-relief",
+   "path": "PhoneGameLab2/games/reef-relief/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Reef Relief",
+   "desc": "Swing the claw. Haul the junk. Spare the fish.",
+   "genre": [
+    "Arcade"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true
   },
   {
    "id": "PhoneGameLab2/rocket-fun",

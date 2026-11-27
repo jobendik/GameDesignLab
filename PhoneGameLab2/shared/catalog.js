@@ -4,13 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 13,
-    "slug": "cake-tower",
-    "t": "Cake Tower",
-    "d": "Drop swinging cake layers to build a balanced tower.",
-    "thumb": "../thumbs/PhoneGameLab2--cake-tower.jpg"
-   },
-   {
     "n": 14,
     "slug": "candy-connect",
     "t": "Candy Connect",
@@ -30,13 +23,6 @@ window.LAB_GAMES = [
     "t": "Cats & Cans",
     "d": "Classic shell game — track the cup hiding the cat.",
     "thumb": "../thumbs/PhoneGameLab2--cats-and-cans.jpg"
-   },
-   {
-    "n": 17,
-    "slug": "clean-the-ocean",
-    "t": "Clean the Ocean",
-    "d": "Drop a claw to grab trash and keep the ocean clean.",
-    "thumb": "../thumbs/PhoneGameLab2--clean-the-ocean.jpg"
    },
    {
     "n": 18,
@@ -519,37 +505,14 @@ window.LAB_GAMES = [
   ]
  },
  {
-  "cat": "Skill",
-  "items": [
-   {
-    "slug": "flicknic",
-    "t": "Flicknic",
-    "d": "Flick the bugs off the blanket. Save Bun's cake.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--flicknic.jpg"
-   },
-   {
-    "slug": "jampoline",
-    "t": "Jampoline",
-    "d": "Draw springy leaves. Bounce berries to Bun.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--jampoline.jpg"
-   },
-   {
-    "slug": "ramp-scamp",
-    "t": "Ramp Scamp",
-    "d": "Tilt the ramp. Pip is not slowing down.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--ramp-scamp.jpg"
-   }
-  ]
- },
- {
   "cat": "Arcade",
   "items": [
+   {
+    "slug": "cakewalk",
+    "t": "Cakewalk",
+    "d": "Catch the cake on Momo's head. Walk gently!",
+    "v2": true
+   },
    {
     "slug": "gulp-and-float",
     "t": "Gulp & Float",
@@ -575,12 +538,47 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--pier-pressure.jpg"
    },
    {
+    "slug": "reef-relief",
+    "t": "Reef Relief",
+    "d": "Swing the claw. Haul the junk. Spare the fish.",
+    "v2": true
+   },
+   {
     "slug": "sunny-soak",
     "t": "Sunny Soak",
     "d": "Lob water balloons. Cool your pals down.",
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--sunny-soak.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Skill",
+  "items": [
+   {
+    "slug": "flicknic",
+    "t": "Flicknic",
+    "d": "Flick the bugs off the blanket. Save Bun's cake.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--flicknic.jpg"
+   },
+   {
+    "slug": "jampoline",
+    "t": "Jampoline",
+    "d": "Draw springy leaves. Bounce berries to Bun.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--jampoline.jpg"
+   },
+   {
+    "slug": "ramp-scamp",
+    "t": "Ramp Scamp",
+    "d": "Tilt the ramp. Pip is not slowing down.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--ramp-scamp.jpg"
    }
   ]
  },

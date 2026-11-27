@@ -1,0 +1,411 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Reef Relief</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* REEF RELIEF — Nori the penguin runs a little salvage boat. A grabber claw swings under the keel like a pendulum;
+ * tap and the winch lets go: the claw shoots out along its swing, grabs the first thing it meets and is cranked home.
+ * Core idea kept: drop a claw, grab the trash, keep the ocean clean.
+ * Physical claw: pendulum swing, follow-through on the drop, the load hangs and sways under the boat, reel speed falls
+ *          with weight (a tyre crawls, a can zips), the boat dips and heels and Nori sweats.
+ * Twists:  THE SLICK — a leaky drum on the seabed feeds an oil slick that creeps toward the boat (the haul's clock).
+ *          Hauling the heavy drum itself plugs the leak: slow now, more time later.
+ *          SEA CREATURES must not be grabbed: fish, turtles and jellies wander between you and the junk. A grab is let go
+ *          at once but feeds the slick and breaks your streak; a jelly zaps the claw.
+ *          UPGRADES — after each haul pick one of three: winch, claw, oil boom, fish whistle, sonar line.
+ * Identity: sunny toy-boat sea in four times of day; soft "chill" music that tightens as the slick closes in. */
+let demo = false;
+Lab.init({
+  title: "Reef Relief", tagline: "Swing the claw. Haul the junk. Spare the fish.", category: "Arcade", kicker: "Pocket Pals",
+  howto: ["Tap to drop the claw where it points", "Heavy junk reels slowly — plug the leaky drum", "Never grab the sea creatures"],
+  theme: { bg: "#0f5f86", bg2: "#8fdcf0", fg: "#1e2850", muted: "#3d5a80", accent: "#ffa62b", accent2: "#ff6b6b", light: true },
+  orient: "any", music: { style: "chill", key: "C", vol: .42 }, restart: start,
+  attract(dt, t) { if (!trash) { demo = true; setup(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, shade = Lab.color.shade, INK = Pals.ink;
+const KINDS = {
+  can: { r: 12, w: .2, val: 10, bed: 1 }, bottle: { r: 13, w: .25, val: 15 }, bag: { r: 15, w: .15, val: 20 }, boot: { r: 15, w: .6, val: 30, bed: 1 },
+  tyre: { r: 21, w: 1.5, val: 60, bed: 1 }, net: { r: 22, w: 1.9, val: 80, bed: 1 }, drum: { r: 23, w: 2.6, val: 100, bed: 1 },
+};
+const UPS = {
+  winch: { n: "Turbo Winch", d: "Reels junk in 30% faster", c: "#ffa62b", max: 3 },
+  claw: { n: "Big Claw", d: "A wider, surer grab", c: "#ffd23f", max: 3 },
+  boom: { n: "Oil Boom", d: "The slick spreads slower", c: "#9b8cff", max: 3 },
+  whistle: { n: "Fish Whistle", d: "Creatures dodge the claw", c: "#5fd39a", max: 2 },
+  sonar: { n: "Sonar Line", d: "Shows where the claw lands", c: "#3ec5ff", max: 2 },
+};
+const SEAS = [
+  { sky: ["#9fe0ff", "#eafaff"], top: "#66d4e4", deep: "#14679b", sand: "#f3d9a0", sun: "#fff3b0", fg: "#1e2850" },
+  { sky: ["#74cdf7", "#d6f5ff"], top: "#4fcbc2", deep: "#0f5f86", sand: "#f6e3b4", sun: "#fffbe0", fg: "#1e2850" },
+  { sky: ["#ff9f7a", "#ffe3b8"], top: "#77b9d8", deep: "#2d4d92", sand: "#ecc9a2", sun: "#fff1c1", fg: "#3b2340" },
+  { sky: ["#252a66", "#5a58a6"], top: "#3d74b4", deep: "#131a4c", sand: "#b7aed0", sun: "#fdf6c3", fg: "#f4f1ff", night: 1 },
+];
+const FISHC = ["#ff9f5a", "#ffd166", "#ff8fb8", "#b9a3ff"];
+let W, H, S, waterY, bedY, px, py, rest, A, cards = [];
+let trash, crit, claw, bub, fly, phase, haul, slick, leaks, quota, cleaned, score, streak, bestStreak, total, drops, up, clock, nextId, warnT,
+  nori, boat, winch, omega, vOut, grabR, spotless, told;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+const floorAt = x => bedY - (Math.sin(x * .013 + 1) * 7 + Math.sin(x * .031) * 4) * S;
+const seaOf = () => SEAS[(haul - 1) % SEAS.length];
+function layout() {
+  const P = Lab.play; W = Lab.W; H = Lab.H;
+  S = clamp(Math.min(W / 390, H / 520), .7, 1.5);
+  waterY = P.y + 84 * S; bedY = H - Lab.safe.bottom - 30 * S; px = W / 2; py = waterY + 16 * S; rest = 40 * S;
+  A = Math.min(1.2, Math.atan2(W / 2 - 22 * S, (bedY - py) * .42));
+  Lab.sprite.clear("rr");
+  if (trash) {
+    for (const t of trash) { t.r = KINDS[t.kind].r * S; t.hx = t.u * W; t.hy = t.float ? waterY + t.v * (bedY - waterY) : floorAt(t.hx) - t.r * .55; if (!t.held) { t.x = t.hx; t.y = t.hy; } }
+    for (const f of crit) { f.x = clamp(f.x, 20, W - 20); f.r = f.r0 * S; }
+    claw.len = Math.min(claw.len, rest); if (claw.st !== "swing") { if (claw.item) { claw.item.held = false; claw.item.x = claw.item.hx; claw.item.y = claw.item.hy; claw.item = null; } claw.st = "swing"; }
+    stats(); if (phase === "shop") placeCards();
+  }
+}
+Lab.onResize(layout);
+function stats() { omega = 1.55 + Math.min(.6, (haul - 1) * .09); vOut = 640 * S; grabR = 15 * S * (1 + .25 * up.claw); }
+
+/* ---------- world ---------- */
+function setup() {
+  haul = 1; score = 0; streak = 0; bestStreak = 0; total = 0; drops = 0; clock = 0; nextId = 1; warnT = 0; told = {};
+  up = { winch: 0, claw: 0, boom: 0, whistle: 0, sonar: 0 };
+  claw = { st: "swing", ph: 0, th: 0, vth: 0, len: 40, open: 1, item: null, t: 0, stretch: 0 };
+  nori = { joy: 0, oops: 0, wow: 0, sq: 0, strain: 0, crank: 0 }; boat = { dip: 0, tilt: 0 }; bub = []; fly = []; trash = []; crit = [];
+  layout(); claw.len = rest; newHaul();
+}
+function newHaul() {
+  slick = 0; cleaned = 0; spotless = false; stats(); phase = "play"; trash = []; crit = []; fly = [];
+  const list = ["drum", "tyre", "boot", "can", "can", "can", "bottle", "bottle"];
+  if (haul >= 2) list.push("bag", "can"); if (haul >= 3) list.push("net", "bag"); if (haul >= 4) list.push("drum", "tyre"); if (haul >= 5) list.push("boot", "bottle"); if (haul >= 6) list.push("net");
+  let room = Math.floor((W - 36 * S) / (52 * S));
+  for (let kind of list) { if (KINDS[kind].bed && room <= 0) kind = Lab.chance(.5) ? "bottle" : "bag"; if (KINDS[kind].bed) room--; place(kind); }
+  quota = Math.ceil(trash.length * (.5 + Math.min(.25, (haul - 1) * .05))); leaks = trash.filter(t => t.kind === "drum").length;
+  for (let i = 0; i < 2 + Math.min(4, haul); i++) addCrit("fish");
+  for (let i = 0; i < (haul >= 2 ? Math.min(3, haul - 1) : 0); i++) addCrit("jelly");
+  for (let i = 0; i < (haul >= 3 ? Math.min(2, (haul - 1) >> 1) : 0); i++) addCrit("turtle");
+  if (!demo) { const s = seaOf(); Lab.setTheme({ fg: s.fg, muted: s.night ? "#c9c6f0" : "#3d5a80", light: !s.night }); }
+}
+function place(kind) {
+  const k = KINDS[kind], r = k.r * S; let x = W / 2, y = bedY, ok = false;
+  for (let i = 0; i < 90 && !ok; i++) {
+    if (k.bed) { x = Lab.rand(26 * S, W - 26 * S); y = floorAt(x) - r * .55; }
+    else { const d = Lab.rand(.32, .8) * (bedY - py), hw = Math.min(W / 2 - 30 * S, d * Math.tan(A * .88)); y = py + d; x = px + Lab.rand(-hw, hw); }
+    ok = Math.abs(Math.atan2(x - px, y - py)) < A * .95 && trash.every(o => Lab.dist(x, y, o.hx, o.hy) > r + o.r + (k.bed ? 5 : 16) * S);
+  }
+  trash.push({ id: nextId++, kind, x, y, hx: x, hy: y, u: x / W, v: (y - waterY) / (bedY - waterY), r, w: k.w, val: k.val, float: !k.bed, ph: Lab.rand(0, TAU), amp: k.bed ? 0 : Lab.rand(8, 20) * S, sp: Lab.rand(.5, .9), held: false, sway: 0 });
+}
+function addCrit(kind, x, y) {
+  const r0 = { fish: 11, turtle: 17, jelly: 13 }[kind];
+  crit.push({ id: nextId++, kind, r0, r: r0 * S, x: x == null ? Lab.rand(30, W - 30) : x, y: y || 0, v: kind === "turtle" ? Lab.rand(.55, .82) : Lab.rand(.24, .8), dir: Lab.chance(.5) ? 1 : -1,
+    sp: kind === "fish" ? Lab.rand(38, 76) : kind === "turtle" ? Lab.rand(18, 28) : Lab.rand(5, 10), ph: Lab.rand(0, TAU), oy: 0, dart: 0, free: 0, col: Lab.choose(FISHC) });
+  return crit[crit.length - 1];
+}
+function start() {
+  demo = false; setup(); Lab.setScore(0);
+  winch = Lab.audio.loop({ type: "sawtooth", f: 80, lp: 520, vol: 0 });
+  Lab.input.onDown = [(x, y) => { if (phase === "shop") { const i = cards.findIndex(k => x >= k.x && x <= k.x + k.w && y >= k.y && y <= k.y + k.h); if (i >= 0) pick(i); } else drop(); }];
+  Lab.input.onKey = [k => { if (phase === "shop") { if (k >= "1" && k <= "3") pick(+k - 1); } else if (k === " " || k === "ArrowDown" || k === "Enter") drop(); }];
+  Lab.toast("Tap to drop the claw", 2200, { y: .3 });
+  Lab.expose({
+    get score() { return score; }, get haul() { return haul; }, get phase() { return phase; }, get quota() { return quota; }, get cleaned() { return cleaned; }, set cleaned(v) { cleaned = v; }, get streak() { return streak; },
+    get slick() { return slick; }, set slick(v) { slick = v; }, get leaks() { return leaks; }, get up() { return up; }, get cards() { return cards.map(k => ({ id: k.id, x: k.x + k.w / 2, y: k.y + k.h / 2 })); },
+    get claw() { return { st: claw.st, th: claw.th, len: claw.len, item: claw.item && claw.item.kind, x: px + Math.sin(claw.th) * claw.len, y: py + Math.cos(claw.th) * claw.len }; },
+    trash: () => trash.map(t => ({ id: t.id, kind: t.kind, x: t.x, y: t.y, r: t.r, w: t.w, held: t.held })), crit: () => crit.map(f => ({ id: f.id, kind: f.kind, x: f.x, y: f.y })),
+    predict() { const p = predict(); return { type: p.type, id: p.e && p.e.id, kind: p.e && p.e.kind }; }, drop, pick,
+    aimAt(id) { const t = trash.find(o => o.id === id) || crit.find(o => o.id === id); claw.th = clamp(Math.atan2(t.x - px, t.y - py), -A, A); claw.ph = Math.asin(claw.th / A); },
+    freeze(v) { omega = v ? 0 : 1.55; }, clearCrit() { crit = []; }, putCrit(kind, x, y) { const f = addCrit(kind, x, y); f.sp = 0; f.v = (y - waterY) / (bedY - waterY); f.ph = 0; f.kind2 = 1; return f.id; }, get rate() { return slickRate(); },
+  });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+
+/* ---------- claw ---------- */
+function drop() {
+  if (phase !== "play" || claw.st !== "swing" || Lab.paused) return false;
+  claw.st = "drop"; claw.vth = A * Math.cos(claw.ph) * omega; drops++; snd("whoosh", { pitch: .8 }); snd("bubble", { pitch: .7 }); Lab.buzz(8); nori.sq = .16;
+  return true;
+}
+/* What is at (x,y) for a claw of the current size? Creatures first: they swim in front of the junk. */
+function probe(x, y) {
+  for (const f of crit) if (Lab.dist(x, y, f.x, f.y) < grabR * .35 + f.r * .85) return { type: "crit", e: f };
+  for (const t of trash) if (!t.held && Lab.dist(x, y, t.x, t.y) < grabR * .6 + t.r) return { type: "trash", e: t };
+  if (y >= floorAt(x) - 3 * S || x < 8 || x > W - 8) return { type: "floor" };
+  return null;
+}
+function predict() {
+  let th = claw.th, vth = claw.st === "swing" ? A * Math.cos(claw.ph) * omega : claw.vth, len = claw.len; const h = 1 / 120, pts = [];
+  for (let i = 0; i < 400; i++) {
+    th += vth * h; vth *= Math.exp(-5 * h); len += vOut * h; const x = px + Math.sin(th) * len, y = py + Math.cos(th) * len, p = probe(x, y);
+    if (i % 6 === 0) pts.push(x, y); if (p) { p.x = x; p.y = y; p.pts = pts; return p; }
+  }
+  return { type: "floor", x: px, y: bedY, pts };
+}
+function stepDrop(h) {
+  const c = claw; c.th += c.vth * h; c.vth *= Math.exp(-5 * h); c.len += vOut * h;
+  const x = px + Math.sin(c.th) * c.len, y = py + Math.cos(c.th) * c.len, p = probe(x, y); if (!p) return;
+  if (p.type === "trash") {
+    const t = p.e; t.held = true; c.item = t; c.st = "grab"; c.t = .13; c.stretch = t.w * 5 * S; nori.wow = .5;
+    snd("snap", { pitch: 1.2 - t.w * .15 }); snd("thud", { pitch: 1.5 - t.w * .3, vol: .5 + t.w * .2 }); Lab.hitstop(.03 + t.w * .012); if (t.w > 1) Lab.shake(2 + t.w * 1.5, .18); Lab.buzz(10 + t.w * 8);
+    for (let i = 0; i < 7; i++) addBub(x + Lab.rand(-t.r, t.r), y + Lab.rand(-t.r, t.r));
+    if (!t.float) fx.puff(x, t.y + t.r * .6, { n: 8, color: shade(seaOf().sand, -.1), speed: 60 });
+  } else if (p.type === "crit") {
+    const f = p.e, jelly = f.kind === "jelly"; streak = 0; slick = Math.min(1, slick + (jelly ? .06 : .04)); nori.oops = 1.2; f.dart = 1.3; f.dir = f.x < px ? -1 : 1;
+    c.st = "stun"; c.t = jelly ? .9 : .35; c.jelly = jelly;
+    if (jelly) { snd("zap", { vol: .7 }); Lab.shake(5, .3); fx.sparks(x, y, -Math.PI / 2, { n: 12, color: "#fff7a8", spread: TAU }); Lab.flash("#fff7a8", .12, .25); }
+    else { snd("error", { vol: .6 }); snd("bubble", { pitch: 1.4 }); }
+    fx.text(f.x, f.y - f.r - 10 * S, jelly ? "Zap!" : "Sorry!", { color: jelly ? "#fff7a8" : "#fff", size: 17 * S }); Lab.buzz(30);
+    if (!demo && !told.crit) { told.crit = 1; Lab.toast("Careful — creatures feed the slick!", 1700, { y: .3 }); }
+  } else { c.st = "reel"; streak = 0; snd("thud", { pitch: .8, vol: .4 }); fx.puff(x, y, { n: 8, color: shade(seaOf().sand, -.08), speed: 70 }); }
+}
+function deliver(t) {
+  trash.splice(trash.indexOf(t), 1); cleaned++; total++; streak++; bestStreak = Math.max(bestStreak, streak);
+  const mult = 1 + .25 * Math.min(streak - 1, 4), gain = Math.round(t.val * mult / 5) * 5; score += gain; nori.joy = t.w > 1 ? 1.4 : .8; nori.sq = .2;
+  fly.push({ kind: t.kind, r: t.r, t: 0, side: claw.th >= 0 ? 1 : -1 });
+  fx.text(px, waterY - 62 * S, "+" + gain + (mult > 1 ? "  ×" + mult : ""), { color: mult > 1 ? "#fff3a0" : "#fff", size: (17 + Math.min(8, streak * 2)) * S });
+  fx.burst(px, py, { n: 8 + Math.round(t.w * 5), colors: ["#fff", "#bdf3ff", "#ffe08a"], speed: 150, life: .5, size: 3, gravity: -60 });
+  if (!demo) { Lab.setScore(score); Lab.bumpScore(); Lab.audio.combo(Math.min(streak, 8) - 1, { vol: .22 }); Lab.sfx("pickup", { pitch: 1.3 - t.w * .12 }); }
+  if (t.kind === "drum") { leaks--; if (!demo) { Lab.toast(leaks ? "One leak plugged!" : "Leak plugged — the slick slows!", 1500, { y: .3 }); Lab.sfx("powerup", { vol: .6 }); } fx.ring(px, py, { r0: 10, r1: 70 * S, color: "#9b8cff", width: 4 }); }
+  if (t.kind === "net") { const f = addCrit("fish", px + 10 * S, py + 30 * S); f.free = 2.2; f.dart = 1; score += 25; if (!demo) Lab.setScore(score); fx.text(px, py + 46 * S, "Freed! +25", { color: "#ffd1e6", size: 15 * S }); snd("chime", { vol: .6 }); }
+  if (!demo && cleaned === quota && trash.length) { Lab.toast("Quota met! Clear the rest for a bonus", 1700, { y: .3 }); Lab.sfx("star", { vol: .6 }); }
+}
+const slickRate = () => (1 / 52 + leaks / 95) * Math.pow(.84, up.boom);
+function addBub(x, y) { if (bub.length < 46) bub.push({ x, y, r: Lab.rand(1.5, 4) * S, v: Lab.rand(30, 70) * S, ph: Lab.rand(0, 6) }); }
+
+/* ---------- flow ---------- */
+function haulDone(clean) {
+  phase = "done"; spotless = clean; nori.joy = 2.4;
+  const bonus = clean ? Math.round((60 + 140 * (1 - slick)) * (1 + haul * .25) / 5) * 5 : 0;
+  if (bonus) { score += bonus; Lab.setScore(score); Lab.bumpScore(); fx.text(px, waterY - 84 * S, "Spotless! +" + bonus, { color: "#fff3a0", size: 22 * S, life: 1.4 }); }
+  Lab.sfx("levelup"); Lab.banner(clean ? "Spotless reef!" : "Haul " + haul + " done!", { color: "#ffd23f", ms: 1300, y: .42 });
+  fx.burst(px, waterY - 30 * S, { n: 26, colors: ["#ffd23f", "#ff8fb8", "#fff", "#5fd39a"], speed: 300, life: .9, size: 4, gravity: 300, shape: "star" });
+  Lab.after(1.5, openShop);
+}
+function openShop() {
+  const pool = Lab.shuffle(Object.keys(UPS).filter(id => up[id] < UPS[id].max)).slice(0, 3);
+  if (!pool.length) { score += 100; Lab.setScore(score); haul++; newHaul(); return; }
+  cards = pool.map(id => ({ id, x: 0, y: 0, w: 0, h: 0, t: 0 })); placeCards(); phase = "shop"; Lab.sfx("unlock", { vol: .5 });
+}
+function placeCards() {
+  const n = cards.length, wide = W > H * 1.1;
+  if (wide) { const cw = Math.min(200 * S, (W - 60) / 3), ch = 150 * S, g = 14 * S, x0 = W / 2 - (n * cw + (n - 1) * g) / 2, y0 = waterY + (bedY - waterY - ch) / 2 + 8 * S; cards.forEach((k, i) => { k.x = x0 + i * (cw + g); k.y = y0; k.w = cw; k.h = ch; }); }
+  else { const cw = Math.min(W - 36, 340 * S), ch = 84 * S, g = 12 * S, y0 = waterY + (bedY - waterY - (n * ch + (n - 1) * g)) / 2 + 14 * S; cards.forEach((k, i) => { k.x = W / 2 - cw / 2; k.y = y0 + i * (ch + g); k.w = cw; k.h = ch; }); }
+}
+function pick(i) {
+  const k = cards[i]; if (phase !== "shop" || !k || k.t < .25) return false;
+  up[k.id]++; Lab.sfx("powerup"); Lab.buzz(12); fx.burst(k.x + k.w / 2, k.y + k.h / 2, { n: 18, color: UPS[k.id].c, speed: 240, life: .6, shape: "star" });
+  haul++; newHaul(); Lab.banner("Haul " + haul, { color: "#fff", ms: 900, y: .42 }); return true;
+}
+function lose() {
+  phase = "over"; Lab.shake(8, .4); Lab.music.intensity(0);
+  Lab.gameover({ title: "Oops! Slicked in", message: "The oil reached the boat before the quota.", score, stats: [["Hauls done", haul - 1], ["Junk hauled", total], ["Best streak", bestStreak]] });
+}
+
+function tick(dt) {
+  clock += dt; const c = claw, sea = bedY - waterY;
+  for (const f of crit) {
+    const fast = f.dart > 0 ? 4.5 : 1; f.dart = Math.max(0, f.dart - dt); f.free = Math.max(0, f.free - dt);
+    f.x += f.dir * f.sp * S * fast * dt; if (f.x < 22 * S) f.dir = 1; if (f.x > W - 22 * S) f.dir = -1;
+    f.oy = Lab.damp(f.oy, 0, .8, dt);
+    if (up.whistle && c.st === "drop") {   // dodge: slide sideways off the line of the falling claw
+      const dx = f.x - px, dy = f.y - py, along = dx * Math.sin(c.th) + dy * Math.cos(c.th), side = dx * Math.cos(c.th) - dy * Math.sin(c.th);
+      if (along > c.len - 10 * S && Math.abs(side) < (26 + 22 * up.whistle) * S + f.r) { const k = (side >= 0 ? 1 : -1) * 230 * S * dt; f.x += k * Math.cos(c.th); f.oy -= k * Math.sin(c.th); }
+    }
+    const amp = (f.kind === "jelly" ? 44 : f.kind === "turtle" ? 8 : 12) * S, k = f.kind === "jelly" ? .9 : 1.7;
+    f.y = clamp(waterY + f.v * sea + (f.kind2 ? 0 : Math.sin(clock * k + f.ph) * amp) + f.oy, waterY + 34 * S, floorAt(f.x) - f.r - 4 * S);
+  }
+  for (const t of trash) if (t.float && !t.held) { t.x = t.hx + Math.sin(clock * t.sp + t.ph) * t.amp; t.y = t.hy + Math.sin(clock * 1.3 + t.ph) * 4 * S; }
+  if (c.st === "swing") { c.ph += omega * dt; c.th = A * Math.sin(c.ph); c.len = Lab.damp(c.len, rest, 12, dt); c.open = Lab.damp(c.open, 1, 9, dt); }
+  else if (c.st === "drop") { c.open = Lab.damp(c.open, 1.15, 14, dt); for (let i = 0; i < 3 && c.st === "drop"; i++) stepDrop(dt / 3); if (Math.random() < dt * 30) addBub(px + Math.sin(c.th) * c.len, py + Math.cos(c.th) * c.len); }
+  else if (c.st === "grab") { c.t -= dt; c.open = Lab.damp(c.open, .12, 30, dt); if (c.t <= 0) c.st = "reel"; }
+  else if (c.st === "stun") { c.t -= dt; c.open = Lab.damp(c.open, 1.2, 20, dt); if (c.t <= 0) { c.st = "reel"; c.jelly = false; } }
+  else if (c.st === "reel") {
+    const w = c.item ? c.item.w : 0, v = c.item ? 500 * S * (1 + .3 * up.winch) / (1 + w * .9) : 900 * S;
+    c.len -= v * dt; c.vth += -c.th * (7 + 5 * rest / Math.max(rest, c.len) * 4) * dt; c.vth *= Math.exp(-(1.4 + w * .5) * dt); c.th += c.vth * dt;
+    if (!c.item) c.open = Lab.damp(c.open, 1, 6, dt);
+    nori.crank += v * dt / (9 * S);
+    if (c.len <= rest) {
+      c.len = rest; if (c.item) deliver(c.item); c.item = null; c.st = "swing";
+      const s = clamp(c.th / A, -1, 1); c.ph = c.vth < 0 ? Math.PI - Math.asin(s) : Math.asin(s);
+    }
+  }
+  c.stretch = Lab.damp(c.stretch, 0, 9, dt);
+  if (c.item) { const L = c.len + c.stretch + c.item.r * .45; c.item.x = px + Math.sin(c.th) * L; c.item.y = py + Math.cos(c.th) * L; c.item.sway = c.th; }
+  const load = c.item && c.st === "reel" ? c.item.w : 0;
+  nori.strain = Lab.damp(nori.strain, load, 5, dt); boat.dip = Lab.damp(boat.dip, load * 3.2 * S, 5, dt); boat.tilt = Lab.damp(boat.tilt, load * c.th * .05, 5, dt);
+  nori.joy = Math.max(0, nori.joy - dt); nori.oops = Math.max(0, nori.oops - dt); nori.wow = Math.max(0, nori.wow - dt); nori.sq = Lab.damp(nori.sq, 0, 8, dt);
+  for (const b of bub) { b.y -= b.v * dt; b.x += Math.sin(clock * 3 + b.ph) * 8 * dt; } bub = bub.filter(b => b.y > waterY + 4);
+  if (Math.random() < dt * 1.5) addBub(Lab.rand(0, W), bedY - 6);
+  for (const f of fly) f.t += dt / .42; fly = fly.filter(f => f.t < 1);
+  for (const k of cards) k.t += dt;
+  if (winch) winch.set({ vol: c.st === "reel" ? (c.item ? .07 : .035) : c.st === "drop" ? .03 : 0, f: c.st === "reel" ? (c.item ? 105 / (1 + load * .32) : 150) : 190 });
+  if (demo) { if (!trash.length) newHaul(); if (c.st === "swing" && Math.random() < dt * 4 && predict().type === "trash") drop(); return; }
+  if (phase !== "play") return;
+  slick = Math.min(1, slick + slickRate() * dt); Lab.music.intensity(.2 + slick * .8);
+  if (slick > .8) { warnT -= dt; if (warnT <= 0) { Lab.sfx("warn", { pitch: .8 + slick * .4, vol: .5 }); warnT = 1.1 - slick * .5; } }
+  if (c.st === "swing") { if (!trash.length) haulDone(true); else if (slick >= 1) { if (cleaned >= quota) haulDone(false); else lose(); } }
+}
+
+/* ---------- drawing ---------- */
+function bgSprite() {
+  const i = (haul - 1) % SEAS.length, p = SEAS[i];
+  return Lab.sprite("rr-bg" + i, W + 80, H + 80, g => {
+    g.translate(40, 40);
+    let gr = g.createLinearGradient(0, 0, 0, waterY); gr.addColorStop(0, p.sky[0]); gr.addColorStop(1, p.sky[1]); g.fillStyle = gr; g.fillRect(-40, -40, W + 80, waterY + 40);
+    const sx = W * .83, sy = Lab.play.y + 26 * S; draw.glow(g, sx, sy, 60 * S, p.sun, .5); draw.circle(g, sx, sy, 15 * S, p.sun);
+    if (p.night) { g.fillStyle = "#fff"; const rn = Lab.rng(5); for (let k = 0; k < 26; k++) g.fillRect(rn() * W, rn() * (waterY - 14), 1.6, 1.6); }
+    g.fillStyle = p.night ? "rgba(200,205,255,.2)" : "rgba(255,255,255,.85)"; for (const [cx, cy, cw] of [[.2, .5, 46], [.56, .28, 34]]) { const y = Lab.play.y + cy * 70 * S, x = W * cx; g.beginPath(); g.ellipse(x, y, cw * S, cw * .3 * S, 0, 0, TAU); g.ellipse(x - cw * .4 * S, y - cw * .16 * S, cw * .42 * S, cw * .3 * S, 0, 0, TAU); g.ellipse(x + cw * .3 * S, y - cw * .2 * S, cw * .5 * S, cw * .34 * S, 0, 0, TAU); g.fill(); }
+    g.fillStyle = Lab.color.mix(p.sky[1], p.deep, .45); g.beginPath(); g.ellipse(W * .1, waterY + 4, 70 * S, 26 * S, 0, Math.PI, TAU); g.fill();        // far island
+    draw.rect(g, W * .1 - 5 * S, waterY - 50 * S, 10 * S, 28 * S, 3, "#fff7ea"); draw.rect(g, W * .1 - 5 * S, waterY - 42 * S, 10 * S, 7 * S, 0, "#ff6b6b"); draw.rect(g, W * .1 - 7 * S, waterY - 57 * S, 14 * S, 8 * S, 3, p.night ? "#fff3a0" : "#ffd23f");
+    gr = g.createLinearGradient(0, waterY, 0, bedY); gr.addColorStop(0, p.top); gr.addColorStop(1, p.deep); g.fillStyle = gr; g.fillRect(-40, waterY, W + 80, H - waterY + 40);
+    g.fillStyle = "rgba(255,255,255,.07)"; for (let k = 0; k < 5; k++) { const x = W * (.08 + k * .22); g.beginPath(); g.moveTo(x, waterY); g.lineTo(x + 34 * S, waterY); g.lineTo(x - 50 * S, bedY); g.lineTo(x - 120 * S, bedY); g.closePath(); g.fill(); }
+    const rn = Lab.rng(11 + i);
+    for (let k = 0; k < Math.ceil(W / (120 * S)); k++) {                                             // rocks + coral behind the bed line
+      const x = (k + .2 + rn() * .6) * 120 * S, y = floorAt(x), rr = (14 + rn() * 16) * S;
+      g.fillStyle = Lab.color.mix(p.deep, "#b9a3ff", .35); g.beginPath(); g.ellipse(x, y, rr * 1.5, rr, 0, Math.PI, TAU); g.fill();
+      const cc = ["#ff9eb5", "#ffb37a", "#c79bff"][k % 3], cx = x + rr * 1.6; g.strokeStyle = Lab.color.mix(cc, p.deep, .25); g.lineWidth = 5 * S; g.lineCap = "round";
+      for (let b = -1; b <= 1; b++) { g.beginPath(); g.moveTo(cx, y + 4); g.quadraticCurveTo(cx + b * 4 * S, y - 12 * S, cx + b * 12 * S, y - (22 + rn() * 10) * S); g.stroke(); }
+    }
+    g.fillStyle = p.sand; g.beginPath(); g.moveTo(-40, H + 40); for (let x = -40; x <= W + 40; x += 12) g.lineTo(x, floorAt(x)); g.lineTo(W + 40, H + 40); g.closePath(); g.fill();
+    g.fillStyle = shade(p.sand, -.12); for (let k = 0; k < 60; k++) { const x = rn() * W; g.fillRect(x, floorAt(x) + 5 + rn() * 26 * S, 2.4, 2.4); }
+    g.fillStyle = shade(p.sand, .2); for (let x = -40; x < W + 40; x += 12) g.fillRect(x, floorAt(x), 13, 2.5 * S);
+  });
+}
+function trashSprite(kind, r) {
+  const sz = Math.ceil(r * 2.4 + 10);
+  return Lab.sprite("rr-" + kind + Math.round(r * 4), sz, sz, g => {
+    g.translate(sz / 2, sz / 2); g.lineJoin = g.lineCap = "round";
+    if (kind === "can") { g.rotate(-.5); draw.rect(g, -r * .62, -r * .92, r * 1.24, r * 1.84, r * .24, "#e3e8ee"); draw.rect(g, -r * .62, -r * .32, r * 1.24, r * .7, 0, "#ff6b6b"); g.fillStyle = "#9aa5b3"; g.beginPath(); g.ellipse(0, -r * .86, r * .56, r * .16, 0, 0, TAU); g.fill(); draw.rect(g, -r * .44, -r * .7, r * .16, r * 1.4, r * .08, "rgba(255,255,255,.55)"); }
+    else if (kind === "bottle") { g.rotate(.6); draw.rect(g, -r * .5, -r * .5, r, r * 1.5, r * .36, "rgba(170,240,205,.9)"); draw.rect(g, -r * .2, -r * .98, r * .4, r * .6, r * .1, "rgba(170,240,205,.9)"); draw.rect(g, -r * .26, -r * 1.12, r * .52, r * .26, r * .08, "#3ec5ff"); draw.rect(g, -r * .5, -r * .05, r, r * .5, 0, "rgba(255,255,255,.75)"); draw.rect(g, -r * .34, -r * .4, r * .14, r * 1.2, r * .07, "rgba(255,255,255,.6)"); }
+    else if (kind === "bag") { g.fillStyle = "rgba(250,252,255,.88)"; g.strokeStyle = "rgba(160,175,200,.9)"; g.lineWidth = 1.6; g.beginPath(); g.moveTo(-r * .8, -r * .35); g.quadraticCurveTo(-r * 1, r * .9, -r * .2, r * .92); g.quadraticCurveTo(r * .9, r * 1, r * .82, -r * .35); g.quadraticCurveTo(0, -r * .1, -r * .8, -r * .35); g.fill(); g.stroke();
+      g.lineWidth = r * .16; g.strokeStyle = "rgba(250,252,255,.9)"; for (const d of [-1, 1]) { g.beginPath(); g.arc(d * r * .42, -r * .46, r * .26, Math.PI, TAU); g.stroke(); } g.strokeStyle = "rgba(160,175,200,.6)"; g.lineWidth = 1.4; g.beginPath(); g.moveTo(-r * .3, 0); g.quadraticCurveTo(-r * .1, r * .4, -r * .36, r * .7); g.moveTo(r * .3, -r * .05); g.quadraticCurveTo(r * .46, r * .4, r * .2, r * .7); g.stroke(); draw.rect(g, -r * .3, r * .1, r * .6, r * .36, r * .1, "#ff8fb8"); }
+    else if (kind === "boot") { g.fillStyle = "#b07a52"; g.beginPath(); g.moveTo(-r * .55, -r * .95); g.lineTo(r * .1, -r * .95); g.lineTo(r * .14, r * .1); g.quadraticCurveTo(r * .95, r * .15, r * .95, r * .62); g.lineTo(-r * .55, r * .62); g.closePath(); g.fill(); draw.rect(g, -r * .64, r * .56, r * 1.66, r * .28, r * .1, "#6b4630"); draw.rect(g, -r * .62, -r * 1.02, r * .8, r * .26, r * .1, "#d8a274"); g.fillStyle = "#fff1dc"; for (let k = 0; k < 3; k++) { g.beginPath(); g.arc(-r * .04, -r * .55 + k * r * .26, r * .07, 0, TAU); g.fill(); } }
+    else if (kind === "tyre") { g.fillStyle = "#45415a"; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.arc(0, 0, r * .46, 0, TAU, true); g.fill("evenodd"); g.strokeStyle = "#2f2b42"; g.lineWidth = r * .1; for (let a = 0; a < 12; a++) { const q = a / 12 * TAU; g.beginPath(); g.moveTo(Math.cos(q) * r * .8, Math.sin(q) * r * .8); g.lineTo(Math.cos(q + .2) * r * .98, Math.sin(q + .2) * r * .98); g.stroke(); } g.strokeStyle = "rgba(255,255,255,.3)"; g.lineWidth = r * .09; g.beginPath(); g.arc(0, 0, r * .68, Math.PI * 1.1, Math.PI * 1.6); g.stroke(); }
+    else if (kind === "net") { g.fillStyle = "rgba(214,178,120,.5)"; g.strokeStyle = "#b98a4e"; g.lineWidth = 1.8; g.beginPath(); g.ellipse(0, r * .1, r, r * .8, 0, 0, TAU); g.fill(); g.stroke(); g.save(); g.clip(); for (let k = -3; k <= 3; k++) { g.beginPath(); g.moveTo(k * r * .34 - r, r); g.lineTo(k * r * .34 + r, -r); g.moveTo(k * r * .34 - r, -r); g.lineTo(k * r * .34 + r, r); g.stroke(); } g.restore();
+      g.fillStyle = "#ff9f5a"; g.beginPath(); g.ellipse(0, r * .12, r * .42, r * .27, 0, 0, TAU); g.fill(); g.beginPath(); g.moveTo(-r * .36, r * .12); g.lineTo(-r * .66, -r * .1); g.lineTo(-r * .66, r * .34); g.fill(); draw.circle(g, r * .2, r * .06, r * .09, "#fff"); draw.circle(g, r * .22, r * .06, r * .05, INK); for (const [bx, by] of [[-.8, -.5], [.7, -.6], [.9, .5]]) draw.circle(g, bx * r, by * r, r * .12, "#ff6b6b"); }
+    else { draw.rect(g, -r * .72, -r * .95, r * 1.44, r * 1.9, r * .22, "#ef7d4f"); for (const y of [-.52, .34]) draw.rect(g, -r * .78, y * r, r * 1.56, r * .18, r * .06, "#c9572e"); draw.rect(g, -r * .5, -r * .86, r * .18, r * 1.7, r * .08, "rgba(255,255,255,.3)"); draw.circle(g, r * .08, -r * .08, r * .32, "#fff1dc"); g.fillStyle = INK; g.beginPath(); g.moveTo(r * .08, -r * .3); g.quadraticCurveTo(r * .32, r * .02, r * .08, r * .1); g.quadraticCurveTo(-r * .16, r * .02, r * .08, -r * .3); g.fill(); }
+  });
+}
+function drawTrash(c, t) { const sp = trashSprite(t.kind, t.r); c.save(); c.translate(t.x, t.y); c.rotate(t.held ? -t.sway : t.float ? Math.sin(clock * 1.1 + t.ph) * .22 : 0); c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore(); }
+function drawCrit(c, f, night) {
+  const r = f.r, scared = f.dart > 0; c.save(); c.translate(f.x, f.y);
+  if (f.kind === "jelly") {
+    const pul = Math.sin(clock * 3 + f.ph) * .1; if (night) draw.glow(c, 0, 0, r * 2.4, "#ff9ecb", .35);
+    c.strokeStyle = "rgba(255,170,210,.85)"; c.lineWidth = 2.2 * S; c.lineCap = "round"; for (let k = -2; k <= 2; k++) { c.beginPath(); c.moveTo(k * r * .34, r * .1); c.quadraticCurveTo(k * r * .34 + Math.sin(clock * 4 + k + f.ph) * 4 * S, r * .8, k * r * .3 + Math.sin(clock * 3 + k) * 3 * S, r * 1.5); c.stroke(); }
+    c.fillStyle = "rgba(255,158,203,.92)"; c.beginPath(); c.ellipse(0, 0, r * (1 + pul), r * (.9 - pul), 0, Math.PI, TAU); c.quadraticCurveTo(0, r * .36, -r * (1 + pul), 0); c.fill();
+    c.fillStyle = "rgba(255,255,255,.45)"; c.beginPath(); c.ellipse(-r * .34, -r * .5, r * .28, r * .16, -.5, 0, TAU); c.fill();
+    c.fillStyle = INK; for (const d of [-1, 1]) { c.beginPath(); c.arc(d * r * .3, -r * .24, r * (scared ? .13 : .09), 0, TAU); c.fill(); }
+  } else if (f.kind === "turtle") {
+    c.scale(f.dir, 1); const pad = Math.sin(clock * (scared ? 12 : 3) + f.ph) * .5;
+    c.fillStyle = "#8fd9a0"; for (const [x, y, a] of [[.6, .5, .5 + pad], [-.6, .5, -.4 - pad], [.55, -.35, -.5 - pad], [-.55, -.3, .4 + pad]]) { c.save(); c.translate(x * r, y * r); c.rotate(a); c.beginPath(); c.ellipse(0, 0, r * .46, r * .2, 0, 0, TAU); c.fill(); c.restore(); }
+    c.beginPath(); c.ellipse(r * 1.12, -r * .06, r * .4, r * .32, 0, 0, TAU); c.fill();
+    c.fillStyle = "#4fae72"; c.beginPath(); c.ellipse(0, 0, r, r * .7, 0, 0, TAU); c.fill(); c.strokeStyle = "#3a8f5a"; c.lineWidth = 1.8 * S; c.beginPath(); c.ellipse(0, 0, r * .56, r * .38, 0, 0, TAU); c.moveTo(-r * .56, 0); c.lineTo(-r, 0); c.moveTo(r * .56, 0); c.lineTo(r, 0); c.moveTo(0, -r * .38); c.lineTo(0, -r * .7); c.moveTo(0, r * .38); c.lineTo(0, r * .7); c.stroke();
+    draw.circle(c, r * 1.24, -r * .12, r * (scared ? .12 : .085), INK);
+  } else {
+    c.scale(f.dir, 1); const wag = Math.sin(clock * (scared ? 26 : 9) + f.ph) * .35;
+    c.fillStyle = shade(f.col, -.15); c.save(); c.translate(-r * 1.05, 0); c.rotate(wag); c.beginPath(); c.moveTo(r * .1, 0); c.lineTo(-r * .7, -r * .6); c.lineTo(-r * .5, 0); c.lineTo(-r * .7, r * .6); c.closePath(); c.fill(); c.restore();
+    c.fillStyle = f.col; c.beginPath(); c.ellipse(0, 0, r * 1.2, r * .78, 0, 0, TAU); c.fill(); c.fillStyle = "rgba(255,255,255,.4)"; c.beginPath(); c.ellipse(-r * .1, r * .28, r * .8, r * .34, 0, 0, Math.PI); c.fill();
+    c.fillStyle = shade(f.col, -.15); c.beginPath(); c.moveTo(-r * .3, -r * .7); c.quadraticCurveTo(0, -r * 1.3, r * .3, -r * .68); c.fill();
+    draw.circle(c, r * .62, -r * .14, r * (scared ? .3 : .24), "#fff"); draw.circle(c, r * .68, -r * .14, r * (scared ? .13 : .14), INK);
+  }
+  c.restore();
+  if (f.free > 0) { c.globalAlpha = Math.min(1, f.free); draw.heart(c, f.x, f.y - r * 1.8 - (2.2 - f.free) * 10 * S, 6 * S, "#ff8fb8"); c.globalAlpha = 1; }
+}
+function drawClaw(c, x, y, th, open, jelly) {
+  c.save(); c.translate(x, y); c.rotate(-th); if (jelly) c.translate(Lab.rand(-2, 2), Lab.rand(-2, 2));
+  const s = S * (1 + .18 * up.claw); c.lineCap = c.lineJoin = "round";
+  for (const d of [-1, 1]) {
+    const o = open * .62; c.save(); c.translate(d * 5 * s, -6 * s); c.rotate(-d * o);
+    c.strokeStyle = INK; c.lineWidth = 7.5 * s; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(d * 13 * s, 6 * s, d * 9 * s, 17 * s); c.lineTo(d * 2 * s, 22 * s); c.stroke();
+    c.strokeStyle = "#ffa62b"; c.lineWidth = 4.5 * s; c.stroke(); c.restore();
+  }
+  draw.rect(c, -8 * s, -17 * s, 16 * s, 13 * s, 4 * s, "#ffd23f", INK, 1.6 * s); draw.circle(c, 0, -10.5 * s, 2.6 * s, INK);
+  c.restore();
+}
+function drawBoat(c, t) {
+  const bob = Math.sin(t * 1.7) * 2 * S + boat.dip, load = nori.strain, cst = claw.st, over = phase === "over";
+  c.save(); c.translate(px, waterY + bob); c.rotate(Math.sin(t * 1.2) * .018 + boat.tilt);
+  c.strokeStyle = "#8a5a2f"; c.lineWidth = 3 * S; c.beginPath(); c.moveTo(-40 * S, -44 * S); c.lineTo(-40 * S, -78 * S); c.stroke();                 // flag mast
+  c.fillStyle = "#ffd23f"; c.beginPath(); c.moveTo(-40 * S, -78 * S); c.quadraticCurveTo(-28 * S, -76 * S + Math.sin(t * 5) * 2 * S, -18 * S, -71 * S + Math.sin(t * 5 + 1) * 3 * S); c.lineTo(-40 * S, -65 * S); c.fill();
+  draw.rect(c, -64 * S, -46 * S, 44 * S, 32 * S, 7 * S, "#fff7ea", INK, 1.6 * S); draw.rect(c, -68 * S, -50 * S, 52 * S, 8 * S, 4 * S, "#3ec5ff", INK, 1.6 * S);
+  draw.circle(c, -42 * S, -29 * S, 8 * S, "#bdefff"); c.strokeStyle = INK; c.lineWidth = 1.6 * S; c.beginPath(); c.arc(-42 * S, -29 * S, 8 * S, 0, TAU); c.stroke();
+  // Nori at the crank (drawn in boat space: he bobs and heels with it)
+  const tx = px + Math.sin(claw.th) * claw.len, ty = py + Math.cos(claw.th) * claw.len, nx = 8 * S, sz = 50 * S, ny = -15 * S - sz * .5;
+  const mood = over ? "sad" : nori.oops > 0 ? "scared" : nori.joy > 0 ? "joy" : phase === "shop" ? "happy" : load > .9 ? "focus" : nori.wow > 0 ? "wow" : cst === "swing" ? "think" : "happy";
+  Pals.draw(c, "nori", nx, ny - (nori.joy > 0 ? Math.abs(Math.sin(t * 11)) * 5 * S : 0), sz, { mood, t, look: [clamp((tx - px) / (90 * S), -1, 1), clamp((ty - waterY) / (160 * S), -.2, 1)], arms: nori.joy > 0 ? "cheer" : cst === "reel" || cst === "drop" || cst === "grab" ? "hold" : "down",
+    squash: nori.sq + (cst === "reel" ? Math.sin(nori.crank) * .05 : 0), tilt: cst === "reel" && load > .5 ? -.12 : 0, hot: clamp(load / 2.4, 0, 1), clipY: sz * .5, shadow: false, talk: nori.oops > .7 ? .8 : 0 });
+  draw.circle(c, 44 * S, -24 * S, 10 * S, "#9aa5b3", INK, 1.6 * S);                                                                    // winch drum + crank
+  c.strokeStyle = INK; c.lineWidth = 3 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(44 * S, -24 * S); c.lineTo(44 * S + Math.cos(nori.crank) * 12 * S, -24 * S + Math.sin(nori.crank) * 12 * S); c.stroke(); draw.circle(c, 44 * S + Math.cos(nori.crank) * 12 * S, -24 * S + Math.sin(nori.crank) * 12 * S, 3 * S, "#ff6b6b");
+  c.fillStyle = "#ff6b6b"; c.strokeStyle = INK; c.lineWidth = 2 * S; c.beginPath(); c.moveTo(-78 * S, -17 * S); c.lineTo(78 * S, -17 * S); c.quadraticCurveTo(70 * S, 13 * S, 46 * S, 16 * S); c.lineTo(-46 * S, 16 * S); c.quadraticCurveTo(-70 * S, 13 * S, -78 * S, -17 * S); c.fill(); c.stroke();
+  draw.rect(c, -74 * S, -16 * S, 148 * S, 7 * S, 3 * S, "#fff7ea"); for (const x of [-30, 0, 30]) draw.circle(c, x * S, 1 * S, 3.4 * S, "#fff7ea");
+  for (const f of fly) { const u = ease.outCubic(f.t), sp = trashSprite(f.kind, f.r * (1 - u * .35)), x = lerp(f.side * 86 * S, -6 * S, u), y = lerp(10 * S, -30 * S, u) - Math.sin(u * Math.PI) * 44 * S; c.save(); c.translate(x, y); c.rotate(u * 5 * f.side); c.globalAlpha = 1 - Math.max(0, u - .8) * 5; c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore(); }
+  c.restore();
+}
+function drawIcon(c, id, x, y, r) {
+  draw.circle(c, x, y, r, UPS[id].c); c.strokeStyle = INK; c.fillStyle = INK; c.lineWidth = r * .15; c.lineCap = "round";
+  if (id === "winch") { c.beginPath(); c.arc(x, y, r * .42, 0, TAU); c.stroke(); for (let a = 0; a < 6; a++) { const q = a / 6 * TAU; c.beginPath(); c.moveTo(x + Math.cos(q) * r * .42, y + Math.sin(q) * r * .42); c.lineTo(x + Math.cos(q) * r * .66, y + Math.sin(q) * r * .66); c.stroke(); } }
+  else if (id === "claw") { for (const d of [-1, 1]) { c.beginPath(); c.moveTo(x, y - r * .5); c.quadraticCurveTo(x + d * r * .7, y - r * .1, x + d * r * .28, y + r * .56); c.stroke(); } }
+  else if (id === "boom") { c.beginPath(); c.moveTo(x - r * .62, y + r * .1); c.quadraticCurveTo(x, y + r * .5, x + r * .62, y + r * .1); c.stroke(); for (const d of [-1, 0, 1]) draw.circle(c, x + d * r * .42, y + (d ? .05 : .22) * r, r * .16, "#ff6b6b"); }
+  else if (id === "whistle") { c.beginPath(); c.ellipse(x + r * .1, y, r * .46, r * .3, 0, 0, TAU); c.fill(); c.beginPath(); c.moveTo(x - r * .3, y); c.lineTo(x - r * .66, y - r * .3); c.lineTo(x - r * .66, y + r * .3); c.fill(); }
+  else { for (const k of [.3, .52, .74]) { c.beginPath(); c.arc(x - r * .3, y + r * .3, r * k * 1.1, -Math.PI * .5, 0); c.stroke(); } }
+}
+function render(t) {
+  const c = Lab.ctx, P = Lab.play, sea = seaOf(), bg = bgSprite(), cl = claw;
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+  c.lineCap = "round"; c.strokeStyle = Lab.color.mix(sea.deep, "#5fd39a", .55); c.lineWidth = 5 * S;                              // seaweed
+  for (let k = 0; k < Math.ceil(W / (150 * S)); k++) { const x = (k + .55) * 150 * S, y = floorAt(x) + 3; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(x + d * 5 * S, y); c.quadraticCurveTo(x + d * 14 * S + Math.sin(t * 1.4 + k + d) * 9 * S, y - 24 * S, x + d * 4 * S + Math.sin(t * 1.1 + k) * 12 * S, y - (44 + (k % 3) * 9) * S); c.stroke(); } }
+  for (const d of trash) if (d.kind === "drum" && !d.held) for (let k = 0; k < 5; k++) { const u = (clock * .22 + k / 5 + d.ph) % 1; c.globalAlpha = .75 * (1 - u * .5); draw.circle(c, d.x + Math.sin(u * 9 + k) * 7 * S, lerp(d.y - d.r, waterY + 4 * S, u), (5 - u * 2.4) * S, INK); } c.globalAlpha = 1;
+  for (const d of trash) if (!d.held) drawTrash(c, d);
+  for (const f of crit) drawCrit(c, f, sea.night);
+  c.strokeStyle = "rgba(255,255,255,.5)"; c.lineWidth = 1.2; for (const b of bub) { c.beginPath(); c.arc(b.x, b.y, b.r, 0, TAU); c.stroke(); }
+  const tx = px + Math.sin(cl.th) * (cl.len + cl.stretch), ty = py + Math.cos(cl.th) * (cl.len + cl.stretch);
+  if (phase === "play" && cl.st === "swing") {                                                                                  // aim: a short tick, or the sonar line
+    const p = up.sonar ? predict() : null, n = p ? (up.sonar > 1 ? p.pts.length : Math.ceil(p.pts.length * .5)) : 0;
+    c.fillStyle = up.sonar ? "rgba(140,230,255,.85)" : "rgba(255,255,255,.5)";
+    if (p) { for (let i = 4; i < n; i += 2) { c.beginPath(); c.arc(p.pts[i], p.pts[i + 1], 2.2 * S, 0, TAU); c.fill(); } if (up.sonar > 1) { c.strokeStyle = p.type === "crit" ? "#ff8fa3" : "rgba(140,230,255,.9)"; c.lineWidth = 2.5 * S; c.beginPath(); c.arc(p.x, p.y, (10 + Math.sin(t * 8) * 2) * S, 0, TAU); c.stroke(); } }
+    else for (let i = 1; i <= 3; i++) { c.beginPath(); c.arc(tx + Math.sin(cl.th) * (16 + i * 13) * S, ty + Math.cos(cl.th) * (16 + i * 13) * S, (2.6 - i * .4) * S, 0, TAU); c.fill(); }
+  }
+  const vib = cl.st === "reel" && cl.item ? Math.sin(t * 60) * Math.min(1.4, cl.item.w * .5) * S : 0;                              // rope
+  for (const [col, lw] of [[INK, 4.2 * S], ["#fff4d6", 2.2 * S]]) { c.strokeStyle = col; c.lineWidth = lw; c.beginPath(); c.moveTo(px, py); c.quadraticCurveTo((px + tx) / 2 + vib * Math.cos(cl.th) + (cl.st === "drop" ? Math.sin(t * 22) * 3 * S : 0), (py + ty) / 2, tx - Math.sin(cl.th) * 15 * S, ty - Math.cos(cl.th) * 15 * S); c.stroke(); }
+  if (cl.item) drawTrash(c, cl.item);
+  drawClaw(c, tx, ty, cl.th, cl.open, cl.jelly);
+  drawBoat(c, t);
+  draw.circle(c, px, py + Math.sin(t * 1.7) * 2 * S + boat.dip, 5 * S, "#9aa5b3", INK, 1.6 * S);
+  c.fillStyle = Lab.color.alpha(sea.top, .5); c.fillRect(-40, waterY + 2 * S, W + 80, 15 * S);                                  // the hull sits in the water
+  c.fillStyle = "rgba(255,255,255,.55)"; c.beginPath(); c.moveTo(-40, waterY + 3 * S); for (let x = -40; x <= W + 40; x += 16) c.lineTo(x, waterY + Math.sin(x * .05 + t * 2) * 2.2 * S); for (let x = W + 40; x >= -40; x -= 16) c.lineTo(x, waterY + 4 * S + Math.sin(x * .04 - t * 1.6) * 2 * S); c.fill();
+  const reach = slick * (W / 2 - 84 * S);                                                                                         // the slick creeps in from both shores
+  if (reach > 2) for (const d of [-1, 1]) {
+    const x0 = d < 0 ? -40 : W + 40, x1 = d < 0 ? reach : W - reach, n = Math.max(2, Math.ceil(Math.abs(x1 - x0) / 14)); c.fillStyle = INK; c.beginPath();
+    for (let i = 0; i <= n; i++) { const x = lerp(x0, x1, i / n); c.lineTo(x, waterY - 3 * S + Math.sin(x * .05 + t * 2) * 2.2 * S); }
+    c.quadraticCurveTo(x1 - d * 9 * S, waterY + 3 * S, x1, waterY + 8 * S); for (let i = n; i >= 0; i--) { const x = lerp(x0, x1, i / n); c.lineTo(x, waterY + (7 + Math.sin(x * .09 + t) * 2.5) * S); } c.fill();
+    c.fillStyle = "rgba(190,150,255,.5)"; for (let k = 0, x = d < 0 ? 12 : W - 12; k < 40 && (d < 0 ? x < x1 - 14 : x > x1 + 14); k++, x -= d * 34 * S) { c.beginPath(); c.ellipse(x, waterY + 1.5 * S + Math.sin(x * .05 + t * 2) * 2 * S, 9 * S, 1.6 * S, 0, 0, TAU); c.fill(); }
+  }
+  // HUD: slick meter (left), quota (right)
+  const HS = clamp(S, .9, 1.3), hx = P.x + 12, hy = P.y + 6 * HS, mw = Math.min(104 * HS, W * .27), hot = slick > .8 && phase === "play", fg = sea.fg;
+  draw.text(c, "SLICK", hx, hy + 5 * HS, { size: 10.5 * HS, color: fg, align: "left", weight: 800 });
+  draw.rect(c, hx, hy + 13 * HS, mw, 12 * HS, 6 * HS, "rgba(255,255,255,.7)", hot && Math.sin(t * 12) > 0 ? "#ff5d73" : INK, 1.8 * HS);
+  if (slick > .02) draw.rect(c, hx + 2 * HS, hy + 15 * HS, Math.max(8 * HS, (mw - 4 * HS) * slick), 8 * HS, 4 * HS, hot ? "#ff5d73" : INK);
+  if (leaks > 0 && phase === "play") { c.fillStyle = fg; c.beginPath(); const dx = hx + mw + 9 * HS, dy = hy + 19 * HS + Math.sin(t * 5) * 1.5 * HS; c.moveTo(dx, dy - 7 * HS); c.quadraticCurveTo(dx + 6 * HS, dy + 1 * HS, dx, dy + 5 * HS); c.quadraticCurveTo(dx - 6 * HS, dy + 1 * HS, dx, dy - 7 * HS); c.fill(); if (leaks > 1) draw.text(c, "×" + leaks, dx + 12 * HS, dy, { size: 10 * HS, color: fg }); }
+  const qx = P.x + P.w - 12, met = cleaned >= quota;
+  draw.text(c, "HAUL " + haul, qx, hy + 5 * HS, { size: 10.5 * HS, color: fg, align: "right", weight: 800 });
+  draw.rect(c, qx - 64 * HS, hy + 11 * HS, 64 * HS, 17 * HS, 8.5 * HS, met ? "#5fd39a" : "rgba(255,255,255,.7)", INK, 1.8 * HS);
+  draw.text(c, (met ? "✓ " : "") + cleaned + " / " + quota, qx - 32 * HS, hy + 20 * HS, { size: 11.5 * HS, color: INK, weight: 800 });
+  if (streak > 1 && phase === "play") draw.text(c, "×" + (1 + .25 * Math.min(streak - 1, 4)) + " streak", qx, hy + 40 * HS, { size: 12 * HS, color: "#fff3a0", align: "right", stroke: "rgba(20,30,70,.6)" });
+  if (phase === "shop") {
+    c.fillStyle = "rgba(12,30,70,.5)"; c.fillRect(-40, waterY + 17 * S, W + 80, H);
+    draw.text(c, "Pick an upgrade", W / 2, cards[0].y - 20 * S, { size: 21 * S, color: "#fff", stroke: "rgba(20,30,70,.5)" });
+    cards.forEach((k, i) => {
+      const u = UPS[k.id], a = ease.outBack(clamp((k.t - i * .07) / .3, 0, 1)), col = k.w < k.h * 1.6; if (a <= 0) return;
+      c.save(); c.translate(k.x + k.w / 2, k.y + k.h / 2); c.scale(a, a); c.translate(-k.w / 2, -k.h / 2);
+      draw.rect(c, 0, 4 * S, k.w, k.h, 16 * S, "rgba(20,30,70,.3)"); draw.rect(c, 0, 0, k.w, k.h, 16 * S, "#fffdf7", INK, 2.5 * S);
+      const ir = (col ? 26 : 24) * S, ix = col ? k.w / 2 : 14 * S + ir, iy = col ? 16 * S + ir : k.h / 2, tx2 = col ? k.w / 2 : ix + ir + 12 * S, al = col ? "center" : "left", ty2 = col ? iy + ir + 20 * S : k.h / 2 - 14 * S;
+      drawIcon(c, k.id, ix, iy, ir);
+      draw.text(c, u.n, tx2, ty2, { size: 16 * S, color: INK, align: al, weight: 800 });
+      const words = u.d.split(" "), lines = [""], maxw = col ? k.w - 16 * S : k.w - tx2 - 10 * S; c.font = Lab.font(11.5 * S, 600); for (const w of words) { const s = lines[lines.length - 1] + (lines[lines.length - 1] ? " " : "") + w; if (c.measureText(s).width > maxw && lines[lines.length - 1]) lines.push(w); else lines[lines.length - 1] = s; }
+      lines.forEach((s, j) => draw.text(c, s, tx2, ty2 + (18 + j * 14) * S, { size: 11.5 * S, color: "#5b5876", align: al, weight: 600 }));
+      for (let j = 0; j < u.max; j++) draw.circle(c, (col ? k.w / 2 - (u.max - 1) * 6 * S : k.w - 16 * S - (u.max - 1) * 12 * S) + j * 12 * S, col ? k.h - 14 * S : 14 * S, 3.6 * S, j < up[k.id] ? u.c : j === up[k.id] ? Lab.color.alpha(u.c, .45) : "#e3deea", INK, 1.2 * S);
+      c.restore();
+    });
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

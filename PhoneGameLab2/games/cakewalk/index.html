@@ -1,0 +1,276 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Cakewalk</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* CAKEWALK — Momo the frog is the bakery's waiter: Bun tosses cake layers out of the kitchen hatch and Momo catches
+ * them on the plate he balances on his head. Core idea kept: build a tall cake out of falling layers.
+ * The verb is new: nothing is "dropped on a timer" — you WALK the tower under each layer. Every layer is a springy
+ * follower of the one below, so the stack lags when Momo sets off and whips when he stops; a layer whose centre slides
+ * past the edge underneath takes everything above it to the floor. Gentle steps keep a tall cake; a dash saves a far
+ * layer and risks the lot. Sloppy catches sit off-centre and eat the margin, perfect catches calm the sway.
+ * Each cake is a recipe (N layers, then the cherry) that is served to the shelf; neat cakes win a heart back.
+ * Later: jelly layers (wobblier), wide wafers (steadier), a pepper pot to step away from (ACHOO!), two things in the air.
+ * World is laid out in units (1 u = S px), origin on the floor, so a resize never disturbs the cake.              */
+let demo = false;
+Lab.init({
+  title: "Cakewalk", tagline: "Catch the cake on Momo's head. Walk gently!", category: "Arcade", kicker: "Pocket Pals",
+  howto: ["Drag to walk Momo under the falling layer", "Sudden moves make the tower sway", "Catch the cherry to serve the cake"],
+  theme: { bg: "#bfe6d8", bg2: "#eaf7ef", fg: "#34304a", muted: "#5d7078", accent: "#ff7a59", accent2: "#36a873", light: true },
+  orient: "any", music: { style: "march", key: "F", bpm: 104, vol: .3 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, rand = Lab.rand, shade = Lab.color.shade, INK = Pals.ink;
+const MOMO = 74, PLATE = -86, PLW = 104, VMAX = 560, K0 = 400, ZETA = .45, STEP = 1 / 120;
+const FLAV = ["#ff9bb0", "#ffe3a1", "#b9774a", "#a6e3c4", "#a9b8ff", "#ffb37a"];
+const TYPES = { sponge: { w: 96, h: 24, k: 1 }, jelly: { w: 92, h: 24, k: .55 }, wafer: { w: 122, h: 14, k: 1.3 }, cherry: { w: 22, h: 22 }, pepper: { w: 24, h: 34 } };
+let S, VW, floorY, sillY, wide;
+let momo, stack, falls, debris, decals, shelf, serving, recipe, bun, phase, hearts, score, cake, served, combo, bestCombo, perfects,
+  danger, worst, creakT, acc, lastPepper, clock, endT, auto;
+
+const px = x => x * S, py = y => floorY + y * S;
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15;
+  S = Math.min(P.w / 390, P.h / (wide ? 480 : 700)); VW = Lab.W / S; floorY = P.y + P.h - 46 * S;
+  sillY = Math.max((P.y + 108 * S - floorY) / S, -600);
+  Lab.sprite.clear("cw");
+}
+Lab.onResize(() => { if (!stack) return; const o = VW; layout(); const d = (VW - o) / 2; momo.x = clamp(momo.x + d, 40, VW - 40); momo.tx = momo.x; for (const L of stack) L.x += d; for (const f of falls) f.x += d; for (const f of debris) f.x += d; decals.length = 0; });
+
+function start() { demo = false; reset(); Lab.setScore(0);
+  Lab.input.onDown = [x => { momo.tx = x / S; }];
+  Lab.input.onMove = [x => { if (Lab.input.down) momo.tx = x / S; }];
+  Lab.expose({
+    get score() { return score; }, get hearts() { return hearts; }, get cake() { return cake; }, get served() { return served; }, get phase() { return phase; },
+    get danger() { return danger; }, get combo() { return combo; }, get need() { return recipe.length; }, get momoX() { return momo.x * S; }, get topX() { return topX() * S; },
+    get stack() { return stack.map(L => ({ x: L.x * S, off: L.off, type: L.type })); },
+    get falls() { return falls.map(f => ({ kind: f.kind, x: f.x * S, y: py(f.y), land: landX(f) * S, live: !f.bounced && !f.free })); },
+    toss(kind, landPx, T) { toss(kind === "layer" ? { kind, type: "sponge", col: 0 } : { kind }, landPx / S, T || .9); },
+    hold(on) { auto = !on; bun.hold = null; }, setCake(n) { cake = n; recipe = makeRecipe(); stack.length = 0; }, floorY: () => floorY, S: () => S,
+  });
+  Lab.loop(frame);
+}
+function reset() {
+  layout();
+  momo = { x: VW / 2, tx: VW / 2, v: 0, sq: 0, joyT: 0, sadT: 0, dizzyT: 0 };
+  stack = []; falls = []; debris = []; decals = []; shelf = []; serving = null; phase = "play"; hearts = 3; score = 0; cake = 0; served = 0; combo = 0; bestCombo = 0; perfects = 0;
+  danger = 0; worst = -1; creakT = 0; acc = 0; lastPepper = true; clock = 0; endT = 0; auto = true;
+  recipe = makeRecipe(); bun = { hold: null, wind: 0, dur: 1, gap: .7, aim: 0, thrown: 0, oopsT: 0, joyT: 0, sq: 0 };
+}
+function makeRecipe() {
+  const n = Math.min(3 + cake, wide ? 7 : 8), r = []; let col = -1;
+  for (let i = 0; i < n; i++) { let k; do k = Lab.randInt(0, FLAV.length - 1); while (k === col); col = k;
+    r.push({ kind: "layer", col, type: i && cake >= 1 && Lab.chance(.2 + cake * .03) ? "jelly" : i && cake >= 2 && Lab.chance(.2) ? "wafer" : "sponge" }); }
+  return r;
+}
+const surf = () => stack.reduce((a, L) => a - L.h, PLATE);
+const topX = () => stack.length ? stack[stack.length - 1].x : momo.x, topW = () => stack.length ? stack[stack.length - 1].w : PLW;
+function surfFor(f) { let s = surf(); for (const o of falls) if (o !== f && o.kind === "layer" && !o.bounced && (!f || o.y > f.y)) s -= o.h; return s; }
+function landX(f) { const d = surfFor(f) - f.h / 2 - f.y; if (d <= 0) return f.x; return f.x + f.vx * (-f.vy + Math.sqrt(Math.max(0, f.vy * f.vy + 2 * f.g * d))) / f.g; }
+const flightT = () => Math.max(1.0, 1.75 - cake * .1);
+
+function toss(it, tx, T) {
+  const d = TYPES[it.kind === "layer" ? it.type : it.kind], by = sillY - 70, A = 26;
+  const f = { kind: it.kind, type: it.type, col: it.col, w: d.w, h: d.h, x: VW / 2, y: by, rot: 0, air: 0, bounced: false, free: false, T: T || flightT() };
+  const dy = Math.max(30, surfFor(null) - f.h / 2 - by), u = (Math.sqrt(2 * A) + Math.sqrt(2 * A + 2 * dy)) / f.T;
+  f.g = u * u; f.vy = -Math.sqrt(2 * f.g * A); f.vx = (tx - f.x) / f.T; falls.push(f);
+  snd("whoosh", { pitch: it.kind === "pepper" ? 1.5 : 1.1, vol: .5 }); bun.thrown = .45; bun.sq = -.2;
+  if (it.kind === "pepper") { bun.oopsT = 1.1; if (!demo) fx.text(px(VW / 2), py(sillY - 96), "Oops, pepper!", { color: "#e2553f", size: 15 * Math.max(S, .8) }); }
+}
+function director(dt) {
+  if (phase !== "play" || !auto) return;
+  if (bun.hold) { bun.wind -= dt; if (bun.wind <= 0) { toss(bun.hold, bun.aim); bun.hold = null; bun.gap = .28; } return; }
+  bun.gap -= dt; if (bun.gap > 0) return;
+  const air = falls.filter(f => !f.bounced && !f.free); if (air.length >= (cake >= 3 ? 2 : 1) || air.length && air[0].air < air[0].T * .55) return;
+  const have = stack.length + air.filter(f => f.kind === "layer").length, N = recipe.length, T = flightT();
+  let it, aim;
+  if (cake >= 2 && !lastPepper && stack.length >= 2 && have <= N && Lab.chance(Math.min(.3, .1 + cake * .03))) { it = { kind: "pepper" }; aim = topX() + rand(-12, 12); }
+  else if (have < N) it = recipe[have]; else if (!air.some(f => f.kind === "cherry")) it = { kind: "cherry" }; else return;
+  if (!aim) { const R = cake === 0 ? 20 + have * 34 : Math.min(330, 110 + cake * 30, T * 235), c = VW / 2; aim = clamp(topX() + rand(-R, R), Math.max(64, c - 400), Math.min(VW - 64, c + 400)); }
+  lastPepper = it.kind === "pepper"; bun.hold = it; bun.aim = aim; bun.dur = bun.wind = Math.max(.3, .55 - cake * .03);
+}
+
+function springs(h) {
+  let dg = 0; worst = -1;
+  for (let i = 0; i < stack.length; i++) {
+    const L = stack[i], bx = i ? stack[i - 1].x : momo.x, K = K0 * TYPES[L.type].k / (1 + i * .1), D = 2 * Math.sqrt(K) * ZETA;
+    L.v += (K * (bx + L.off - L.x) - D * L.v) * h; L.x += L.v * h;
+    const lim = Math.min(L.w, i ? stack[i - 1].w : PLW) * .5, rel = Math.abs(L.x - bx) / lim;
+    if (rel > 1 && phase === "play") { topple(i); return; }
+    if (rel > dg) { dg = rel; worst = i; }
+  }
+  danger = dg;
+}
+function spill(L, y, dir, kick) { debris.push({ kind: "layer", type: L.type, col: L.col, w: L.w, h: L.h, x: L.x, y, vx: L.v * .5 + dir * rand(70, 190) * kick, vy: -rand(40, 200) * kick, rot: 0, vr: dir * rand(1.5, 5) }); }
+function topple(i) {
+  const dir = Math.sign(stack[i].x - (i ? stack[i - 1].x : momo.x)) || 1; let y = surf();
+  const gone = stack.splice(i); for (let j = gone.length - 1; j >= 0; j--) { y += gone[j].h; spill(gone[j], y - gone[j].h / 2, dir, 1); }
+  for (const f of falls) { f.free = true; f.bounced = true; }
+  combo = 0; momo.sadT = 1.2; bun.oopsT = 1.3; bun.gap = 1; bun.hold = null; snd("crunch"); snd("slide", { pitch: .7 }); Lab.shake(8, .3); Lab.buzz(30);
+  if (!demo) fx.text(px(momo.x), py(surf() - 40), "Whoops!", { color: "#e2553f", size: 22 * Math.max(S, .8) });
+  loseHeart();
+}
+function loseHeart() { if (demo) return; hearts--; if (hearts <= 0 && phase === "play") { phase = "end"; endT = 0; let y = PLATE; for (const L of stack) { y -= L.h; spill(L, y + L.h / 2, Lab.chance(.5) ? 1 : -1, .6); } stack = []; momo.dizzyT = 9; momo.sq = .3; snd("splash", { pitch: .7 }); Lab.shake(12, .5); } }
+
+function landOn(f) {
+  const dx = f.x - topX(), tw = topW();
+  if (f.kind === "pepper") { if (Math.abs(dx) < (tw + f.w) * .45) { sneeze(f); return true; } return false; }
+  const tol = f.kind === "cherry" ? tw * .46 : Math.min(tw, f.w) * .46;
+  if (Math.abs(dx) <= tol) { catchIt(f, dx); return true; }
+  if (Math.abs(dx) < (tw + f.w) / 2) { f.bounced = true; f.vx = Math.sign(dx) * 150 + f.vx * .3; f.vy = -190; if (stack.length) stack[stack.length - 1].v -= Math.sign(dx) * 50; snd("knock", { pitch: 1.2 }); fx.text(px(f.x), py(f.y) - 14, "so close!", { color: "#8a6f7d", size: 13 * Math.max(S, .8) }); }
+  return false;
+}
+function catchIt(f, dx) {
+  const perfect = Math.abs(dx) < 8, X = px(f.x), Y = py(surf());
+  momo.sq = .22; for (const L of stack) L.sq = Math.max(L.sq, .14);
+  if (perfect) { combo++; perfects++; bestCombo = Math.max(bestCombo, combo); momo.joyT = .7; bun.joyT = .8; for (const L of stack) L.v *= .45; } else combo = 0;
+  if (f.kind === "cherry") { score += 20 + (perfect ? 15 : 0); serve(); snd("pop", { pitch: 1.5 }); return; }
+  const gain = 10 + stack.length * 2 + (perfect ? 10 + 5 * Math.min(combo, 8) : 0);
+  score += gain; if (!demo) { Lab.setScore(score); if (perfect) Lab.bumpScore(); }
+  stack.push({ type: f.type, col: f.col, w: f.w, h: f.h, x: topX() + (perfect ? 0 : dx * .85), off: perfect ? 0 : dx * .85, v: f.vx * .22, sq: .34 });
+  snd("thud", { pitch: 1.35 - stack.length * .06 }); if (f.type === "jelly") snd("boing", { pitch: 1.3, vol: .5 }); Lab.buzz(10);
+  fx.burst(X, Y, { n: perfect ? 12 : 5, colors: [FLAV[f.col], "#fff"], speed: perfect ? 190 : 110, life: .45, size: 3 * S, gravity: 500, shape: perfect ? "star" : "circle" });
+  if (perfect) { if (!demo) Lab.audio.combo(combo, { vol: .22 }); fx.ring(X, Y, { r0: 10, r1: 60 * S, color: "#fff", width: 4 }); }
+  if (!demo) fx.text(X, Y - 26 * S, perfect ? (combo > 1 ? "Perfect ×" + combo : "Perfect!") + "  +" + gain : "+" + gain, { color: perfect ? "#ff7a59" : "#5d7078", size: (perfect ? 19 : 15) * Math.max(S, .8) });
+}
+function sneeze(f) {
+  const dir = Lab.chance(.5) ? 1 : -1; stack.forEach((L, i) => { L.v += dir * (430 + i * 70); L.sq = .2; }); momo.dizzyT = .9; momo.sq = .3; combo = 0;
+  snd("whoosh", { pitch: 1.8 }); snd("boing", { pitch: .8 }); Lab.shake(6, .25);
+  fx.burst(px(f.x), py(f.y), { n: 16, colors: ["#8a7f72", "#d9cfc0"], speed: 170, life: .6, size: 2.5 * S, gravity: 120 }); if (!demo) fx.text(px(momo.x), py(-MOMO - 6), "ACHOO!", { color: "#e2553f", size: 22 * Math.max(S, .8) });
+}
+function serve() {
+  const n = stack.length, neat = n ? clamp(1 - stack.reduce((a, L) => a + Math.abs(L.off), 0) / n / 40, 0, 1) : 1, bonus = Math.round((40 + n * 20) * (.5 + neat) / 5) * 5;
+  score += bonus; served++; phase = "serve"; momo.joyT = 1.4; bun.joyT = 1.6; bun.hold = null;
+  serving = { layers: stack.map(L => ({ type: L.type, col: L.col, w: L.w, h: L.h, off: L.x - momo.x })), t: 0, x0: momo.x, slot: (served - 1) % slots() };
+  stack = []; if (demo) return;
+  Lab.setScore(score); Lab.bumpScore(); snd("levelup"); Lab.buzz(20);
+  fx.text(px(momo.x), py(PLATE - n * 24 - 50), "Served!  +" + bonus, { color: "#ff7a59", size: 24 * Math.max(S, .8), life: 1.4 });
+  if (neat >= .8 && hearts < 3) { hearts++; Lab.toast("Neat cake — a heart back!", 1400, { y: .3 }); } else Lab.toast("Neatness " + Math.round(neat * 100) + "%", 1100, { y: .3 });
+}
+const slots = () => Math.max(2, Math.min(8, Math.floor((VW / 2 - 84) / 42) * 2));
+function slotX(i) { const side = i % 2 ? 1 : -1, j = i >> 1; return VW / 2 + side * (104 + j * 42); }
+
+function update(dt) {
+  clock += dt;
+  const k = demo ? 0 : Lab.input.axisX(); if (k) momo.tx = clamp(momo.x + k * 150, 40, VW - 40);
+  if (demo) { const f = falls.filter(o => !o.bounced && o.kind !== "pepper").sort((a, b) => b.y - a.y)[0]; let goal = f ? momo.x + landX(f) - topX() : VW / 2; momo.tx = Lab.approach(momo.tx, clamp(goal, 50, VW - 50), 250 * dt); }
+  const des = phase === "end" ? 0 : clamp((clamp(momo.tx, 40, VW - 40) - momo.x) * 9, -VMAX, VMAX); momo.v = Lab.damp(momo.v, des, 10, dt); momo.x = clamp(momo.x + momo.v * dt, 40, VW - 40);
+  momo.sq = Lab.damp(momo.sq, 0, 9, dt); momo.joyT -= dt; momo.sadT -= dt; momo.dizzyT -= dt; bun.thrown -= dt; bun.oopsT -= dt; bun.joyT -= dt; bun.sq = Lab.damp(bun.sq, 0, 8, dt);
+  acc = Math.min(acc + dt, .05); while (acc >= STEP) { acc -= STEP; springs(STEP); }
+  for (const L of stack) L.sq = Lab.damp(L.sq, 0, 10, dt);
+  director(dt);
+  for (const f of falls) {
+    const b0 = f.y + f.h / 2; f.air += dt; f.vy += f.g * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.rot = f.bounced ? f.rot + f.vx * .02 * dt * 6 : clamp(f.vx / 900, -.3, .3) * Math.sin(f.air * 5);
+    const sy = surf(), b1 = f.y + f.h / 2;
+    if (!f.bounced && f.vy > 0 && b0 <= sy + 2 && b1 >= sy && phase === "play" && landOn(f)) { f.dead = true; continue; }
+    if (b1 >= 0) { f.dead = true; const X = px(f.x);
+      if (f.kind === "pepper") { fx.puff(X, floorY, { color: "#d9cfc0" }); snd("knock", { pitch: 1.6, vol: .5 }); if (!f.free && phase === "play" && !demo) { score += 5; Lab.setScore(score); fx.text(X, floorY - 20, "Phew! +5", { color: "#5d7078", size: 14 * Math.max(S, .8) }); } }
+      else { splat(f.x, f.kind === "cherry" ? "#e2334f" : FLAV[f.col], f.w); if (!f.free && phase === "play") { combo = 0; momo.sadT = 1; bun.oopsT = 1; bun.gap = .5; loseHeart(); } } }
+  }
+  falls = falls.filter(f => !f.dead);
+  for (const d of debris) { d.vy += 1500 * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.rot += d.vr * dt; if (d.y + d.h / 2 >= 0) { d.dead = true; splat(d.x, FLAV[d.col], d.w); } }
+  debris = debris.filter(d => !d.dead); for (const d of decals) d.a -= dt * .12; decals = decals.filter(d => d.a > 0);
+  if (serving) { serving.t += dt / 1.0; if (serving.t >= 1) { shelf[serving.slot] = serving.layers; serving = null; cake++; recipe = makeRecipe(); phase = "play"; bun.gap = .5; if (!demo) Lab.banner("Cake " + (cake + 1), { color: "#ff7a59", ms: 900, y: .36 }); } }
+  if (phase === "play" && danger > .72) { creakT -= dt; if (creakT <= 0) { snd("tick", { pitch: .7 + danger * .6, vol: .7 }); creakT = .16; } }
+  if (phase === "end") { endT += dt; if (demo) reset(); else if (endT > 1.3) { phase = "done"; Lab.gameover({ title: "Splat!", message: "Momo is wearing the cake.", score, stats: [["Cakes served", served], ["Perfect catches", perfects], ["Best streak", bestCombo]] }); } }
+  if (!demo) Lab.music.intensity(clamp(.2 + stack.length * .08 + danger * .3, 0, 1));
+}
+function splat(x, col, w) {
+  const X = px(x); fx.burst(X, floorY - 4, { n: 12, colors: [col, "#fff7ea"], speed: 200, angle: -Math.PI / 2, spread: 2.2, life: .5, size: 3.5 * S, gravity: 800 });
+  decals.push({ x, col, w: w * rand(.5, .7), a: 1 }); if (decals.length > 10) decals.shift(); snd("splash", { pitch: 1.2, vol: .7 });
+}
+function frame(dt, t) { update(dt); render(t); }
+function attract(dt, t) { if (!stack || !demo) { demo = true; reset(); } update(dt); render(t); }
+
+/* ---------- drawing ---------- */
+function layerSprite(type, col, wu, hu) {
+  const w = wu * S, h = hu * S, pad = 8 * S;
+  return Lab.sprite("cwL" + type + col + ":" + Math.round(w), w + pad * 2, h + pad * 2, g => {
+    g.translate(pad, pad); const c = FLAV[col], r = Math.min(8 * S, h * .4), rnd = Lab.rng(col * 13 + wu);
+    if (type === "wafer") { draw.rect(g, 0, 0, w, h, 4 * S, "#e9b872", "#c58f4b", 1.5 * S); g.strokeStyle = "rgba(160,105,50,.55)"; g.lineWidth = 1.2 * S; for (let x = 7 * S; x < w - 3; x += 9 * S) { g.beginPath(); g.moveTo(x, 2 * S); g.lineTo(x, h - 2 * S); g.stroke(); } draw.rect(g, 3 * S, 2 * S, w - 6 * S, 2.5 * S, 1, "rgba(255,255,255,.4)"); return; }
+    if (type === "jelly") { draw.rect(g, 0, 0, w, h, r * 1.3, Lab.color.alpha(shade(c, -.08), .82), shade(c, -.3), 1.5 * S); draw.rect(g, 5 * S, 3 * S, w - 10 * S, 4 * S, 2 * S, "rgba(255,255,255,.6)"); g.fillStyle = "rgba(255,255,255,.35)"; for (let i = 0; i < 5; i++) { g.beginPath(); g.arc(w * (.12 + rnd() * .76), h * (.5 + rnd() * .3), (1.5 + rnd() * 2) * S, 0, TAU); g.fill(); } return; }
+    draw.rect(g, 0, 0, w, h, r, shade(c, -.1), shade(c, -.38), 1.5 * S); draw.rect(g, 1.5 * S, h * .52, w - 3 * S, 3 * S, 1, "rgba(255,255,255,.75)");
+    g.fillStyle = shade(c, .55); g.beginPath(); g.moveTo(0, r); g.arcTo(0, 0, r, 0, r); g.lineTo(w - r, 0); g.arcTo(w, 0, w, r, r); g.lineTo(w, h * .3);
+    const n = Math.round(w / (15 * S)); for (let i = 0; i < n; i++) { const x1 = w - (i + 1) * w / n, d = h * (.22 + rnd() * .3); g.quadraticCurveTo(x1 + w / n * .5, h * .3 + d, x1, h * .3); } g.closePath(); g.fill();
+    for (let i = 0; i < w / (12 * S); i++) { g.fillStyle = [FLAV[(col + 2) % 6], "#fff", FLAV[(col + 4) % 6]][i % 3]; g.save(); g.translate(w * (.06 + rnd() * .88), h * (.08 + rnd() * .16)); g.rotate(rnd() * 3); g.fillRect(-2.2 * S, -.9 * S, 4.4 * S, 1.8 * S); g.restore(); }
+  });
+}
+function drawItem(c, o, X, Y, sc, rot, sq) {
+  c.save(); c.translate(X, Y); if (rot) c.rotate(rot); c.scale(sc * (1 + (sq || 0) * .5), sc * (1 - (sq || 0)));
+  if (o.kind === "cherry") { const r = 10 * S; c.strokeStyle = "#4f8a3a"; c.lineWidth = 2 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(0, -r * .7); c.quadraticCurveTo(r * .2, -r * 1.9, r * .9, -r * 2); c.stroke(); draw.circle(c, 0, 0, r, "#e2334f", "#a61f3a", 1.5 * S); draw.circle(c, -r * .35, -r * .35, r * .25, "rgba(255,255,255,.8)"); }
+  else if (o.kind === "pepper") { const w = 20 * S, h = 30 * S; draw.rect(c, -w / 2, -h / 2 + 7 * S, w, h - 7 * S, 5 * S, "#f4efe6", "#8a7f72", 1.5 * S); draw.rect(c, -w * .42, -h / 2, w * .84, 9 * S, 4 * S, "#8a7f72"); c.fillStyle = INK; for (let i = -1; i <= 1; i++) { c.beginPath(); c.arc(i * 4 * S, -h / 2 + 4 * S, 1.1 * S, 0, TAU); c.fill(); } draw.text(c, "P", 0, 5 * S, { size: 13 * S, color: "#e2553f", weight: 700 }); }
+  else { const sp = layerSprite(o.type, o.col, o.w, o.h); c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); }
+  c.restore();
+}
+function bgSprite() {
+  return Lab.sprite("cwbg", Lab.W + 80, Lab.H + 80, g => {
+    g.translate(40, 40); const W = Lab.W, H = Lab.H, hx = W / 2, sy = py(sillY), T = 46 * S;
+    draw.vgrad(g, -40, -40, W + 80, floorY + 40, ["#a9dccb", "#cdeee0"]);
+    g.strokeStyle = "rgba(255,255,255,.4)"; g.lineWidth = 2; for (let x = hx % T - T; x < W + 40; x += T) { g.beginPath(); g.moveTo(x, -40); g.lineTo(x, floorY); g.stroke(); } for (let y = floorY - T; y > -40; y -= T) { g.beginPath(); g.moveTo(-40, y); g.lineTo(W + 40, y); g.stroke(); }
+    g.fillStyle = "rgba(255,255,255,.22)"; const rnd = Lab.rng(5); for (let i = 0; i < 26; i++) g.fillRect(hx % T - T + Math.floor(rnd() * (W / T + 2)) * T + 2, floorY - T * (1 + Math.floor(rnd() * (floorY / T + 1))) + 2, T - 4, T - 4);
+    // hatch + awning + shelf
+    const hw = 64 * S, hh = 96 * S; draw.rect(g, hx - hw - 8 * S, sy - hh - 8 * S, hw * 2 + 16 * S, hh + 14 * S, 14 * S, "#f6e2b8", "#c9a568", 2 * S); draw.rect(g, hx - hw, sy - hh, hw * 2, hh, 9 * S, "#4d3f63");
+    draw.glow(g, hx, sy - hh * .3, hw * 1.3, "#ffb26b", .55);
+    for (let i = 0; i < 6; i++) { const x = hx - hw - 14 * S + i * (hw * 2 + 28 * S) / 6, w = (hw * 2 + 28 * S) / 6; g.fillStyle = i % 2 ? "#fff6e2" : "#ff9a7a"; g.beginPath(); g.moveTo(x, sy - hh - 22 * S); g.lineTo(x + w, sy - hh - 22 * S); g.lineTo(x + w, sy - hh + 2 * S); g.arc(x + w / 2, sy - hh + 2 * S, w / 2, 0, Math.PI); g.closePath(); g.fill(); }
+    const sw = (slots() / 2) * 42 * S + 14 * S; for (const d of [-1, 1]) { const x = hx + d * 84 * S; draw.rect(g, d < 0 ? x - sw : x, sy + 2 * S, sw, 9 * S, 4 * S, "#d9a066", "#b27a45", 1.5 * S); g.fillStyle = "#b27a45"; g.fillRect(d < 0 ? x - sw + 10 * S : x + sw - 14 * S, sy + 11 * S, 4 * S, 12 * S); }
+    if (floorY - sy > 400 * S) { // wall clock + utensil rail fill the tall wall
+      const cy = sy + 120 * S, cx = hx - Math.min(W * .3, 150 * S), rx = hx + Math.min(W * .3, 150 * S);
+      draw.circle(g, cx, cy, 26 * S, "#fff8ea", "#ff9a7a", 4 * S); g.strokeStyle = INK; g.lineCap = "round"; g.lineWidth = 3 * S; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx, cy - 15 * S); g.moveTo(cx, cy); g.lineTo(cx + 11 * S, cy + 5 * S); g.stroke(); draw.circle(g, cx, cy, 3 * S, INK);
+      draw.rect(g, rx - 40 * S, cy - 26 * S, 80 * S, 5 * S, 2 * S, "#c9a568");
+      [["#ff9a7a", 0], ["#f6e2b8", 1], ["#8fc7b5", 2]].forEach(([col, i]) => { const x = rx - 26 * S + i * 26 * S; g.strokeStyle = "#b27a45"; g.lineWidth = 3 * S; g.beginPath(); g.moveTo(x, cy - 22 * S); g.lineTo(x, cy + 8 * S); g.stroke(); i === 1 ? draw.rect(g, x - 8 * S, cy + 6 * S, 16 * S, 22 * S, 4 * S, col, "#c9a568", 1.5 * S) : draw.circle(g, x, cy + 17 * S, 10 * S, col, shade(col, -.25), 1.5 * S); });
+    }
+    // floor
+    g.fillStyle = "#f7e9d2"; g.fillRect(-40, floorY, W + 80, H - floorY + 40); const F = 34 * S;
+    g.fillStyle = "#f2c9a8"; for (let r = 0; r * F * .55 < H - floorY + 40; r++) for (let x = hx % (F * 2) - F * 2 - (r % 2) * F; x < W + 40; x += F * 2) g.fillRect(x, floorY + r * F * .55, F, F * .55);
+    g.fillStyle = "#e8b48c"; g.fillRect(-40, floorY - 3 * S, W + 80, 6 * S);
+  });
+}
+function drawCake(c, layers, X, baseY, sc, bob) {
+  let y = baseY; for (const L of layers) { const h = L.h * S * sc; drawItem(c, { kind: "layer", type: L.type, col: L.col, w: L.w, h: L.h }, X + L.off * S * sc, y - h / 2, sc, 0, 0); y -= h; }
+  drawItem(c, { kind: "cherry" }, X + (layers.length ? layers[layers.length - 1].off : 0) * S * sc, y - 9 * S * sc, sc, 0, 0);
+}
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(), hx = px(VW / 2), sy = py(sillY), U = Math.max(S, .8);
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // Bun in the hatch
+  const wind = bun.hold ? 1 - bun.wind / bun.dur : 0, lookF = falls[0], bx = hx, byy = sy - 20 * S;
+  const an = Pals.draw(c, "bun", bx, byy, 62 * S, { t, shadow: false, clipY: 20 * S, mood: bun.oopsT > 0 ? "wow" : bun.joyT > 0 ? "joy" : bun.hold ? "think" : "happy", arms: bun.hold || bun.thrown > 0 ? "up" : bun.joyT > 0 ? "cheer" : "down",
+    squash: bun.sq + (bun.hold ? ease.inQuad(wind) * .16 : 0), look: lookF ? [clamp((lookF.x - VW / 2) / 120, -1, 1), .7] : [clamp((momo.x - VW / 2) / 160, -1, 1), .8] });
+  if (bun.hold) drawItem(c, bun.hold.kind === "layer" ? Object.assign({ w: TYPES[bun.hold.type].w, h: TYPES[bun.hold.type].h }, bun.hold) : bun.hold, bx, an.head[1] - 18 * S + ease.inQuad(wind) * 6 * S, .55 + .45 * ease.outBack(clamp(wind * 2.5, 0, 1)), 0, 0);
+  draw.rect(c, hx - 74 * S, sy, 148 * S, 13 * S, 5 * S, "#e9b872", "#b27a45", 1.5 * S);
+  shelf.forEach((ly, i) => { if (ly) drawCake(c, ly, px(slotX(i)), sy + 2 * S, .3, 0); });
+  if (served > slots()) draw.text(c, "×" + served, hx, sy + 26 * S, { size: 13 * U, color: "#5d7078", weight: 700 });
+  // floor stains
+  for (const d of decals) { c.globalAlpha = Math.min(1, d.a * 2) * .8; c.fillStyle = d.col; c.beginPath(); c.ellipse(px(d.x), floorY + 5 * S, d.w * S, 5 * S, 0, 0, TAU); c.fill(); } c.globalAlpha = 1;
+  // landing guides
+  for (const f of falls) { if (f.bounced || phase !== "play") continue; const lx = px(landX(f)), ly = py(surfFor(f)), pep = f.kind === "pepper", col = pep ? "#e2553f" : "#ff7a59", near = clamp(f.air / f.T, 0, 1);
+    c.save(); c.globalAlpha = .35 + near * .55; c.strokeStyle = col; c.lineWidth = 2.5 * S; c.setLineDash([5 * S, 7 * S]); c.lineDashOffset = -t * 30; c.beginPath(); c.moveTo(lx, Math.min(ly - 8, py(f.y) + f.h * S)); c.lineTo(lx, ly - 8 * S); c.stroke(); c.setLineDash([]);
+    const r = (f.w * .5 + 6) * S * (1.5 - near * .5); c.lineWidth = 3 * S; if (pep) { c.beginPath(); c.moveTo(lx - 9 * S, ly - 22 * S); c.lineTo(lx + 9 * S, ly - 4 * S); c.moveTo(lx + 9 * S, ly - 22 * S); c.lineTo(lx - 9 * S, ly - 4 * S); c.stroke(); }
+    else { c.beginPath(); c.ellipse(lx, ly - 2 * S, r, 5 * S, 0, 0, TAU); c.stroke(); c.fillStyle = col; c.beginPath(); c.moveTo(lx - 7 * S, ly - 20 * S); c.lineTo(lx + 7 * S, ly - 20 * S); c.lineTo(lx, ly - 9 * S); c.closePath(); c.fill(); } c.restore(); }
+  // Momo, plate and the cake
+  const mx = px(momo.x), scared = phase === "play" && danger > .7, lf = falls.find(f => !f.bounced) || falls[0];
+  const mood = momo.dizzyT > 0 ? "dizzy" : momo.sadT > 0 ? "sad" : momo.joyT > 0 ? "joy" : scared ? "scared" : lf ? "think" : "happy";
+  const ma = Pals.draw(c, "momo", mx, floorY - MOMO * S / 2, MOMO * S, { t, mood, arms: phase === "serve" || phase === "end" ? "cheer" : "up", squash: momo.sq + Math.abs(momo.v) / VMAX * -.05, tilt: clamp(momo.v / VMAX, -1, 1) * .13,
+    look: lf ? [clamp((lf.x - momo.x) / 120, -1, 1), -.9] : [clamp(momo.v / 300, -1, 1), -.3], hot: phase === "play" ? clamp((danger - .55) * 2, 0, 1) : 0 });
+  const bob = ma.head[1] - (floorY - MOMO * S), pyy = py(PLATE) + bob;
+  if (phase !== "end" && phase !== "done") { c.fillStyle = "#fffaf0"; c.strokeStyle = "#c9b79c"; c.lineWidth = 1.5 * S; c.beginPath(); draw.rect(c, mx - 15 * S, pyy + 4 * S, 30 * S, 6 * S, 2 * S, "#e6d8c0"); c.beginPath(); c.ellipse(mx, pyy + 3 * S, PLW * S / 2, 5 * S, 0, 0, TAU); c.fill(); c.stroke(); }
+  else if (phase !== "play") { c.fillStyle = "#fff3f5"; c.beginPath(); c.ellipse(mx, ma.head[1] + 4 * S, 34 * S, 12 * S, 0, 0, TAU); c.fill(); c.beginPath(); c.ellipse(mx - 22 * S, ma.head[1] + 16 * S, 7 * S, 12 * S, 0, 0, TAU); c.fill(); drawItem(c, { kind: "cherry" }, mx + 6 * S, ma.head[1] - 10 * S, 1, .3, 0); }
+  let y = pyy; stack.forEach((L, i) => { const h = L.h * S * (1 - L.sq * .35), below = i ? stack[i - 1].x : momo.x, lean = clamp((L.x - below - L.off) * .012, -.22, .22);
+    drawItem(c, { kind: "layer", type: L.type, col: L.col, w: L.w, h: L.h }, px(L.x), y - h / 2, 1, lean, L.sq);
+    if (scared && i === worst) { c.strokeStyle = `rgba(226,85,63,${.5 + .4 * Math.sin(t * 22)})`; c.lineWidth = 3 * S; draw.rr(c, px(L.x) - L.w * S / 2 - 3, y - h - 2, L.w * S + 6, h + 4, 8 * S); c.stroke(); }
+    y -= h; });
+  if (serving) { const k = ease.inOutCubic(clamp(serving.t * 1.15, 0, 1)), X = Lab.lerp(px(serving.x0), px(slotX(serving.slot)), k), Y = Lab.lerp(pyy, sy + 2 * S, k) - Math.sin(k * Math.PI) * 60 * S; drawCake(c, serving.layers, X, Y, Lab.lerp(1, .3, k), 0); }
+  for (const f of falls) drawItem(c, f, px(f.x), py(f.y), 1, f.rot, 0);
+  for (const d of debris) drawItem(c, d, px(d.x), py(d.y), 1, d.rot, 0);
+  // floor band: hearts, recipe chips, cake number
+  const P = Lab.play, by = floorY + (P.y + P.h - floorY) * .58, cw = 15 * U, n = recipe.length, x0 = Lab.W / 2 - (n + 1) * cw / 2 + cw / 2;
+  for (let i = 0; i < 3; i++) { draw.heart(c, P.x + 20 * U + i * 21 * U, by, 7.5 * U, i < hearts ? "#ff5d73" : "rgba(52,48,74,.18)"); }
+  for (let i = 0; i < n; i++) { const done = i < stack.length || phase === "serve", r = recipe[i]; draw.rect(c, x0 + i * cw - cw * .42, by - 5 * U, cw * .84, 10 * U, 3 * U, done ? FLAV[r.col] : "rgba(52,48,74,.14)", done ? shade(FLAV[r.col], -.35) : null, 1.2); if (r.type !== "sponge" && !done) draw.text(c, r.type === "jelly" ? "~" : "=", x0 + i * cw, by, { size: 10 * U, color: "rgba(52,48,74,.5)" }); }
+  draw.circle(c, x0 + n * cw, by, 5 * U, phase === "serve" ? "#e2334f" : "rgba(226,51,79,.3)");
+  draw.text(c, "CAKE " + (cake + 1), P.x + P.w - 14 * U, by, { size: 13 * U, color: "#5d7078", align: "right", weight: 700 });
+  if (!demo && cake === 0 && stack.length < 2 && falls.length && phase === "play") draw.text(c, stack.length ? "Walk gently — the cake sways!" : "Stand under the ring", Lab.W / 2, py(sillY) + 44 * S, { size: 15 * U, color: "#34304a", stroke: "rgba(255,255,255,.7)" });
+}
+Lab.boot();
+})();
+</script></body></html>

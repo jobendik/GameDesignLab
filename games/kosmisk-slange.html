@@ -141,11 +141,11 @@ const PHASES = ['Skumring', 'Midnatt', 'Daggry'];
 const NAMES = ['Tuva', 'Brage', 'Ylva', 'Sindre', 'Runa', 'Halvor', 'Idunn', 'Embla', 'Varg', 'Aslak', 'Mjøll', 'Vetle', 'Eir', 'Torje', 'Signe', 'Ravn'];
 const HUES = [188, 268, 330, 145, 212, 12, 300, 165, 235, 95, 350];
 const KINDS = {   // look = hvor langt fram den ser, react = sekunder mellom beslutninger, lapse = sjanse for å fly i blinde
-  beiter: { look: 150, react: .22, lapse: .03, sight: 320, fear: 1, hunt: 0 },
-  drommer: { look: 105, react: .42, lapse: .1, sight: 200, fear: .6, hunt: 0 },
-  jeger: { look: 170, react: .14, lapse: .05, sight: 540, fear: .25, hunt: 1 },
-  kikker: { look: 160, react: .2, lapse: .04, sight: 300, fear: .7, hunt: 0 },
-  kretser: { look: 125, react: .18, lapse: .06, sight: 280, fear: .5, hunt: 0 },
+  beiter: { look: 150, react: .22, lapse: .006, sight: 320, fear: 1, hunt: 0 },
+  drommer: { look: 110, react: .42, lapse: .03, sight: 200, fear: .6, hunt: 0 },
+  jeger: { look: 170, react: .14, lapse: .01, sight: 540, fear: .25, hunt: 1 },
+  kikker: { look: 160, react: .2, lapse: .008, sight: 300, fear: .7, hunt: 0 },
+  kretser: { look: 125, react: .18, lapse: .012, sight: 280, fear: .5, hunt: 0 },
 };
 const ROSTER = ['beiter', 'jeger', 'kikker', 'drommer', 'kretser', 'jeger', 'beiter', 'kikker', 'jeger', 'drommer', 'beiter'];
 const SHAPES = [
@@ -215,7 +215,7 @@ function delPel(p) { if (!p.alive) return; const c = pgrid[p.c], i = c.indexOf(p
 function mkSnake(i, name, hue, kind) { return { i, name, hue, kind, K: KINDS[kind], me: i === 0, px: new Float32Array(CAP), py: new Float32Array(CAP), hi: 0, n: N0, x: 0, y: 0, ang: 0, aim: 0, acc: 0, r: 8, spd: SPEED,
   boost: false, wantBoost: false, alive: true, dead: 0, pend: 0, burn: 0, scorch: 0, ghost: 0, own: 0, think: 0, gx: 0, gy: 0, mode: 'graze', tgt: null, lapse: 0, con: null, si: 0, sdir: 1, wa: 0, orb: 0, well: null, wmin: 0, flash: 0 }; }
 const PX = (s, i) => s.px[(s.hi - i) & (CAP - 1)], PY = (s, i) => s.py[(s.hi - i) & (CAP - 1)];
-function place(s, x, y, ang, n) { s.x = x; s.y = y; s.ang = s.aim = ang; s.n = n; s.hi = 0; s.acc = 0; s.pend = 0; s.burn = 0; s.scorch = 0; s.alive = true; s.boost = s.wantBoost = false; s.well = null; s.con = null; s.mode = 'graze'; s.lapse = 0;
+function place(s, x, y, ang, n) { s.x = x; s.y = y; s.ang = s.aim = ang; s.n = n; s.hi = 0; s.acc = 0; s.pend = 0; s.burn = 0; s.scorch = 0; s.burnt = 0; s.alive = true; s.boost = s.wantBoost = false; s.well = null; s.con = null; s.mode = 'graze'; s.lapse = 0;
   const c = Math.cos(ang), sn = Math.sin(ang); for (let i = 0; i < n + 2; i++) { const k = (0 - i) & (CAP - 1); s.px[k] = x - c * GAP * i; s.py[k] = y - sn * GAP * i; } s.r = radius(n); }
 const radius = n => 6.5 + Math.min(10, Math.sqrt(n) * .5);
 
@@ -294,9 +294,11 @@ function segNear(s, x, y, rad) {   // nærmeste fremmede kroppsdel innen rad →
     const dx = PX(o, i) - x, dy = PY(o, i) - y, rr = rad - 24 + o.r; if (dx * dx + dy * dy < rr * rr) return o; } } return null; }
 function probe(s, x, y) { let c = 0; if (Math.hypot(x, y) > G.R - 36) c += 6; const brave = s.kind === 'kretser' ? 26 : 62;
   for (const w of G.wells) { const dx = x - w.x, dy = y - w.y, av = w.rc + brave; if (dx * dx + dy * dy < av * av) c += 9; }
-  if (segNear(s, x, y, 24 + s.r + 9)) c += 10; return c; }
+  if (segNear(s, x, y, 24 + s.r + 9)) c += 10;
+  for (const o of G.snakes) { if (o === s || !o.alive) continue; const dx = o.x + Math.cos(o.ang) * 55 - x, dy = o.y + Math.sin(o.ang) * 55 - y; if (dx * dx + dy * dy < 1500) { c += 7; break; } }   // der hodet deres er om et øyeblikk
+  return c; }
 const OFFS = [0, .42, -.42, .9, -.9, 1.5, -1.5, 2.3, -2.3];
-function steerAngle(s, want) { let bestA = want, bc = 1e9; const L = s.K.look * (s.boost ? 1.45 : 1);
+function steerAngle(s, want, look) { let bestA = want, bc = 1e9; const L = (look || s.K.look) * (s.boost ? 1.45 : 1);
   for (let k = 0; k < OFFS.length; k++) { const a = want + OFFS[k], ca = Math.cos(a), sa = Math.sin(a); let c = Math.abs(OFFS[k]) * .7 + Math.abs(angDiff(a, s.ang)) * .15;
     c += probe(s, s.x + ca * L * .3, s.y + sa * L * .3) * 1.4 + probe(s, s.x + ca * L * .64, s.y + sa * L * .64) + probe(s, s.x + ca * L, s.y + sa * L) * .6; if (c < bc) { bc = c; bestA = a; } }
   return bestA; }
@@ -305,7 +307,8 @@ function think(s) { const K = s.K, g = G; s.wantBoost = false; s.mode = 'graze';
   const dc = Math.hypot(s.x, s.y); if (dc > g.R - 190) { s.gx = s.x * .4; s.gy = s.y * .4; s.mode = 'home'; s.wantBoost = dc > g.R - 30 && s.n > 20; return; }
   for (const o of g.snakes) { if (o === s || !o.alive) continue; const dx = s.x - o.x, dy = s.y - o.y, d = Math.hypot(dx, dy);   // noen kommer rett mot meg → vik unna
     if (d < 150 * K.fear && o.n > s.n * .6 && Math.abs(angDiff(Math.atan2(dy, dx), o.ang)) < .6) { const side = angDiff(Math.atan2(dy, dx), o.ang) > 0 ? 1 : -1, a = o.ang + side * 1.1; s.gx = s.x + Math.cos(a) * 200; s.gy = s.y + Math.sin(a) * 200; s.mode = 'flee'; s.wantBoost = s.n > 24 && rnd() < .5; return; } }
-  if (s.kind === 'jeger' && s.n > 22) { let bv = 0, tg = null; for (const o of g.snakes) { if (o === s || !o.alive || o.ghost > 0) continue; const d = Math.hypot(o.x - s.x, o.y - s.y); if (d > K.sight) continue; const v = (o.me ? 1.3 : 1) * (o.mode === 'stars' ? 1.2 : 1) / (d + 90); if (v > bv) { bv = v; tg = o; } }
+  if (s.kind === 'jeger' && (s.orb -= K.react) < -6) s.orb = 7 + rnd() * 5;
+  if (s.kind === 'jeger' && s.n > 22 && s.orb > 0) { let bv = 0, tg = null; for (const o of g.snakes) { if (o === s || !o.alive || o.ghost > 0 || (o.me && g.phase === 0)) continue; const d = Math.hypot(o.x - s.x, o.y - s.y); if (d > K.sight) continue;   /* skumringen er fredelig for deg */ const v = (o.me ? 1.3 : 1) * (o.mode === 'stars' ? 1.2 : 1) / (d + 90); if (v > bv) { bv = v; tg = o; } }
     if (tg) { const d = Math.hypot(tg.x - s.x, tg.y - s.y), lead = clamp(d * .6, 70, 210); s.gx = tg.x + Math.cos(tg.ang) * lead; s.gy = tg.y + Math.sin(tg.ang) * lead; s.mode = 'hunt'; s.tgt = tg;
       s.wantBoost = d < 330 && s.n > 30 && Math.abs(angDiff(Math.atan2(s.gy - s.y, s.gx - s.x), s.ang)) < .7; return; } }
   if (s.kind === 'kikker') { let c = s.con; if (!c || c.owner >= 0 || c.faded || c.need > s.n - 2) { c = null; let bd = 1e9; for (const o of g.cons) { if (o.owner >= 0 || o.faded || o.need > s.n - 4 || (o === g.starter && g.t < 50) || Math.hypot(o.cx, o.cy) > g.R - 120) continue; const d = Math.hypot(o.cx - s.x, o.cy - s.y); if (d < bd) { bd = d; c = o; } }
@@ -334,7 +337,7 @@ function kill(s, cause, by) { if (!s.alive) return; const g = G; s.alive = false
 function moveSnake(s) { const g = G;
   const tr = 3.7 * Math.sqrt(8.6 / s.r) * DT; s.ang += clamp(angDiff(s.aim, s.ang), -tr, tr);
   s.boost = s.wantBoost && s.n > 14; let sp = s.boost ? BOOST : SPEED, gx = 0, gy = 0, inw = null;
-  if (s.boost) { s.burn += DT * 5.5; while (s.burn >= 1 && s.n > 12) { s.burn--; s.n--; addPel(PX(s, s.n) + (rnd() - .5) * 8, PY(s, s.n) + (rnd() - .5) * 8, 1, s.hue, 16); } }
+  if (s.boost) { s.burn += DT * 5.5; while (s.burn >= 1 && s.n > 12) { s.burn--; s.n--; s.burnt++; addPel(PX(s, s.n) + (rnd() - .5) * 8, PY(s, s.n) + (rnd() - .5) * 8, 1, s.hue, 16); } }
   for (const w of g.wells) { const dx = w.x - s.x, dy = w.y - s.y, d = Math.hypot(dx, dy) || 1; if (d >= w.ri) continue; const k = 1 - d / w.ri, k2 = k * k; sp *= 1 + .5 * k2; gx += dx / d * w.pull * k2; gy += dy / d * w.pull * k2;
     if (d < w.rc + s.r * .4 && s.ghost <= 0) { kill(s, w.hole ? 'hole' : 'sun', null); return; }
     if (d < w.rc * 2.3 + 20) { inw = w; if (s.well !== w) { s.well = w; s.wmin = d; } else if (d < s.wmin) s.wmin = d; }
@@ -517,7 +520,7 @@ function render() { const g = G, time = g.time, p = g.snakes[0], card = cardUp =
   const edge = (x, y, col, big) => { const s = toScreen(x, y), m = 26; if (s.x > m && s.x < W - m && s.y > 70 && s.y < H - m) return; const a = Math.atan2(s.y - H / 2, s.x - W / 2), k = Math.min((W / 2 - m) / Math.abs(Math.cos(a) || 1e-6), (H / 2 - m - 26) / Math.abs(Math.sin(a) || 1e-6)), ex = W / 2 + Math.cos(a) * k, ey = H / 2 + 12 + Math.sin(a) * k, q = big ? 13 : 11;
     ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(ex + Math.cos(a) * q, ey + Math.sin(a) * q); ctx.lineTo(ex + Math.cos(a + 2.5) * q, ey + Math.sin(a + 2.5) * q); ctx.lineTo(ex + Math.cos(a - 2.5) * q, ey + Math.sin(a - 2.5) * q); ctx.closePath(); ctx.fill(); if (!big) { star4(ex - Math.cos(a) * 22, ey - Math.sin(a) * 22, 8, time); ctx.fill(); } };
   if (g.mode === 'play') { let bc = null, bd = 1e9, prog = false; for (const c of g.cons) { if (c.owner >= 0 || c.faded) continue; let lit = 0; for (const st of c.stars) if (st.lt[0] > 0) lit++; if (lit) { prog = true; for (const st of c.stars) if (st.lt[0] <= 0) edge(st.x, st.y, 'rgba(255,225,150,.95)', 1); } else if (p.n >= c.need) { const d = Math.hypot(c.cx - p.x, c.cy - p.y); if (d < bd) { bd = d; bc = c; } } }
-    if (bc && !prog) edge(bc.cx, bc.cy, `rgba(255,225,150,${.55 + .3 * Math.sin(time * 4)})`, 0); if (g.rush) edge(g.rush.x, g.rush.y, '#fff', 1); }
+    if (bc && !prog) edge(bc.cx, bc.cy, `rgba(255,225,150,${.78 + .2 * Math.sin(time * 4)})`, 0); if (g.rush) edge(g.rush.x, g.rush.y, '#fff', 1); }
   // minikart
   { const mr = Math.min(W, H) < 500 ? 44 : 60, mx = 14 + mr, my = H - 16 - mr, sc = mr / RW; ctx.fillStyle = 'rgba(255,214,176,.3)'; ctx.beginPath(); ctx.arc(mx, my, mr, 0, TAU); ctx.fill();
     ctx.fillStyle = 'rgba(8,12,34,.9)'; ctx.beginPath(); ctx.arc(mx, my, g.R * sc, 0, TAU); ctx.fill(); ctx.strokeStyle = 'rgba(170,180,255,.35)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(mx, my, mr, 0, TAU); ctx.stroke();
@@ -544,12 +547,12 @@ function frame(now) { requestAnimationFrame(frame); const dt = Math.min(.1, (now
 newGame(true); AU.music('menu');
 window.__gdl = {
   get state() { const g = G, p = g.snakes[0]; return { mode: g.mode, paused, t: g.t, score: Math.round(g.score), best, R: g.R, phase: g.phase, owned: g.owned, kills: g.kills, pellets: pcount, cause: g.cause, won: g.won, rank: g.rank, bonus: g.bonus, muted: AU.muted, zoom: cam.z,
-    you: { x: p.x, y: p.y, ang: p.ang, n: p.n, r: p.r, alive: p.alive, boost: p.boost, ghost: p.ghost > 0, spd: p.spd },
+    you: { x: p.x, y: p.y, ang: p.ang, n: p.n, r: p.r, alive: p.alive, boost: p.boost, ghost: p.ghost > 0, spd: p.spd, burnt: p.burnt },
     bots: g.snakes.slice(1).map(s => ({ name: s.name, kind: s.kind, x: s.x, y: s.y, n: s.n, alive: s.alive, mode: s.mode })),
     wells: g.wells.map(w => ({ x: w.x, y: w.y, rc: w.rc, ri: w.ri, hole: !!w.hole })),
     cons: g.cons.map(c => ({ name: c.name, need: c.need, owner: c.owner, faded: c.faded, cx: c.cx, cy: c.cy, stars: c.stars.map(s => ({ x: s.x, y: s.y, lit: s.lt[0] > 0 })) })) }; },
   advance(sec) { const n = Math.round(sec * 60); for (let i = 0; i < n; i++) step(); }, manual(on) { manual = !!on; acc = 0; },
-  toScreen, safe(a) { return steerAngle(G.snakes[0], a); },
+  toScreen, safe(a, look) { return steerAngle(G.snakes[0], a, look); },
   dust() { const p = G.snakes[0]; let b = null, bd = 1e9; for (const c of pgrid) for (const q of c) { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd && d > 30) { bd = d; b = q; } } return b && { x: b.x, y: b.y, v: b.v }; },
 };
 if (AUTOSTART) startRun();
