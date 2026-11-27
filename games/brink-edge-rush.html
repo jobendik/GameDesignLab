@@ -92,7 +92,7 @@ if(save.day!==dayStr())save.dayBest=0;
 if(save.streakDay!==dayStr()&&save.streakDay!==dayStr(-1))save.streak=0;
 
 /* ---------- tuning ---------- */
-const STEP=1/120,CLIMB=1.15,TH=0.05,VIS_R=0.014,HIT_R=0.005,GB=0.075,RUSH_T=3.6,LOOK=1.7,SHIELD_AT=12;
+const STEP=1/120,CLIMB=1.2,TH=0.06,VIS_R=0.014,HIT_R=0.005,GB=0.075,RUSH_T=3.6,LOOK=1.7,SHIELD_AT=12;
 const TIERS=[
   {name:'SAFE',min:0,pts:18,surge:.03,mult:.05,parts:4,shake:.1,col:'c',pitch:0},
   {name:'CLOSE',min:.3,pts:42,surge:.06,mult:.1,parts:7,shake:.2,col:'c',pitch:3},
@@ -135,7 +135,7 @@ const AU=(()=>{let ac=null,out=null,nb=null,muted=Q.has('mute')?Q.get('mute')===
       if(G.rush>0)tone(220*Math.pow(2,LEAD[s]/12),.16,.09,'sawtooth',0,at,2800);next+=spb;step++;}}
   return{unlock,get muted(){return muted;},get ctx(){return ac;},
     setMuted(m){muted=m;if(out)out.gain.value=m?0:.8;if(!Q.has('mute')){save.mute=m;store.set(SAVE,save);}},
-    start(){if(!timer)timer=setInterval(sched,25);step=0;next=0;},
+    start(){if(!timer){timer=setInterval(sched,25);step=0;next=0;}},
     engine(on,hold,v){if(!engG||!ac)return;const t=ac.currentTime;engG.gain.setTargetAtTime(on&&!muted&&!manual?.035:0,t,.05);eng.frequency.setTargetAtTime(58+v*26+(hold?34:0),t,.04);},
     graze(chain,pitch,ti){const semi=PENT[chain%5]+12*Math.min(2,Math.floor(chain/5))+pitch,f=330*Math.pow(2,semi/12);tone(f,.15,.13+ti*.015,'triangle');tone(f*2,.09,.05,'sine');
       if(ti>=3){noise(.14,.14+ti*.02,1800,'bandpass',7000,0,5);tone(f*1.5,.2,.07,'sawtooth',0,.03,3000);}},
@@ -171,6 +171,7 @@ let G=null,scene='menu',paused=false,manual=false,hold=false,lastMode='daily';
 const parts=[],pops=[],streaks=[];for(let i=0;i<44;i++)streaks.push({x:Math.random(),y:Math.random(),z:.25+Math.random()*.75,l:.03+Math.random()*.09});
 let shake=0,flash=0,flashCol='255,255,255',danger=0,menuT=0;
 const P=()=>clamp(G.X/95,0,1);
+const climbOf=()=>lerp(.92,CLIMB,P());
 const vOf=()=>lerp(.62,1.25,P())+clamp((G.X-95)*.0035,0,.35);
 function newRun(mode,demo){
   const seed=SEED!=null?SEED:mode==='daily'?hashStr('brink-er-'+dayStr()):(Math.random()*4294967296)>>>0;
@@ -194,7 +195,7 @@ function spawnGate(){
   if(G.pat.left<=0)G.pat=choosePattern();
   const pat=G.pat,p=P(),r=G.rng,T=lerp(1.25,.6,p);let f=1,h=lerp(.17,.088,p),c,sway=0,shut=false,jack=null;
   if(pat.name==='burst')f=.62;else if(pat.name==='tunnel')f=.5;else if(pat.name==='breather')f=1.5;
-  const reach=Math.max(.05,CLIMB*T*f*.8-G.dev);G.dev=0;
+  const reach=Math.max(.05,climbOf()*T*f*.8-G.dev);G.dev=0;
   const to=(target,m)=>G.prevC+clamp(target-G.prevC,-m,m);
   const step=(s)=>{if(G.prevC+pat.dir*s>1-h-.04||G.prevC+pat.dir*s<h+.04)pat.dir*=-1;return G.prevC+pat.dir*s;};
   switch(pat.name){
@@ -238,7 +239,7 @@ function sim(dt,real){
   if(G.demo){const g=G.gates.find(g=>!g.done&&g.x-G.X>-TH);const tc=g?g.cur[0].c:.5;hold=G.y>tc+.012;}
   G.t+=dt;if(G.inv>0)G.inv-=dt;
   G.v+=(vOf()*(G.rush>0?1.35:1)-G.v)*Math.min(1,dt*5);G.X+=G.v*dt;
-  G.vy+=((hold?-CLIMB:CLIMB)-G.vy)*Math.min(1,dt*28);G.y+=G.vy*dt;
+  const cl=climbOf();G.vy+=((hold?-cl:cl)-G.vy)*Math.min(1,dt*28);G.y+=G.vy*dt;
   if(hold)G.didHold+=dt;else if(G.didHold>.12)G.didDive+=dt;
   if(G.y<VIS_R||G.y>1-VIS_R){G.y=clamp(G.y,VIS_R,1-VIS_R);G.vy=0;G.railT-=dt;if(G.railT<=0){G.railT=.07;spark(PX,sy(G.y<.5?0:1),1,'c',90,-G.v*XU*.5);if(!G.demo)AU.rail();}}
   G.trailT-=dt;if(G.trailT<=0){G.trailT=1/50;G.trail.push(G.X,G.y);if(G.trail.length>56)G.trail.splice(0,2);}
@@ -260,7 +261,7 @@ function sim(dt,real){
   }
   danger+=(dg-danger)*Math.min(1,real*(dg>danger?14:5));
   if(G.demo)return;
-  G.sinceGraze=(G.sinceGraze||0)+dt;if(G.sinceGraze>.6)G.mult=Math.max(1,G.mult-dt*.38);
+  G.sinceGraze=(G.sinceGraze||0)+dt;if(G.sinceGraze>1.5)G.mult=Math.max(1,G.mult-dt*.3);
   G.score+=dt*(8+P()*22)*G.mult*(G.rush>0?2:1);
   AU.engine(true,hold,G.v);
 }
@@ -277,10 +278,10 @@ function graze(g,close){
   G.chain++;G.miss=0;G.grazes++;G.sinceGraze=0;if(G.chain>G.bestChain)G.bestChain=G.chain;if(ti>G.topTier)G.topTier=ti;
   G.mult=Math.min(12,G.mult+T.mult);let pts=Math.round(T.pts*G.mult*rm);
   const x=PX,up=G.y<gap.c,y=sy(gap.c+(up?-gap.h:gap.h));
-  if(gap.jack){const j=Math.round(250*G.mult*rm);pts+=j;G.jackpots++;pop('JACKPOT',x+46*UI,y+(up?48:-30)*UI,'g',true);spark(x,y,14,'g',260);}
+  if(gap.jack){const j=Math.round(250*G.mult*rm);pts+=j;G.jackpots++;pop('JACKPOT',x+74*UI,y+(up?74:-62)*UI,'g',true);spark(x,y,14,'g',260);}
   G.score+=pts;if(G.rush<=0)G.surge=Math.min(1,G.surge+T.surge*(gap.jack?1.6:1));
   spark(x,y,T.parts,T.col,150+close*220,-G.v*XU*.35);
-  pop((ti>=2?T.name+' ':'')+'+'+fmt(pts),x+30*UI,y+(up?30:-14)*UI,T.col,ti>=3);
+  pop((ti>=2?T.name+' ':'')+'+'+fmt(pts),x+74*UI,y+(up?46:-34)*UI,T.col,ti>=3);
   kick(T.shake,ti>=3?.14+ti*.04:0,ti>=4?'255,220,120':'255,255,255');G.pulse=1;
   if(ti>=3){G.stop=Math.max(G.stop,RM?0:ti>=4?.055:.035);G.ts=Math.min(G.ts,ti>=4?.36:.5);}
   AU.graze(G.chain,T.pitch,ti);
@@ -330,7 +331,7 @@ function render(){
   ctx.fillStyle=vig;ctx.fillRect(0,0,W,H);
   if(danger>.02&&!rush&&G.alive){ctx.fillStyle=`rgba(255,30,60,${danger*.16})`;ctx.fillRect(0,0,W,H);}
   if(flash>0){ctx.globalCompositeOperation='lighter';ctx.fillStyle=`rgba(${flashCol},${flash*.42})`;ctx.fillRect(0,0,W,H);ctx.globalCompositeOperation='source-over';}
-  if(!G.demo)drawHUD(rush);
+  if(!G.demo&&!overShown)drawHUD(rush);
   ctx.textAlign='center';ctx.textBaseline='middle';
   for(const q of pops){const k=1-q.t/q.life,g=q.t<.1?lerp(.5,1.15,q.t/.1):q.t<.2?lerp(1.15,1,(q.t-.1)/.1):1;ctx.globalAlpha=clamp(k*1.6,0,1);
     ctx.font=`900 ${Math.round((q.big?25:18)*UI*g)}px "Saira Condensed",sans-serif`;ctx.fillStyle=`hsl(${HUE[q.col]},95%,${q.col==='g'?70:76}%)`;ctx.shadowColor=`hsla(${HUE[q.col]},95%,60%,.8)`;ctx.shadowBlur=10;
@@ -338,7 +339,7 @@ function render(){
   ctx.globalAlpha=1;
 }
 function drawGates(rush){
-  const w=Math.max(10,TH*XU);
+  const w=Math.max(16,TH*XU);
   for(const g of G.gates){const x=sx(g.x);if(x<-w*2||x>W+w*2||g.dead)continue;const d=g.x-G.X,prox=clamp(1-Math.abs(d)/.55,0,1),past=d<-TH;
     const hue=rush?lerp(g.hue,46,.6):g.hue,a=past?.4:1,L=50+prox*12;let y0=0;
     for(let k=0;k<=g.cur.length;k++){const gp=g.cur[k],y1=gp?gp.c-gp.h:1;if(y1>y0+.001){const ya=sy(y0),hh=(y1-y0)*YU;
@@ -368,7 +369,7 @@ function drawShip(rush){
   ctx.globalCompositeOperation='source-over';
   const s=VIS_R*YU*1.15,a=Math.atan2(G.vy*YU,G.v*XU)*.8;ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.scale(1+G.pulse*.25,1-G.pulse*.12);
   ctx.beginPath();ctx.moveTo(s*1.7,0);ctx.lineTo(-s*1.1,-s);ctx.lineTo(-s*.5,0);ctx.lineTo(-s*1.1,s);ctx.closePath();ctx.fillStyle=rush?'#fff1c2':'#f2feff';ctx.shadowColor=rush?'#ffd23c':'#38e8ff';ctx.shadowBlur=12;ctx.fill();ctx.restore();ctx.shadowBlur=0;
-  if(G.chain>=2){ctx.font=`900 ${Math.round((13+Math.min(9,G.chain*.25))*UI*(1+G.pulse*.3))}px "Saira Condensed"`;ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillStyle=`hsla(${lerp(190,322,clamp(G.chain/40,0,1))},95%,74%,.95)`;ctx.fillText('×'+G.chain,x-20*UI,y-22*UI);}
+  if(G.chain>=2){ctx.font=`900 ${Math.round((13+Math.min(9,G.chain*.25))*UI*(1+G.pulse*.3))}px "Saira Condensed"`;ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillStyle=`hsla(${lerp(190,322,clamp(G.chain/40,0,1))},95%,74%,.95)`;ctx.fillText(G.chain+' CHAIN',x-20*UI,y-22*UI);}
 }
 function drawHUD(rush){
   const fs=clamp(BT*.5,24,60),yb=Math.max(fs+2,BT-12-(W>H?0:18*UI));ctx.textBaseline='alphabetic';ctx.textAlign='center';
@@ -419,7 +420,7 @@ const canRetry=()=>scene==='over'&&overShown&&(manual||performance.now()-overAt>
 
 /* ---------- input: one button (any pointer, Space / Up / W / Enter) ---------- */
 const held=new Set();
-function press(id){AU.unlock();if(scene==='play'&&!paused){held.add(id);hold=true;}else if(canRetry())start(G.mode);}
+function press(id){AU.unlock();AU.start();if(scene==='play'&&!paused){held.add(id);hold=true;}else if(canRetry())start(G.mode);}
 function release(id){held.delete(id);if(!held.size)hold=false;}
 cv.addEventListener('pointerdown',e=>{e.preventDefault();try{window.focus();cv.focus({preventScroll:true});}catch(_){ }press('p'+e.pointerId);});
 for(const ev of['pointerup','pointercancel'])window.addEventListener(ev,e=>release('p'+e.pointerId));

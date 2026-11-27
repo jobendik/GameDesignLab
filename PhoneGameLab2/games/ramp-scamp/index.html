@@ -1,0 +1,197 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Ramp Scamp</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* RAMP SCAMP — Pip the fox will not wait. He skateboards along the treetop decks at full tilt, and at the end of every
+ * deck lies a hinged plank. HOLD and the plank tilts up; let go and it locks; Pip hits it whenever he gets there.
+ * Core idea kept: hold, release, cross the gap. What changed: you set an ANGLE, not a length, in real time, for a
+ * ballistic jump — too flat and he drops short, too steep and he stalls or sails over. A dotted arc shows the jump.
+ *   • bullseye mat on every deck: land on it for a PERFECT; consecutive perfects raise the multiplier (×5)
+ *   • acorns hang on the brave arc — often the high lob to the same mat — all three = "Stylish!"
+ *   • later: gaps you must leave flat, bounce mushrooms mid-gap, wind, a shorter and shorter preview, more speed
+ *   • three tumbles (a balloon lifts him back) and the run is over
+ * Identity: autumn treetops at golden hour — rust and gold crowns, rope-and-plank decks, a red skateboard; ratchet
+ *           clicks climb in pitch with the angle, "drive" music pushes harder with every speed tier. */
+let demo = false;
+Lab.init({
+  title: "Ramp Scamp", tagline: "Tilt the ramp. Pip is not slowing down.", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Hold to tilt the next ramp, let go to lock it", "Follow the dotted arc onto the mat", "Acorns hang on the daring line"],
+  theme: { bg: "#ffe2b8", bg2: "#fff3da", fg: "#4a2a1c", muted: "#8a6650", accent: "#ff7a2f", accent2: "#2bb3a3", light: true },
+  orient: "any", music: { style: "drive", key: "D", vol: .32 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const RAD = Math.PI / 180, G = 480, L = 60, RATE = 100 * RAD, MAXA = 66 * RAD, STEP = 1 / 120, KILL = 430, PSIZE = 46;
+const SKY = [["#ffd9a8", "#fff4dc"], ["#ffb89a", "#ffe9c4"], ["#c9b8f0", "#ffd9c9"]], CROWN = ["#f2a64a", "#e8743b", "#d9523a", "#f6c453"];
+let S, P, viewW, lead, baseY, plats, count, pip, cam, lives, score, gaps, streak, bestStreak, acorns, tier, over, auto, clock, acc, prev, lifeB, kHeld;
+fx.auto = false;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() { P = Lab.play; S = Math.min(Lab.W / 520, P.h / 400); viewW = Lab.W / S; lead = viewW > 800 ? .3 : .2; baseY = P.y + P.h * (P.h > P.w ? .58 : .66); Lab.sprite.clear("rs"); }
+Lab.onResize(() => { if (plats) layout(); });
+const hingeX = p => p.x + p.w - L + 14;
+function launchState(p, a) { const hx = hingeX(p); return { x: hx + Math.cos(a) * L, y: p.y - Math.sin(a) * L, vx: p.v * Math.cos(a), vy: -p.v * Math.sin(a), ax: p.wind, from: p }; }
+function stepAir(o, h) { o.vy += G * h; o.vx += o.ax * h; o.x += o.vx * h; o.y += o.vy * h; }
+function collide(o, px, py) {
+  for (const p of plats) {
+    if (p === o.from || p.x > o.x + 20 || p.x + p.w < px - 10) continue;
+    if (o.vy >= 0 && py <= p.y + 1 && o.y >= p.y && o.x >= p.x - 6 && o.x <= p.x + p.w + 2) return { p, type: "land" };
+    if (p.kind === "deck" && px < p.x && o.x >= p.x && o.y > p.y) return { p, type: o.y - p.y < 20 ? "scramble" : "face" };
+  }
+  return null;
+}
+function simArc(p, a) {
+  const o = launchState(p, a), pts = []; let res = null, i = 0;
+  while (i < 400 && !res) { const px = o.x, py = o.y; stepAir(o, STEP); const hit = collide(o, px, py); if (hit) { if (hit.type === "land" && hit.p.kind === "shroom") { o.y = hit.p.y; o.vy = -Math.abs(o.vy) * .98; o.from = hit.p; } else res = hit; } else if (o.y > p.y + KILL) res = { type: "miss" }; if (++i % 5 === 0) pts.push([o.x, o.y]); }
+  return { pts, res: res || { type: "miss" }, x: o.x };
+}
+function mk(x, w, y, kind, v) { return { x, w, y, kind, v, a: 0, ideal: 0, lock: false, wind: 0, mat: 0, nuts: [], landed: false, sq: 0, n: count }; }
+function addPlat() {
+  const A = plats.filter(p => p.kind === "deck").pop(), n = count++, t = Math.min(8, Math.floor(n / 6)), v = Math.min(382, 270 + t * 14);
+  for (let tries = 0; tries < 10; tries++) {
+    const easy = n < 3 || tries === 9, flat = !easy && t >= 1 && Lab.chance(.14), ang = easy ? rand(28, 40) : flat ? 0 : rand(16, 58), a = ang * RAD;
+    const ty = easy ? A.y : clamp(A.y + (flat ? rand(30, 85) : rand(-70, 75)), -130, 110); if (flat && ty < A.y + 25) continue;
+    A.wind = !easy && !flat && t >= 4 && Lab.chance(.3) ? rand(50, 120) * (Lab.chance(.5) ? 1 : -1) : 0;
+    const o = launchState(A, a); let sh = null, x1 = null, minY = o.y, i = 0;
+    if (!easy && t >= 2 && ang >= 22 && Lab.chance(.28)) { const ys = A.y + rand(0, 36); while (i++ < 600 && !(o.vy > 0 && o.y >= ys)) stepAir(o, STEP); sh = mk(o.x - 30, 60, ys, "shroom", v); o.y = ys; o.vy = -Math.abs(o.vy) * .98; minY = o.y; }
+    for (i = 0; i < 700 && !(o.vy > 0 && o.y >= ty); i++) { stepAir(o, STEP); minY = Math.min(minY, o.y); if (o.vy < 0 && o.y < ty && x1 === null) x1 = o.x; }
+    if (minY > ty - 12 || i >= 700) continue;
+    let aL = easy ? 105 : Math.max(46, rand(62, 92) - t * 3); if (x1 !== null) aL = Math.min(aL, o.x - x1 - 24); if (aL < 34) continue;
+    const bx = o.x - aL, edge = sh ? sh.x + sh.w + 36 : A.x + A.w + 44; if (bx < edge || sh && sh.x < A.x + A.w + 40) continue;
+    const B = mk(bx, aL + (easy ? 290 : rand(250, 310)), ty, "deck", v); B.mat = aL; A.ideal = a; if (sh) plats.push(sh); plats.push(B);
+    let arcA = a; for (let th = ang + 18; th <= 66 && !easy; th += 2) { const r = simArc(A, th * RAD); if (r.res.type === "land" && r.res.p === B && Math.abs(r.x - (B.x + B.mat)) < 16) { arcA = th * RAD; break; } }
+    const r = simArc(A, arcA); A.nuts = n < 1 ? [] : [.3, .5, .7].map(f => { const q = r.pts[Math.floor(r.pts.length * f)]; return { x: q[0], y: q[1] - 24, got: false }; });
+    return;
+  }
+}
+function reset() {
+  plats = []; count = 0; lives = 3; score = 0; gaps = 0; streak = 0; bestStreak = 0; acorns = 0; tier = 0; over = false; auto = false; clock = 0; acc = 0; prev = null; lifeB = 0; kHeld = false;
+  const first = mk(-120, 560, 0, "deck", 270); first.landed = true; plats.push(first); count = 0;
+  pip = { x: 0, y: 0, vx: 0, vy: 0, ax: 0, state: "run", plat: first, launch: first, from: null, s: 0, sq: 0, v: 270, joy: 0, doom: false, tilt: 0, fy: 0 };
+  cam = { x: -viewW * lead, y: 0 }; for (let i = 0; i < 6; i++) addPlat(); fx.clear();
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0); Lab.music.intensity(.3); Lab.hint("Hold to tilt the ramp · let go to lock it");
+  Lab.input.onKey = [(k, e) => { if (k === " " || k === "ArrowUp") kHeld = true; }];
+  Lab.expose({
+    get score() { return score; }, get lives() { return lives; }, get gaps() { return gaps; }, get streak() { return streak; }, get tier() { return tier; }, get acorns() { return acorns; },
+    get pip() { return { x: pip.x, y: pip.y, state: pip.state }; }, get ramp() { const p = activeRamp(); return p ? { a: p.a / RAD, ideal: p.ideal / RAD, lock: p.lock, n: p.n } : null; },
+    setAngle(deg) { const p = activeRamp(); if (p) p.a = deg * RAD; }, sim(deg) { const p = activeRamp(); return p ? simArc(p, deg * RAD).res.type : null; }, auto(on) { auto = on; },
+  });
+  Lab.loop(frame);
+}
+/* ---------- play ---------- */
+function activeRamp() {
+  if ((pip.state === "run" || pip.state === "drop") && !pip.plat.lock) return pip.plat;
+  for (const p of plats) if (p.kind === "deck" && !p.lock && hingeX(p) > pip.x) return p;
+  return null;
+}
+function lose() {
+  lives--; lifeB = 1; streak = 0; snd("hurt"); snd("whistle", { pitch: .7, vol: .5 }); Lab.shake(8, .3); Lab.buzz(30);
+  if (lives <= 0) { over = true; fx.clear(); if (!demo) Lab.gameover({ title: "Wipeout!", message: "Pip is already asking for another go.", score, stats: [["Gaps cleared", gaps], ["Best perfect streak", bestStreak], ["Acorns", acorns]] }); return; }
+  let t = plats.find(p => p.kind === "deck" && p.x + p.w - 170 > pip.x && p !== pip.launch); while (!t) { addPlat(); t = plats.find(p => p.kind === "deck" && p.x + p.w - 170 > pip.x && p !== pip.launch); }
+  for (const p of plats) if (p.x < t.x && p.kind === "deck") p.lock = true;
+  t.landed = true; pip.plat = t; pip.x = t.x + 26; pip.y = t.y - 190; pip.state = "drop"; pip.v = t.v; pip.vx = pip.vy = 0; pip.doom = false;
+}
+function land(p, scramble) {
+  if (p.kind === "shroom") { pip.y = p.y; pip.vy = -Math.abs(pip.vy) * .98; pip.from = p; p.sq = 1; snd("boing", { pitch: 1.2 }); fx.burst(pip.x, p.y, { n: 6, color: "#fff", speed: 120, life: .4, size: 3 }); return; }
+  pip.state = "run"; pip.plat = p; pip.y = p.y; pip.v = p.v; pip.sq = .36; pip.doom = false; snd("land", { vol: .8 }); Lab.buzz(8);
+  fx.burst(pip.x, p.y, { n: 7, color: "#f6e3c0", speed: 110, life: .45, size: 4, gravity: 200, spread: 2.4, angle: -1.57 });
+  if (p.landed) return; p.landed = true; gaps++;
+  const perfect = !scramble && Math.abs(pip.x - (p.x + p.mat)) <= 16, nuts = pip.launch.nuts, stylish = nuts.length && nuts.every(n => n.got);
+  streak = perfect ? streak + 1 : 0; bestStreak = Math.max(bestStreak, streak); const mult = 1 + Math.min(streak, 4); let pts = 10 * mult + (stylish ? 15 : 0); score += pts;
+  if (perfect) { pip.joy = .7; fx.text(pip.x, p.y - 74, "Perfect" + (mult > 1 ? " ×" + mult : "!"), { color: "#2bb3a3", size: 20, outline: "#fff" }); fx.ring(p.x + p.mat, p.y, { r0: 6, r1: 46, color: "#2bb3a3", width: 4 }); if (!demo) Lab.audio.combo(streak + 2, { vol: .22 }); Lab.hitstop(.03); }
+  else if (scramble) fx.text(pip.x, p.y - 70, "Phew!", { color: "#fff", size: 17 });
+  if (stylish) { fx.text(pip.x + 30, p.y - 100, "Stylish! +15", { color: "#ffb52e", size: 18, outline: "#4a2a1c" }); snd("star"); }
+  const nt = Math.floor(gaps / 6); if (nt > tier) { tier = nt; if (lives < 3 && tier % 2 === 0) { lives++; lifeB = 1; } if (!demo) { Lab.banner(tier > 8 ? "Top speed!" : "Faster!", { color: "#ff7a2f", ms: 900, y: .24 }); snd("levelup"); Lab.music.intensity(clamp(.3 + tier * .1, 0, 1)); Lab.sprite.clear("rsbg"); } }
+  if (!demo) { Lab.setScore(score); if (perfect) Lab.bumpScore(); }
+}
+function step(h) {
+  clock += h; const act = activeRamp(), held = demo || auto ? !!(act && act.a < act.ideal - .004) : (Lab.input.down || kHeld);
+  if (act && held && act.a < MAXA) { const a0 = act.a; act.a = Math.min(MAXA, act.a + RATE * h); if (Math.floor(act.a / (5 * RAD)) !== Math.floor(a0 / (5 * RAD))) snd("tick", { pitch: .8 + act.a * 1.1, vol: .55 }); }
+  const p = pip.plat;
+  if (pip.state === "run") { pip.x += pip.v * h; pip.y = p.y; pip.tilt = 0; if (pip.x >= hingeX(p)) { p.lock = true; pip.state = "ramp"; pip.s = Math.min(L - 1, (pip.x - hingeX(p)) / Math.cos(p.a)); } }
+  else if (pip.state === "ramp") {
+    pip.s += pip.v * h; pip.x = hingeX(p) + Math.cos(p.a) * pip.s; pip.y = p.y - Math.sin(p.a) * pip.s; pip.tilt = -p.a;
+    if (pip.s >= L) { Object.assign(pip, launchState(p, p.a)); pip.launch = p; pip.state = "air"; pip.sq = -.22; pip.fy = p.y; pip.doom = simArc(p, p.a).res.type !== "land"; snd("whoosh", { pitch: .8 + p.a * .6 }); if (p.a > .1) snd("jump", { pitch: .9 + p.a * .4, vol: .6 }); }
+  } else if (pip.state === "air") {
+    const px = pip.x, py = pip.y; stepAir(pip, h); pip.tilt = Math.atan2(pip.vy, pip.vx) * .55;
+    for (const n of pip.launch.nuts) if (!n.got && Math.hypot(pip.x - n.x, pip.y - 24 - n.y) < 30) { n.got = true; acorns++; score += 5; if (!demo) Lab.setScore(score); snd("coin", { pitch: 1 + pip.launch.nuts.filter(q => q.got).length * .12 }); fx.burst(n.x, n.y, { n: 6, colors: ["#ffb52e", "#fff"], speed: 120, life: .4, size: 3 }); }
+    const hit = collide(pip, px, py);
+    if (hit && hit.type === "face") { pip.state = "fall"; pip.x = hit.p.x - 8; pip.vx = -50; pip.vy = Math.max(pip.vy, 40); pip.doom = true; snd("thud"); Lab.shake(5, .2); fx.burst(pip.x, pip.y - 20, { n: 6, color: "#fff", speed: 140, life: .3, shape: "star", size: 4 }); }
+    else if (hit) land(hit.p, hit.type === "scramble");
+    else if (pip.y > pip.fy + KILL) lose();
+  } else if (pip.state === "fall") { stepAir(pip, h); pip.tilt += h * 5; if (pip.y > pip.fy + KILL) lose(); }
+  else if (pip.state === "drop") { pip.y += 230 * h; pip.tilt = Math.sin(clock * 6) * .12; if (pip.y >= p.y) { pip.y = p.y; pip.state = "run"; pip.sq = .3; snd("land"); } }
+}
+function update(dt) {
+  acc = Math.min(acc + dt, .06); while (acc >= STEP && !over) { step(STEP); acc -= STEP; }
+  if (!Lab.input.keys[" "] && !Lab.input.keys.ArrowUp && !Lab.input.keys.Space) kHeld = false;
+  const last = plats[plats.length - 1]; if (last.x < pip.x + 1700) addPlat(); if (plats.length > 3 && plats[0].x + plats[0].w < cam.x - 500 && plats[0] !== pip.plat && plats[0] !== pip.launch) plats.shift();
+  cam.x = pip.x - viewW * lead; const ty = pip.state === "air" || pip.state === "fall" ? pip.fy : pip.plat.y; cam.y = Lab.damp(cam.y, clamp(ty, -90, 80), 3, dt);
+  pip.sq = Lab.damp(pip.sq, 0, 9, dt); pip.joy = Math.max(0, pip.joy - dt); lifeB = Math.max(0, lifeB - dt * 2); for (const p of plats) if (p.sq > 0) p.sq = Math.max(0, p.sq - dt * 4);
+  if (pip.state === "run" && Math.random() < dt * 14) fx.burst(pip.x - 14, pip.y - 2, { n: 1, color: "rgba(255,243,220,.8)", speed: 40, life: .35, size: 4, gravity: -30, spread: 1, angle: Math.PI });
+}
+function frame(dt, t) { update(dt); render(t); }
+function attract(dt, t) { if (!demo) { demo = true; layout(); reset(); } if (over) reset(); update(dt); render(t); }
+
+/* ---------- drawing ---------- */
+function ell(g, x, y, rx, ry, rot) { g.beginPath(); g.ellipse(x, y, Math.max(0, rx), Math.max(0, ry), rot || 0, 0, TAU); }
+function hsh(i) { const x = Math.sin(i * 127.1 + 3.7) * 43758.5453; return x - Math.floor(x); }
+function drawDeck(c, p, t, active) {
+  const far = p.x - cam.x; if (far > viewW + 80 || far + p.w < -160) return;
+  if (p.kind === "shroom") { const q = ease.pulse(p.sq) * .3, cx = p.x + p.w / 2; draw.rect(c, cx - 9, p.y + 6, 18, 620, 6, "#f3e3c8"); c.save(); c.translate(cx, p.y + 14); c.scale(1 + q, 1 - q); c.fillStyle = "#e4483f"; c.beginPath(); c.ellipse(0, 0, p.w / 2 + 6, 22, 0, Math.PI, TAU); c.fill(); c.fillStyle = "#fff"; for (const [x, y, r] of [[-18, -9, 5], [4, -14, 6], [22, -6, 4]]) { ell(c, x, y, r, r * .8); c.fill(); } c.restore(); return; }
+  const tw = Math.min(70, p.w * .3), cx = p.x + p.w * .45; draw.rect(c, cx - tw / 2, p.y + 8, tw, 640, 10, "#8a5a3c"); c.fillStyle = "#74482e"; c.fillRect(cx + tw * .18, p.y + 12, tw * .14, 640); c.fillRect(cx - tw * .3, p.y + 60, tw * .1, 600);
+  c.strokeStyle = "#74482e"; c.lineWidth = 7; c.lineCap = "round"; c.beginPath(); c.moveTo(cx - tw / 2, p.y + 70); c.lineTo(p.x + 14, p.y + 12); c.moveTo(cx + tw / 2, p.y + 70); c.lineTo(p.x + p.w - 14, p.y + 12); c.stroke();
+  for (let i = 0; i < 5; i++) { const lx = p.x + (i + .5) / 5 * p.w + (hsh(p.n * 7 + i) - .5) * 30; c.fillStyle = CROWN[(p.n + i) % 4]; ell(c, lx, p.y + 24 + hsh(p.n + i * 3) * 16, 26 + hsh(p.n * 3 + i) * 16, 18); c.fill(); }
+  draw.rect(c, p.x - 4, p.y, p.w + 8, 15, 6, "#d9a566"); draw.rect(c, p.x - 4, p.y, p.w + 8, 6, 3, "#f0cc94"); c.fillStyle = "rgba(116,72,46,.35)"; for (let x = p.x + 22; x < p.x + p.w; x += 28) c.fillRect(x, p.y + 1, 1.6, 13);
+  if (p.mat) { draw.rect(c, p.x + p.mat - 17, p.y - 1.5, 34, 7, 3, "#2bb3a3"); draw.rect(c, p.x + p.mat - 5, p.y - 1.5, 10, 7, 2, "#fff"); }
+  // the ramp
+  const hx = hingeX(p), a = p.a;
+  if (a > .03) { c.strokeStyle = "#74482e"; c.lineWidth = 5; c.beginPath(); c.moveTo(hx + Math.cos(a) * L * .62, p.y - Math.sin(a) * L * .62); c.lineTo(hx + L * .5, p.y + 2); c.stroke(); }
+  c.save(); c.translate(hx, p.y); c.rotate(-a);
+  if (active) { c.strokeStyle = `rgba(255,255,255,${.55 + Math.sin(t * 8) * .3})`; c.lineWidth = 4; draw.rr(c, -3, -10, L + 6, 13, 6); c.stroke(); }
+  draw.rect(c, 0, -8, L, 9, 4, "#c9763f"); draw.rect(c, 0, -8, L, 3.5, 2, "#e89a5c"); c.fillStyle = "#fff"; for (let i = 0; i < 3; i++) { c.beginPath(); c.moveTo(L - 26 + i * 8, -8); c.lineTo(L - 21 + i * 8, -8); c.lineTo(L - 25 + i * 8, 1); c.lineTo(L - 30 + i * 8, 1); c.fill(); }
+  c.restore(); draw.circle(c, hx, p.y - 2, 5, "#4a2a1c"); draw.circle(c, hx, p.y - 2, 2, "#f0cc94");
+  if (p.wind) { const d = Math.sign(p.wind), k = Math.abs(p.wind) / 120; c.strokeStyle = "#74482e"; c.lineWidth = 3; c.beginPath(); c.moveTo(hx - 16, p.y); c.lineTo(hx - 16, p.y - 54); c.stroke(); c.fillStyle = "#ff5d73"; c.beginPath(); c.moveTo(hx - 16, p.y - 54); c.lineTo(hx - 16 + d * (16 + 16 * k), p.y - 47 + Math.sin(t * 10) * 3); c.lineTo(hx - 16, p.y - 40); c.fill();
+    c.strokeStyle = "rgba(255,255,255,.7)"; c.lineWidth = 2.5; for (let i = 0; i < 5; i++) { const u = (t * .9 * d + hsh(p.n + i)) % 1, x = p.x + p.w + 20 + ((u + 1) % 1) * 170, y = p.y - 30 - hsh(p.n * 2 + i) * 150; c.beginPath(); c.moveTo(x, y); c.lineTo(x + d * 26, y); c.stroke(); } }
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, sk = SKY[tier % 3];
+  const bg = Lab.sprite("rsbg" + W + "x" + H + "_" + tier % 3, W + 80, H + 80, g => { g.translate(40, 40); draw.vgrad(g, -40, -40, W + 80, H + 80, [[0, sk[0]], [.7, sk[1]]]); g.fillStyle = "rgba(255,255,255,.5)"; ell(g, W * .74, P.y + P.h * .2, 46 * S, 46 * S); g.fill(); g.fillStyle = "rgba(255,255,255,.28)"; ell(g, W * .74, P.y + P.h * .2, 80 * S, 80 * S); g.fill(); });
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // parallax: far hills, mid trees
+  c.fillStyle = "rgba(226,140,90,.35)"; c.beginPath(); c.moveTo(-40, H + 40); for (let x = -40; x <= W + 40; x += 18) { const wx = x / S + cam.x * .12; c.lineTo(x, baseY - 30 * S + Math.sin(wx * .012) * 26 * S + Math.sin(wx * .031) * 9 * S - cam.y * S * .12); } c.lineTo(W + 40, H + 40); c.fill();
+  const sp = 150, i0 = Math.floor(cam.x * .4 / sp) - 1; for (let i = i0; i < i0 + viewW / sp + 3; i++) { const x = (i * sp - cam.x * .4 + hsh(i) * 60) * S, hgt = (120 + hsh(i * 3) * 130) * S, y = baseY + 110 * S - cam.y * S * .4, r = (44 + hsh(i * 5) * 26) * S; c.fillStyle = "rgba(138,90,60,.5)"; c.fillRect(x - 6 * S, y - hgt, 12 * S, hgt + H); c.fillStyle = Lab.color.alpha(CROWN[((i % 4) + 4) % 4], .62); ell(c, x, y - hgt, r, r * .9); c.fill(); ell(c, x - r * .6, y - hgt + r * .3, r * .7, r * .6); c.fill(); ell(c, x + r * .6, y - hgt + r * .35, r * .65, r * .55); c.fill(); }
+  c.fillStyle = "rgba(255,243,220,.5)"; c.fillRect(-40, baseY + 150 * S - cam.y * S * .5, W + 80, H);
+  // world
+  c.save(); c.translate(0, baseY); c.scale(S, S); c.translate(-cam.x, -cam.y);
+  const act = over ? null : activeRamp();
+  for (const p of plats) drawDeck(c, p, t, p === act && !demo);
+  for (const p of plats) for (const n of p.nuts) if (!n.got) { const y = n.y + Math.sin(t * 3 + n.x * .05) * 3; c.fillStyle = "#c9763f"; ell(c, n.x, y + 2, 8, 10); c.fill(); c.fillStyle = "#7a4a2a"; c.beginPath(); c.ellipse(n.x, y - 3, 9.5, 6.5, 0, Math.PI, TAU); c.fill(); c.fillRect(n.x - 1.2, y - 13, 2.4, 5); c.fillStyle = "rgba(255,255,255,.5)"; ell(c, n.x - 3, y + 2, 2, 4); c.fill(); }
+  // dotted preview of the jump the active ramp would give
+  if (act && !demo) {
+    if (!prev || prev.p !== act || prev.a !== act.a) prev = { p: act, a: act.a, r: simArc(act, act.a) };
+    const pts = prev.r.pts, frac = tier < 2 ? 1 : tier < 4 ? .6 : .36, n = Math.ceil(pts.length * frac), ok = prev.r.res.type === "land" || prev.r.res.type === "scramble";
+    for (let i = 0; i < n; i++) { c.globalAlpha = (1 - i / pts.length * .6) * (i > n - 4 && frac < 1 ? (n - i) / 4 : 1); draw.circle(c, pts[i][0], pts[i][1] - 4, i % 2 ? 3 : 4, frac === 1 && !ok ? "#ffd9c9" : "#fff"); } c.globalAlpha = 1;
+    if (frac === 1 && ok && pts.length) { draw.circle(c, prev.r.x, prev.r.res.p.y - 4, 6, null, "#fff", 2.5); }
+  }
+  // Pip on his board
+  const air = pip.state === "air" || pip.state === "fall", mood = pip.state === "drop" ? "dizzy" : pip.state === "fall" || pip.doom && pip.vy > 0 ? "scared" : pip.joy > 0 ? "joy" : air ? (pip.vy < 0 ? "joy" : "wow") : "happy";
+  if (pip.state === "drop") { const bx = pip.x + 4, by = pip.y - PSIZE - 60; c.strokeStyle = "rgba(74,42,28,.6)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(pip.x, pip.y - PSIZE); c.lineTo(bx, by + 24); c.stroke(); c.fillStyle = "#ff5d73"; ell(c, bx, by, 20, 25); c.fill(); c.fillStyle = "rgba(255,255,255,.5)"; ell(c, bx - 7, by - 9, 5, 8, .4); c.fill(); }
+  if (!air && pip.state !== "drop") draw.shadow(c, pip.x, pip.y + 1, 22, 4, .18);
+  c.save(); c.translate(pip.x, pip.y); c.rotate(pip.tilt);
+  draw.rect(c, -24, -9, 48, 6, 3, "#e4483f"); draw.rect(c, -24, -9, 48, 2.4, 1.2, "#ff8a7a"); for (const d of [-14, 14]) { draw.circle(c, d, -2.5, 4.2, INK); draw.circle(c, d, -2.5, 1.6, "#ffd23f"); }
+  Pals.draw(c, "pip", 0, -9 - PSIZE / 2, PSIZE, { t, mood, squash: pip.sq + (air ? -.08 : Math.sin(t * 16) * .02), look: air ? [.7, pip.vy < 0 ? -.6 : .7] : [1, act && act.a > .05 ? -.4 : 0], arms: pip.state === "drop" ? "up" : air ? (pip.doom && pip.vy > 0 ? "wave" : "up") : pip.joy > 0 ? "cheer" : "down", tilt: air ? 0 : .08, talk: pip.doom && air ? 1 : 0, shadow: false });
+  c.restore();
+  if (!air && pip.state !== "drop") for (let i = 0; i < 3; i++) { const u = (t * 3 + i / 3) % 1; c.strokeStyle = `rgba(255,255,255,${.6 * (1 - u)})`; c.lineWidth = 2.5; c.beginPath(); c.moveTo(pip.x - 30 - u * 26, pip.y - 12 - i * 12); c.lineTo(pip.x - 44 - u * 26, pip.y - 12 - i * 12); c.stroke(); }
+  fx.draw(c); c.restore();
+  // lives, streak, speed
+  for (let i = 0; i < 3; i++) { const on = i < lives, k = (i === lives && lifeB > 0 ? 1 + lifeB * .5 : 1) * 9 * Math.max(S, .8); draw.heart(c, P.x + 22 + i * 26 * Math.max(S, .8), P.y + 20, k, on ? "#ff7a2f" : "rgba(74,42,28,.2)"); }
+  if (streak > 0) { const tx = "Perfect ×" + (1 + Math.min(streak, 4)); draw.rect(c, W / 2 - 62, P.y + 8, 124, 26, 13, "#2bb3a3"); draw.text(c, tx, W / 2, P.y + 22, { size: 14, weight: 700 }); }
+  draw.text(c, "Speed " + (Math.min(tier, 8) + 1), P.x + P.w - 14, P.y + 21, { size: 14, color: "#4a2a1c", align: "right", weight: 700 });
+}
+Lab.boot();
+})();
+</script></body></html>

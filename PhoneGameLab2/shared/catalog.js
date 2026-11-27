@@ -4,39 +4,11 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 6,
-    "slug": "brick-breaker",
-    "t": "Brick Breaker",
-    "d": "Paddle a ball to smash a wall of bricks.",
-    "thumb": "../thumbs/PhoneGameLab2--brick-breaker.jpg"
-   },
-   {
-    "n": 7,
-    "slug": "bridge",
-    "t": "Bridge",
-    "d": "Hold to grow a bridge that exactly crosses the gap.",
-    "thumb": "../thumbs/PhoneGameLab2--bridge.jpg"
-   },
-   {
     "n": 8,
     "slug": "bubble-shooter",
     "t": "Bubble Shooter",
     "d": "Shoot bubbles to match 3+ and clear the board.",
     "thumb": "../thumbs/PhoneGameLab2--bubble-shooter.jpg"
-   },
-   {
-    "n": 9,
-    "slug": "bubble-up",
-    "t": "Bubble Up",
-    "d": "Float upward in a bubble, dodging falling spikes.",
-    "thumb": "../thumbs/PhoneGameLab2--bubble-up.jpg"
-   },
-   {
-    "n": 10,
-    "slug": "building-block-puzzle",
-    "t": "Block Puzzle",
-    "d": "Place tetromino pieces and clear full lines.",
-    "thumb": "../thumbs/PhoneGameLab2--building-block-puzzle.jpg"
    },
    {
     "n": 11,
@@ -542,10 +514,45 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--bedtime-stacks.jpg"
    },
    {
+    "slug": "pack-ice",
+    "t": "Pack Ice",
+    "d": "Slide ice blocks in from any side. Fill a line to crack it.",
+    "v2": true,
+    "score": 8
+   },
+   {
     "slug": "stew-patch",
     "t": "Stew Patch",
     "d": "Pull the veg, let the neighbours creep in, feed the queue.",
-    "v2": true
+    "v2": true,
+    "score": 8
+   }
+  ]
+ },
+ {
+  "cat": "Arcade",
+  "items": [
+   {
+    "slug": "gulp-and-float",
+    "t": "Gulp & Float",
+    "d": "Ride a bubble to the stars. Gulp fireflies, dodge the prickles.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "slug": "lilypad-lunch",
+    "t": "Lilypad Lunch",
+    "d": "Bounce Momo off the lily pad and gulp the fruit.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "slug": "sunny-soak",
+    "t": "Sunny Soak",
+    "d": "Lob water balloons. Cool your pals down.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--sunny-soak.jpg"
    }
   ]
  },
@@ -572,19 +579,12 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--jampoline.jpg"
-   }
-  ]
- },
- {
-  "cat": "Arcade",
-  "items": [
+   },
    {
-    "slug": "sunny-soak",
-    "t": "Sunny Soak",
-    "d": "Lob water balloons. Cool your pals down.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--sunny-soak.jpg"
+    "slug": "ramp-scamp",
+    "t": "Ramp Scamp",
+    "d": "Tilt the ramp. Pip is not slowing down.",
+    "v2": true
    }
   ]
  }

@@ -1,0 +1,214 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Lilypad Lunch</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* LILYPAD LUNCH — Momo the frog is the ball. He belly-bounces off a lily pad you slide across the pond and eats his way
+ * through the fruit hanging over the water.
+ * Core idea kept: slide a paddle, keep the bouncing thing in play, clear what hangs above.
+ * What changed: gravity arcs instead of a constant-speed ball; where Momo lands on the pad aims the next hop; ripe fruit
+ * is EATEN on the way through (tongue reach is generous) so one good arc can gulp a whole row — the gulp chain (fruit
+ * per hop) is the score engine; hard green fruit bonks him back and ripens; bees sting him dizzy so he drops like a
+ * stone; a golden peach makes him BIG. Miss the pad and he splashes (three lilies = three splashes).
+ * Later trees: swaying vines, more bees, more green fruit, a shrinking pad. Lonely last fruit drifts down to him.
+ * Identity: sunny pond under a fruit canopy, four times of day; springy "boing" pitched by where he lands, a rising
+ *           gulp ladder, funk music that fills in with the chain. */
+let demo = false;
+Lab.init({
+  title: "Lilypad Lunch", tagline: "Bounce Momo off the lily pad and gulp the fruit.", category: "Arcade", kicker: "Pocket Pals",
+  howto: ["Drag to slide the lily pad under Momo", "The pad's edge sends him sideways", "More fruit in one hop = bigger gulps"],
+  theme: { bg: "#bfeedd", bg2: "#fff3d6", fg: "#234a3c", muted: "#5d7f70", accent: "#ff7d6e", accent2: "#36a873", light: true },
+  orient: "any", music: { style: "funk", key: "E", vol: .34 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const SCENES = [{ sky: ["#c9f2e2", "#fff6dc"], hill: "#9fdcae", leaf: ["#58b96e", "#3f9f5c"], water: ["#7fd6d0", "#4fb3bf"] }, { sky: ["#b5e4ff", "#f1fbff"], hill: "#a6dba0", leaf: ["#62c06a", "#46a45a"], water: ["#6ccdea", "#3fa3d6"] },
+  { sky: ["#ffd9b8", "#fff2cf"], hill: "#e9b98a", leaf: ["#7fb85a", "#5f9d4a"], water: ["#ffb89a", "#e98a86"] }, { sky: ["#d9ccff", "#ffe3ef"], hill: "#b8a6e6", leaf: ["#5fae8a", "#458f76"], water: ["#a99df0", "#7f77d6"] }];
+const FRUIT = [{ c: "#ff9a7a", d: "#f0705f" }, { c: "#a678e8", d: "#7f55cc" }, { c: "#ff5f6e", d: "#d93a52" }];
+const PATS = [(i, j) => j < 3, (i, j) => (i + j) % 2 === 0, (i, j, n, m) => Math.abs(i - (n - 1) / 2) / ((n - 1) / 2) + Math.abs(j - (m - 1) / 2) / ((m - 1) / 2) <= 1.05, (i, j, n, m) => i === 0 || j === 0 || i === n - 1 || j === m - 1, (i, j) => i % 2 === 0, (i, j) => (i + j) % 3 !== 1];
+let S, P, waterY, padY, padHalf0, r, fr, G, V, VX, field = { x: 0, y: 0, w: 1, h: 1 };
+let momo, pad, fruits, bees, level, lives, score, chain, bestChain, eaten, over, big, sinceEat, nextT, auto, gold, goldDone, total, clock, tongue, mouth, lifeB, tipT;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() {
+  P = Lab.play; const wide = P.w > P.h * 1.15; S = wide ? P.h / 430 : Math.min(P.w / 390, P.h / 720);
+  waterY = Lab.H - Lab.safe.bottom - (wide ? 40 : 64) * S; padY = waterY - 8 * S; r = (wide ? 21 : 23) * S; fr = (wide ? 13 : 17) * S; padHalf0 = Math.max(48 * S, P.w * .085);
+  field = { x: P.x + 26 * S, y: P.y + 52 * S, w: P.w - 52 * S, h: (padY - P.y) * (wide ? .46 : .44) };
+  G = 1800 * S; V = Math.sqrt(2 * G * (padY - r - P.y - 34 * S)); VX = P.w * .56 / (2 * V / G);
+  Lab.sprite.clear("ll");
+}
+Lab.onResize(() => { if (!momo) return; const ux = (momo.x - P.x) / P.w, uy = (momo.y - P.y) / (padY - P.y), up = (pad.x - P.x) / P.w, v0 = V; layout(); momo.x = P.x + ux * P.w; momo.y = P.y + uy * (padY - P.y); momo.vy *= V / v0; pad.x = pad.tx = P.x + up * P.w; });
+const padHalf = () => padHalf0 * (level >= 7 ? .82 : level >= 5 ? .9 : 1);
+const fxOf = (f, t) => field.x + f.u * field.w + (level >= 4 && f.kind !== 2 ? Math.sin(t * 1.1 + f.v * 5) * Math.min(26 * S, field.w * .05) : 0);
+const fyOf = (f, t) => field.y + f.v * field.h + Math.sin(t * 2 + f.ph) * 2.5 * S;
+
+function spawnLevel() {
+  const cols = clamp(Math.floor(field.w / (fr * 3.3)), 5, 12), rows = clamp(Math.floor(field.h / (fr * 3.1)), 3, 6), pat = PATS[(level - 1) % PATS.length], hard = Math.min(.5, .14 * (level - 1));
+  fruits = []; for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) if (pat(i, j, cols, rows)) fruits.push({ u: (i + .5) / cols, v: (j + .5) / rows, kind: Lab.chance(hard * (.4 + j / rows)) ? 1 : 0, look: j % 3, eatT: 0, ripeT: 0, ph: rand(0, TAU), born: -(i + j) * .03, lone: false });
+  total = fruits.length; gold = null; goldDone = level < 2; sinceEat = 0;
+  bees = []; const nb = level < 2 ? 0 : Math.min(4, 1 + Math.floor((level - 2) / 2)); for (let i = 0; i < nb; i++) bees.push({ v: 1.16 + i * .2, ph: rand(0, TAU), sp: rand(.5, .8) * (i % 2 ? -1 : 1), off: 0, x: 0, y: 0 });
+}
+function reset() {
+  level = 1; lives = 3; score = 0; chain = 0; bestChain = 0; eaten = 0; over = false; big = 0; nextT = 0; auto = false; clock = 0; tongue = []; lifeB = 0; tipT = 0;
+  pad = { x: P.x + P.w / 2, tx: P.x + P.w / 2, v: 0, dip: 0 }; momo = { x: pad.x, y: padY - r, vx: 0, vy: 0, state: "sit", t: .9, sq: 0, dizzy: 0, gulp: 0, joy: 0 }; mouth = [momo.x, momo.y];
+  spawnLevel();
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0); Lab.music.intensity(.25);
+  Lab.input.onDown = [x => { pad.tx = x; }]; Lab.input.onMove = [x => { if (Lab.input.down || Lab.input.pointerType === "mouse") pad.tx = x; }];
+  Lab.expose({
+    get score() { return score; }, get lives() { return lives; }, get level() { return level; }, get chain() { return chain; }, get eaten() { return eaten; }, get big() { return big; },
+    get momo() { return { x: momo.x, y: momo.y, vx: momo.vx, vy: momo.vy, state: momo.state, dizzy: momo.dizzy > 0 }; }, get padX() { return pad.x; }, get padY() { return padY; }, get waterY() { return waterY; }, get r() { return r; }, get padHalf() { return padHalf(); },
+    fruits() { return fruits.filter(f => !f.eatT).map(f => ({ x: fxOf(f, clock), y: fyOf(f, clock), kind: f.kind })); }, bees() { return bees.length; },
+    auto(on) { auto = on; }, place(x, y, vx, vy) { chain = 0; momo.state = "air"; momo.x = x; momo.y = y; momo.vx = vx; momo.vy = vy; momo.dizzy = 0; }, setPad(x) { pad.x = pad.tx = x; },
+    clear() { fruits = []; bees = []; total = 0; gold = null; goldDone = true; }, add(x, y, kind) { fruits.push({ u: (x - field.x) / field.w, v: (y - field.y) / field.h, kind, look: 0, eatT: 0, ripeT: 0, ph: 0, born: 1, lone: false }); total++; },
+    bee(x, y) { bees.push({ v: (y - field.y) / field.h, ph: Math.asin(clamp((x - field.x) / field.w * 2 - 1, -1, 1)) - clock * 0, sp: 0, off: 0, x, y, fixed: [x, y] }); },
+  });
+  Lab.loop(frame);
+}
+/* ---------- play ---------- */
+function land(off) {
+  const h = padHalf(), k = clamp(off / h, -1, 1);
+  momo.y = padY - r; momo.vy = -V; momo.vx = k * VX + clamp(pad.v, -900 * S, 900 * S) * .12; momo.sq = .38; momo.dizzy = 0; pad.dip = 1;
+  if (chain >= 4) { const b = chain * 5; score += b; fx.text(momo.x, padY - r * 3, "Feast! +" + b, { color: "#ffe066", size: 20 * S }); momo.joy = .8; snd("coin"); }
+  chain = 0; snd("boing", { pitch: .85 + Math.abs(k) * .5, vol: .7 }); Lab.buzz(6);
+  pad.rip = 1;
+  fx.burst(momo.x, padY, { n: 5, color: "#eafff7", speed: 150, life: .4, size: 3, gravity: 600, spread: 1.6, angle: -1.57 });
+  if (!demo) { Lab.setScore(score); Lab.music.intensity(clamp(.25 + level * .08, 0, .8)); }
+}
+function eat(f, t) {
+  f.eatT = .001; chain++; bestChain = Math.max(bestChain, chain); eaten++; sinceEat = 0; momo.gulp = .3;
+  const gold_ = f.kind === 2, pts = gold_ ? 50 : 10 * Math.min(chain, 8); score += pts; if (!demo) { Lab.setScore(score); if (chain > 2) Lab.bumpScore(); Lab.audio.combo(Math.min(chain, 12), { vol: .22 }); }
+  tongue.push({ f, t: 0 }); snd("pop", { pitch: 1 + Math.min(chain, 10) * .06, vol: .5 });
+  fx.text(fxOf(f, t), fyOf(f, t) - fr * 1.6, "+" + pts, { color: chain > 2 ? "#ffe066" : "#fff", size: (15 + Math.min(chain, 8) * 1.6) * S });
+  if (gold_) { big = 8; snd("powerup"); momo.joy = 1; if (!demo) Lab.banner("BIG MOMO!", { color: "#f2a900", ms: 900, y: .3 }); }
+  if (chain >= 3) momo.joy = Math.max(momo.joy, .5);
+  if (!fruits.some(q => !q.eatT && q.kind !== 2)) { nextT = .7; }
+}
+function splash() {
+  lives--; lifeB = 1; chain = 0; big = 0; momo.state = "sunk"; momo.t = 1.1; momo.dizzy = 0;
+  snd("splash"); Lab.shake(7, .3); Lab.buzz(30);
+  fx.burst(momo.x, waterY, { n: 22, colors: ["#fff", "#d9fbff", SCENES[(level - 1) % 4].water[0]], speed: 380, life: .7, size: 5, gravity: 900, spread: 1.5, angle: -1.57 });
+  fx.ring(momo.x, waterY, { r0: 8, r1: 90 * S, color: "rgba(255,255,255,.8)", width: 4, life: .6 });
+  if (lives <= 0) { over = true; }
+}
+function step(h, t) {
+  const m = momo; pad.v = (pad.x - (pad.px == null ? pad.x : pad.px)) / h; pad.px = pad.x;
+  if (m.state === "sit") { m.x = pad.x; m.y = padY - r; if ((m.t -= h) <= 0) { m.state = "air"; m.vy = -V; m.vx = 0; m.sq = -.2; snd("jump"); } return; }
+  if (m.state === "sunk") { m.y += 120 * S * h; if ((m.t -= h) <= 0) { if (over) { if (!demo) Lab.gameover({ title: "Splash!", message: "Momo's lunch break is over.", score, stats: [["Trees cleared", level - 1], ["Best gulp", "×" + bestChain], ["Fruit eaten", eaten]] }); m.t = 99; } else { m.state = "sit"; m.t = .75; m.sq = .3; m.vx = m.vy = 0; } } return; }
+  const py = m.y, R = r * (big > 0 ? 1.45 : 1); m.vy += G * h; m.x += m.vx * h; m.y += m.vy * h; if (m.dizzy > 0) m.dizzy -= h;
+  if (m.x < P.x + r) { m.x = P.x + r; m.vx = Math.abs(m.vx) * .8; } if (m.x > P.x + P.w - r) { m.x = P.x + P.w - r; m.vx = -Math.abs(m.vx) * .8; }
+  if (m.y < P.y + r && m.vy < 0) { m.vy *= -.4; fx.burst(m.x, P.y, { n: 5, color: "#58b96e", speed: 120, shape: "shard", life: .5 }); snd("knock", { vol: .4 }); }
+  if (m.vy > 0 && py + r <= padY + 1 && m.y + r >= padY) { const off = m.x - pad.x; if (Math.abs(off) <= padHalf() + r * .75) land(off); }
+  if (m.y - r > waterY + 6 * S) { splash(); return; }
+  for (const f of fruits) {
+    if (f.eatT || f.born < .6) continue; const x = fxOf(f, t), y = fyOf(f, t), dx = m.x - x, dy = m.y - y, d = Math.hypot(dx, dy) || 1;
+    if (f.kind === 1 && big <= 0) {
+      if (d < R + fr && f.ripeT <= 0) { const nx = dx / d, ny = dy / d, vn = m.vx * nx + m.vy * ny; if (vn < 0) { m.vx -= 1.7 * vn * nx; m.vy -= 1.7 * vn * ny; } m.x = x + nx * (R + fr + 1); m.y = y + ny * (R + fr + 1); f.ripeT = .3; f.kind = 0; f.wob = 1; score += 5; if (!demo) Lab.setScore(score); m.sq = .2; snd("knock", { pitch: 1.3 }); Lab.hitstop(.03); fx.burst(x, y, { n: 6, color: "#b7e39a", speed: 160, life: .4, size: 4 }); fx.text(x, y - fr * 1.5, "ripe!", { color: "#fff", size: 13 * S }); }
+    } else if (f.ripeT <= 0 && m.dizzy <= 0 && d < R + fr + 9 * S) eat(f, t);
+  }
+  for (const b of bees) { if (b.off > 0 || m.dizzy > 0) continue; if (Math.hypot(m.x - b.x, m.y - b.y) < R * .85 + 9 * S) { b.off = 2.6; m.dizzy = 1; m.vx *= .15; m.vy = Math.max(m.vy, 0) + 160 * S; chain = 0; if (big > 0) { big = 0; } snd("zap", { pitch: 1.4, vol: .6 }); snd("hurt", { vol: .5 }); Lab.shake(5, .2); Lab.buzz(20); fx.burst(b.x, b.y, { n: 8, colors: ["#ffd23f", "#fff"], speed: 200, life: .4, shape: "spark" }); fx.text(m.x, m.y - r * 2, "Ouch!", { color: "#ffd23f", size: 17 * S }); } }
+}
+function update(dt, t) {
+  clock = t;
+  if (Lab.input.axisX()) pad.tx = clamp(pad.tx + Lab.input.axisX() * 760 * S * dt, P.x, P.x + P.w);
+  if (auto || demo) { const m = momo, live = fruits.filter(f => !f.eatT && f.kind !== 2); let aim = 0; if (live.length && m.state === "air") { const f = live.reduce((a, b) => Math.abs(fxOf(a, t) - m.x) > Math.abs(fxOf(b, t) - m.x) ? a : b), dx = fxOf(f, t) - m.x; aim = clamp(dx / (VX * .9), -1, 1) * padHalf() * .8; } pad.tx = m.x - aim; }
+  const ph = padHalf(); pad.tx = clamp(pad.tx, P.x + ph * .7, P.x + P.w - ph * .7); pad.x = Lab.damp(pad.x, pad.tx, 34, dt); pad.dip = Math.max(0, pad.dip - dt * 4); pad.rip = Math.max(0, (pad.rip || 0) - dt * 2);
+  const n = Math.max(1, Math.ceil(dt / .008)); for (let i = 0; i < n; i++) step(dt / n, t);
+  momo.sq = Lab.damp(momo.sq, 0, 9, dt); momo.gulp = Math.max(0, momo.gulp - dt); momo.joy = Math.max(0, momo.joy - dt); if (big > 0) big -= dt; lifeB = Math.max(0, lifeB - dt * 2);
+  for (const b of bees) { if (b.off > 0) b.off -= dt; if (b.fixed) { b.x = b.fixed[0]; b.y = b.fixed[1]; continue; } b.x = field.x + field.w * (.5 + .46 * Math.sin(t * b.sp + b.ph)); b.y = field.y + b.v * field.h + Math.sin(t * 3 + b.ph) * 7 * S; }
+  for (let i = fruits.length - 1; i >= 0; i--) {
+    const f = fruits[i]; if (f.born < 1) f.born = Math.min(1, f.born + dt * 3.5); if (f.ripeT > 0) f.ripeT -= dt; if (f.wob > 0) f.wob -= dt * 3;
+    if (f.eatT) { f.eatT += dt; if (f.eatT > .13) { fruits.splice(i, 1); fx.burst(mouth[0], mouth[1], { n: 5, colors: [FRUIT[f.look].c, "#fff"], speed: 110, life: .35, size: 3 }); } continue; }
+    if (f.lone) { const tx = clamp((momo.x - field.x) / field.w, .05, .95); f.u += clamp(tx - f.u, -.05 * dt, .05 * dt) * 3; f.v = Math.min(1.5, f.v + dt * .09); if (f.kind === 1) f.kind = 0; }
+    if (f.kind === 2) { f.u += dt * .11; if (f.u > 1.15) { fruits.splice(i, 1); gold = null; } }
+  }
+  sinceEat += dt; const left = fruits.filter(f => !f.eatT && f.kind !== 2);
+  if (sinceEat > 7 && left.length <= 3 && momo.state === "air") left.forEach(f => f.lone = true);
+  if (!goldDone && left.length <= total / 2 && left.length > 2) { goldDone = true; gold = { u: -.12, v: 1.22, kind: 2, look: 0, eatT: 0, ripeT: 0, ph: 0, born: 1, lone: false }; fruits.push(gold); snd("star"); }
+  if (nextT > 0 && (nextT -= dt) <= 0) {
+    score += 100 * level; level++; if (level % 3 === 1 && lives < 3) { lives++; lifeB = 1; snd("powerup"); }
+    if (!demo) { Lab.setScore(score); Lab.bumpScore(); Lab.banner("Tree " + level, { color: "#2f9a64", ms: 1000, y: .32 }); snd("levelup"); Lab.sprite.clear("llbg"); }
+    spawnLevel(); fx.burst(momo.x, momo.y, { n: 16, colors: ["#ffe066", "#fff", "#ff9a7a"], speed: 240, shape: "star", life: .7 });
+  }
+  for (let i = tongue.length - 1; i >= 0; i--) if ((tongue[i].t += dt) > .13) tongue.splice(i, 1);
+  if (!demo && level === 1 && momo.state === "air" && (tipT += dt) > 0 && tipT < 99 && eaten === 0 && tipT > 6) { tipT = 99; Lab.toast("Land him on the pad's edge to steer", 1800, { y: .62 }); }
+}
+function frame(dt, t) { update(dt, t); render(t); }
+function attract(dt, t) { if (!demo) { demo = true; layout(); reset(); } if (over || lives < 3) { lives = 3; over = false; } update(dt, t); render(t); }
+
+/* ---------- drawing ---------- */
+function ell(g, x, y, rx, ry, rot) { g.beginPath(); g.ellipse(x, y, Math.max(0, rx), Math.max(0, ry), rot || 0, 0, TAU); }
+function fruitSpr(kind, look) {
+  const s = Math.round(fr * 3.4); return Lab.sprite("llf" + kind + look + "_" + s, s, s, g => {
+    g.translate(s / 2, s / 2 + fr * .2); g.lineCap = "round"; const q = fr;
+    g.strokeStyle = "#7a5a3a"; g.lineWidth = q * .14; g.beginPath(); g.moveTo(0, -q * .8); g.quadraticCurveTo(q * .1, -q * 1.3, -q * .05, -q * 1.7); g.stroke();
+    g.fillStyle = kind === 1 ? "#6fae58" : "#58b96e"; ell(g, q * .42, -q * 1.25, q * .46, q * .2, -.5); g.fill();
+    if (kind === 2) { g.fillStyle = "rgba(255,224,102,.35)"; ell(g, 0, 0, q * 1.55, q * 1.55); g.fill(); }
+    const c = kind === 1 ? { c: "#9fd67a", d: "#78b85c" } : kind === 2 ? { c: "#ffd23f", d: "#f2a900" } : FRUIT[look];
+    if (kind !== 1 && look === 2) { for (const d of [-1, 1]) { g.fillStyle = c.c; ell(g, d * q * .46, q * .12, q * .56, q * .56); g.fill(); g.fillStyle = "rgba(255,255,255,.4)"; ell(g, d * q * .46 - q * .2, -q * .1, q * .14, q * .1, -.6); g.fill(); } return; }
+    g.fillStyle = c.c; ell(g, 0, 0, q, q * (look === 1 && kind !== 1 ? 1.08 : .96)); g.fill(); g.save(); g.clip(); g.fillStyle = c.d; ell(g, q * .3, q * .5, q, q * .8); g.fill(); g.restore();
+    if (kind !== 1 && look === 0) { g.strokeStyle = c.d; g.lineWidth = q * .1; g.beginPath(); g.moveTo(0, -q * .8); g.quadraticCurveTo(-q * .3, 0, 0, q * .7); g.stroke(); }
+    g.fillStyle = "rgba(255,255,255,.45)"; ell(g, -q * .4, -q * .42, q * .24, q * .15, -.6); g.fill();
+    if (kind === 1) { g.strokeStyle = "rgba(43,35,64,.5)"; g.lineWidth = q * .12; g.beginPath(); g.moveTo(-q * .4, -q * .05); g.lineTo(-q * .12, q * .08); g.moveTo(q * .4, -q * .05); g.lineTo(q * .12, q * .08); g.stroke(); g.beginPath(); g.moveTo(-q * .2, q * .42); g.lineTo(q * .2, q * .42); g.stroke(); }
+  });
+}
+function drawBg(c, t) {
+  const W = Lab.W, H = Lab.H, sc = SCENES[(level - 1) % 4], bg = Lab.sprite("llbg" + W + "x" + H + "_" + (level - 1) % 4, W + 80, H + 80, g => {
+    g.translate(40, 40); draw.vgrad(g, -40, -40, W + 80, H + 80, [[0, sc.sky[0]], [.8, sc.sky[1]]]);
+    g.fillStyle = "rgba(255,255,255,.55)"; ell(g, W * .78, P.y + (waterY - P.y) * .62, 42 * S, 42 * S); g.fill();
+    g.fillStyle = sc.hill; g.beginPath(); g.moveTo(-40, waterY); for (let x = -40; x <= W + 40; x += 16) g.lineTo(x, waterY - 46 * S - Math.sin(x * .011 + 1) * 22 * S - Math.sin(x * .029) * 8 * S); g.lineTo(W + 40, waterY); g.fill();
+    const rng = Lab.rng(5); g.strokeStyle = Lab.color.shade(sc.hill, -.22); g.lineWidth = 3 * S; g.lineCap = "round"; for (let i = 0; i < 16; i++) { const x = rng() * W, hgt = (40 + rng() * 60) * S; g.beginPath(); g.moveTo(x, waterY); g.quadraticCurveTo(x + 6 * S, waterY - hgt * .5, x + (rng() - .5) * 20 * S, waterY - hgt); g.stroke(); g.fillStyle = "#8a5a3a"; ell(g, x + 2, waterY - hgt * .9, 3.4 * S, 9 * S); if (i % 2) g.fill(); }
+    for (let l = 0; l < 2; l++) { g.fillStyle = sc.leaf[1 - l]; for (let x = -30; x < W + 40; x += 34 * S) { const y = P.y - 30 * S + rng() * 26 * S + l * -10 * S; ell(g, x + rng() * 12, y, (36 + rng() * 16) * S, (40 + rng() * 22 - l * 14) * S); g.fill(); } }
+    g.strokeStyle = sc.leaf[1]; g.lineWidth = 2.5 * S; for (let i = 0; i < 9; i++) { const x = (i + .5) / 9 * W + (rng() - .5) * 20, len = (30 + rng() * 60) * S; g.beginPath(); g.moveTo(x, P.y - 6); g.quadraticCurveTo(x + 8 * S, P.y + len * .5, x - 4 * S, P.y + len); g.stroke(); g.fillStyle = sc.leaf[0]; ell(g, x - 4 * S, P.y + len, 7 * S, 4 * S, .6); g.fill(); }
+  });
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, sc = SCENES[(level - 1) % 4], m = momo, ph = padHalf(); drawBg(c, t);
+  // water (back)
+  draw.vgrad(c, -40, waterY, W + 80, H - waterY + 40, sc.water); c.fillStyle = "rgba(255,255,255,.35)"; for (let i = 0; i < 7; i++) { const x = ((i * .17 * W + t * (10 + i * 3)) % (W + 80)) - 40; c.fillRect(x, waterY + 10 * S + (i % 3) * 13 * S, 34 * S, 2.5 * S); }
+  // fruit + bees
+  for (const f of fruits) {
+    if (f.born <= 0) continue; let x = fxOf(f, t), y = fyOf(f, t), k = ease.outBack(clamp(f.born, 0, 1));
+    if (f.eatT) { const u = clamp(f.eatT / .13, 0, 1); x = lerp(x, mouth[0], u * u); y = lerp(y, mouth[1], u * u); k = 1 - u * .6; }
+    if (f.kind === 2) { draw.circle(c, x, y, fr * 1.7, "rgba(255,255,255,.22)", "rgba(255,255,255,.8)", 2); }
+    const sp = fruitSpr(f.kind, f.look), w = sp.w * k; c.save(); c.translate(x, y - fr * 1.5); c.rotate(Math.sin(t * 1.6 + f.ph) * .08 + (f.wob > 0 ? Math.sin(f.wob * 20) * .3 * f.wob : 0)); c.drawImage(sp, -w / 2, fr * 1.5 - w / 2 - fr * .2 * k, w, w); c.restore();
+  }
+  for (const b of bees) {
+    c.save(); c.translate(b.x, b.y); c.globalAlpha = b.off > 0 ? .35 : 1; const q = 9 * S, dir = b.fixed ? 1 : Math.sign(Math.cos(t * b.sp + b.ph) * b.sp) || 1; c.scale(dir, 1);
+    c.fillStyle = "rgba(255,255,255,.75)"; const fl = Math.sin(t * 40) * .5; ell(c, -q * .2, -q * .9, q * .7, q * .4, -.5 + fl); c.fill(); ell(c, q * .3, -q * .9, q * .6, q * .36, .3 - fl); c.fill();
+    c.fillStyle = "#ffd23f"; ell(c, 0, 0, q * 1.25, q * .95); c.fill(); c.save(); c.clip(); c.fillStyle = INK; c.fillRect(-q * .55, -q, q * .4, q * 2); c.fillRect(q * .15, -q, q * .4, q * 2); c.restore();
+    c.fillStyle = INK; ell(c, q * .95, -q * .15, q * .16, q * .16); c.fill(); c.beginPath(); c.moveTo(-q * 1.2, 0); c.lineTo(-q * 1.7, -q * .1); c.lineTo(-q * 1.2, q * .25); c.fill(); c.restore();
+  }
+  // lily pad
+  const py = padY + pad.dip * 7 * S + Math.sin(t * 2) * 1.5 * S, tilt = clamp(pad.v / 2600, -.12, .12);
+  c.save(); c.translate(pad.x, py); c.rotate(tilt);
+  c.fillStyle = "rgba(0,40,60,.16)"; ell(c, 0, 9 * S, ph * 1.02, 9 * S); c.fill(); if (pad.rip > 0) { c.strokeStyle = `rgba(255,255,255,${pad.rip * .7})`; c.lineWidth = 2.5 * S; ell(c, 0, 6 * S, ph * (1.05 + (1 - pad.rip) * .6), (11 + (1 - pad.rip) * 9) * S); c.stroke(); }
+  c.fillStyle = "#2f8f5c"; ell(c, 0, 5 * S, ph, 10 * S); c.fill(); c.fillStyle = "#4dbb78"; c.beginPath(); c.ellipse(0, 1 * S, ph, 9 * S, 0, .32, TAU - .12); c.lineTo(0, 1 * S); c.fill();
+  c.strokeStyle = "rgba(255,255,255,.3)"; c.lineWidth = 1.5 * S; for (const a of [-.75, -.35, .3, .7]) { c.beginPath(); c.moveTo(0, S); c.lineTo(Math.sin(a) * ph * .9, S - Math.cos(a) * 3 * S + 3 * S * Math.abs(a)); c.stroke(); }
+  c.fillStyle = "#ff9ec4"; for (let i = 0; i < 5; i++) { ell(c, -ph * .72 + Math.cos(i * 1.257 - 1.57) * 5 * S, -3 * S + Math.sin(i * 1.257 - 1.57) * 3.4 * S, 4 * S, 3 * S, i * 1.257); c.fill(); } c.fillStyle = "#ffe066"; ell(c, -ph * .72, -3 * S, 2.4 * S, 2 * S); c.fill();
+  c.restore();
+  // Momo
+  if (m.state !== "sunk" || m.t < 98) {
+    const size = r * 2.1 * (big > 0 ? 1.45 * (big < 1.5 ? 1 + Math.sin(t * 30) * .04 : 1) : 1), air = m.state === "air", sp = clamp(Math.abs(m.vy) / V, 0, 1);
+    const near = fruits.some(f => !f.eatT && f.kind !== 1 && Math.hypot(fxOf(f, t) - m.x, fyOf(f, t) - m.y) < r * 4);
+    const far = air && m.vy > 0 && m.y > field.y + field.h && Math.abs(m.x - pad.x) > ph * 1.5;
+    const mood = m.state === "sunk" ? "dizzy" : m.dizzy > 0 ? "dizzy" : m.joy > 0 ? "joy" : far ? "scared" : near ? "wow" : "happy";
+    const a = Pals.draw(c, "momo", m.x, m.y + r - size / 2, size, { t, mood, squash: air ? m.sq - sp * .16 : m.sq, tilt: air ? clamp(m.vx / VX, -1, 1) * .28 * (m.vy < 0 ? 1 : -.6) : 0, look: air ? [clamp(m.vx / VX, -1, 1), m.vy < 0 ? -.8 : .8] : [0, -.6], arms: air ? (m.vy < 0 ? "up" : m.joy > 0 ? "cheer" : "down") : "down", talk: m.gulp > 0 || near ? .9 : 0, shadow: false, tint: big > 0 ? "#7fe0a6" : null });
+    mouth = a && a.mouth ? a.mouth : [m.x, m.y - r * .2];
+    for (const q of tongue) { const u = q.t / .13, x = lerp(fxOf(q.f, t), mouth[0], u * u), y = lerp(fyOf(q.f, t), mouth[1], u * u); c.strokeStyle = "#ff7d9a"; c.lineWidth = 5 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(mouth[0], mouth[1]); c.lineTo(x, y); c.stroke(); }
+    if (m.dizzy > 0) for (let i = 0; i < 3; i++) draw.star(c, m.x + Math.cos(t * 7 + i * 2.1) * r, m.y - r * 1.5 + Math.sin(t * 7 + i * 2.1) * r * .3, 4.5 * S, "#ffd23f", 5);
+    if (chain >= 2 && air) draw.text(c, "×" + chain, m.x + r * 1.5, m.y - r * 1.2, { size: (14 + Math.min(chain, 8) * 1.4) * S, color: "#fff", stroke: "rgba(35,74,60,.7)", weight: 800 });
+    if (air && m.y < P.y - r) { c.fillStyle = "#36a873"; c.beginPath(); c.moveTo(m.x, P.y + 4); c.lineTo(m.x - 8, P.y + 16); c.lineTo(m.x + 8, P.y + 16); c.fill(); }
+  }
+  // water (front) so a sunk Momo disappears into it
+  c.globalAlpha = .82; draw.vgrad(c, -40, waterY + 3 * S, W + 80, H - waterY + 40, sc.water); c.globalAlpha = 1;
+  // lives + level
+  for (let i = 0; i < 3; i++) { const x = P.x + 22 * S + i * 26 * S, y = P.y + 20 * S, on = i < lives, k = on ? 1 : .8, pop = i === lives && lifeB > 0 ? 1 + lifeB * .6 : 1; c.globalAlpha = on ? 1 : .3; c.fillStyle = on ? "#ff8fb8" : "#7d9488"; for (let p = 0; p < 5; p++) { ell(c, x + Math.cos(p * 1.257 - 1.57) * 6 * S * k * pop, y + Math.sin(p * 1.257 - 1.57) * 6 * S * k * pop, 5 * S * k, 5 * S * k); c.fill(); } c.fillStyle = on ? "#ffe066" : "#9fb3a8"; ell(c, x, y, 4 * S * k, 4 * S * k); c.fill(); c.globalAlpha = 1; }
+  draw.text(c, "Tree " + level, P.x + P.w - 14 * S, P.y + 20 * S, { size: 15 * Math.max(S, .85), color: "#fff", stroke: "rgba(35,74,60,.75)", align: "right", weight: 700 });
+  if (big > 0) draw.rect(c, P.x + P.w / 2 - 40 * S, P.y + 16 * S, 80 * S * clamp(big / 8, 0, 1), 7 * S, 3.5 * S, "#f2a900");
+}
+Lab.boot();
+})();
+</script></body></html>

@@ -1,0 +1,302 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Pack Ice</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PACK ICE — Nori the penguin shoves ice blocks across a frozen pond.
+ * Core idea kept: polyomino pieces, an 8×8 board, full rows and columns clear.
+ * Twist (the verb changes): you do not PLACE a piece, you SLIDE it. Drag a piece to any of the four edges and Nori
+ *          pushes it in from there — it glides until it bumps into something. Where things stop is the whole puzzle:
+ *          overhangs, pockets that can only be reached from one side, lanes that get corked.
+ *          FISH are frozen in some blocks; clear them and Nori eats them. Five fish = one BELLY SLIDE: drag Nori
+ *          himself to an edge and he slides down that lane smashing every block in it.
+ *          Each "catch" (6 lines) moves the marker buoys — fixed posts that stop slides mid-board — and adds bigger pieces.
+ * Identity: bright snowfield, pale rink, candy-coloured ice cubes, navy penguin; glassy sounds, "puzzle" music. */
+let demo = false, demoT = 0;
+Lab.init({
+  title: "Pack Ice", tagline: "Slide ice blocks in from any side. Fill a line to crack it.", category: "Puzzle", kicker: "Pocket Pals",
+  howto: ["Drag a block to any edge of the pond", "Nori slides it in until it bumps", "Full lines crack. Feed Nori 5 fish, then drag him!"],
+  theme: { bg: "#cfeaff", bg2: "#f6fcff", accent: "#2f7fd6", accent2: "#ffa62b", fg: "#1e2850", muted: "#51648f", light: true },
+  orient: "any", music: { style: "puzzle", key: "A", vol: .4 }, restart: start, attract,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, shade = Lab.color.shade, INK = Pals.ink;
+const N = 8, COLS = ["#3d9bff", "#1fc4a7", "#9b7bff", "#ff7fae", "#ffb02e"], DIR = [[1, 0], [0, -1], [-1, 0], [0, 1]]; // side 0 top · 1 right · 2 bottom · 3 left
+const DEFS = [[["#"], 2, 1], [["##"], 3, 1], [["###"], 3, 1], [["#.", "##"], 4, 1], [["##", "##"], 3, 1], [["####"], 2, 1], [["###", ".#."], 3, 1], [["#..", "###"], 2, 1], [["..#", "###"], 2, 1],
+[[".##", "##."], 1, 1], [["##.", ".##"], 1, 1], [["#####"], 1, 3], [["#.#", "###"], 1, 3], [[".#.", "###", ".#."], 1, 3], [["#..", "#..", "###"], 1, 3], [["###", "###"], 1, 4]];
+function parse(rows) { const cells = []; rows.forEach((s, r) => [...s].forEach((ch, c) => { if (ch === "#") cells.push([r, c]); })); return norm(cells); }
+function norm(cells) { const mr = Math.min(...cells.map(q => q[0])), mc = Math.min(...cells.map(q => q[1])); cells = cells.map(q => [q[0] - mr, q[1] - mc]).sort((a, b) => a[0] - b[0] || a[1] - b[1]); return { cells, h: Math.max(...cells.map(q => q[0])) + 1, w: Math.max(...cells.map(q => q[1])) + 1 }; }
+const SHAPES = DEFS.map(([rows, wt, lvl]) => { const rots = [], seen = {}; let p = parse(rows); for (let i = 0; i < 4; i++) { const k = JSON.stringify(p.cells); if (!seen[k]) { seen[k] = 1; rots.push(p); } p = norm(p.cells.map(([r, c]) => [c, p.h - 1 - r])); } return { rots, wt, lvl }; });
+let S, P, wide, side, bx, by, cell, home, slots, info;
+let grid, posts, tray, drag, aim, ghosts, flyers, score, lines, level, streak, bestStreak, fishEaten, meter, charge, moves, over, clock, nori, nudge, slamT, stuckT;
+
+function layout() {
+  P = Lab.play; wide = P.w > P.h * 1.15;
+  if (wide) {
+    side = Math.min(P.h - 92, P.w / 2.4); S = side / 300; bx = P.x + (P.w - side) / 2; by = P.y + (P.h - side) / 2;
+    home = { x: bx - 128 * S, y: by + 78 * S }; info = { x: bx - 128 * S, y: by + side - 70 * S, w: 150 * S };
+    slots = [0, 1, 2].map(i => ({ x: bx + side + 124 * S, y: by + side * (i + .5) / 3, w: 130 * S, h: side / 3 - 6 * S }));
+  } else {
+    S = Math.min(P.w / 390, P.h / 730); side = Math.min(P.w - 96 * S, P.h - 330 * S); S = Math.min(S, side / 280); const top = Math.max(0, (P.h - side - 330 * S) * .4);
+    bx = P.x + (P.w - side) / 2; by = P.y + top + 142 * S; home = { x: P.x + 52 * S, y: P.y + top + 56 * S }; info = { x: P.x + P.w - 88 * S, y: P.y + top + 50 * S, w: 150 * S };
+    slots = [0, 1, 2].map(i => ({ x: P.x + P.w * (i + .5) / 3, y: by + side + 126 * S, w: P.w / 3 - 8 * S, h: 112 * S }));
+  }
+  cell = side / N; Lab.sprite.clear("pi");
+}
+Lab.onResize(() => { if (grid) { layout(); drag = aim = null; if (nori) { nori.x = home.x; nori.y = home.y; } } });
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function mkPiece(def, rot) {
+  if (!def) { const pool = SHAPES.filter(s => s.lvl <= level); let w = rand(0, pool.reduce((a, s) => a + s.wt * (s.lvl > 1 && level >= 5 ? 2 : 1), 0)); def = pool[pool.length - 1]; for (const s of pool) { w -= s.wt * (s.lvl > 1 && level >= 5 ? 2 : 1); if (w <= 0) { def = s; break; } } }
+  const p = rot == null ? Lab.choose(def.rots) : def.rots[rot % def.rots.length];
+  return { cells: p.cells, w: p.w, h: p.h, col: Lab.randInt(0, COLS.length - 1), fish: Lab.chance(.32) ? Lab.randInt(0, p.cells.length - 1) : -1, pop: 0 };
+}
+function reset() {
+  grid = Array.from({ length: N }, () => Array(N).fill(null)); posts = Array.from({ length: N }, () => Array(N).fill(false)); ghosts = []; flyers = [];
+  score = 0; lines = 0; level = 1; streak = bestStreak = 0; fishEaten = 0; meter = 0; charge = 0; moves = 0; over = false; clock = 0; drag = aim = null; nudge = { x: 0, y: 0 }; slamT = 0; stuckT = 0;
+  nori = { x: home.x, y: home.y, mode: "home", t: 0, joy: 0, gulp: 0, sq: 0, k: 0 }; tray = []; deal();
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => { if (over || drag) return; pick(x, y); }];
+  Lab.input.onMove = [(x, y) => { if (drag) { drag.x = x; drag.y = y; updateAim(); } }];
+  Lab.input.onUp = [(x, y) => { if (drag) { drag.x = x; drag.y = y; updateAim(); drop(); } }];
+  Lab.hint("Drag a block to an edge of the pond");
+  Lab.expose({
+    get score() { return score; }, get lines() { return lines; }, get level() { return level; }, get streak() { return streak; }, get meter() { return meter; }, get charge() { return charge; }, set charge(v) { charge = v; },
+    get over() { return over; }, get moves() { return moves; }, get fish() { return fishEaten; }, get geo() { return { bx, by, cell, side, slots, home }; },
+    grid() { return grid.map((row, r) => row.map((b, c) => posts[r][c] ? "P" : !b ? "." : b.fish ? "f" : "#").join("")); },
+    tray() { return tray.map(p => p ? p.cells.length : 0); },
+    setGrid(rows) { ghosts = []; rows.forEach((s, r) => [...s].forEach((ch, c) => { posts[r][c] = ch === "P"; grid[r][c] = ch === "#" || ch === "f" ? { col: (r + c) % COLS.length, fish: ch === "f", t0: 0, dur: 0, fr: r, fc: c } : null; })); },
+    setTray(list) { tray = list.map(rows => { if (!rows) return null; const p = parse(rows); return { cells: p.cells, w: p.w, h: p.h, col: 0, fish: -1, pop: 0 }; }); },
+    rest(i, s, lane) { return tray[i] ? rest(tray[i], s, lane) : null; }, launch, canMove: anyMove, check: checkOver,
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- rules ---------- */
+function freeAt(p, r, c, s) {
+  for (const [i, j] of p.cells) {
+    const R = r + i, C = c + j;
+    if (R < 0 || R >= N || C < 0 || C >= N) { if ((s === 0 && R < 0) || (s === 2 && R >= N) || (s === 3 && C < 0) || (s === 1 && C >= N)) { if ((s % 2 === 0 && (C < 0 || C >= N)) || (s % 2 && (R < 0 || R >= N))) return false; continue; } return false; }
+    if (grid[R][C] || posts[R][C]) return false;
+  }
+  return true;
+}
+/* Where does piece p come to rest when pushed in from side s at lane (leftmost column / top row)? null = cannot get fully onto the pond. */
+function rest(p, s, lane) {
+  if (lane < 0 || lane > N - (s % 2 ? p.h : p.w)) return null;
+  const [dr, dc] = DIR[s]; let r = s === 0 ? -p.h : s === 2 ? N : lane, c = s === 3 ? -p.w : s === 1 ? N : lane, steps = 0;
+  while (freeAt(p, r + dr, c + dc, s)) { r += dr; c += dc; steps++; }
+  return r < 0 || c < 0 || r + p.h > N || c + p.w > N ? null : { r, c, steps };
+}
+function findLines() {
+  const out = [];
+  for (let r = 0; r < N; r++) { let n = 0, ok = true; for (let c = 0; c < N; c++) { if (grid[r][c]) n++; else if (!posts[r][c]) { ok = false; break; } } if (ok && n) out.push(["r", r]); }
+  for (let c = 0; c < N; c++) { let n = 0, ok = true; for (let r = 0; r < N; r++) { if (grid[r][c]) n++; else if (!posts[r][c]) { ok = false; break; } } if (ok && n) out.push(["c", c]); }
+  return out;
+}
+function fits(p) { for (let s = 0; s < 4; s++) for (let l = 0; l < N; l++) if (rest(p, s, l)) return true; return false; }
+function anyMove() { return tray.some(p => p && fits(p)); }
+function deal() {
+  tray = [0, 1, 2].map(() => mkPiece());
+  if (moves === 0 && !demo) { tray[0] = mkPiece(SHAPES[4], 0); tray[1] = mkPiece(SHAPES[2], 0); tray[2] = mkPiece(SHAPES[3], 1); }
+  if (!anyMove()) { const cands = SHAPES.slice().sort((a, b) => b.rots[0].cells.length - a.rots[0].cells.length); for (const d of cands) { const ok = d.rots.findIndex(q => fits(q)); if (ok >= 0) { tray[0] = mkPiece(d, ok); break; } } }
+  tray.forEach((p, i) => { p.pop = 1 + i * .12; });
+}
+function checkOver() {
+  if (over || anyMove()) { stuckT = 0; return; }
+  if (charge > 0) { if (!stuckT) { stuckT = 1; if (!demo) Lab.hint("No block fits — drag Nori to smash a lane!", { sticky: true }); } return; }
+  over = true; drag = aim = null; if (demo) return;
+  Lab.after(.9, () => { snd("thud", { pitch: .6 }); Lab.shake(6, .3); });
+  Lab.after(1.5, () => Lab.gameover({ title: "Frozen solid!", message: "No block fits anywhere. Nori landed " + fishEaten + " fish.", score, stats: [["Lines", lines], ["Catch", level], ["Best streak", "×" + Math.max(1, bestStreak)]] }));
+}
+function launch(i, s, lane) {
+  const p = tray[i], res = p && rest(p, s, lane); if (!res || over) return false;
+  tray[i] = null; moves++; const [dr, dc] = DIR[s], t0 = clock + .1, dur = .09 + .034 * res.steps, land = t0 + dur - clock;
+  p.cells.forEach(([a, b], k) => { grid[res.r + a][res.c + b] = { col: p.col, fish: k === p.fish, fr: res.r + a - dr * res.steps, fc: res.c + b - dc * res.steps, t0, dur }; });
+  score += p.cells.length; { const sp = edgeSpot(s, lane, s % 2 ? p.h : p.w); nori.x = sp[0]; nori.y = sp[1]; } nori.mode = "push"; nori.t = 0; nori.side = s; snd("slide", { pitch: 1.3 - res.steps * .05, vol: .7 });
+  const lx = bx + (res.c + (dc > 0 ? p.w : dc < 0 ? 0 : p.w / 2)) * cell, ly = by + (res.r + (dr > 0 ? p.h : dr < 0 ? 0 : p.h / 2)) * cell;
+  Lab.after(land, () => { if (demo) return; snd("knock", { pitch: 1.25 - res.steps * .06 }); nudge.x += dc * (2 + res.steps * .6) * S; nudge.y += dr * (2 + res.steps * .6) * S; fx.burst(lx, ly, { n: 5 + res.steps, colors: ["#fff", "#d9f1ff"], speed: 120 * S, life: .35, size: 3 * S, shape: "shard", angle: Math.atan2(-dr, -dc), spread: 2.2 }); Lab.buzz(8); });
+  resolve(land, 1); if (tray.every(q => !q)) deal(); checkOver(); if (!demo) Lab.setScore(score);
+  return true;
+}
+function resolve(delay, viaPiece) {
+  const ls = findLines(); if (!ls.length) { if (viaPiece) streak = 0; return; }
+  streak++; bestStreak = Math.max(bestStreak, streak); const set = new Set(); for (const [k, i] of ls) for (let j = 0; j < N; j++) set.add(k === "r" ? i * N + j : j * N + i);
+  let fishN = 0, idx = 0, cx = 0, cy = 0, n = 0;
+  for (const key of set) { const r = Math.floor(key / N), c = key % N, b = grid[r][c]; if (!b) continue; grid[r][c] = null; b.r = r; b.c = c; b.dieAt = clock + delay + .12 + (idx++) * .022; ghosts.push(b); if (b.fish) fishN++; cx += c; cy += r; n++; }
+  const L2 = ls.length, mult = Math.min(5, streak), pts = 60 * L2 * L2 * mult + fishN * 30; score += pts; lines += L2;
+  const tx = bx + (cx / n + .5) * cell, ty = by + (cy / n + .5) * cell;
+  Lab.after(delay + .12, () => {
+    if (demo) return; snd("glass", { pitch: .9 + L2 * .12 }); Lab.audio.combo(2 + streak * 2 + L2); Lab.shake(3 + L2 * 3, .2); nori.joy = 1.1; Lab.bumpScore(); Lab.setScore(score);
+    fx.text(tx, ty, "+" + pts, { color: "#1e2850", size: (20 + L2 * 4) * S, outline: "#fff" });
+    if (L2 > 1 || mult > 1) Lab.banner((L2 > 2 ? "TRIPLE CRACK" : L2 > 1 ? "DOUBLE CRACK" : "STREAK") + (mult > 1 ? "  ×" + mult : ""), { color: "#ffa62b", ms: 900, y: bY() });
+  });
+  const nl = 1 + Math.floor(lines / 6); if (nl > level) { level = nl; Lab.after(delay + .7, levelUp); }
+}
+function levelUp() {
+  if (over) return; const want = Math.min(4, level - 1), old = posts; let ok = false;
+  for (let tries = 0; tries < 12 && !ok; tries++) {
+    posts = Array.from({ length: N }, () => Array(N).fill(false)); const free = [];
+    for (let r = 1; r < N - 1; r++) for (let c = 1; c < N - 1; c++) if (!grid[r][c]) free.push([r, c]);
+    Lab.shuffle(free).slice(0, want).forEach(([r, c]) => { posts[r][c] = true; }); ok = anyMove() && !findLines().length;
+  }
+  if (!ok) posts = old; if (demo) return;
+  Lab.banner("CATCH " + level, { color: "#2f7fd6", ms: 1300, y: bY() }); snd("levelup"); Lab.toast(level === 3 ? "Bigger blocks ahead!" : "The buoys moved", 1500, { y: bY() + .07 });
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (posts[r][c]) fx.ring(bx + (c + .5) * cell, by + (r + .5) * cell, { r0: 4, r1: cell, color: "#ff5d5d", life: .5 });
+  checkOver();
+}
+function laneBlocks(s, lane) { const out = []; for (let j = 0; j < N; j++) { const r = s % 2 ? lane : j, c = s % 2 ? j : lane; if (grid[r][c]) out.push([r, c]); } return out; }
+function belly(s, lane) {
+  const bl = laneBlocks(s, lane); if (charge < 1 || !bl.length || over) return false;
+  charge--; moves++; slamT = .6; nori.mode = "slide"; nori.side = s; nori.lane = lane; nori.k = 0; stuckT = 0; if (!demo) Lab.hint("");
+  const [dr, dc] = DIR[s]; let pts = 0;
+  for (const [r, c] of bl) { const b = grid[r][c], along = s === 0 ? r : s === 2 ? N - 1 - r : s === 3 ? c : N - 1 - c; grid[r][c] = null; b.r = r; b.c = c; b.dieAt = clock + .08 + along * .05; b.fr = r; b.fc = c; ghosts.push(b); pts += 8 + (b.fish ? 30 : 0); }
+  score += pts; snd("swish", { pitch: .8 }); snd("slide", { pitch: .7 }); Lab.after(.3, () => { if (demo) return; Lab.shake(8, .3); snd("crunch"); Lab.setScore(score); Lab.bumpScore(); fx.text(bx + side / 2, by + side / 2, "SMASH +" + pts, { color: "#ffa62b", size: 24 * S, outline: "#1e2850" }); });
+  Lab.after(.75, checkOver); return true;
+}
+
+/* ---------- input ---------- */
+function pick(x, y) {
+  if (charge > 0 && Math.hypot(x - home.x, y - home.y) < 44 * S && nori.mode === "home") { drag = { nori: true, p: { cells: [[0, 0]], w: 1, h: 1 }, x, y }; snd("tap", { pitch: .8 }); updateAim(); return; }
+  for (let i = 0; i < 3; i++) { const s = slots[i]; if (tray[i] && Math.abs(x - s.x) < s.w / 2 && Math.abs(y - s.y) < s.h / 2) { drag = { i, p: tray[i], x, y }; snd("tap", { pitch: 1.2 }); updateAim(); return; } }
+}
+function updateAim() {
+  const lift = Lab.input.pointerType === "touch" ? 54 * S : 0, px = drag.x, py = drag.y - lift, u = (px - bx - side / 2) / (side / 2), v = (py - by - side / 2) / (side / 2), au = Math.abs(u), av = Math.abs(v);
+  if (Math.max(au, av) > 1.46) { aim = null; return; }
+  let s = av >= au ? (v < 0 ? 0 : 2) : (u > 0 ? 1 : 3);
+  if (aim && aim.s !== s && (aim.s % 2 === 0 ? av : au) + .14 > Math.max(au, av) && ((aim.s === 0 && v < 0) || (aim.s === 2 && v > 0) || (aim.s === 1 && u > 0) || (aim.s === 3 && u < 0))) s = aim.s;
+  const p = drag.p, span = s % 2 ? p.h : p.w, lane = clamp(Math.round(((s % 2 ? py - by : px - bx)) / cell - span / 2), 0, N - span);
+  if (aim && aim.s === s && aim.lane === lane) return;
+  aim = { s, lane, res: null, lines: [] }; snd("tick", { pitch: .9 + lane * .06, vol: .5 });
+  if (drag.nori) { aim.res = laneBlocks(s, lane).length ? { r: 0, c: 0, steps: 0 } : null; return; }
+  const res = aim.res = rest(p, s, lane); if (!res) return;
+  for (const [a, b] of p.cells) grid[res.r + a][res.c + b] = p; aim.lines = findLines(); for (const [a, b] of p.cells) grid[res.r + a][res.c + b] = null;
+}
+function drop() {
+  const d = drag, a = aim; drag = aim = null;
+  if (a && a.res) { if (d.nori) belly(a.s, a.lane); else launch(d.i, a.s, a.lane); }
+  else { if (a) snd("error", { vol: .6 }); else snd("tap", { pitch: .7, vol: .5 }); if (!d.nori) d.p.pop = .6; }
+}
+function bY() { return wide ? .5 : (by - 36 * S) / Lab.H; }
+function edgeSpot(s, lane, span) { const k = (lane + span / 2) * cell; return s === 0 ? [bx + k, by - 24 * S] : s === 2 ? [bx + k, by + side + 30 * S] : s === 3 ? [bx - 26 * S, by + k] : [bx + side + 26 * S, by + k]; }
+
+/* ---------- update ---------- */
+function update(dt) {
+  clock += dt; nudge.x = Lab.damp(nudge.x, 0, 14, dt); nudge.y = Lab.damp(nudge.y, 0, 14, dt); slamT = Math.max(0, slamT - dt);
+  nori.joy = Math.max(0, nori.joy - dt); nori.gulp = Math.max(0, nori.gulp - dt); nori.t += dt;
+  for (const p of tray) if (p && p.pop > 0) p.pop = Math.max(0, p.pop - dt * 3);
+  if (nori.mode === "slide") {
+    nori.k += dt / .5; const span = 1, a = edgeSpot(nori.side, nori.lane, span), b = edgeSpot((nori.side + 2) % 4, nori.lane, span), k = Lab.ease.inOutQuad(clamp(nori.k, 0, 1)); nori.x = lerp(a[0], b[0], k); nori.y = lerp(a[1], b[1], k);
+    if (nori.k >= 1.15) { nori.mode = "home"; nori.joy = .8; }
+  } else {
+    let tx = home.x, ty = home.y; if (nori.mode === "push" && nori.t > .5) nori.mode = "home";
+    if (drag && aim) { const sp = edgeSpot(aim.s, aim.lane, drag.nori ? 1 : (aim.s % 2 ? drag.p.h : drag.p.w)); tx = sp[0]; ty = sp[1]; nori.mode = "aim"; nori.side = aim.s; } else if (nori.mode === "aim") nori.mode = "home";
+    if (nori.mode !== "push") { nori.x = Lab.damp(nori.x, tx, drag && drag.nori && !aim ? 30 : 16, dt); nori.y = Lab.damp(nori.y, ty, 16, dt); if (drag && drag.nori && !aim) { nori.x = drag.x; nori.y = drag.y - 20 * S; } }
+  }
+  for (const g of ghosts) if (clock >= g.dieAt) {
+    g.dead = true; if (demo) continue; const x = bx + (g.c + .5) * cell, y = by + (g.r + .5) * cell;
+    fx.burst(x, y, { n: 5, colors: [COLS[g.col], "#fff", shade(COLS[g.col], .3)], speed: 170 * S, life: .45, size: 5 * S, shape: "shard", gravity: 500 * S });
+    if (g.fish) flyers.push({ x, y, x0: x, y0: y, k: 0 });
+  }
+  ghosts = ghosts.filter(g => !g.dead);
+  for (const f of flyers) {
+    f.k += dt / .55; const k = Lab.ease.inOutQuad(clamp(f.k, 0, 1)), mx = nori.x, my = nori.y - 4 * S; f.x = lerp(f.x0, mx, k); f.y = lerp(f.y0, my, k) - Math.sin(k * Math.PI) * 50 * S;
+    if (f.k >= 1) { f.dead = true; fishEaten++; meter++; nori.gulp = .35; snd("coin", { pitch: .9 + meter * .1 }); if (meter >= 5) { meter -= 5; if (charge < 2) { charge++; snd("powerup"); Lab.banner("BELLY SLIDE READY", { color: "#ffa62b", ms: 1200, y: bY() }); } } }
+  }
+  flyers = flyers.filter(f => !f.dead);
+}
+function frame(dt) { update(dt); render(); }
+function attract(dt) {
+  if (!demo) { demo = true; layout(); reset(); demoT = .6; }
+  if ((demoT -= dt) < 0) {
+    demoT = .8; if (over) { reset(); return; } let best = null, bs = -1;
+    tray.forEach((p, i) => { if (!p) return; for (let s = 0; s < 4; s++) for (let l = 0; l < N; l++) { const r = rest(p, s, l); if (!r) continue; for (const [a, b] of p.cells) grid[r.r + a][r.c + b] = p; const sc = findLines().length * 10 + Math.random() * 3 + r.steps * .3; for (const [a, b] of p.cells) grid[r.r + a][r.c + b] = null; if (sc > bs) { bs = sc; best = [i, s, l]; } } });
+    if (best) launch(best[0], best[1], best[2]);
+  }
+  update(dt); render();
+}
+
+/* ---------- art ---------- */
+function blockSprite(ci) {
+  const sz = Math.ceil(cell);
+  return Lab.sprite("piblk" + ci + "_" + sz, sz, sz, (g, w) => {
+    const col = COLS[ci], m = w * .05; draw.rect(g, m, m, w - m * 2, w - m * 2, w * .2, shade(col, -.22)); const gr = g.createLinearGradient(0, 0, 0, w); gr.addColorStop(0, shade(col, .28)); gr.addColorStop(1, col);
+    g.fillStyle = gr; draw.rr(g, m, m, w - m * 2, w - m * 2 - w * .07, w * .2); g.fill();
+    g.fillStyle = "rgba(255,255,255,.34)"; g.beginPath(); g.moveTo(w * .16, w * .5); g.lineTo(w * .5, w * .13); g.lineTo(w * .72, w * .13); g.lineTo(w * .16, w * .72); g.fill();
+    g.strokeStyle = "rgba(255,255,255,.75)"; g.lineWidth = w * .05; g.lineCap = "round"; g.beginPath(); g.moveTo(w * .24, w * .16); g.lineTo(w * .5, w * .16); g.stroke();
+  });
+}
+function drawFish(c, x, y, s, a) { c.save(); c.translate(x, y); c.rotate(a || 0); c.fillStyle = "#ff8a2b"; c.strokeStyle = INK; c.lineWidth = Math.max(1, s * .1); c.lineJoin = "round"; c.beginPath(); c.moveTo(s * .55, 0); c.quadraticCurveTo(0, -s * .55, -s * .45, 0); c.lineTo(-s * .85, -s * .4); c.lineTo(-s * .85, s * .4); c.lineTo(-s * .45, 0); c.quadraticCurveTo(0, s * .55, s * .55, 0); c.closePath(); c.fill(); c.stroke(); draw.circle(c, s * .22, -s * .08, s * .09, INK); c.restore(); }
+function drawBlock(c, b, x, y, sz, alpha) { if (alpha != null) c.globalAlpha = alpha; c.drawImage(blockSprite(b.col), x, y, sz, sz); if (b.fishOn || b.fish === true) drawFish(c, x + sz / 2, y + sz * .52, sz * .36, -.2); c.globalAlpha = 1; }
+function drawPiece(c, p, cx, cy, sz, alpha) { const x0 = cx - p.w * sz / 2, y0 = cy - p.h * sz / 2; p.cells.forEach(([a, b], k) => { c.globalAlpha = alpha == null ? 1 : alpha; c.drawImage(blockSprite(p.col), x0 + b * sz, y0 + a * sz, sz, sz); if (k === p.fish) drawFish(c, x0 + (b + .5) * sz, y0 + (a + .52) * sz, sz * .36, -.2); }); c.globalAlpha = 1; }
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80, o = 40;
+  return Lab.sprite("pibg" + W + "x" + H, W, H, g => {
+    draw.vgrad(g, 0, 0, W, H, ["#cfeaff", "#f4fbff"]); g.fillStyle = "rgba(255,255,255,.85)";
+    for (let i = 0; i < 7; i++) { const x = (i * .173 + .05) % 1 * W, y = ((i * .37 + .11) % 1) * H, rr = (70 + (i * 37) % 60) * S; g.beginPath(); g.ellipse(x, y, rr * 1.5, rr * .5, 0, 0, TAU); g.fill(); }
+    g.fillStyle = "rgba(120,170,215,.16)"; for (let i = 0; i < 26; i++) { const x = (i * .618) % 1 * W, y = (i * .381 + .07) % 1 * H; g.beginPath(); g.ellipse(x, y, 9 * S, 3 * S, 0, 0, TAU); g.fill(); }
+    const X = bx + o, Y = by + o, bm = 13 * S;
+    g.fillStyle = "rgba(60,110,170,.18)"; draw.rr(g, X - bm, Y - bm + 6 * S, side + bm * 2, side + bm * 2, 22 * S); g.fill();
+    g.fillStyle = "#ffffff"; draw.rr(g, X - bm, Y - bm, side + bm * 2, side + bm * 2, 22 * S); g.fill();
+    for (let i = 0; i < 4; i++) for (let k = 0; k < 9; k++) { const q = (k + .5) / 9 * side, x = i === 0 ? X + q : i === 2 ? X + q : i === 3 ? X - bm * .5 : X + side + bm * .5, y = i === 0 ? Y - bm * .5 : i === 2 ? Y + side + bm * .5 : Y + q; g.beginPath(); g.arc(x, y, bm * (.75 + ((k * 7 + i) % 3) * .12), 0, TAU); g.fill(); }
+    g.fillStyle = "#8cc4ea"; draw.rr(g, X - 3 * S, Y - 3 * S, side + 6 * S, side + 6 * S, 9 * S); g.fill();
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) { g.fillStyle = (r + c) % 2 ? "#d3ecfb" : "#dff2fd"; draw.rr(g, X + c * cell + 1, Y + r * cell + 1, cell - 2, cell - 2, cell * .16); g.fill(); }
+    g.strokeStyle = "rgba(255,255,255,.7)"; g.lineWidth = 1.5; g.lineCap = "round"; for (let i = 0; i < 9; i++) { const x = X + ((i * .37 + .1) % 1) * side * .8, y = Y + ((i * .53 + .2) % 1) * side * .9; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 26 * S, y - 9 * S); g.stroke(); }
+    for (const s of slots) { g.fillStyle = "rgba(255,255,255,.7)"; draw.rr(g, s.x - s.w / 2 + o, s.y - s.h / 2 + o, s.w, s.h, 18 * S); g.fill(); g.strokeStyle = "rgba(90,150,210,.25)"; g.lineWidth = 2; g.stroke(); }
+  });
+}
+function render() {
+  const c = Lab.ctx, bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  c.save(); c.translate(nudge.x, nudge.y);
+  // blocks (resting, sliding, about to crack)
+  const sl = b => { const k = b.dur ? clamp((clock - b.t0) / b.dur, 0, 1) : 1, e = Math.pow(k, 1.5); return e; };
+  c.save(); c.beginPath(); c.rect(bx - cell * .9, by - cell * .9, side + cell * 1.8, side + cell * 1.8); c.clip();
+  for (let r = 0; r < N; r++) for (let q = 0; q < N; q++) { const b = grid[r][q]; if (!b) continue; const e = sl(b); drawBlock(c, b, bx + lerp(b.fc, q, e) * cell, by + lerp(b.fr, r, e) * cell, cell); }
+  for (const g of ghosts) { const e = sl(g), x = bx + lerp(g.fc, g.c, e) * cell, y = by + lerp(g.fr, g.r, e) * cell; drawBlock(c, g, x, y, cell); const fl = clamp(1 - (g.dieAt - clock) / .12, 0, 1); if (fl > 0) { c.fillStyle = `rgba(255,255,255,${fl * .85})`; draw.rr(c, x + 2, y + 2, cell - 4, cell - 4, cell * .2); c.fill(); } }
+  c.restore();
+  for (let r = 0; r < N; r++) for (let q = 0; q < N; q++) if (posts[r][q]) { const x = bx + (q + .5) * cell, y = by + (r + .5) * cell, rr = cell * .3; draw.shadow(c, x + 2 * S, y + rr * .9, rr, rr * .35, .2); draw.circle(c, x, y, rr, "#ff5d5d", INK, 2 * S); c.strokeStyle = "#fff"; c.lineWidth = rr * .32; c.beginPath(); c.arc(x, y, rr * .58, 0, TAU); c.stroke(); draw.circle(c, x, y - rr * .1, rr * .2, "#ffd23f", INK, 1.5 * S); }
+  // onboarding arrows: the pond can be entered from every side
+  if (moves === 0 && !drag && !demo) { const a = .35 + .3 * Math.sin(clock * 4), off = (Math.sin(clock * 4) * .5 + .5) * 6 * S; c.fillStyle = `rgba(47,127,214,${a})`; for (let s = 0; s < 4; s++) { const [dr, dc] = DIR[s], x = bx + side / 2 - dc * (side / 2 + 20 * S - off), y = by + side / 2 - dr * (side / 2 + 20 * S - off); c.save(); c.translate(x, y); c.rotate(Math.atan2(dr, dc)); c.beginPath(); c.moveTo(11 * S, 0); c.lineTo(-7 * S, -11 * S); c.lineTo(-7 * S, 11 * S); c.fill(); c.restore(); } }
+  // aim preview
+  if (drag && aim) {
+    const p = drag.p, s = aim.s, [dr, dc] = DIR[s], span = s % 2 ? p.h : p.w, ok = !!aim.res, lx = s % 2 ? bx : bx + aim.lane * cell, ly = s % 2 ? by + aim.lane * cell : by, lw = s % 2 ? side : span * cell, lh = s % 2 ? span * cell : side;
+    c.fillStyle = ok ? (drag.nori ? "rgba(255,166,43,.3)" : "rgba(255,255,255,.42)") : "rgba(255,80,80,.22)"; draw.rr(c, lx, ly, lw, lh, cell * .2); c.fill();
+    if (ok && !drag.nori) {
+      for (const [k, i] of aim.lines) { c.fillStyle = `rgba(255,214,70,${.4 + .2 * Math.sin(clock * 10)})`; if (k === "r") c.fillRect(bx, by + i * cell, side, cell); else c.fillRect(bx + i * cell, by, cell, side); }
+      drawPiece(c, p, bx + (aim.res.c + p.w / 2) * cell, by + (aim.res.r + p.h / 2) * cell, cell, .62);
+      c.strokeStyle = "#1e2850"; c.lineWidth = 2 * S; c.setLineDash([5 * S, 5 * S]); for (const [a, b] of p.cells) { draw.rr(c, bx + (aim.res.c + b) * cell + 2, by + (aim.res.r + a) * cell + 2, cell - 4, cell - 4, cell * .2); c.stroke(); } c.setLineDash([]);
+    }
+    const sp = edgeSpot(s, aim.lane, span), n = 3; c.fillStyle = ok ? "#2f7fd6" : "#e2533f";
+    for (let i = 0; i < n; i++) { const ph = ((clock * 2 + i / n) % 1), d = (18 + ph * 40) * S, x = sp[0] + dc * d + (s % 2 ? 0 : 0), y = sp[1] + dr * d; c.globalAlpha = Math.sin(ph * Math.PI) * .9; c.save(); c.translate(x, y); c.rotate(Math.atan2(dr, dc)); c.beginPath(); c.moveTo(8 * S, 0); c.lineTo(-5 * S, -8 * S); c.lineTo(-5 * S, 8 * S); c.fill(); c.restore(); }
+    c.globalAlpha = 1; if (!ok) { c.strokeStyle = "#e2533f"; c.lineWidth = 5 * S; c.lineCap = "round"; const x = sp[0] + dc * 44 * S, y = sp[1] + dr * 44 * S, q = 9 * S; c.beginPath(); c.moveTo(x - q, y - q); c.lineTo(x + q, y + q); c.moveTo(x + q, y - q); c.lineTo(x - q, y + q); c.stroke(); }
+  }
+  c.restore();
+  // tray
+  for (let i = 0; i < 3; i++) { const p = tray[i], s = slots[i]; if (!p || (drag && drag.i === i)) continue; const sz = Math.min(cell * .62, s.w / 5.4, s.h / 5.2) * (1 + Lab.ease.pulse(clamp(p.pop, 0, 1)) * .18), dim = !over && !fits(p); drawPiece(c, p, s.x, s.y, sz, dim ? .35 : 1); }
+  // HUD: fish meter + catch progress
+  if (!demo) {
+    const mx = home.x + (wide ? -52 * S : 46 * S), my = home.y + (wide ? 62 * S : 4 * S);
+    for (let i = 0; i < 5; i++) { const x = mx + i * 22 * S + 8 * S, y = my; c.globalAlpha = i < meter ? 1 : .22; drawFish(c, x, y, 9 * S, 0); } c.globalAlpha = 1;
+    draw.text(c, charge > 0 ? "Belly slide ×" + charge : "5 fish = belly slide", mx + 52 * S, my + 20 * S, { size: 11 * S, color: charge > 0 ? "#d9761a" : "#51648f", weight: 700 });
+    const ix = info.x, iy = info.y; draw.text(c, "Catch " + level, ix, iy - 8 * S, { size: 17 * S, color: "#1e2850", weight: 800 }); const bw = 110 * S; draw.rect(c, ix - bw / 2, iy + 8 * S, bw, 9 * S, 5 * S, "rgba(47,127,214,.2)"); draw.rect(c, ix - bw / 2, iy + 8 * S, Math.max(9 * S, bw * (lines % 6) / 6), 9 * S, 5 * S, "#2f7fd6");
+    draw.text(c, lines + " lines" + (streak > 1 ? " · streak ×" + Math.min(5, streak) : ""), ix, iy + 30 * S, { size: 11 * S, color: "#51648f", weight: 700 });
+  }
+  // Nori
+  let filled = 0; for (let r = 0; r < N; r++) for (let q = 0; q < N; q++) if (grid[r][q]) filled++;
+  const sz = 50 * S, sliding = nori.mode === "slide", [dr, dc] = DIR[nori.side || 0];
+  if (sliding) { const a = clock * 30; Pals.draw(c, "nori", nori.x, nori.y, sz, { t: clock, mood: "joy", pose: "lie", flip: dc < 0, tilt: dr > 0 ? Math.PI / 2 : dr < 0 ? -Math.PI / 2 : 0, shadow: false }); if (!demo) fx.burst(nori.x - dc * 16 * S, nori.y - dr * 16 * S, { n: 1, color: "#fff", speed: 60, life: .3, size: 4 * S }); void a; }
+  else {
+    const push = nori.mode === "push", pk = push ? Lab.ease.pulse(clamp(nori.t / .3, 0, 1)) : 0, aimg = nori.mode === "aim", readyBob = charge > 0 && nori.mode === "home" && !drag ? Math.abs(Math.sin(clock * 5)) * 5 * S : 0;
+    const mood = over ? "sad" : nori.gulp > 0 || nori.joy > 0 ? "joy" : aimg ? (aim && !aim.res ? "sad" : "focus") : stuckT ? "scared" : filled > 40 ? "scared" : "happy";
+    const look = aimg || push ? [dc, dr] : drag ? [clamp((drag.x - nori.x) / 150, -1, 1), clamp((drag.y - nori.y) / 150, -1, 1)] : [0, 0];
+    Pals.draw(c, "nori", nori.x + (push ? dc * pk * 10 * S : 0), nori.y + (push ? dr * pk * 10 * S : 0) - readyBob, sz, { t: clock, mood, look, arms: push || aimg ? "hold" : nori.joy > 0 ? "cheer" : "down", squash: push ? pk * .16 : nori.gulp > 0 ? -.1 : readyBob ? -.05 : 0, talk: nori.gulp > 0 ? 1 : 0, tilt: aimg || push ? dc * .12 : 0 });
+    if (charge > 0 && nori.mode === "home" && !drag && !demo && !over) { const bxx = home.x + (wide ? 0 : 6 * S), byy = home.y - 46 * S; Pals.bubble(c, bxx, byy, 78 * S, 26 * S, { tailX: home.x, tailY: home.y - 26 * S }); draw.text(c, "Drag me!", bxx, byy + 1, { size: 12 * S, color: INK, weight: 800 }); }
+  }
+  for (const f of flyers) drawFish(c, f.x, f.y, 11 * S, Math.sin(f.k * 9) * .5);
+  // the piece in hand
+  if (drag && !drag.nori) { const lift = Lab.input.pointerType === "touch" ? 54 * S : 0; drawPiece(c, drag.p, drag.x, drag.y - lift, cell * (aim ? .5 : .8), aim ? .55 : .95); }
+}
+Lab.boot();
+})();
+</script></body></html>

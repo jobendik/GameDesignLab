@@ -90,15 +90,18 @@ window.GDL_CATALOG = {
    "path": "games/brink-edge-rush.html",
    "collection": "arcade",
    "title": "BRINK · Edge Rush",
-   "desc": "Edge rush platformer on the brink of danger.",
+   "desc": "One button, one dart, endless neon gates: hold to climb, release to dive, and shave every gap edge as close as you dare to ignite the Rush.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Action"
    ],
    "controls": [
     "touch",
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--brink-edge-rush.jpg"
   },
   {
@@ -106,9 +109,10 @@ window.GDL_CATALOG = {
    "path": "games/brink-reactor.html",
    "collection": "arcade",
    "title": "BRINK · Reactor",
-   "desc": "Reactor variant of the Brink edge game.",
+   "desc": "One tap hops your spark between two containment rings: hop at the last instant to carve away the plates a failing reactor keeps throwing into your orbit.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Action"
    ],
    "controls": [
     "touch",
@@ -577,16 +581,19 @@ window.GDL_CATALOG = {
    "id": "games/orbit-drift-3d",
    "path": "games/orbit-drift-3d.html",
    "collection": "arcade",
-   "title": "Orbit Drift 3D — Three.js Sling Prototype",
-   "desc": "3D orbit drift sling prototype.",
+   "title": "Orbit Drift 3D — Ringstream",
+   "desc": "Fly a probe down an endless stream of ring gates in deep space: thread the centres to build speed, skim rocks for style and dive round planets for a slingshot.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Action"
    ],
    "controls": [
     "touch",
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--orbit-drift-3d.jpg"
   },
   {
@@ -2491,40 +2498,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--bedtime-stacks.jpg"
   },
   {
-   "id": "PhoneGameLab2/brick-breaker",
-   "path": "PhoneGameLab2/games/brick-breaker/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Brick Breaker",
-   "desc": "Paddle a ball to smash a wall of bricks.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 6,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--brick-breaker.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/bridge",
-   "path": "PhoneGameLab2/games/bridge/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Bridge",
-   "desc": "Hold to grow a bridge that exactly crosses the gap.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 7,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--bridge.jpg"
-  },
-  {
    "id": "PhoneGameLab2/bubble-shooter",
    "path": "PhoneGameLab2/games/bubble-shooter/index.html",
    "collection": "PhoneGameLab2",
@@ -2540,40 +2513,6 @@ window.GDL_CATALOG = {
    "n": 8,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--bubble-shooter.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/bubble-up",
-   "path": "PhoneGameLab2/games/bubble-up/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Bubble Up",
-   "desc": "Float upward in a bubble, dodging falling spikes.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 9,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--bubble-up.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/building-block-puzzle",
-   "path": "PhoneGameLab2/games/building-block-puzzle/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Block Puzzle",
-   "desc": "Place tetromino pieces and clear full lines.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 10,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--building-block-puzzle.jpg"
   },
   {
    "id": "PhoneGameLab2/bumper-park",
@@ -2967,6 +2906,24 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--guitar-ace.jpg"
   },
   {
+   "id": "PhoneGameLab2/gulp-and-float",
+   "path": "PhoneGameLab2/games/gulp-and-float/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Gulp & Float",
+   "desc": "Ride a bubble to the stars. Gulp fireflies, dodge the prickles.",
+   "genre": [
+    "Arcade"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
+  },
+  {
    "id": "PhoneGameLab2/happy-connect",
    "path": "PhoneGameLab2/games/happy-connect/index.html",
    "collection": "PhoneGameLab2",
@@ -3174,6 +3131,24 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--jungle-shot.jpg"
   },
   {
+   "id": "PhoneGameLab2/lilypad-lunch",
+   "path": "PhoneGameLab2/games/lilypad-lunch/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Lilypad Lunch",
+   "desc": "Bounce Momo off the lily pad and gulp the fruit.",
+   "genre": [
+    "Arcade"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
+  },
+  {
    "id": "PhoneGameLab2/make-a-kite",
    "path": "PhoneGameLab2/games/make-a-kite/index.html",
    "collection": "PhoneGameLab2",
@@ -3276,6 +3251,23 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--mower.jpg"
   },
   {
+   "id": "PhoneGameLab2/pack-ice",
+   "path": "PhoneGameLab2/games/pack-ice/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Pack Ice",
+   "desc": "Slide ice blocks in from any side. Fill a line to crack it.",
+   "genre": [
+    "Puzzle"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
+  },
+  {
    "id": "PhoneGameLab2/pinata-drop",
    "path": "PhoneGameLab2/games/pinata-drop/index.html",
    "collection": "PhoneGameLab2",
@@ -3342,6 +3334,22 @@ window.GDL_CATALOG = {
    "n": 53,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--rainbows.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/ramp-scamp",
+   "path": "PhoneGameLab2/games/ramp-scamp/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Ramp Scamp",
+   "desc": "Tilt the ramp. Pip is not slowing down.",
+   "genre": [
+    "Skill"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true
   },
   {
    "id": "PhoneGameLab2/rocket-fun",
@@ -3646,7 +3654,9 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/sub-adventure",
