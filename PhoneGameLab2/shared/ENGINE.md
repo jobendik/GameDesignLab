@@ -82,6 +82,8 @@ Test at 390×844 and 844×390 (and 1280×800 desktop).
   drop shoot laser zap explode boom crunch splash glass powerup levelup win lose error hurt unlock star whistle heartbeat warn spring snap chime
 - `Lab.audio.combo(n)` — rising pentatonic ladder for streaks/chains. `Lab.audio.note('E5',{type,dur,vol})`, `Lab.audio.tone({f,f2,type,dur,vol,delay,lp})`,
   `Lab.audio.noise({dur,vol,lp|hp|bp,f2})` for custom sounds. Vary pitch with game state (size, speed, combo) so audio carries information.
+- Rhythm games: schedule your own notes ahead with `Lab.audio.tone({delay, music:true})` against `Lab.audio.now()` (audio clock, s);
+  `Lab.audio.latency` reports output latency. Judge hits on one clock.
 - Continuous sounds (rolling, wind, engines, charging): `const h = Lab.audio.loop({noise:true,bp:600,vol:0})` or `({type:'sawtooth',f:90,lp:800})`,
   then `h.set({vol,f,cutoff})` each frame and `h.stop()`. Loops stop on restart/game over and mute while paused — create them in `start()`.
 - Music: `music:{style, key, bpm?, seed?, vol?}` in `Lab.init`; styles: bounce chill drive tense dream arcade puzzle funk march spooky.
@@ -94,7 +96,7 @@ glow(c,x,y,r,color,alpha), bg(c,top,bottom,mid?), shadow(c,x,y,rx,ry,alpha), vig
 `Lab.sprite(key,w,h,(g,w,h)=>{…})` caches expensive procedural art (draw with `drawImage(s,x,y,s.w,s.h)`; `Lab.sprite.clear('prefix')` evicts by key prefix) ·
 `Lab.color.{shade(col,±amt),mix,alpha,hsl}` · `Lab.font(size,weight)`.
 A sprite has a logical size (`s.w`,`s.h`); to bake a full-stage background that survives screen shake, bake it at
-`W+80 × H+80` and draw it at `(-40,-40, s.w, s.h)` — never stretch a `W×H` sprite. Rebuild on `Lab.onResize`.
+`W+80 × H+80` (inside the bake, `g.translate(40,40)` first so you can draw in screen coordinates) and draw it at `(-40,-40, s.w, s.h)` — never stretch a `W×H` sprite. Rebuild on `Lab.onResize`.
 Avoid per-frame `shadowBlur` on many objects and per-frame gradient creation for many objects — bake into sprites.
 
 ## Math / utils

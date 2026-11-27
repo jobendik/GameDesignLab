@@ -470,7 +470,8 @@ window.LAB_GAMES = [
     "t": "Punchline",
     "d": "Tap the punched holes. Your taps play the tune.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--69-punchline.jpg"
    },
    {
     "n": 70,
@@ -478,7 +479,8 @@ window.LAB_GAMES = [
     "t": "Coconut Groove",
     "d": "Strike the steel pans on the beat.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--70-coconut-groove.jpg"
    }
   ]
  },

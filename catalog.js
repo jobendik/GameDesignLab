@@ -427,8 +427,10 @@ window.GDL_CATALOG = {
    "path": "games/neon-core-ballstorm.html",
    "collection": "arcade",
    "title": "Neon Core Ballstorm",
-   "desc": "Neon-styled ballstorm arena action.",
+   "desc": "Aim a storm of ricocheting data packets, draft a new build every few turns and keep the corrupted grid off your firewall.",
    "genre": [
+    "Roguelite",
+    "Physics",
     "Arcade"
    ],
    "controls": [
@@ -2437,7 +2439,8 @@ window.GDL_CATALOG = {
    "n": 69,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--69-punchline.jpg"
   },
   {
    "id": "PhoneGameLab/70-coconut-groove",
@@ -2456,24 +2459,8 @@ window.GDL_CATALOG = {
    "n": 70,
    "v2": true,
    "score": 8,
-   "status": "transformed"
-  },
-  {
-   "id": "PhoneGameLab2/basketball",
-   "path": "PhoneGameLab2/games/basketball/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Basketball",
-   "desc": "Flick shots into the hoop against the clock.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 3,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--basketball.jpg"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--70-coconut-groove.jpg"
   },
   {
    "id": "PhoneGameLab2/bedtime-stacks",
@@ -3107,6 +3094,22 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--ice-cream-shop.jpg"
   },
   {
+   "id": "PhoneGameLab2/ice-dunk",
+   "path": "PhoneGameLab2/games/ice-dunk/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Ice Dunk",
+   "desc": "Belly-slide Nori into the fishing hole.",
+   "genre": [
+    "Sports"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true
+  },
+  {
    "id": "PhoneGameLab2/ice-smash",
    "path": "PhoneGameLab2/games/ice-smash/index.html",
    "collection": "PhoneGameLab2",
@@ -3665,7 +3668,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--sunny-soak.jpg"
   },
   {
    "id": "PhoneGameLab2/super-balloons",

@@ -239,6 +239,8 @@
     setSfx(on) { audioPrefs.sfx = !!on; LS.set('gdl:audio', audioPrefs); if (sfxBus) sfxBus.gain.value = on ? 1 : 0; },
     setMusic(on) { audioPrefs.music = !!on; LS.set('gdl:audio', audioPrefs); if (musicBus && ac) musicBus.gain.setTargetAtTime(on ? music.vol * music._duck : 0, ac.currentTime, .05); if (on && music.cfg && !music.timer) music.play(music.cfg); },
     get ctx() { return ac; },
+    /* audio clock in seconds (0 before the first gesture) and output latency — for rhythm games scheduling their own notes with tone({delay}) */
+    now() { return ac ? ac.currentTime : 0; }, get latency() { return ac ? (ac.outputLatency || ac.baseLatency || 0) : 0; },
     get unlocked() { return unlocked; },
   };
   /* Sustained sound for continuous things (rolling, wind, engine, charge):
@@ -677,8 +679,8 @@
       if (splashUp && (e.key === 'Enter' || e.key === ' ')) { dismissSplash(); return; }
       if (over && overlayReady && (e.key === 'Enter' || e.key === ' ' || e.key === 'r' || e.key === 'R')) { Lab.restart(); return; }
       if (paused) { if (e.key === 'Enter' || e.key === ' ') Lab.resume(); return; }
+      input.keys[e.key] = true; input.keys[e.code] = true; // set first so a key already reads as held inside onKey handlers
       if (!e.repeat) { pressedKeys[e.key] = pressedKeys[e.code] = true; hideHint(); fire(input.onKey, e.key, e); fireAuto('key', e.key, e); }
-      input.keys[e.key] = true; input.keys[e.code] = true;
     });
     global.addEventListener('keyup', e => { input.keys[e.key] = false; input.keys[e.code] = false; });
     global.addEventListener('blur', () => { input.keys = {}; autoPause(); });

@@ -4,13 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 3,
-    "slug": "basketball",
-    "t": "Basketball",
-    "d": "Flick shots into the hoop against the clock.",
-    "thumb": "../thumbs/PhoneGameLab2--basketball.jpg"
-   },
-   {
     "n": 4,
     "slug": "berry-bounce",
     "t": "Berry Bounce",
@@ -565,6 +558,17 @@ window.LAB_GAMES = [
   ]
  },
  {
+  "cat": "Sports",
+  "items": [
+   {
+    "slug": "ice-dunk",
+    "t": "Ice Dunk",
+    "d": "Belly-slide Nori into the fishing hole.",
+    "v2": true
+   }
+  ]
+ },
+ {
   "cat": "Arcade",
   "items": [
    {
@@ -572,7 +576,8 @@ window.LAB_GAMES = [
     "t": "Sunny Soak",
     "d": "Lob water balloons. Cool your pals down.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--sunny-soak.jpg"
    }
   ]
  }

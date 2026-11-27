@@ -1,0 +1,285 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Ice Dunk</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* ICE DUNK — Nori the penguin IS the ball. Seen from above: a frozen pond ringed with snowbanks, a fishing hole
+ * somewhere up the ice, a clock. Drag to aim, let go, and Nori belly-slides: he keeps his line, loses a little speed,
+ * banks off snow, ice blocks and snowman bumpers, scoops up fish on the way and DUNKS himself into the hole — then swims
+ * back under the ice and pops up at the start with his catch.
+ * Core idea kept: shots into a target against the clock, makes add time.
+ * Different from the arced, gravity-driven sibling (Blacktop Buzzer): no gravity at all — it is angles, banks and
+ * routes.  Hooks: every bank before the dunk multiplies it (bank ×2, double bank ×3, trick shot ×4); fish on the ice
+ * make a longer route worth it; a streak of dunks adds a second multiplier.  The guide only shows the first stretch.
+ * Variety (new rink every 4 dunks): ice block, drifting hole, sliding ice, snowman bumpers, smaller hole, mixes.
+ * Identity: pale blue ice with skate scratches, fat white snowbanks, orange fish and flag; brisk "march" music. */
+let demo = false, demoT = 1;
+Lab.init({
+  title: "Ice Dunk", tagline: "Belly-slide Nori into the fishing hole.", category: "Sports", kicker: "Pocket Pals",
+  howto: ["Drag to aim, let go to slide", "Dunk into the hole to win back time", "Bank off the snow for bonus points"],
+  theme: { bg: "#bfe0f7", bg2: "#f2fbff", accent: "#2f6fd6", accent2: "#ffa62b", fg: "#1e2850", muted: "#56658c", light: true },
+  orient: "any", music: { style: "march", key: "G", vol: .34 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink;
+const V0 = 880, DECEL = 250, STEP = 1 / 240, RN = 17, REST = .93, START_T = 40, MAX_T = 60, A_MIN = -Math.PI + .17, A_MAX = -.17;
+const INTRO = { 2: "An ice block — bank around it!", 3: "The hole drifts now", 4: "Sliding ice", 5: "Snowmen go boing", 6: "Smaller hole" };
+let S, rink, home, nori, hole, oldHole, blocks, bumpers, fishes, aim, drag, queued, time, score, dives, shots, streak, bestStreak, bestBanks, fishN, level, over,
+  clock, acc, trail, cheerT, sadT, slideLoop, lastSec, timeFlash, kbT;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() {
+  const P = Lab.play, old = rink, wide = P.w > P.h * 1.15; let s0 = Math.min(P.w / 390, P.h / 680);
+  const bot = Lab.H - Lab.safe.bottom - 14 * s0; let top = P.y + 52 * s0, h = bot - top, w;
+  if (wide) { S = h / clamp(h, 430, 600); top = P.y + 52 * S; h = bot - top; S = h / clamp(h, 430, 600); w = Math.min(P.w - 28 * S, h * 1.7); }
+  else { w = Math.min(P.w - 24 * s0, h * .92); S = Math.min(w / 362, h / 600); }
+  rink = { L: P.x + (P.w - w) / 2, T: top, w, h }; rink.R = rink.L + w; rink.B = top + h;
+  home = { x: rink.L + w / 2, y: rink.B - 54 * S };
+  if (old && nori) { const mx = x => rink.L + (x - old.L) / old.w * w, my = y => rink.T + (y - old.T) / old.h * h; nori.x = mx(nori.x); nori.y = my(nori.y); trail = []; place(); }
+  Lab.sprite.clear("idbg");
+}
+Lab.onResize(() => { if (nori) layout(); });
+const X = u => rink.L + u * rink.w, Y = v => rink.T + v * rink.h;
+function place() {   // px positions from rink-relative ones (also each frame for movers)
+  if (hole) { hole.x = clamp(X(hole.u + Math.sin(clock * hole.spd + hole.ph) * hole.amp), rink.L + (hole.r + 12) * S, rink.R - (hole.r + 12) * S); hole.y = Y(hole.v); }
+  for (const b of blocks) { b.x = clamp(X(b.u + Math.sin(clock * b.spd + b.ph) * b.amp), rink.L + b.w * S / 2 + 4, rink.R - b.w * S / 2 - 4); b.y = Y(b.v); }
+  for (const b of bumpers) { b.x = X(b.u); b.y = Y(b.v); } for (const f of fishes) { f.x = X(f.u); f.y = Y(f.v); }
+}
+const blk = (u, v, w, h, amp) => ({ u, v, w, h, amp: amp || 0, spd: Lab.rand(.9, 1.3) * (1 + level * .04), ph: Lab.rand(0, TAU), born: 0 });
+const bmp = (u, v) => ({ u, v, r: 21, hit: 0, born: 0 });
+function newRound(first) {
+  const L = level, wideK = clamp(rink.w / rink.h, .5, 1.7);
+  oldHole = hole && !first ? { x: hole.x, y: hole.y, r: hole.r, t: 0 } : null;
+  hole = { u: first ? .5 : Lab.rand(.16, .84), v: first ? .24 : Lab.rand(.1, .38), r: L >= 6 ? 25 : L >= 2 ? 28 : 32, amp: L >= 3 ? Lab.rand(.08, .17) * (L >= 7 ? 1.3 : 1) : 0, spd: Lab.rand(.8, 1.2) * (1 + L * .05), ph: Lab.rand(0, TAU), born: 0 };
+  blocks = []; bumpers = []; fishes = [];
+  const side = hole.u < .5 ? -1 : 1;
+  if (L === 2) blocks.push(blk(.5 + side * .06, .56, 88, 34));
+  else if (L === 3) blocks.push(blk(.5 + side * .16, .55, 100, 34));
+  else if (L === 4) blocks.push(blk(.3, .62, 80, 32), blk(.66, .5, 84, 32, .13));
+  else if (L === 5) { bumpers.push(bmp(.28, .5), bmp(.72, .6)); blocks.push(blk(.5, .56, 72, 30, .18)); }
+  else if (L >= 6) {
+    const pat = Lab.randInt(0, 2);
+    if (pat === 0) { blocks.push(blk(.3, .5, 84, 32, .14), blk(.7, .64, 84, 32, .14)); bumpers.push(bmp(.5, .57)); }
+    else if (pat === 1) { blocks.push(blk(.5, .6, 120, 32, L >= 8 ? .1 : 0)); bumpers.push(bmp(.2, .48), bmp(.8, .48)); }
+    else { blocks.push(blk(.34, .62, 70, 30, .1), blk(.66, .62, 70, 30, .1), blk(.5, .46, 76, 30, .2)); }
+  }
+  const nF = first ? 1 : 2 + (L >= 3 ? 1 : 0);
+  for (let i = 0, tries = 0; i < nF && tries < 40; tries++) {
+    const u = Lab.rand(.12, .88), v = Lab.rand(.28, .74);
+    if (blocks.some(b => Math.abs(u - b.u) * rink.w < (b.w / 2 + 30 + b.amp * rink.w / S) * S && Math.abs(v - b.v) * rink.h < (b.h / 2 + 30) * S) || bumpers.some(b => Math.hypot((u - b.u) * rink.w, (v - b.v) * rink.h) < 50 * S) || fishes.some(f => Math.hypot((u - f.u) * rink.w, (v - f.v) * rink.h) < 44 * S)) continue;
+    fishes.push({ u, v, gold: false, t: Lab.rand(0, 6), born: 0 }); i++;
+  }
+  if (!first && Lab.chance(.4)) fishes.push({ u: Lab.chance(.5) ? .09 / wideK : 1 - .09 / wideK, v: Lab.rand(.3, .6), gold: true, t: 0, born: 0 });
+  place();
+}
+function reset() {
+  clock = 0; acc = 0; time = START_T; score = 0; dives = 0; shots = 0; streak = 0; bestStreak = 0; bestBanks = 0; fishN = 0; level = 1; over = false; trail = []; cheerT = 0; sadT = 0; lastSec = 99; timeFlash = 0; kbT = 0;
+  hole = null; blocks = []; bumpers = []; fishes = []; queued = null; drag = null; aim = { on: false, ang: -Math.PI / 2, pull: 0 };
+  nori = { x: home.x, y: home.y, vx: 0, vy: 0, state: "ready", t: 0, ang: -Math.PI / 2, sq: 0, banks: 0, wow: 0, fish: 0, fromX: 0, fromY: 0, joy: 0 };
+  newRound(true);
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0);
+  slideLoop = Lab.audio.loop({ noise: true, bp: 2200, q: .8, vol: 0 });
+  Lab.input.onDown = [(x, y) => { if (!over) { drag = { x0: x, y0: y, mode: 0 }; kbT = 0; } }];
+  Lab.input.onMove = [(x, y) => {
+    if (!drag || over) return; const dx = x - drag.x0, dy = y - drag.y0, len = Math.hypot(dx, dy);
+    if (len < 14 * Math.max(.8, S)) { if (!drag.mode) aim.on = false; return; }
+    if (!drag.mode) drag.mode = dy > 0 ? -1 : 1;                       // push toward the target, or pull back like a slingshot
+    aim.ang = clamp(Math.atan2(dy * drag.mode, dx * drag.mode) < 0 ? Math.atan2(dy * drag.mode, dx * drag.mode) : (dx * drag.mode < 0 ? A_MIN : A_MAX), A_MIN, A_MAX); aim.on = true; aim.pull = clamp(len / (130 * S), 0, 1);
+  }];
+  Lab.input.onUp = [() => { if (drag && aim.on && !over) launch(aim.ang); drag = null; aim.on = false; aim.pull = 0; }];
+  Lab.input.onKey = [k => { if (over) return; if (k === " " || k === "Enter" || k === "ArrowUp") { launch(aim.ang); kbT = 0; } }];
+  Lab.hint("Drag toward the hole, then let go");
+  Lab.expose({
+    get score() { return score; }, get time() { return time; }, set time(v) { time = v; }, get level() { return level; }, get dives() { return dives; }, get shots() { return shots; }, get streak() { return streak; }, get fish() { return fishN; },
+    get nori() { return { x: nori.x, y: nori.y, state: nori.state, banks: nori.banks }; }, get hole() { return { x: hole.x, y: hole.y, r: hole.r * S }; }, get home() { return { x: home.x, y: home.y }; },
+    get rink() { return Object.assign({ rn: RN * S }, rink); }, get fishes() { return fishes.map(f => ({ x: f.x, y: f.y })); }, get blocks() { return blocks.map(b => ({ x: b.x, y: b.y, w: b.w * S, h: b.h * S })); },
+    launch, angleTo(x, y) { return Math.atan2(y - home.y, x - home.x); },
+    sim(ang) { const b = { x: home.x, y: home.y, vx: Math.cos(ang) * V0 * S, vy: Math.sin(ang) * V0 * S }; let banks = 0; for (let i = 0; i < 1900; i++) { if (step(b, STEP, false)) banks++; if (Math.hypot(b.x - hole.x, b.y - hole.y) < (hole.r - 3) * S) return { dunk: true, banks }; if (Math.hypot(b.vx, b.vy) < 34 * S) break; } return { dunk: false, banks }; },
+    place(o) { hole.u = o.hole[0]; hole.v = o.hole[1]; hole.amp = 0; blocks = (o.blocks || []).map(b => blk(b[0], b[1], b[2], b[3])); bumpers = (o.bumpers || []).map(b => bmp(b[0], b[1])); fishes = (o.fish || []).map(f => ({ u: f[0], v: f[1], gold: false, t: 0, born: 1 })); place(); },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- sliding ---------- */
+function launch(ang) {
+  if (over) return false;
+  if (nori.state !== "ready") { queued = { ang, t: .7 }; return false; }
+  ang = clamp(ang, A_MIN, A_MAX); nori.vx = Math.cos(ang) * V0 * S; nori.vy = Math.sin(ang) * V0 * S; nori.ang = ang; nori.state = "slide"; nori.t = 0; nori.banks = 0; nori.fish = 0; nori.sq = -.3; shots++; trail = [];
+  snd("whoosh", { pitch: 1.1 }); snd("slide", { vol: .5 }); Lab.buzz(8);
+  fx.burst(nori.x, nori.y + 10 * S, { n: 8, color: "#fff", speed: 140, life: .4, size: 4, angle: ang + Math.PI, spread: 1.2, gravity: 0, drag: 3 });
+  return true;
+}
+/* one physics step for a sliding body; returns what it bounced off (or null). live=false is used by the aim guide. */
+function step(b, h, live) {
+  const sp = Math.hypot(b.vx, b.vy), r = RN * S; let hit = null;
+  if (sp > 0) { const ns = Math.max(0, sp - DECEL * S * h); b.vx *= ns / sp; b.vy *= ns / sp; }
+  b.x += b.vx * h; b.y += b.vy * h;
+  if (b.x < rink.L + r) { b.x = rink.L + r; if (b.vx < 0) { b.vx *= -REST; hit = "wall"; b.nx = 1; b.ny = 0; } }
+  if (b.x > rink.R - r) { b.x = rink.R - r; if (b.vx > 0) { b.vx *= -REST; hit = "wall"; b.nx = -1; b.ny = 0; } }
+  if (b.y < rink.T + r) { b.y = rink.T + r; if (b.vy < 0) { b.vy *= -REST; hit = "wall"; b.nx = 0; b.ny = 1; } }
+  if (b.y > rink.B - r) { b.y = rink.B - r; if (b.vy > 0) { b.vy *= -REST; hit = "wall"; b.nx = 0; b.ny = -1; } }
+  for (const k of blocks) {
+    const hw = k.w * S / 2, hh = k.h * S / 2, px = clamp(b.x, k.x - hw, k.x + hw), py = clamp(b.y, k.y - hh, k.y + hh); let dx = b.x - px, dy = b.y - py, d = Math.hypot(dx, dy);
+    if (d >= r) continue; if (d < .001) { dx = 0; dy = b.vy > 0 ? -1 : 1; d = 1; }
+    const nx = dx / d, ny = dy / d; b.x = px + nx * r; b.y = py + ny * r; const vn = b.vx * nx + b.vy * ny;
+    if (vn < 0) { b.vx -= (1 + REST) * vn * nx; b.vy -= (1 + REST) * vn * ny; hit = "block"; b.nx = nx; b.ny = ny; if (live) k.hitT = 1; }
+  }
+  for (const k of bumpers) {
+    const rr = r + k.r * S, dx = b.x - k.x, dy = b.y - k.y, d = Math.hypot(dx, dy); if (d >= rr || d < .001) continue;
+    const nx = dx / d, ny = dy / d; b.x = k.x + nx * rr; b.y = k.y + ny * rr; const vn = b.vx * nx + b.vy * ny;
+    if (vn < 0) { b.vx -= 2 * vn * nx; b.vy -= 2 * vn * ny; const s2 = Math.hypot(b.vx, b.vy), want = Math.max(s2, V0 * S * .8); b.vx *= want / s2; b.vy *= want / s2; hit = "bumper"; b.nx = nx; b.ny = ny; if (live) k.hit = 1; }
+  }
+  return hit;
+}
+function onBank(what) {
+  nori.banks++; nori.sq = .32; nori.wow = .35; const x = nori.x - (nori.nx || 0) * RN * S, y = nori.y - (nori.ny || 0) * RN * S;
+  fx.burst(x, y, { n: 9, colors: ["#fff", "#dff3ff"], speed: 190, life: .45, size: 4, gravity: 0, drag: 3, angle: Math.atan2(nori.ny || 0, nori.nx || 0), spread: 1.6 });
+  if (what === "bumper") { snd("boing", { pitch: 1 + nori.banks * .08 }); score += 5; fx.text(x, y - 16 * S, "+5", { size: 14, color: "#ffa62b" }); if (!demo) Lab.setScore(score); }
+  else snd("knock", { pitch: .9 + nori.banks * .14, vol: .8 });
+  if (!demo) { Lab.audio.combo(nori.banks + 1, { vol: .16 }); Lab.shake(2.5, .1); Lab.buzz(8); }
+  if (nori.banks <= 3) fx.text(nori.x, nori.y - 28 * S, "×" + (nori.banks + 1), { size: 15 + nori.banks * 3, color: "#2f6fd6", outline: "rgba(255,255,255,.9)" });
+}
+function dunk() {
+  const banks = Math.min(nori.banks, 3), sm = 1 + Math.min(2, Math.floor(streak / 3)), mult = (1 + banks) * sm, gain = 10 * mult, tAdd = Math.max(1.5, 3.2 - .25 * level);
+  streak++; bestStreak = Math.max(bestStreak, streak); bestBanks = Math.max(bestBanks, nori.banks); dives++; score += gain; time = Math.min(MAX_T, time + tAdd); timeFlash = 1; cheerT = 1.2;
+  nori.state = "dive"; nori.t = 0; nori.fromX = nori.x; nori.fromY = nori.y; nori.hx = hole.x; nori.hy = hole.y;
+  fx.burst(hole.x, hole.y, { n: 22 + banks * 6, colors: ["#8fd3ff", "#fff", "#4da3f0"], speed: 280, life: .7, size: 5, gravity: 500 }); fx.ring(hole.x, hole.y, { r0: hole.r * S * .6, r1: hole.r * S * 2.6, color: "#fff", width: 5 });
+  fx.text(hole.x, hole.y - 44 * S, (banks === 0 ? "DUNK!" : banks === 1 ? "BANK SHOT!" : banks === 2 ? "DOUBLE BANK!" : "TRICK SHOT!"), { size: 20 + banks * 3, color: banks ? "#ffa62b" : "#2f6fd6", outline: "rgba(255,255,255,.95)" });
+  fx.text(hole.x, hole.y - 18 * S, "+" + gain + (sm > 1 ? "  streak ×" + sm : ""), { size: 18, color: "#1e2850", outline: "rgba(255,255,255,.95)" });
+  fx.text(rink.L + rink.w / 2 + 62 * S, rink.T - 24 * S, "+" + tAdd.toFixed(1) + "s", { size: 15, color: "#2bb673", outline: "rgba(255,255,255,.9)" });
+  snd("splash", { pitch: 1 + banks * .12 }); snd("chime", { pitch: 1 + banks * .1, vol: .7 });
+  if (!demo) { Lab.setScore(score); Lab.bumpScore(); Lab.audio.combo(3 + banks * 2 + Math.min(4, streak), { vol: .22 }); Lab.shake(4 + banks * 2, .2); if (banks) Lab.hitstop(.05); Lab.buzz(20); }
+  const nl = 1 + Math.floor(dives / 4);
+  if (nl > level) { level = nl; if (!demo) { Lab.after(.5, () => { Lab.banner("RINK " + level, { color: "#2f6fd6", ms: 1000, y: .3 }); Lab.sfx("levelup", { vol: .7 }); }); if (INTRO[level]) Lab.after(1.5, () => Lab.toast(INTRO[level], 1900, { y: .16 })); } }
+}
+function miss() {
+  nori.state = "dizzy"; nori.t = 0; nori.vx = nori.vy = 0; sadT = 1; if (streak >= 3) fx.text(nori.x, nori.y - 34 * S, "streak lost", { size: 13, color: "#56658c", outline: "rgba(255,255,255,.9)" }); streak = 0; snd("thud", { pitch: 1.2, vol: .6 });
+}
+function updateNori(dt) {
+  const n = nori; n.t += dt; n.sq = Lab.damp(n.sq, 0, 9, dt); n.wow = Math.max(0, n.wow - dt); n.joy = Math.max(0, n.joy - dt);
+  if (n.state === "slide") {
+    acc = Math.min(acc + dt, .05);
+    while (acc >= STEP && n.state === "slide") {
+      acc -= STEP; const hit = step(n, STEP, true); if (hit) onBank(hit);
+      for (const f of fishes) if (!f.taken && Math.hypot(n.x - f.x, n.y - f.y) < (RN + 14) * S) {
+        f.taken = true; n.fish++; fishN++; const g = f.gold ? 15 : 5, ts = f.gold ? 1 : .5; score += g; time = Math.min(MAX_T, time + ts); timeFlash = 1;
+        fx.burst(f.x, f.y, { n: 8, colors: f.gold ? ["#ffe066", "#fff"] : ["#ffa62b", "#fff"], speed: 150, life: .45, size: 4, shape: f.gold ? "star" : "circle" }); fx.text(f.x, f.y - 16 * S, "+" + g, { size: 15, color: f.gold ? "#e0a91a" : "#ffa62b", outline: "rgba(255,255,255,.9)" });
+        snd("pickup", { pitch: 1 + n.fish * .12 }); if (!demo) Lab.setScore(score);
+      }
+      if (Math.hypot(n.x - hole.x, n.y - hole.y) < (hole.r - 3) * S) { dunk(); break; }
+      if (Math.hypot(n.vx, n.vy) < 34 * S || n.t > 8) { miss(); break; }
+    }
+    if (n.state === "slide") { n.ang = Math.atan2(n.vy, n.vx); trail.push({ x: n.x, y: n.y, t: 0 }); if (trail.length > 70) trail.shift(); }
+  } else if (n.state === "dive") { if (n.t > .28) { n.state = "swim"; n.t = 0; fishes = fishes.filter(f => f.taken); newRound(false); } }
+  else if (n.state === "swim") { if (n.t > .42) { n.state = "pop"; n.t = 0; n.x = home.x; n.y = home.y; n.joy = 1; fx.burst(home.x, home.y + 8 * S, { n: 14, colors: ["#8fd3ff", "#fff"], speed: 220, life: .5, size: 4, gravity: 600, angle: -Math.PI / 2, spread: 1.6 }); snd("bubble", { pitch: 1.2 }); } }
+  else if (n.state === "pop") { if (n.t > .3) { n.state = "ready"; n.t = 0; } }
+  else if (n.state === "dizzy") { if (n.t > .45) { n.state = "hop"; n.t = 0; n.fromX = n.x; n.fromY = n.y; } }
+  else if (n.state === "hop") { const k = clamp(n.t / .38, 0, 1); n.x = lerp(n.fromX, home.x, ease.inOutQuad(k)); n.y = lerp(n.fromY, home.y, ease.inOutQuad(k)); if (k >= 1) { n.state = "ready"; n.t = 0; n.sq = .25; snd("land", { vol: .4 }); } }
+  if (n.state === "ready" && queued) { const q = queued; queued = null; launch(q.ang); }
+}
+function update(dt) {
+  clock += dt; cheerT = Math.max(0, cheerT - dt); sadT = Math.max(0, sadT - dt); timeFlash = Math.max(0, timeFlash - dt * 2);
+  if (queued && (queued.t -= dt) <= 0) queued = null;
+  const kx = demo ? 0 : Lab.input.axisX(); if (kx && nori.state !== "slide") { aim.ang = clamp(aim.ang + kx * 1.3 * dt, A_MIN, A_MAX); kbT = 2.5; } kbT = Math.max(0, kbT - dt);
+  place(); updateNori(dt);
+  for (const t of trail) t.t += dt; while (trail.length && trail[0].t > .9) trail.shift();
+  for (const b of blocks) { b.born = Math.min(1, b.born + dt * 4); b.hitT = Math.max(0, (b.hitT || 0) - dt * 4); } for (const b of bumpers) { b.born = Math.min(1, b.born + dt * 4); b.hit = Math.max(0, b.hit - dt * 3.5); }
+  for (const f of fishes) { f.t += dt; f.born = Math.min(1, f.born + dt * 4); } hole.born = Math.min(1, hole.born + dt * 3); if (oldHole && (oldHole.t += dt * 2.5) >= 1) oldHole = null;
+  if (slideLoop && !demo) slideLoop.set({ vol: nori.state === "slide" ? Math.min(.12, Math.hypot(nori.vx, nori.vy) / (V0 * S) * .12) : 0 });
+  if (demo || over) return;
+  time -= dt; Lab.music.intensity(clamp(1.1 - time / 34, .2, 1));
+  const sec = Math.ceil(time); if (sec !== lastSec) { if (sec <= 8 && sec > 0 && sec < lastSec) Lab.sfx("tick", { pitch: 1 + (8 - sec) * .05, vol: .6 }); lastSec = sec; }
+  if (time <= 0 && nori.state !== "slide" && nori.state !== "dive") {   // a slide still in motion at 0:00 may yet be a buzzer-beater
+    time = 0; over = true; aim.on = false; drag = null; Lab.sfx("whistle", { vol: .6 });
+    Lab.after(.5, () => Lab.gameover({ neutral: true, title: "Brrr — time's up!", message: dives ? "Nori dunked " + dives + (dives === 1 ? " time." : " times.") : "The fish got away this time.", score, stats: [["Dunks", dives], ["Fish", fishN], ["Best bank", bestBanks ? "×" + (Math.min(3, bestBanks) + 1) : "—"]] }));
+  }
+}
+function frame(dt, t) { update(dt); render(t); }
+function attract(dt, t) {
+  if (!demo) { demo = true; layout(); reset(); level = 5; newRound(false); }
+  if (nori.state === "ready" && (demoT -= dt) < 0) { demoT = .9; launch(Math.atan2(hole.y - home.y, hole.x - home.x) + Lab.rand(-.5, .5) * (Lab.chance(.45) ? 0 : 1)); if (dives % 3 === 2) level = 4 + (dives % 4); }
+  update(dt); render(t);
+}
+
+/* ---------- art ---------- */
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80, o = 40;
+  return Lab.sprite("idbg" + W + "x" + H, W, H, g => {
+    draw.vgrad(g, 0, 0, W, H, ["#eaf6ff", "#d3e9fb"]);
+    const rnd = Lab.rng(5), k = 20 * S, L = rink.L + o, T = rink.T + o, w = rink.w, h = rink.h;
+    for (let i = 0; i < 60; i++) { g.fillStyle = "rgba(255,255,255,.7)"; g.beginPath(); g.ellipse(rnd() * W, rnd() * H, 30 + rnd() * 50, 8 + rnd() * 10, 0, 0, TAU); g.fill(); }
+    for (let i = 0; i < 14; i++) { const x = rnd() * W, y = rnd() * H, s = (20 + rnd() * 16) * S; if (x > L - k - s && x < L + w + k + s && y > T - k - s * 2 && y < T + h + k) continue; g.fillStyle = "rgba(60,90,140,.12)"; g.beginPath(); g.ellipse(x, y + s * .1, s * .7, s * .18, 0, 0, TAU); g.fill(); for (let j = 0; j < 3; j++) { g.fillStyle = j % 2 ? "#4f9b86" : "#5fae96"; g.beginPath(); g.moveTo(x, y - s * (1.7 - j * .1)); g.lineTo(x + s * (.4 + j * .14), y - s * (1.1 - j * .5)); g.lineTo(x - s * (.4 + j * .14), y - s * (1.1 - j * .5)); g.fill(); } g.fillStyle = "#fff"; g.beginPath(); g.moveTo(x, y - s * 1.7); g.lineTo(x + s * .2, y - s * 1.35); g.lineTo(x - s * .2, y - s * 1.35); g.fill(); }
+    // snowbank + ice
+    draw.rect(g, L - k, T - k + 5 * S, w + k * 2, h + k * 2, 30 * S, "rgba(70,110,170,.2)"); draw.rect(g, L - k, T - k, w + k * 2, h + k * 2, 30 * S, "#ffffff");
+    draw.rr(g, L, T, w, h, 14 * S); g.save(); g.clip(); draw.vgrad(g, L, T, w, h, ["#bfe6fb", "#9fd3f5"]);
+    g.strokeStyle = "rgba(255,255,255,.5)"; g.lineWidth = 1.5; g.lineCap = "round";
+    for (let i = 0; i < 26; i++) { const x = L + rnd() * w, y = T + rnd() * h, r = 40 + rnd() * 120, a = rnd() * TAU; g.beginPath(); g.arc(x, y, r, a, a + .25 + rnd() * .5); g.stroke(); }
+    g.fillStyle = "rgba(255,255,255,.22)"; g.beginPath(); g.moveTo(L + w * .1, T); g.lineTo(L + w * .42, T); g.lineTo(L + w * .16, T + h); g.lineTo(L - w * .16, T + h); g.fill(); g.beginPath(); g.moveTo(L + w * .62, T); g.lineTo(L + w * .7, T); g.lineTo(L + w * .44, T + h); g.lineTo(L + w * .36, T + h); g.fill();
+    g.strokeStyle = "rgba(60,120,190,.35)"; g.lineWidth = 5 * S; draw.rr(g, L, T, w, h, 14 * S); g.stroke(); g.restore();
+    // home spot
+    g.strokeStyle = "rgba(47,111,214,.35)"; g.lineWidth = 3 * S; g.setLineDash([8 * S, 7 * S]); g.beginPath(); g.arc(home.x + o, home.y + o + 4 * S, 34 * S, 0, TAU); g.stroke(); g.setLineDash([]);
+  });
+}
+function drawHoleAt(c, x, y, r, t, a) {
+  c.save(); c.globalAlpha = a; c.fillStyle = "#e9f7ff"; c.beginPath(); c.ellipse(x, y, r + 5 * S, r * .9 + 5 * S, 0, 0, TAU); c.fill();
+  c.fillStyle = "#1f58a8"; c.beginPath(); c.ellipse(x, y, r, r * .9, 0, 0, TAU); c.fill(); c.fillStyle = "#0e3a7c"; c.beginPath(); c.ellipse(x, y + r * .12, r * .82, r * .68, 0, 0, TAU); c.fill();
+  c.strokeStyle = "rgba(190,230,255,.6)"; c.lineWidth = 1.5 * S; const ph = (t * .7) % 1; c.beginPath(); c.ellipse(x, y + r * .1, r * .75 * ph, r * .6 * ph, 0, 0, TAU); c.globalAlpha = a * (1 - ph); c.stroke(); c.restore();
+}
+function drawFish(c, x, y, s, ang, gold, wig) {
+  c.save(); c.translate(x, y); c.rotate(ang); const col = gold ? "#ffd23f" : "#ffa62b";
+  c.fillStyle = Lab.color.shade(col, -.15); c.beginPath(); c.moveTo(-s * .7, 0); c.lineTo(-s * 1.35, -s * .5 + wig * s * .3); c.lineTo(-s * 1.35, s * .5 + wig * s * .3); c.fill();
+  c.fillStyle = col; c.beginPath(); c.ellipse(0, 0, s, s * .56, 0, 0, TAU); c.fill(); c.fillStyle = "rgba(255,255,255,.45)"; c.beginPath(); c.ellipse(s * .1, -s * .2, s * .55, s * .16, 0, 0, TAU); c.fill();
+  c.fillStyle = INK; c.beginPath(); c.arc(s * .5, -s * .08, s * .13, 0, TAU); c.fill(); c.restore();
+}
+function guide(c, t) {
+  const b = { x: home.x, y: home.y, vx: Math.cos(aim.ang) * V0 * S, vy: Math.sin(aim.ang) * V0 * S }; let left = 300 * S, after = -1, n = 0, lx = b.x, ly = b.y, d = (t * 60) % 22;
+  c.fillStyle = "rgba(30,60,120,.55)";
+  while (left > 0 && n++ < 400) {
+    const hit = step(b, STEP * 2, false), seg = Math.hypot(b.x - lx, b.y - ly); left -= seg; d += seg; lx = b.x; ly = b.y;
+    if (hit && after < 0) { after = 0; left = Math.min(left, 78 * S); draw.circle(c, b.x, b.y, 5 * S, null, "rgba(30,60,120,.6)", 2); }
+    if (d >= 22 * S) { d = 0; c.globalAlpha = after >= 0 ? .45 : .85; c.beginPath(); c.arc(b.x, b.y, (after >= 0 ? 2.6 : 3.4) * S, 0, TAU); c.fill(); }
+  }
+  c.globalAlpha = 1;
+}
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(), n = nori, size = 56 * S; c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // spectators peeking over the top snowbank
+  const sy = rink.T - 29 * S, sm = cheerT > 0 ? "joy" : n.wow > 0 ? "wow" : sadT > 0 ? "sad" : time < 8 && !demo ? "scared" : "happy", sl = [clamp((n.x - home.x) / (rink.w * .4), -1, 1), .8];
+  Pals.draw(c, "momo", rink.L + 34 * S, sy - (cheerT > .8 ? Math.sin((1.2 - cheerT) / .4 * Math.PI) * 8 * S : 0), 38 * S, { mood: sm, t, look: sl, arms: cheerT > 0 ? "cheer" : "down", shadow: false });
+  Pals.draw(c, "olli", rink.R - 34 * S, sy - (cheerT > .6 && cheerT < 1 ? Math.sin((1 - cheerT) / .4 * Math.PI) * 8 * S : 0), 38 * S, { mood: sm, t: t + 1, look: sl, arms: cheerT > 0 ? "cheer" : "down", shadow: false });
+  draw.rect(c, rink.L - 20 * S, rink.T - 20 * S, rink.w + 40 * S, 22 * S, 11 * S, "#ffffff");
+  // clock
+  const low = time < 8 && !demo, cx = rink.L + rink.w / 2, cy = rink.T - 30 * S, pul = low ? 1 + .08 * Math.sin(t * 12) : 1 + timeFlash * .12;
+  if (!demo) { draw.rect(c, cx - 44 * S * pul, cy - 15 * S * pul, 88 * S * pul, 30 * S * pul, 15 * S, low ? "#ff5d73" : timeFlash > 0 ? "#2bb673" : "#2f3d73"); draw.text(c, Lab.fmtTime(time), cx, cy + 1, { size: 18 * S * pul, color: "#fff", weight: 700 }); }
+  // ice things
+  if (oldHole) drawHoleAt(c, oldHole.x, oldHole.y, oldHole.r * S * (1 - oldHole.t), t, 1 - oldHole.t);
+  const hr = hole.r * S * ease.outBack(hole.born); if (hr > 1) { drawHoleAt(c, hole.x, hole.y, hr, t, 1); const fxp = hole.x + hr + 8 * S, fy = hole.y; draw.line(c, fxp, fy + 6 * S, fxp, fy - 30 * S, "#7a5a3a", 2.5 * S); c.fillStyle = "#ffa62b"; c.beginPath(); c.moveTo(fxp, fy - 30 * S); c.lineTo(fxp + 16 * S + Math.sin(t * 5) * 2, fy - 24 * S); c.lineTo(fxp, fy - 17 * S); c.fill(); }
+  draw.shadow(c, home.x, home.y + 6 * S, 20 * S, 9 * S, .1);
+  for (const tr of trail) { c.fillStyle = `rgba(255,255,255,${.5 * (1 - tr.t / .9)})`; c.beginPath(); c.arc(tr.x, tr.y, 7 * S, 0, TAU); c.fill(); }
+  for (const f of fishes) if (!f.taken) { const s = 11 * S * ease.outBack(f.born); if (f.gold) draw.glow(c, f.x, f.y, 26 * S, "#ffe066", .5 + .2 * Math.sin(t * 5)); draw.shadow(c, f.x, f.y + 7 * S, s, s * .3, .12); drawFish(c, f.x, f.y + Math.abs(Math.sin(f.t * 5)) * -3 * S, s, Math.sin(f.t * 5) * .25 + (f.u > .5 ? Math.PI : 0), f.gold, Math.sin(f.t * 10)); }
+  for (const b of blocks) { const w = b.w * S * ease.outBack(b.born), h = b.h * S * ease.outBack(b.born), k = b.hitT || 0; draw.rect(c, b.x - w / 2, b.y - h / 2 + 5 * S, w, h, 8 * S, "rgba(40,90,160,.25)"); draw.rect(c, b.x - w / 2, b.y - h / 2 - k * 2, w, h, 8 * S, "#d9f1ff", "#7fbfe8", 2.5); draw.rect(c, b.x - w / 2 + 5 * S, b.y - h / 2 + 4 * S - k * 2, w - 10 * S, h * .32, 5 * S, "rgba(255,255,255,.75)"); if (b.amp) { c.fillStyle = "rgba(47,111,214,.5)"; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(b.x + d * (w / 2 - 9 * S), b.y + 5 * S); c.lineTo(b.x + d * (w / 2 - 16 * S), b.y + 1 * S); c.lineTo(b.x + d * (w / 2 - 16 * S), b.y + 9 * S); c.fill(); } } }
+  for (const b of bumpers) { const r = b.r * S * ease.outBack(b.born) * (1 + ease.pulse(b.hit) * .25); draw.shadow(c, b.x, b.y + r * .8, r, r * .3, .14); draw.circle(c, b.x, b.y, r, "#ffffff", "#a9d2ef", 2.5); c.fillStyle = INK; for (const d of [-1, 1]) { c.beginPath(); c.arc(b.x + d * r * .32, b.y - r * .15, r * .1, 0, TAU); c.fill(); } c.fillStyle = "#ffa62b"; c.beginPath(); c.moveTo(b.x - r * .1, b.y + r * .05); c.lineTo(b.x + r * .42, b.y + r * .18); c.lineTo(b.x - r * .1, b.y + r * .3); c.fill(); draw.rect(c, b.x - r * .5, b.y - r * 1.02, r, r * .3, r * .1, "#ff6b8b"); }
+  // aim guide
+  const aiming = (aim.on || kbT > 0) && !over && !demo;
+  if (aiming) guide(c, t);
+  // Nori
+  if (n.state === "slide") {
+    const sp = Math.hypot(n.vx, n.vy) / (V0 * S); draw.shadow(c, n.x + 3 * S, n.y + 6 * S, size * .42, size * .32, .14);
+    Pals.draw(c, "nori", n.x, n.y, size, { mood: n.wow > 0 ? "wow" : sp > .5 ? "joy" : "focus", t, tilt: n.ang + Math.PI / 2, squash: n.sq - sp * .16, arms: "up", shadow: false });
+  } else if (n.state === "dive") { const k = clamp(n.t / .28, 0, 1); Pals.draw(c, "nori", lerp(n.fromX, n.hx, k), lerp(n.fromY, n.hy, k), size * (1 - k * .9), { mood: "joy", t, tilt: n.ang + Math.PI / 2 + k * 3, shadow: false, arms: "up" }); }
+  else if (n.state === "swim") { const k = ease.inOutQuad(clamp(n.t / .42, 0, 1)); c.fillStyle = "rgba(30,70,140,.22)"; c.beginPath(); c.ellipse(lerp(n.hx, home.x, k), lerp(n.hy, home.y, k), 18 * S, 11 * S, Math.atan2(home.y - n.hy, home.x - n.hx), 0, TAU); c.fill(); }
+  else {
+    const pop = n.state === "pop" ? ease.outBack(clamp(n.t / .3, 0, 1)) : 1, hopZ = n.state === "hop" ? Math.sin(clamp(n.t / .38, 0, 1) * Math.PI) * 30 * S : 0, ready = n.state === "ready";
+    const mood = over ? "sad" : n.state === "dizzy" ? "dizzy" : n.state === "hop" ? "sad" : n.joy > 0 ? "joy" : aiming ? "focus" : low ? "scared" : "happy";
+    if (n.state === "pop" || n.joy > .5) drawHoleAt(c, home.x, home.y + 14 * S, 22 * S * (n.state === "pop" ? 1 : clamp((n.joy - .5) * 4, 0, 1)), t, 1);
+    Pals.draw(c, "nori", n.x + (n.state === "dizzy" ? Math.sin(t * 30) * 2 : 0), n.y - size * .28 * pop - hopZ + (1 - pop) * size * .4, size * pop, { mood, t, look: aiming ? [Math.cos(aim.ang), Math.sin(aim.ang)] : [clamp((hole.x - n.x) / (rink.w * .4), -1, 1), -.8], squash: n.sq + (aiming && ready ? .06 + aim.pull * .16 : 0), tilt: n.state === "dizzy" ? Math.sin(t * 9) * .25 : aiming && ready ? Math.cos(aim.ang) * .18 : 0, arms: n.joy > 0 ? "cheer" : aiming ? "up" : "down", shadow: n.state !== "hop" });
+    if (n.joy > 0 && n.state !== "pop") drawFish(c, n.x + 9 * S, n.y - size * .28 + 1 * S, 8 * S, .5 + Math.sin(t * 22) * .2, false, Math.sin(t * 30));
+    if (n.state === "dizzy") for (let i = 0; i < 3; i++) { const a = t * 6 + i * TAU / 3; draw.star(c, n.x + Math.cos(a) * 20 * S, n.y - size * .72 + Math.sin(a) * 6 * S, 5 * S, "#ffd23f", 5, .5); }
+  }
+  if (streak >= 3 && !demo) draw.text(c, "streak ×" + (1 + Math.min(2, Math.floor(streak / 3))), rink.L + rink.w / 2 - 62 * S, rink.T - 30 * S, { size: 13 * S, color: "#e0661a", weight: 700, align: "right" });
+}
+Lab.boot();
+})();
+</script></body></html>

@@ -2,6 +2,25 @@
 
 Newest first. One entry per coherent, verified batch of work.
 
+## 2026-11-27 — Phone Game Lab complete (70/70) + 12 standalone games + first Pocket Pals game
+- **Phone Game Lab 33–70** rebuilt (38 more games; the collection is now entirely on engine v2): Snug, Antiquity,
+  Teeter Torte, Plumb Line, Tumblepeg, Blacktop Buzzer, Brass Pocket, Postage Stamp, Bamboo Span, Plumpling, Haberdash,
+  Shoo!, Live Wires, Fountain Court, Decant, Tall Order, Bolt Hole, Slidescape, Tideglass, Plot Twist, Hedgeroll,
+  Glasswright, Shuteye Street, Soundings, Alphabroth, Purlwise, Petal Count, Lantern Tail, Ribbon Rodeo, Big Drip,
+  Last Slice, Pocket Reef, Potting Shed, Lantern Noodles, Chute First, Punchline, Coconut Groove — plus 14 Sparkmoth,
+  15 Facet, 16 Pin Whirl, 23 Pogo Peak, 24 Spindle Drop from the first wave. All 70 pass smoke; every game has a
+  gameplay test and a review. Before/after contact sheets: `docs/baseline/phone-game-lab.jpg` → `docs/after/phone-game-lab.jpg`.
+- **Standalone games rebuilt** (12): Neon Hagen, Sprouty's Garden, Static Bloom (was "Neon Krunker"), Breach Vector,
+  Thimble & the Bramble King (was "Zelda Lite"), Star Trail Adventure (was a plumber-platformer clone), Furniture Forts,
+  Power Wash Royale, Puppet Panic, Physics Charades — Pose or Splat, Mystic Potion Sort, Unicorn Magic Sort. All
+  self-contained (no CDNs, fonts vendored, ad SDK removed), with touch controls, tests and reviews.
+- **Pocket Pals**: first game on the mascot cast, Bedtime Stacks (was "2048").
+- **Bugs found by verification**: Tideglass slow-drag soft drop was speed-gated (fixed in the game); Scribble Siege
+  and Tumblepeg had racy/off-screen test steps (fixed in the tests, not weakened). A full-suite re-run found no other
+  flaky tests.
+- **Engine**: releases delivered while paused, `Lab.fmt` up to Qa, `Lab.audio.now()/latency`, keys readable inside
+  `onKey`, count-up rounding, pointer type, docs for level puzzles / test timing / baked backgrounds.
+
 ## 2026-11-26 — Arcade launcher + Phone Game Lab wave 1 (29 games)
 - **Arcade** (`index.html`): data-driven from the generated catalog — featured by review score, continue playing,
   favorites, instant search, genre / collection / control filters, sorts, URL-hash state, "Surprise me", keyboard
