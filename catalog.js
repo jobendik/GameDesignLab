@@ -2375,7 +2375,8 @@ window.GDL_CATALOG = {
    "n": 66,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--66-potting-shed.jpg"
   },
   {
    "id": "PhoneGameLab/67-lantern-noodles",
@@ -2394,7 +2395,8 @@ window.GDL_CATALOG = {
    "n": 67,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--67-lantern-noodles.jpg"
   },
   {
    "id": "PhoneGameLab/68-chute-first",
@@ -2413,7 +2415,8 @@ window.GDL_CATALOG = {
    "n": 68,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--68-chute-first.jpg"
   },
   {
    "id": "PhoneGameLab/69-punchline",
@@ -2450,23 +2453,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--70-rhythm-lane.jpg"
   },
   {
-   "id": "PhoneGameLab2/balloon-splash",
-   "path": "PhoneGameLab2/games/balloon-splash/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Balloon Splash",
-   "desc": "Throw water balloons at moving targets.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 2,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--balloon-splash.jpg"
-  },
-  {
    "id": "PhoneGameLab2/basketball",
    "path": "PhoneGameLab2/games/basketball/index.html",
    "collection": "PhoneGameLab2",
@@ -2499,7 +2485,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--bedtime-stacks.jpg"
   },
   {
    "id": "PhoneGameLab2/berry-bounce",
@@ -3656,6 +3643,21 @@ window.GDL_CATALOG = {
    "n": 71,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--sub-adventure.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/sunny-soak",
+   "path": "PhoneGameLab2/games/sunny-soak/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Balloon Splash",
+   "desc": "Tap balloons to splash them. 30 seconds.",
+   "genre": [
+    "Minigame"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": false
   },
   {
    "id": "PhoneGameLab2/super-balloons",

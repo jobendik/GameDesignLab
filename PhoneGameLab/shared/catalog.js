@@ -72,7 +72,8 @@ window.LAB_GAMES = [
     "t": "Chute First",
     "d": "Sort first. Think faster.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--68-chute-first.jpg"
    }
   ]
  },
@@ -405,7 +406,8 @@ window.LAB_GAMES = [
     "t": "Lantern Noodles",
     "d": "Build bowls fast. Remember your regulars.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--67-lantern-noodles.jpg"
    }
   ]
  },
@@ -445,7 +447,8 @@ window.LAB_GAMES = [
     "t": "Potting Shed",
     "d": "Merge, grow and fill the day's orders.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--66-potting-shed.jpg"
    }
   ]
  },

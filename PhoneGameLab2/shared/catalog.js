@@ -4,13 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 2,
-    "slug": "balloon-splash",
-    "t": "Balloon Splash",
-    "d": "Throw water balloons at moving targets.",
-    "thumb": "../thumbs/PhoneGameLab2--balloon-splash.jpg"
-   },
-   {
     "n": 3,
     "slug": "basketball",
     "t": "Basketball",
@@ -555,6 +548,11 @@ window.LAB_GAMES = [
     "t": "Wire Ball",
     "d": "Drag a ring along a wire without touching it.",
     "thumb": "../thumbs/PhoneGameLab2--wire-ball.jpg"
+   },
+   {
+    "slug": "sunny-soak",
+    "t": "Balloon Splash",
+    "d": "Tap balloons to splash them. 30 seconds."
    }
   ]
  },
@@ -566,7 +564,8 @@ window.LAB_GAMES = [
     "t": "Bedtime Stacks",
     "d": "Slide the books. Bring Olli his bedtime story.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--bedtime-stacks.jpg"
    }
   ]
  }
