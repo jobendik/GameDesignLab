@@ -1,28 +1,278 @@
-<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Sunny Soak</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
 </head><body><script>
-Lab.init({title:"Balloon Splash", instructions:"Tap balloons to splash them. 30 seconds.", restart:start});
-let balloons,t,score;
-function start(){
-  balloons=[];score=0;t=30;Lab.setScore(0);
-  for(let i=0;i<6;i++)spawn();
-  Lab.input.onTap=[(x,y)=>{
-    for(const b of balloons){if(!b.dead && Lab.dist(x,y,b.x,b.y)<b.r){b.dead=true;score++;Lab.setScore(score);Lab.beep(800,.05);}}
-  }];
-  Lab.loop((dt)=>{
-    t-=dt; if(t<=0){Lab.gameover({title:"Time!",message:"Popped "+score+" balloons."});return;}
-    for(const b of balloons){if(b.dead)continue;b.x+=b.vx*dt;b.y+=b.vy*dt;
-      if(b.x<b.r||b.x>Lab.W-b.r)b.vx*=-1;if(b.y<140+b.r||b.y>Lab.H-40-b.r)b.vy*=-1;}
-    balloons=balloons.filter(b=>!b.dead);
-    while(balloons.length<6)spawn();
-    draw();
+(function(){ "use strict";
+/* SUNNY SOAK — the hottest day of the year. Pip the fox stands on the garden deck with a tub of water balloons;
+ * the other pals wander across the lawn, flushed and sweating, and WANT to be soaked.
+ * Core idea kept: throw water balloons at moving targets.
+ * Hooks:   TAP = quick small balloon; HOLD = fill a bigger one (wider splash, slower flight) — hold too long and it
+ *          bursts over Pip.  Balloons take time to land, so you lead the target; a splash soaks everyone inside it
+ *          (doubles/triples).  Only five balloons in the tub; it refills slowly, so misses cost.
+ *          HEAT is the clock: it climbs by itself and jumps when a pal leaves dry; every soak cools it. Full = over.
+ * Variety: each pal moves in character — Bun ambles, Momo hops, Nori belly-slides, Olli hides under an umbrella
+ *          (needs a big balloon), Bolt must stay DRY (robots + water = bzzt).  Later: conga lines, crossings, escorts.
+ * Identity: bright mown lawn, wooden deck, blue-sky strip, candy balloons; "funk" music that heats up with the meter. */
+let demo = false, demoT = 1;
+Lab.init({
+  title: "Sunny Soak", tagline: "Lob water balloons. Cool your pals down.", category: "Arcade", kicker: "Pocket Pals",
+  howto: ["Tap the lawn to lob a water balloon", "Hold to fill a bigger one — not too long!", "Soak hot pals. Keep Bolt the robot dry"],
+  theme: { bg: "#63bf5c", bg2: "#bfeaff", accent: "#1e9be0", accent2: "#ffb52e", fg: "#22304a", muted: "#4f6178", light: true },
+  orient: "any", music: { style: "funk", key: "C", vol: .38 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink, mix = Lab.color.mix;
+const BCOL = ["#ff6b8b", "#ffb52e", "#9b8cff", "#ff8a3d", "#f06bd0"];
+const HOT = { bun: "#e493d2", momo: "#b9d468", nori: "#5d3f78", olli: "#cf6a3c", pip: "#ff7a3d", bolt: "#ffd23f" };   // flushed body tints
+const SPEED = { bun: 50, momo: 0, nori: 160, olli: 58, bolt: 66 }, MAXAMMO = 5;
+const INTRO = { 2: "Momo hops in!", 3: "Keep Bolt dry!", 4: "Nori slides by!", 5: "Olli's umbrella needs a BIG one", 6: "Conga line!", 7: "Bolt tags along…" };
+let S, P, wf, yardTop, yardBot, lanes, pip = {}, runners, balloons, puddles, fill, aim, queued, cool, stun, ammo, regen, heat, shownHeat, score, soaks, streak,
+  bestStreak, level, throws, pops, escapes, spawnT, lastLane, over, joyT, pipSq, warnT, fillLoop, clock, noSpawn, heatFlash, bestMulti;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() {
+  P = Lab.play; S = clamp(Math.min(P.w / 390, P.h / 600), .62, 1.5); wf = Math.sqrt(clamp(P.w / (390 * S), 1, 3.2));
+  yardTop = P.y + 162 * S; yardBot = Lab.H - Lab.safe.bottom - 12 * S;
+  const n = clamp(Math.floor((yardBot - yardTop) / (96 * S)), 2, 5), lh = (yardBot - yardTop) / n; lanes = [];
+  for (let i = 0; i < n; i++) lanes.push(yardTop + lh * (i + .8));
+  pip.size = 78 * S; pip.x = P.x + P.w / 2; pip.y = P.y + 48 * S + pip.size * .69;
+  if (runners) for (const r of runners) { r.lane = Math.min(r.lane, n - 1); r.y = lanes[r.lane]; }
+  Lab.sprite.clear("ssbg");
+}
+Lab.onResize(() => { if (runners) { layout(); if (aim) clampAim(aim.x, aim.y); } });
+function clampAim(x, y) { aim = { x: clamp(x, 10, Lab.W - 10), y: clamp(y, yardTop + 14 * S, yardBot - 2) }; }
+const splashR = f => (22 + 34 * f) * S;
+
+function reset() {
+  runners = []; balloons = []; puddles = []; fill = null; queued = null; cool = 0; stun = 0; ammo = MAXAMMO; regen = 0; heat = shownHeat = .22; score = 0; soaks = 0; streak = 0;
+  bestStreak = 0; level = 1; throws = 0; pops = 0; escapes = 0; spawnT = .4; lastLane = -1; over = false; joyT = 0; pipSq = 0; warnT = 0; clock = 0; noSpawn = false; heatFlash = 0; bestMulti = 1;
+  clampAim(Lab.W / 2, (yardTop + yardBot) / 2);
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0);
+  fillLoop = Lab.audio.loop({ type: "sine", f: 300, vol: 0 });
+  Lab.input.onDown = [(x, y) => { if (over) return; clampAim(x, y); press(); }];
+  Lab.input.onMove = [(x, y) => { if (Lab.input.down && !over) clampAim(x, y); }];
+  Lab.input.onUp = [(x, y) => { if (over) return; if (fill) { clampAim(x, y); release(); } else if (queued) queued.up = true; }];
+  Lab.hint("Tap to lob · hold to fill a bigger balloon");
+  Lab.expose({
+    get score() { return score; }, get heat() { return heat; }, set heat(v) { heat = v; }, get level() { return level; }, get soaks() { return soaks; }, get streak() { return streak; },
+    get ammo() { return ammo; }, set ammo(v) { ammo = v; }, get pops() { return pops; }, get throws() { return throws; }, get escapes() { return escapes; }, get filling() { return fill ? fill.v : -1; },
+    get runners() { return runners.map(r => ({ type: r.type, x: r.x, y: r.y - r.size * .45, soaked: r.soaked, v: r.v * r.dir, lane: r.lane })); },
+    get yard() { return { top: yardTop, bot: yardBot, lanes: lanes.slice() }; }, get lastFill() { return pip.lastFill; },
+    hold(v) { noSpawn = v; }, clear() { runners = []; balloons = []; }, spawn(type, lane, dir, x) { const r = spawnRunner(type, lane, dir || 1); if (x != null) r.x = x; return runners.length; },
+    throwAt(x, y, f) { fill = { v: f || 0, col: BCOL[0] }; clampAim(x, y); release(); },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- throwing ---------- */
+function press() {
+  if (stun > 0) return;
+  if (cool > 0) { queued = { up: false }; return; }
+  if (ammo <= 0) { snd("error", { vol: .5 }); fx.text(pip.x + 78 * S, pip.y - 30 * S, "refilling…", { size: 13, color: "#1e6fa8", outline: "rgba(255,255,255,.7)" }); return; }
+  fill = { v: 0, col: Lab.choose(BCOL) }; snd("bubble", { pitch: 1.3, vol: .5 });
+}
+function release() {
+  const f = clamp(fill.v, 0, 1), hx = pip.x, hy = pip.y - pip.size * .95;
+  balloons.push({ x0: hx, y0: hy, tx: aim.x, ty: aim.y, t: 0, T: .46 + .16 * f, f, col: fill.col });
+  pip.lastFill = f; fill = null; ammo--; cool = .22; throws++; pipSq = -.24; snd("whoosh", { pitch: 1.25 - f * .4, vol: .6 }); Lab.buzz(6);
+}
+function burstOnPip() {
+  fill = null; ammo--; stun = 1; streak = 0; pops++; pipSq = .3;
+  const x = pip.x, y = pip.y - pip.size * .6;
+  fx.burst(x, y, { n: 26, colors: ["#6cc8ff", "#bfeaff", "#fff"], speed: 300, life: .7, size: 5, gravity: 700 }); fx.ring(x, y, { r0: 10, r1: 70 * S, color: "#bfeaff", width: 5 });
+  fx.text(x, pip.y + pip.size * .2, "Oops — too full!", { size: 17, color: "#1e6fa8", outline: "rgba(255,255,255,.8)" });
+  snd("pop", { pitch: .8 }); snd("splash", { pitch: 1.2 }); Lab.shake(5, .2); Lab.buzz(25);
+}
+function land(b) {
+  const R = splashR(b.f); let hits = 0, zapped = false, near = 1e9;
+  for (const r of runners) {
+    if (r.soaked) continue; const cy = r.y - r.size * .45 - r.z * .5, d = Math.hypot(r.x - b.tx, cy - b.ty);
+    if (d > R + r.size * .34) continue;
+    if (r.type === "bolt") { zap(r); zapped = true; continue; }
+    if (r.type === "olli" && b.f < .5) { r.wob = 1; snd("knock", { pitch: 1.4 }); fx.text(r.x, r.y - r.size * 1.25, "Too small!", { size: 14, color: "#fff" }); continue; }
+    soak(r); hits++; near = Math.min(near, d);
+  }
+  fx.burst(b.tx, b.ty, { n: 10 + Math.round(b.f * 18), colors: ["#6cc8ff", "#bfeaff", "#fff", b.col], speed: 180 + b.f * 200, life: .55, size: 3.5 + b.f * 2.5, gravity: 600 });
+  fx.ring(b.tx, b.ty, { r0: R * .3, r1: R * 1.15, color: "#e8f8ff", width: 4 + b.f * 3, life: .35 });
+  puddles.push({ x: b.tx, y: b.ty, r: R, t: 0 }); if (puddles.length > 14) puddles.shift();
+  snd("splash", { pitch: 1.35 - b.f * .55, vol: .5 + b.f * .4 }); if (b.f > .5 && !demo) Lab.shake(2 + b.f * 4, .15);
+  if (hits) {
+    streak++; bestStreak = Math.max(bestStreak, streak); bestMulti = Math.max(bestMulti, hits); joyT = .7;
+    const mult = Math.min(5, 1 + Math.floor((streak - 1) / 3)), bull = near < 12 * S, gain = (10 * hits * (hits > 1 ? hits : 1) + (bull ? 5 : 0)) * mult;
+    score += gain;
+    fx.text(b.tx, b.ty - R - 10 * S, "+" + gain + (mult > 1 ? "  ×" + mult : ""), { size: 18 + Math.min(10, hits * 3 + mult), color: hits > 1 ? "#fff3a0" : "#fff" });
+    if (hits > 1) fx.text(b.tx, b.ty - R - 36 * S, hits === 2 ? "DOUBLE!" : hits === 3 ? "TRIPLE!" : "MEGA SPLASH!", { size: 20, color: "#ffe066" }); else if (bull) fx.text(b.tx, b.ty - R - 32 * S, "Bullseye", { size: 14, color: "#bfeaff" });
+    if (!demo) { Lab.setScore(score); Lab.bumpScore(); Lab.audio.combo(Math.min(12, streak - 1 + hits), { vol: .22 }); if (hits > 1) { Lab.hitstop(.04); Lab.buzz(18); } }
+  } else if (!zapped) { if (streak >= 3) fx.text(b.tx, b.ty - R - 8 * S, "streak lost", { size: 13, color: "rgba(255,255,255,.85)" }); streak = 0; }
+  if (zapped) streak = 0;
+}
+function soak(r) {
+  r.soaked = true; r.joy = 1; r.sq = .28; soaks++; heat = Math.max(0, heat - .04); if (r.type === "olli") r.umb = 0;
+  fx.burst(r.x, r.y - r.size * .5, { n: 8, colors: ["#6cc8ff", "#fff"], speed: 150, life: .5, size: 3, gravity: 500 });
+  const nl = 1 + Math.floor(soaks / 8);
+  if (nl > level) {
+    level = nl; heat = Math.max(0, heat - .08);
+    if (!demo) { Lab.banner("LEVEL " + level, { color: "#1e9be0", ms: 1000, y: .3 }); Lab.sfx("levelup", { vol: .7 }); if (INTRO[level]) Lab.after(.9, () => Lab.toast(INTRO[level], 1900, { y: .3 })); }
+  }
+}
+function zap(r) {
+  r.stun = 1.3; heat = Math.min(1, heat + .1); heatFlash = 1;
+  fx.sparks(r.x, r.y - r.size * .5, -Math.PI / 2, { n: 16, color: "#ffe066", spread: TAU, speed: 320 }); fx.text(r.x, r.y - r.size * 1.2, "Bzzt! +heat", { size: 16, color: "#ffe066" });
+  snd("zap"); if (!demo) { Lab.flash("#fff3a0", .15, .3); Lab.shake(6, .25); Lab.buzz(30); }
+}
+
+/* ---------- pals on the lawn ---------- */
+function spawnRunner(type, lane, dir, off) {
+  const size = 62 * S, sm = 1 + .06 * (level - 1);
+  const r = { type, lane, dir, size, x: dir > 0 ? -size * .7 - (off || 0) : Lab.W + size * .7 + (off || 0), y: lanes[lane], t: Lab.rand(0, 3), ph: Lab.rand(0, .4), z: 0, sq: 0, soaked: false, joy: 0, stun: 0, umb: type === "olli" ? 1 : 0, wob: 0, v: SPEED[type] * S * wf * sm, hop: 92 * S * wf * sm };
+  runners.push(r); return r;
+}
+function pickLane() { let l; do l = Lab.randInt(0, lanes.length - 1); while (l === lastLane && lanes.length > 1); lastLane = l; return l; }
+function spawnWave() {
+  if (runners.length >= 9) return;
+  const L = level, pool = ["bun", "bun"]; if (L >= 2) pool.push("momo", "momo"); if (L >= 3) pool.push("bolt"); if (L >= 4) pool.push("nori", "nori"); if (L >= 5) pool.push("olli", "olli"); if (L >= 8) pool.push("bolt");
+  const type = Lab.choose(pool), lane = pickLane(), dir = Lab.chance(.5) ? 1 : -1, u = Math.random(), walker = type === "bun" || type === "olli";
+  if (L >= 6 && u < .15) for (let i = 0; i < 3; i++) spawnRunner("bun", lane, dir, i * 74 * S);
+  else if (L >= 7 && u < .36 && walker) { const a = spawnRunner(type, lane, dir), b = spawnRunner("bolt", lane > 0 ? lane - 1 : lane + 1, dir, 26 * S); b.v = a.v; }
+  else if (L >= 4 && u < .55 && type !== "bolt") { spawnRunner(type, lane, dir); spawnRunner(Lab.choose(pool.filter(p => p !== "bolt")), pickLane(), -dir); }
+  else spawnRunner(type, lane, dir);
+}
+function updateRunner(r, dt) {
+  r.t += dt; r.sq = Lab.damp(r.sq, 0, 8, dt); r.wob = Math.max(0, r.wob - dt * 3); if (r.joy > 0) r.joy = Math.max(0, r.joy - dt);
+  if (r.stun > 0) { r.stun -= dt; return; }
+  const boost = r.soaked ? 1.7 : 1;
+  if (r.type === "momo") {
+    const per = r.soaked ? .7 : 1.05, was = r.ph; r.ph += dt / per;
+    if (r.ph >= 1) { r.ph -= 1; r.sq = .26; r.z = 0; if (r.x > 0 && r.x < Lab.W) snd("land", { vol: .25, pitch: 1.3 }); }
+    if (r.ph > .5) { const k = (r.ph - .5) / .5; r.z = Math.sin(k * Math.PI) * 30 * S; r.x += r.dir * r.hop / (per * .5) * dt; if (was <= .5) r.sq = -.25; } else { r.z = 0; if (r.ph > .32) r.sq = Math.max(r.sq, (r.ph - .32) * 1.2); }
+  } else { r.x += r.dir * r.v * boost * dt; r.z = r.type === "nori" ? 0 : Math.abs(Math.sin(r.t * (r.soaked ? 13 : 8))) * 4 * S; }
+}
+function runnerGone(r) {
+  if (r.soaked || r.type === "bolt" || demo) return;
+  escapes++; heat = Math.min(1, heat + .09); heatFlash = 1;
+  fx.text(clamp(r.x, 60, Lab.W - 60), r.y - r.size * .9, "left dry  +heat", { size: 14, color: "#ff7043", outline: "rgba(255,255,255,.8)" }); snd("hurt", { vol: .45, pitch: .8 });
+}
+
+/* ---------- frame ---------- */
+function update(dt) {
+  clock += dt; cool -= dt; joyT = Math.max(0, joyT - dt); pipSq = Lab.damp(pipSq, 0, 10, dt); heatFlash = Math.max(0, heatFlash - dt * 2);
+  if (stun > 0) stun -= dt;
+  if (queued && cool <= 0 && stun <= 0) { const q = queued; queued = null; if (ammo > 0) { fill = { v: 0, col: Lab.choose(BCOL) }; if (q.up || !Lab.input.down) release(); } }
+  if (fill && !demo && !Lab.input.down && fill.v > .05) release();          // pointer-up lost while paused/blurred
+  if (fill) { fill.v += dt / .85; if (fill.v > 1.5) burstOnPip(); }
+  if (fillLoop && !demo) fillLoop.set(fill ? { vol: .05 + Math.min(1, fill.v) * .05, f: 280 + fill.v * 330 + (fill.v > 1 ? Math.sin(clock * 50) * 40 : 0) } : { vol: 0 });
+  if (ammo < MAXAMMO) { regen += dt; if (regen >= 1.05) { regen = 0; ammo++; snd("bubble", { pitch: .9 + ammo * .08, vol: .3 }); } } else regen = 0;
+  if (!noSpawn && (spawnT -= dt) <= 0) { spawnWave(); spawnT = Math.max(.78, 2.15 - .16 * level) * Lab.rand(.8, 1.2) / Math.sqrt(wf); }
+  for (const r of runners) { updateRunner(r, dt); if (r.x < -r.size * 1.2 - 240 * S || r.x > Lab.W + r.size * 1.2 + 240 * S || (r.dir > 0 ? r.x > Lab.W + r.size * .8 : r.x < -r.size * .8)) { r.gone = true; runnerGone(r); } }
+  runners = runners.filter(r => !r.gone);
+  for (const b of balloons) { b.t += dt; if (b.t >= b.T) { b.done = true; land(b); } }
+  balloons = balloons.filter(b => !b.done);
+  for (const p of puddles) p.t += dt; while (puddles.length && puddles[0].t > 3) puddles.shift();
+  if (!demo && !over) {
+    heat = Math.min(1, heat + (.016 + .0045 * Math.min(level, 12)) * dt); Lab.music.intensity(.15 + heat * .85);
+    if (heat > .82) { warnT -= dt; if (warnT <= 0) { warnT = .7; Lab.sfx("warn", { vol: .4, pitch: .9 + heat * .3 }); } }
+    if (heat >= 1) { over = true; fill = null; if (fillLoop) fillLoop.set({ vol: 0 }); Lab.after(.5, () => Lab.gameover({ title: "Phew — too hot!", message: "The party melted at level " + level + ".", score, stats: [["Pals soaked", soaks], ["Best streak", bestStreak], ["Best splash", bestMulti > 1 ? "×" + bestMulti : "single"]] })); }
+  }
+  shownHeat = Lab.damp(shownHeat, heat, 8, dt);
+}
+function frame(dt, t) { update(dt); render(t); }
+function attract(dt, t) {
+  if (!demo) { demo = true; layout(); reset(); level = 5; }
+  if ((demoT -= dt) < 0 && runners.length) { demoT = Lab.rand(.7, 1.3); const r = Lab.choose(runners.filter(q => !q.soaked && q.type !== "bolt")); if (r) { const f = r.type === "olli" ? .8 : Lab.rand(0, .7); ammo = MAXAMMO; fill = { v: f, col: Lab.choose(BCOL) }; clampAim(r.x + r.dir * (r.type === "momo" ? 30 * S : r.v * .5), r.y - r.size * .45); release(); } }
+  update(dt); render(t);
+}
+
+/* ---------- art ---------- */
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80, o = 40;
+  return Lab.sprite("ssbg" + W + "x" + H, W, H, g => {
+    const yt = yardTop + o, deck = pip.y + pip.size / 2 + o;
+    draw.vgrad(g, 0, 0, W, deck, ["#6ed3f5", "#d5f7ff"]);
+    g.fillStyle = "rgba(255,255,255,.85)"; for (const [cx, cy, cw] of [[W * .18, deck * .42, 70 * S], [W * .8, deck * .55, 54 * S]]) { g.beginPath(); g.ellipse(cx, cy, cw, cw * .3, 0, 0, TAU); g.ellipse(cx - cw * .4, cy - cw * .16, cw * .45, cw * .26, 0, 0, TAU); g.ellipse(cx + cw * .3, cy - cw * .2, cw * .5, cw * .3, 0, 0, TAU); g.fill(); }
+    g.fillStyle = "#4fa85a"; g.beginPath(); g.moveTo(0, deck + 4); for (let x = 0; x <= W; x += 26 * S) g.quadraticCurveTo(x + 13 * S, deck - (22 + ((x * 7) % 13)) * S, x + 26 * S, deck - 6 * S); g.lineTo(W, deck + 4); g.fill();
+    // deck + fence wall
+    draw.vgrad(g, 0, deck - 2 * S, W, yt - deck + 2 * S, ["#d9a066", "#b9793f"]); g.fillStyle = "#e8b77c"; g.fillRect(0, deck - 5 * S, W, 9 * S);
+    g.strokeStyle = "rgba(90,50,20,.28)"; g.lineWidth = 2; for (let x = 20; x < W; x += 34 * S) { g.beginPath(); g.moveTo(x, deck + 4 * S); g.lineTo(x, yt); g.stroke(); }
+    // lawn
+    draw.vgrad(g, 0, yt, W, H - yt, ["#8ed87c", "#6cc468"]);
+    g.fillStyle = "rgba(255,255,255,.07)"; for (let x = 0, i = 0; x < W; x += 56 * S, i++) if (i % 2) g.fillRect(x, yt, 56 * S, H - yt);
+    g.fillStyle = "rgba(40,90,40,.22)"; g.fillRect(0, yt, W, 7 * S);
+    for (const ly of lanes) { g.fillStyle = "rgba(255,244,200,.2)"; draw.rr(g, -20, ly + o - 12 * S, W + 40, 22 * S, 11 * S); g.fill(); }
+    const rnd = Lab.rng(12);
+    for (let i = 0; i < 46; i++) { const x = rnd() * W, y = yt + 14 * S + rnd() * (H - yt - 20 * S), col = ["#fff", "#ffe066", "#ff9ecb"][i % 3]; g.fillStyle = col; for (let k = 0; k < 5; k++) { g.beginPath(); g.arc(x + Math.cos(k * 1.257) * 3.2 * S, y + Math.sin(k * 1.257) * 3.2 * S, 2.3 * S, 0, TAU); g.fill(); } g.fillStyle = "#ffb52e"; g.beginPath(); g.arc(x, y, 2 * S, 0, TAU); g.fill(); }
+    g.fillStyle = "rgba(60,130,60,.5)"; for (let i = 0; i < 70; i++) { const x = rnd() * W, y = yt + 10 + rnd() * (H - yt); g.fillRect(x, y, 2, 5 * S); g.fillRect(x + 4, y + 2, 2, 4 * S); }
   });
 }
-function spawn(){balloons.push({x:Lab.rand(60,Lab.W-60),y:Lab.rand(200,Lab.H-100),r:Lab.rand(28,42),vx:Lab.rand(-90,90),vy:Lab.rand(-70,70),c:`hsl(${Lab.randInt(0,360)},80%,60%)`});}
-function draw(){const c=Lab.ctx;c.fillStyle="#143a4d";c.fillRect(0,0,Lab.W,Lab.H);
-  c.fillStyle="#fff";c.font="14px sans-serif";c.textAlign="left";c.fillText("Time: "+Math.ceil(t),12,Lab.H-12);
-  for(const b of balloons){c.fillStyle=b.c;c.beginPath();c.arc(b.x,b.y,b.r,0,Lab.TAU);c.fill();
-    c.strokeStyle="rgba(255,255,255,.3)";c.beginPath();c.moveTo(b.x,b.y+b.r);c.lineTo(b.x,b.y+b.r+20);c.stroke();}
+function drawBalloon(c, x, y, r, col, wob) {
+  c.save(); c.translate(x, y); if (wob) c.scale(1 + Math.sin(wob) * .09, 1 - Math.sin(wob) * .09);
+  c.fillStyle = Lab.color.shade(col, -.15); c.beginPath(); c.moveTo(-r * .16, r * 1.02); c.lineTo(r * .16, r * 1.02); c.lineTo(0, r * .8); c.fill();
+  c.fillStyle = col; c.beginPath(); c.ellipse(0, 0, r * .9, r, 0, 0, TAU); c.fill();
+  c.fillStyle = "rgba(255,255,255,.55)"; c.beginPath(); c.ellipse(-r * .34, -r * .4, r * .2, r * .3, -.5, 0, TAU); c.fill(); c.restore();
 }
-start();
+function drawUmbrella(c, x, y, w, wob) {
+  c.save(); c.translate(x, y); c.rotate(Math.sin(wob * 18) * wob * .25);
+  c.strokeStyle = "#7a5a3a"; c.lineWidth = 3 * S; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, w * .62); c.stroke();
+  for (let i = 0; i < 4; i++) { c.fillStyle = i % 2 ? "#fff6e3" : "#ff6b6b"; c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, w * .62, Math.PI + i * Math.PI / 4, Math.PI + (i + 1) * Math.PI / 4); c.closePath(); c.fill(); }
+  c.strokeStyle = "rgba(43,35,64,.3)"; c.lineWidth = 1.5; c.beginPath(); c.arc(0, 0, w * .62, Math.PI, TAU); c.closePath(); c.stroke(); c.restore();
+}
+function drawRunner(c, r, t) {
+  const hot = !r.soaked && r.type !== "bolt", y = r.y - r.size / 2 - r.z, slide = r.type === "nori" && r.stun <= 0;
+  draw.shadow(c, r.x, r.y + 2 * S, r.size * (slide ? .5 : .36) * (1 - r.z / (90 * S)), r.size * .09, .16);
+  let mood = r.joy > 0 ? "joy" : r.soaked ? "happy" : "sleepy", look = [r.dir * .7, 0];
+  if (r.type === "bolt") { const scared = balloons.some(b => Math.hypot(b.tx - r.x, b.ty - y) < 110 * S) || (fill && Math.hypot(aim.x - r.x, aim.y - y) < 80 * S); mood = r.stun > 0 ? "dizzy" : scared ? "scared" : "happy"; if (scared) look = [0, -.6]; }
+  Pals.draw(c, r.type, r.x + (r.stun > 0 ? Math.sin(t * 60) * 2 : 0), slide ? y + r.size * .2 : y, r.size, { mood, t: r.t, look, squash: r.sq, tilt: slide ? r.dir * 1.25 : 0, arms: r.joy > 0 ? "cheer" : r.type === "olli" && r.umb ? "hold" : "down", tint: hot ? HOT[r.type] : null, shadow: false });
+  if (r.umb) drawUmbrella(c, r.x, y - r.size * .74, r.size * 1.2, r.wob);
+  if (hot) { for (let i = 0; i < 2; i++) { const ph = (r.t * .9 + i * .5) % 1, sx = r.x + (i ? 1 : -1) * r.size * .44; c.fillStyle = `rgba(90,190,255,${1 - ph})`; c.beginPath(); c.ellipse(sx, y - r.size * .35 + ph * r.size * .4, 2.4 * S, 3.6 * S, 0, 0, TAU); c.fill(); } }
+  else if (r.soaked) { c.fillStyle = "rgba(120,205,255,.8)"; for (let i = 0; i < 3; i++) { const ph = (r.t * 1.6 + i * .33) % 1; c.beginPath(); c.arc(r.x + (i - 1) * r.size * .3, r.y - r.size * .2 + ph * r.size * .25, 2.2 * S * (1 - ph), 0, TAU); c.fill(); } }
+  if (r.type === "bolt") { const by = y - r.size * .98 + Math.sin(t * 4) * 2; c.fillStyle = "#ffe066"; c.strokeStyle = INK; c.lineWidth = 1.5; c.beginPath(); c.moveTo(r.x, by - 13 * S); c.lineTo(r.x + 12 * S, by + 8 * S); c.lineTo(r.x - 12 * S, by + 8 * S); c.closePath(); c.fill(); c.stroke(); c.fillStyle = INK; c.beginPath(); c.moveTo(r.x + 2 * S, by - 6 * S); c.lineTo(r.x - 4 * S, by + 2 * S); c.lineTo(r.x, by + 2 * S); c.lineTo(r.x - 2 * S, by + 6.5 * S); c.lineTo(r.x + 4 * S, by - 1 * S); c.lineTo(r.x, by - 1 * S); c.closePath(); c.fill(); }
+}
+function drawHeat(c, t) {
+  const x = P.x + 44 * S, w = P.w - 60 * S, y = P.y + 8 * S, h = 15 * S, hv = clamp(shownHeat, 0, 1), hotc = mix("#ffd23f", "#ff3d2e", hv), pulse = hv > .82 ? .5 + .5 * Math.sin(t * 12) : 0;
+  const sx = P.x + 22 * S, sy = y + h / 2, sr = (10 + hv * 3 + pulse * 1.5) * S;
+  c.strokeStyle = hotc; c.lineWidth = 3 * S; c.lineCap = "round"; for (let i = 0; i < 8; i++) { const a = i / 8 * TAU + t * .6; c.beginPath(); c.moveTo(sx + Math.cos(a) * sr * 1.25, sy + Math.sin(a) * sr * 1.25); c.lineTo(sx + Math.cos(a) * sr * 1.65, sy + Math.sin(a) * sr * 1.65); c.stroke(); }
+  draw.circle(c, sx, sy, sr, hotc, "rgba(255,255,255,.8)", 2);
+  draw.rect(c, x, y, w, h, h / 2, "rgba(255,255,255,.75)", "rgba(43,35,64,.25)", 1.5);
+  if (hv > .01) { draw.rr(c, x + 2, y + 2, Math.max(h - 4, (w - 4) * hv), h - 4, h / 2); c.fillStyle = hotc; c.fill(); }
+  if (heatFlash > 0 || pulse) { c.strokeStyle = `rgba(255,70,50,${Math.max(heatFlash, pulse * .8)})`; c.lineWidth = 3 * S; draw.rr(c, x - 2, y - 2, w + 4, h + 4, h / 2 + 2); c.stroke(); }
+  draw.text(c, "HEAT", x + w - 8 * S, y + h / 2 + .5, { size: 10 * S, color: "rgba(43,35,64,.6)", weight: 700, align: "right" });
+}
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(), W = Lab.W; c.drawImage(bg, -40, -40, bg.w, bg.h);
+  for (const p of puddles) { const a = clamp(1 - p.t / 3, 0, 1) * .3, k = ease.outCubic(clamp(p.t / .25, 0, 1)); c.fillStyle = `rgba(70,160,235,${a})`; c.beginPath(); c.ellipse(p.x, p.y + 4 * S, p.r * k, p.r * k * .55, 0, 0, TAU); c.fill(); }
+  // deck furniture: level sign, tub of balloons
+  const dy = pip.y + pip.size / 2, tx = pip.x + 82 * S, sxn = pip.x - 92 * S;
+  draw.rect(c, sxn - 3 * S, dy - 30 * S, 6 * S, 30 * S, 2, "#a8703c"); draw.rect(c, sxn - 36 * S, dy - 66 * S, 72 * S, 40 * S, 8 * S, "#fff6e3", "#a8703c", 2.5);
+  draw.text(c, "LEVEL " + level, sxn, dy - 54 * S, { size: 11.5 * S, color: "#8a5a2f", weight: 700 }); const mult = Math.min(5, 1 + Math.floor(Math.max(0, streak - 1) / 3));
+  draw.text(c, streak > 1 ? streak + " streak" + (mult > 1 ? " ×" + mult : "") : "soak 'em!", sxn, dy - 38 * S, { size: 10.5 * S, color: mult > 1 ? "#e0661a" : "#b58a5a", weight: 700, maxWidth: 66 * S });
+  for (let i = 0; i < ammo; i++) drawBalloon(c, tx + ((i % 3) - 1) * 15 * S + (i > 2 ? 7 * S : 0), dy - (24 + (i > 2 ? 15 : 0)) * S, 10 * S, BCOL[i % BCOL.length]);
+  if (ammo < MAXAMMO) { c.strokeStyle = "rgba(30,155,224,.7)"; c.lineWidth = 3 * S; c.beginPath(); c.arc(tx, dy - 50 * S, 6 * S, -Math.PI / 2, -Math.PI / 2 + TAU * regen / 1.05); c.stroke(); }
+  draw.rect(c, tx - 30 * S, dy - 22 * S, 60 * S, 24 * S, 7 * S, "#4fb3ea", "#2b86c2", 2); c.fillStyle = "rgba(255,255,255,.35)"; c.fillRect(tx - 24 * S, dy - 17 * S, 48 * S, 3 * S);
+  // Pip
+  const hotR = runners.find(r => !r.soaked && r.type !== "bolt"), lookAt = fill || balloons.length ? aim : hotR ? { x: hotR.x, y: hotR.y } : null;
+  const look = lookAt ? [clamp((lookAt.x - pip.x) / (W * .35), -1, 1), clamp((lookAt.y - pip.y) / (200 * S), -.2, 1)] : [0, .3];
+  const pm = over ? "dizzy" : stun > 0 ? "dizzy" : joyT > 0 ? "joy" : fill ? (fill.v > 1 ? "scared" : "focus") : heat > .85 ? "scared" : "happy";
+  Pals.draw(c, "pip", pip.x + (stun > 0 ? Math.sin(t * 40) * 2 : 0), pip.y, pip.size, { mood: pm, t, look, squash: pipSq + (fill ? Math.min(.12, fill.v * .1) : 0), arms: fill ? "up" : joyT > 0 ? "cheer" : stun > 0 ? "down" : "hold" });
+  if (fill) { const f = fill.v, r = (9 + 15 * Math.min(1.15, f)) * S; drawBalloon(c, pip.x + (f > 1 ? Math.sin(t * 70) * 2 * S : 0), pip.y - pip.size * .72 - r, r, f > 1 ? mix(fill.col, "#ffffff", .25 + .25 * Math.sin(t * 30)) : fill.col, f > .9 ? t * 34 : 0); }
+  else if (ammo > 0 && stun <= 0 && !over) drawBalloon(c, pip.x, pip.y + pip.size * .16, 9 * S, BCOL[ammo % BCOL.length]);
+  // aim reticle
+  if (fill && !demo) {
+    const R = splashR(clamp(fill.v, 0, 1)), full = fill.v >= 1;
+    c.fillStyle = full ? "rgba(255,240,150,.2)" : "rgba(255,255,255,.16)"; c.beginPath(); c.arc(aim.x, aim.y, R, 0, TAU); c.fill();
+    c.setLineDash([7 * S, 6 * S]); c.lineDashOffset = -t * 30; c.strokeStyle = full ? "#fff3a0" : "rgba(255,255,255,.9)"; c.lineWidth = 2.5 * S; c.beginPath(); c.arc(aim.x, aim.y, R, 0, TAU); c.stroke(); c.setLineDash([]);
+    draw.circle(c, aim.x, aim.y, 3 * S, "#fff");
+  }
+  runners.sort((a, b) => a.y - b.y); for (const r of runners) drawRunner(c, r, t);
+  for (const b of balloons) {
+    const k = b.t / b.T, x = lerp(b.x0, b.tx, k), gy = lerp(b.y0, b.ty, k), z = Math.sin(k * Math.PI) * (70 + 40 * b.f) * S, r = (9 + 15 * b.f) * S * (1 + k * .15);
+    if (gy > yardTop) draw.shadow(c, x, lerp(gy, b.ty, .5) + 6 * S, r * (.5 + k * .5), r * .3, .1 + k * .14);
+    c.strokeStyle = "rgba(255,255,255,.5)"; c.lineWidth = 2; c.setLineDash([4, 6]); c.beginPath(); c.arc(b.tx, b.ty, splashR(b.f) * (.4 + .6 * k), 0, TAU); c.stroke(); c.setLineDash([]);
+    drawBalloon(c, x, gy - z, r, b.col, b.t * 20);
+  }
+  if (heat > .5 && !demo) { c.fillStyle = `rgba(255,120,40,${(heat - .5) * .22})`; c.fillRect(-40, -40, W + 80, Lab.H + 80); }
+  if (!demo) drawHeat(c, t);
+}
+Lab.boot();
+})();
 </script></body></html>

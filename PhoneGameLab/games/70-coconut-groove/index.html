@@ -1,0 +1,205 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Coconut Groove</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* COCONUT GROOVE — a four-pan steel band at sunset. Notes fall down four lanes; strike the pan as each one lands.
+ * Music:   the game sequences its own calypso set (bass tresillo, off-beat stabs, shaker, kick, soft lead) and the chart
+ *          IS the lead line, so every note sits on something you hear. Three tunes back to back (100 → 112 → 126 BPM),
+ *          each with a count-in; patterns thicken from half-notes to syncopated eighths, ribbons, slides and doubles.
+ * Timing:  one song clock drives audio scheduling, note positions and judging; presses are time-stamped between frames.
+ *          PERFECT ±55 ms, GOOD ±130 ms; pressing 130–240 ms early is a miss (no mashing); other stray taps are free.
+ * Notes:   taps · RIBBONS (keep the pan held to the end) · SLIDES (the ribbon bends to the next pan — follow it).
+ * Stakes:  combo → ×2 at 10, ×3 at 25, ×4 at 50. Misses drain the groove meter; empty = the band stops. Finish the
+ *          set for a rank. Charts are generated from fixed seeds, so the set is the same every run and learnable.   */
+Lab.init({
+  title: "Coconut Groove", tagline: "Strike the steel pans on the beat.", category: "Skill & Rhythm",
+  howto: ["Tap a pan as the note lands on it", "Hold ribbons; slide when they bend", "Combos multiply, misses drain the groove"],
+  theme: { bg: "#2b1147", bg2: "#ff7a59", accent: "#ffd166", accent2: "#4ecdc4" },
+  orient: "any", restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, PERF = .055, GOOD = .13, EARLY = .24;
+const LC = ["#ff6b6b", "#ffd166", "#4ecdc4", "#b48cf2"], KEYS = ["d", "f", "j", "k"], SC = [0, 2, 4, 7, 9], mf = m => 440 * Math.pow(2, (m - 69) / 12);
+const TUNES = [
+  { name: "Low Tide", bpm: 100, bars: 16, key: 60, prog: [0, 0, 5, 7, 0, 9, 5, 7], lead: 1.9, seed: 11 },
+  { name: "Mango Sky", bpm: 112, bars: 20, key: 65, prog: [0, 5, 0, 7, 9, 5, 7, 0], lead: 1.7, seed: 23 },
+  { name: "Bonfire", bpm: 126, bars: 24, key: 62, prog: [0, 7, 9, 5, 0, 7, 5, 7], lead: 1.5, seed: 37 },
+];
+const PATS = [ // [eighth index, length in eighths (0 = tap)]
+  [[[0, 0], [4, 0]], [[0, 0], [2, 0], [4, 0], [6, 0]], [[0, 0], [4, 0], [6, 0]], [[0, 0], [2, 0], [4, 0]]],
+  [[[0, 0], [2, 0], [4, 0], [5, 0], [6, 0]], [[0, 0], [3, 0], [4, 0], [6, 0]], [[0, 0], [2, 0], [3, 0], [4, 0], [6, 0]], [[0, 4], [4, 0], [6, 0]], [[0, 0], [2, 0], [4, 4]]],
+  [[[0, 0], [1, 0], [2, 0], [4, 0], [5, 0], [6, 0]], [[0, 0], [2, 0], [3, 0], [5, 0], [6, 0]], [[0, 0], [3, 0], [6, 0], [7, 0]], [[0, 3], [4, 0], [5, 0], [6, 0]], [[0, 0], [1, 0], [2, 0], [3, 0], [4, 4]], [[0, 0], [2, 0], [3, 0], [4, 0], [6, 0], [7, 0]]],
+];
+let lw, lx0, topY, hitY, botY, notes, ni, events, ei, tunes, total, songT, frameWall, score, combo, maxCombo, groove, cnt, judge, padFx, ptrs, alive, finished, curTune, tickAcc;
+
+function layout() { const P = Lab.play; lw = Math.min(P.w / 4, 124); lx0 = P.x + (P.w - lw * 4) / 2; topY = P.y + 26; botY = Lab.H - Lab.safe.bottom; hitY = topY + (botY - topY) * .82; Lab.sprite.clear("cg:"); }
+Lab.onResize(() => { if (notes) layout(); });
+const laneX = l => lx0 + (l + .5) * lw, laneF = x => (x - lx0) / lw - .5, yAt = (t, ld) => hitY - (t - songT) / ld * (hitY - topY);
+
+function build() {
+  notes = []; events = []; tunes = []; let t = 1;
+  TUNES.forEach((T, ti) => {
+    const r = Lab.rng(T.seed), spb = 60 / T.bpm, e = spb / 2, t0 = t + 4 * spb, first = notes.length;
+    for (let i = 0; i < 4; i++) events.push({ t: t + i * spb, k: 0, f: i === 3 ? 1600 : 1100 });
+    let deg = 4, lane = 1 + ti % 2, prevM = -1;
+    for (let b = 0; b < T.bars; b++) {
+      const bt = t0 + b * 4 * spb, off = T.prog[b % T.prog.length], root = T.key + off, third = off === 9 || off === 2 || off === 4 ? 3 : 4;
+      for (let i = 0; i < 8; i++) {
+        const et = bt + i * e; events.push({ t: et, k: 1, v: i % 2 ? .05 : .026 });
+        if (i === 0 || i === 3 || i === 6) events.push({ t: et, k: 2, f: mf(root - 24 + (i === 3 ? 7 : 0)), d: e * 1.7 });
+        if (i === 2 || i === 5) events.push({ t: et, k: 3, f: mf(root + third), f2: mf(root + 7), d: e * .9 });
+        if (b >= 2 && (i === 0 || i === 4)) events.push({ t: et, k: 4 });
+        if (b >= 4 && (i === 2 || i === 6)) events.push({ t: et, k: 5 });
+      }
+      const tier = clamp(b < 2 ? 0 : b < T.bars / 2 ? ti : ti + 1, 0, 2), set = PATS[tier], pat = b === T.bars - 1 ? [[0, 0], [2, 0], [4, 4]] : set[Math.floor(r() * set.length)];
+      for (const [p, len] of pat) {
+        deg = clamp(deg + [-2, -1, -1, 1, 1, 2, 0][Math.floor(r() * 7)], 0, 9); const m = T.key + 12 + SC[deg % 5] + 12 * Math.floor(deg / 5);
+        if (prevM >= 0 && m !== prevM) { lane += m > prevM ? 1 : -1; if (lane < 0) lane = 3; if (lane > 3) lane = 0; } prevM = m;
+        const nt = bt + p * e, slide = len > 0 && ti >= 1 && r() < .55, lane2 = slide ? (lane === 0 || (lane < 3 && r() < .5) ? lane + 1 : lane - 1) : lane;
+        notes.push({ t: nt, lane, lane2, dur: len * e, f: mf(m), st: 0, tail: 0, held: 0, lapse: 0, ti }); events.push({ t: nt, k: 6, f: mf(m), d: len ? len * e : .3 });
+        if (ti === 2 && p === 0 && !len && b >= 12 && r() < .5) { const l2 = (lane + 2) % 4; notes.push({ t: nt, lane: l2, lane2: l2, dur: 0, f: mf(m + third), st: 0, tail: 0, held: 0, lapse: 0, ti }); }
+        lane = lane2;
+      }
+    }
+    const end = t0 + T.bars * 4 * spb; tunes.push({ cin: t, t0, end, spb, lead: T.lead, name: T.name, first, count: notes.length - first }); t = end + 2 * spb;
+  });
+  notes.sort((a, b) => a.t - b.t); events.sort((a, b) => a.t - b.t); total = t;
+}
+function start() {
+  layout(); build(); ni = 0; ei = 0; songT = 0; frameWall = performance.now(); score = 0; combo = 0; maxCombo = 0; groove = .7; cnt = { p: 0, g: 0, m: 0, tails: 0 };
+  judge = { txt: "", col: "#fff", t: 9 }; padFx = [0, 0, 0, 0]; ptrs = new Map(); alive = true; finished = false; curTune = -1; tickAcc = 0;
+  Lab.setScore(0);
+  Lab.input.onDown = [(x, y, id) => { const l = clamp(Math.round(laneF(x)), 0, 3); ptrs.set(id, x); press(l); }];
+  Lab.input.onMove = [(x, y, dx, dy, id) => { if (ptrs.has(id)) ptrs.set(id, x); }];
+  Lab.input.onUp = [(x, y, id) => { ptrs.delete(id); }];
+  Lab.input.onKey = [k => { const l = KEYS.indexOf(k.toLowerCase()); if (l >= 0) press(l); }];
+  Lab.expose({
+    get score() { return score; }, get combo() { return combo; }, get maxCombo() { return maxCombo; }, get mult() { return mult(); }, get groove() { return groove; }, get counts() { return Object.assign({}, cnt); }, get time() { return songT; }, get total() { return total; },
+    get finished() { return finished; }, get tune() { return curTune; }, get notes() { return notes.map((n, i) => ({ i, t: n.t, lane: n.lane, lane2: n.lane2, dur: n.dur, st: n.st, tail: n.tail, ti: n.ti })); }, get nextIndex() { return notes.findIndex(n => n.st === 0); },
+    laneX, get hitY() { return hitY; }, hitAt(lane, at) { return press(lane, at); }, setTime(t, skip) { songT = t; while (ei < events.length && events[ei].t < t) ei++; if (skip) for (const n of notes) if (n.t < t && n.st === 0) { n.st = 4; n.tail = 4; } }, setGroove(v) { groove = v; },
+  });
+  Lab.loop((dt, t) => { update(dt); render(t); });
+}
+const mult = () => combo >= 50 ? 4 : combo >= 25 ? 3 : combo >= 10 ? 2 : 1;
+const now = () => songT + (Lab.paused ? 0 : Math.min(.05, (performance.now() - frameWall) / 1000)) - latency();
+function latency() { const a = Lab.audio.ctx; return a ? Math.min(.05, (a.outputLatency || a.baseLatency || 0) * .5) : 0; }
+
+function pan(f, v) { const a = Lab.audio; a.tone({ f, type: "sine", dur: .5, vol: .22 * v }); a.tone({ f: f * 2, type: "sine", dur: .25, vol: .1 * v }); a.tone({ f: f * 4.2, type: "sine", dur: .07, vol: .035 * v }); }
+function play(ev, delay) {
+  const a = Lab.audio, o = { music: true, delay };
+  if (ev.k === 0) a.tone({ ...o, f: ev.f, type: "square", dur: .05, vol: .07, lp: 3000 });
+  else if (ev.k === 1) a.noise({ ...o, dur: .03, vol: ev.v, hp: 6500 });
+  else if (ev.k === 2) a.tone({ ...o, f: ev.f, type: "triangle", dur: ev.d, vol: .3 });
+  else if (ev.k === 3) { a.tone({ ...o, f: ev.f, type: "triangle", dur: ev.d, vol: .07 }); a.tone({ ...o, f: ev.f2, type: "triangle", dur: ev.d, vol: .06 }); }
+  else if (ev.k === 4) a.tone({ ...o, f: 150, f2: 45, dur: .16, vol: .42 });
+  else if (ev.k === 5) { a.noise({ ...o, dur: .035, vol: .1, bp: 1900, q: 2 }); a.tone({ ...o, f: 820, dur: .03, vol: .05, type: "triangle" }); }
+  else { a.tone({ ...o, f: ev.f, type: "sine", dur: Math.max(.3, ev.d), vol: .09 }); a.tone({ ...o, f: ev.f * 2, type: "sine", dur: .18, vol: .03 }); }
+}
+function say(txt, col) { judge = { txt, col, t: 0 }; }
+function press(lane, at) {
+  if (!alive) return null; const T = at != null ? at : now(); padFx[lane] = 1; let n = null;
+  for (let i = ni; i < notes.length; i++) { const q = notes[i]; if (q.t - T > EARLY) break; if (q.st === 0 && q.lane === lane) { n = q; break; } }
+  if (!n) { Lab.audio.tone({ f: 190 + lane * 30, type: "sine", dur: .12, vol: .08 }); return null; }
+  const d = T - n.t, ad = Math.abs(d); judgeNote(n, ad <= PERF ? 1 : ad <= GOOD ? 2 : 3, d); return n.st;
+}
+function judgeNote(n, st, d) {
+  n.st = st; const x = laneX(n.lane);
+  if (st === 3) { cnt.m++; combo = 0; groove -= .09; n.tail = 3; say(d != null && d < 0 ? "EARLY" : "MISS", "#ff8a8a"); Lab.audio.tone({ f: 110, f2: 80, type: "triangle", dur: .15, vol: .14 }); if (d != null) Lab.shake(3, .12); padFx[n.lane] = -1; }
+  else {
+    combo++; maxCombo = Math.max(maxCombo, combo); const pts = (st === 1 ? 100 : 50) * mult(); score += pts; groove = Math.min(1, groove + (st === 1 ? .022 : .008)); if (st === 1) cnt.p++; else cnt.g++;
+    say(st === 1 ? "PERFECT" : "GOOD", st === 1 ? "#fff3b0" : "#9be8d8"); pan(n.f, st === 1 ? 1 : .7); Lab.buzz(st === 1 ? 10 : 6); Lab.setScore(score);
+    fx.ring(x, hitY, { r0: lw * .2, r1: lw * (st === 1 ? .7 : .5), color: st === 1 ? "#fff3b0" : LC[n.lane], width: 4, life: .28 });
+    if (st === 1) fx.burst(x, hitY, { n: 6, colors: [LC[n.lane], "#fff"], speed: 190, life: .35, size: 3, angle: -1.57, spread: 2.2, shape: "spark" });
+    if (combo === 10 || combo === 25 || combo === 50) { Lab.toast("×" + mult() + " multiplier", 900, { y: .3 }); Lab.sfx("powerup", { vol: .5 }); Lab.bumpScore(); }
+    if (!n.dur) n.tail = 1;
+  }
+  while (ni < notes.length && notes[ni].st !== 0 && notes[ni].tail !== 0) ni++;
+}
+function update(dt) {
+  for (let l = 0; l < 4; l++) padFx[l] = Lab.damp(padFx[l], 0, 9, dt); judge.t += dt;
+  if (!alive) return;
+  songT += dt; frameWall = performance.now();
+  while (ei < events.length && events[ei].t < songT + .12) { const ev = events[ei++]; if (ev.t > songT - .05) play(ev, Math.max(0, ev.t - songT)); }
+  const ct = tunes.findIndex(q => songT >= q.cin && songT < q.end + q.spb * 2); if (ct >= 0 && ct !== curTune) { curTune = ct; Lab.banner(tunes[ct].name, { color: "#fff3b0", ms: 1600, y: .3 }); if (ct > 0) { Lab.sfx("levelup", { vol: .5 }); Lab.toast("Tune " + (ct + 1) + " of 3 · " + TUNES[ct].bpm + " BPM", 1600, { y: .42 }); } }
+  for (let i = ni; i < notes.length && notes[i].t < songT - GOOD; i++) if (notes[i].st === 0) judgeNote(notes[i], 3, null);
+  // ribbons: the pan (or the bending ribbon) must stay covered until the tail
+  for (let i = ni; i < notes.length && notes[i].t <= songT; i++) {
+    const n = notes[i]; if (!n.dur || n.tail !== 0 || n.st === 0) continue;
+    const p = clamp((songT - n.t) / n.dur, 0, 1), lp = n.lane + (n.lane2 - n.lane) * ease.inOutQuad(clamp((p - .4) / .5, 0, 1)), kl = p < .65 ? n.lane : n.lane2;
+    let ok = Lab.input.keys[KEYS[kl]] || Lab.input.keys[KEYS[n.lane2]] && p > .4; for (const x of ptrs.values()) if (Math.abs(laneF(x) - lp) <= .85) ok = true;
+    if (ok) { n.held += dt; n.lapse = 0; tickAcc += dt; if (tickAcc > tunes[n.ti].spb / 2) { tickAcc = 0; score += 10 * mult(); Lab.setScore(score); fx.burst(lx0 + (lp + .5) * lw, hitY, { n: 2, colors: [LC[n.lane], "#fff"], speed: 120, life: .3, size: 2.5, angle: -1.57, spread: 1.6 }); } }
+    else if ((n.lapse += dt) > .28) { n.tail = 3; combo = 0; groove -= .05; say("DROPPED", "#ff8a8a"); Lab.audio.tone({ f: 110, f2: 80, type: "triangle", dur: .15, vol: .12 }); }
+    if (n.tail === 0 && songT >= n.t + n.dur - .05) {
+      if (n.held >= (n.dur - .05) * .8) { n.tail = 1; cnt.tails++; combo++; maxCombo = Math.max(maxCombo, combo); score += 100 * mult(); Lab.setScore(score); groove = Math.min(1, groove + .03); say(n.lane2 !== n.lane ? "SLIDE!" : "HELD!", "#fff3b0"); pan(n.f * 2, .6); fx.ring(laneX(n.lane2), hitY, { r0: lw * .2, r1: lw * .8, color: "#fff3b0", width: 5, life: .35 }); }
+      else n.tail = 2;
+    }
+  }
+  while (ni < notes.length && notes[ni].st !== 0 && notes[ni].tail !== 0) ni++;
+  if (groove <= 0) return end(false);
+  if (songT >= total) end(true);
+}
+function end(done) {
+  alive = false; finished = done; const judged = cnt.p + cnt.g + cnt.m, acc = judged ? (cnt.p + cnt.g * .5) / judged : 0, rank = acc >= .95 ? "S" : acc >= .85 ? "A" : acc >= .7 ? "B" : "C";
+  const stats = [["Accuracy", Math.round(acc * 100) + "%"], ["Max combo", maxCombo], ["Perfect", cnt.p]];
+  if (done) { fx.burst(Lab.W / 2, hitY, { n: 40, colors: LC, speed: 420, life: 1, size: 5, gravity: 300, shape: "star" }); Lab.gameover({ neutral: true, title: "Set complete · rank " + rank, message: cnt.m ? cnt.m + " missed out of " + notes.length + " notes." : "Not a single miss!", score, stats }); }
+  else { Lab.shake(8, .4); Lab.gameover({ title: "The band lost the beat", message: "Stopped during “" + tunes[Math.max(0, curTune)].name + "” — tune " + (Math.max(0, curTune) + 1) + " of 3.", score, stats }); }
+}
+
+/* ---------- art */
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80; return Lab.sprite("cg:bg", W, H, g => {
+    g.translate(40, 40); const hz = topY + (botY - topY) * .46, X0 = -40, cxm = Lab.W / 2;
+    draw.vgrad(g, X0, -40, W, hz + 40, [[0, "#2b1147"], [.45, "#8a2f6b"], [.8, "#ff7a59"], [1, "#ffd27a"]]);
+    draw.glow(g, cxm, hz, Lab.W * .5, "#fff3b0", .55); draw.circle(g, cxm, hz, Math.min(Lab.W * .2, 120), "#fff0b8");
+    draw.vgrad(g, X0, hz, W, Lab.H + 40 - hz, [[0, "#c75b6b"], [.25, "#5a2a6e"], [1, "#1c0f3a"]]);
+    for (let i = 0; i < 9; i++) { const y = hz + 6 + i * i * 2.6 + i * 6, w = Math.min(Lab.W * .2, 120) * (1.9 - i * .12); g.fillStyle = "rgba(255,225,150," + (.5 - i * .045) + ")"; draw.rr(g, cxm - w / 2, y, w, 3 + i * .5, 2); g.fill(); }
+    const rnd = Lab.rng(9); for (let i = 0; i < 50; i++) { g.fillStyle = "rgba(255,255,255," + (.25 + rnd() * .5) + ")"; g.fillRect(X0 + rnd() * W, -40 + rnd() * (hz * .5 + 40), 1.5, 1.5); }
+    g.fillStyle = "#1a0b2e"; g.strokeStyle = "#1a0b2e"; g.lineCap = "round";
+    if (lx0 > 70) for (const s of [-1, 1]) { const bx = cxm + s * Math.max(lw * 2.5, Lab.W * .5 - 26), by = hz + 30; g.lineWidth = 9; g.beginPath(); g.moveTo(bx + s * 14, by + 200); g.quadraticCurveTo(bx + s * 10, by - 60, bx - s * 10, by - 150); g.stroke();
+      for (let i = 0; i < 7; i++) { const a = -Math.PI / 2 + (i - 3) * .52 - s * .1, L = 74; g.beginPath(); g.moveTo(bx - s * 10, by - 150); g.quadraticCurveTo(bx - s * 10 + Math.cos(a) * L * .6, by - 150 + Math.sin(a) * L * .6 - 22, bx - s * 10 + Math.cos(a) * L, by - 150 + Math.sin(a) * L + 16); g.lineWidth = 7; g.stroke(); } }
+    g.fillStyle = "rgba(20,8,40,.55)"; g.fillRect(lx0 - 6, -40, lw * 4 + 12, H);
+    for (let l = 0; l < 4; l++) { g.fillStyle = l % 2 ? "rgba(255,255,255,.035)" : "rgba(255,255,255,.0)"; g.fillRect(lx0 + l * lw, -40, lw, H); }
+    g.strokeStyle = "rgba(255,255,255,.14)"; g.lineWidth = 1.5; for (let l = 0; l <= 4; l++) { g.beginPath(); g.moveTo(lx0 + l * lw, -40); g.lineTo(lx0 + l * lw, H); g.stroke(); }
+  });
+}
+function panSprite(l) { const r = Math.round(Math.min(lw * .43, (botY - hitY) * .8)); return Lab.sprite("cg:p" + l + ":" + r, r * 2 + 8, r * 2 + 8, g => { const c = r + 4; draw.circle(g, c, c + 3, r, "rgba(0,0,0,.35)"); const gr = g.createRadialGradient(c - r * .3, c - r * .4, r * .1, c, c, r); gr.addColorStop(0, "#eef4fa"); gr.addColorStop(.6, "#9fb3c8"); gr.addColorStop(1, "#5c6f8a"); draw.circle(g, c, c, r, gr, LC[l], 4); g.strokeStyle = "rgba(40,55,80,.45)"; g.lineWidth = 1.6; for (const [a, d, s] of [[0, 0, .3], [.6, .56, .2], [2.4, .56, .2], [4.2, .56, .2], [5.4, .5, .16]]) { g.beginPath(); g.ellipse(c + Math.cos(a) * r * d, c + Math.sin(a) * r * d, r * s, r * s * .8, a, 0, TAU); g.stroke(); } }); }
+function disc(c, x, y, l, r, a) { c.globalAlpha = a; draw.circle(c, x, y + 2, r, "rgba(0,0,0,.3)"); draw.circle(c, x, y, r, LC[l], "#fff", 3); c.fillStyle = "rgba(255,255,255,.4)"; c.beginPath(); c.ellipse(x - r * .3, y - r * .35, r * .36, r * .2, -.5, 0, TAU); c.fill(); c.globalAlpha = 1; }
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  const tu = tunes[Math.max(0, curTune)], ph = tu ? ((songT - tu.t0) / tu.spb % 1 + 1) % 1 : 0, beat = Math.pow(1 - ph, 3);
+  draw.glow(c, Lab.W / 2, topY + (botY - topY) * .46, Lab.W * .3, "#fff3b0", .12 + beat * .16);
+  c.fillStyle = "rgba(255,255,255," + (.05 + beat * .1) + ")"; c.fillRect(lx0, hitY - 2, lw * 4, 4);
+  for (let l = 0; l < 4; l++) { const s = panSprite(l), k = padFx[l], held = Lab.input.keys[KEYS[l]] || [...ptrs.values()].some(x => Math.round(laneF(x)) === l); if (k > .02 || held) draw.glow(c, laneX(l), hitY, lw * .9, LC[l], Math.max(k * .6, held ? .25 : 0)); if (k < -.02) draw.glow(c, laneX(l), hitY, lw * .8, "#ff3b3b", -k * .5); c.save(); c.translate(laneX(l), hitY); c.scale(1 + Math.abs(k) * .1, 1 - Math.abs(k) * .12); c.drawImage(s, -s.w / 2, -s.h / 2, s.w, s.h); c.restore(); }
+  const R = Math.min(lw * .3, (hitY - topY) * .075);
+  for (let i = ni; i < notes.length; i++) {
+    const n = notes[i], ld = tunes[n.ti].lead; if (n.t - songT > ld + .1) break;
+    const y = yAt(n.t, ld), x = laneX(n.lane);
+    if (n.dur) { // ribbon: straight for the first 40 %, then bends to lane2
+      const active = n.st === 1 || n.st === 2, dead = n.tail === 3 || n.st === 3, done = n.tail === 1 || n.tail === 2 || n.st === 4; if (done) continue;
+      c.lineCap = c.lineJoin = "round"; c.beginPath(); let started = false;
+      for (let k = 0; k <= 12; k++) { const p = k / 12, ty = yAt(n.t + n.dur * p, ld); if (active && ty > hitY) continue; const px = lx0 + (n.lane + (n.lane2 - n.lane) * ease.inOutQuad(clamp((p - .4) / .5, 0, 1)) + .5) * lw; if (!started && active) { const pn = clamp((songT - n.t) / n.dur, 0, 1); c.moveTo(lx0 + (n.lane + (n.lane2 - n.lane) * ease.inOutQuad(clamp((pn - .4) / .5, 0, 1)) + .5) * lw, hitY); } c[started || active ? "lineTo" : "moveTo"](px, ty); started = true; }
+      c.globalAlpha = dead ? .3 : 1; c.strokeStyle = "rgba(255,255,255,.85)"; c.lineWidth = R * 1.25; c.stroke(); c.strokeStyle = dead ? "#777" : LC[n.lane]; c.lineWidth = R * 1.25 - 6; c.stroke(); c.globalAlpha = 1;
+      const ey = yAt(n.t + n.dur, ld), ex = laneX(n.lane2); if (ey < hitY || !active) { draw.circle(c, ex, ey, R * .62, dead ? "#777" : "#fff", null); if (n.lane2 !== n.lane) { const s = Math.sign(n.lane2 - n.lane); c.fillStyle = LC[n.lane]; c.beginPath(); c.moveTo(ex + s * R * .34, ey); c.lineTo(ex - s * R * .2, ey - R * .32); c.lineTo(ex - s * R * .2, ey + R * .32); c.fill(); } }
+      if (!active) disc(c, x, y, n.lane, R, dead ? .3 : 1);
+    } else if (n.st === 0) disc(c, x, y, n.lane, R, clamp((y - topY + 30) / 60, 0, 1));
+    else if (n.st === 3 && y < botY + R) disc(c, x, y, n.lane, R, .25);
+  }
+  // judgement, combo, groove meter, tune + progress
+  if (judge.t < .5) { const k = ease.outBack(clamp(judge.t * 7, 0, 1)); c.globalAlpha = clamp((.5 - judge.t) * 5, 0, 1); draw.text(c, judge.txt, Lab.W / 2, hitY - lw * 1.05 - judge.t * 16, { size: clamp(lw * .28, 20, 30) * k, color: judge.col, stroke: "rgba(20,8,40,.8)" }); c.globalAlpha = 1; }
+  if (combo >= 3) { draw.text(c, String(combo), Lab.W / 2, topY + (hitY - topY) * .3, { size: clamp(lw * .6, 40, 68), color: "rgba(255,255,255,.2)" }); draw.text(c, "COMBO  ×" + mult(), Lab.W / 2, topY + (hitY - topY) * .3 + clamp(lw * .4, 28, 46), { size: 12, color: "rgba(255,255,255,.4)" }); }
+  const mw = lw * 4 - 16, mx = lx0 + 8, my = topY - 13, gcol = groove > .5 ? "#4ecdc4" : groove > .25 ? "#ffd166" : "#ff6b6b";
+  draw.rect(c, mx, my, mw, 9, 4.5, "rgba(20,8,40,.6)", "rgba(255,255,255,.25)", 1.5); draw.rect(c, mx + 1.5, my + 1.5, Math.max(6, (mw - 3) * clamp(groove, 0, 1)), 6, 3, gcol);
+  if (groove < .25 && alive) { c.globalAlpha = .3 + .3 * Math.sin(t * 12); draw.rect(c, mx - 2, my - 2, mw + 4, 13, 6, null, "#ff6b6b", 2); c.globalAlpha = 1; }
+  if (tu) { const pr = clamp((songT - tu.t0) / (tu.end - tu.t0), 0, 1); c.fillStyle = "rgba(255,255,255,.14)"; c.fillRect(lx0, botY - 4, lw * 4, 4); c.fillStyle = "#ffd166"; c.fillRect(lx0, botY - 4, lw * 4 * pr, 4); draw.text(c, (Math.max(0, curTune) + 1) + "/3  " + tu.name.toUpperCase(), lx0 + 8, botY - 14, { size: 10.5, color: "rgba(255,255,255,.5)", align: "left" }); }
+  if (tu && songT < tu.t0 && songT >= tu.cin) { const b = Math.floor((songT - tu.cin) / tu.spb), f = ((songT - tu.cin) / tu.spb) % 1; draw.text(c, b < 3 ? String(3 - b) : "GO", Lab.W / 2, topY + (hitY - topY) * .62, { size: 64 * (1.3 - f * .3), color: "rgba(255,243,176," + (1 - f * .7) + ")", stroke: "rgba(20,8,40,.6)" }); }
+}
+function attract(dt, t) {
+  if (!notes) { layout(); build(); ni = 0; ei = 0; songT = tunes[0].t0; combo = 27; groove = .8; judge = { txt: "", t: 9 }; padFx = [0, 0, 0, 0]; ptrs = new Map(); curTune = 0; alive = false; }
+  songT += dt; if (songT > tunes[0].end - 2) { songT = tunes[0].t0; ni = 0; for (const n of notes) { n.st = 0; n.tail = 0; } }
+  while (ni < notes.length && notes[ni].t <= songT) { const n = notes[ni++]; n.st = 1; n.tail = 1; padFx[n.lane] = 1; }
+  for (let l = 0; l < 4; l++) padFx[l] = Lab.damp(padFx[l], 0, 9, dt); render(t);
+}
+Lab.boot();
+})();
+</script></body></html>

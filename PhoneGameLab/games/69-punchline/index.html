@@ -10,6 +10,7 @@
  * Twist:  the brass COMB. A hole can be tapped any time it is on the roll, but tapped while it crosses the comb it
  *         rings (octave shimmer) and scores more; consecutive ringing notes build an "in tune" flow bonus. Early taps
  *         are safe but dull — letting holes ride down to the comb is where the points (and the actual rhythm) are.
+ * Mercy:  when a hole slides off, the roll catches and winds back a beat so one miss does not snowball.
  * Holds:  long slots (≥2 beats) keep paying while held and finish with a bonus.
  * Set:    five public-domain tunes (Ode to Joy, Minuet in G, Sakura, Greensleeves, Hall of the Mountain King), each
  *         a little faster and speeding up as it goes, then round again; a tune without a slip winds a life back.
@@ -32,7 +33,7 @@ const SONGS = [
   { t: "Hall of the Mountain King", bar: 4, pick: 0, up: 0, roots: "A A A C A A A A A A A C A A A A", n: MK + "G5:2 " + MK + "A4:2 " + MK + "G5:2 " + MK + "A5:2" },
 ];
 const midiOf = n => Math.round(69 + 12 * Math.log2(Lab.audio.noteFreq(n) / 440));
-let rx, rw, mg, lw, topY, botY, combY, PPB, pos, tempo, started, tiles, next, metas, songN, endBeat, score, lives, flow, bestFlow, taps, rings, holdsDone, tunes, alive, holds, pluck, laneFx, lastHit, keyHeld, slipFx, tapHint;
+let rx, rw, mg, lw, topY, botY, combY, PPB, pos, tempo, started, tiles, next, metas, songN, endBeat, score, lives, flow, bestFlow, taps, rings, holdsDone, tunes, alive, holds, pluck, laneFx, lastHit, keyHeld, slipFx, tapHint, rewind;
 
 function layout() {
   const P = Lab.play; rw = Math.min(P.w, 560); rx = P.x + (P.w - rw) / 2; mg = clamp(rw * .04, 12, 22); lw = (rw - mg * 2) / 4;
@@ -55,7 +56,7 @@ function addSong() {
 }
 function start() {
   layout(); tiles = []; metas = []; songN = 0; endBeat = 0; next = 0; pos = 0; tempo = 0; started = false; score = 0; lives = 3; flow = 0; bestFlow = 0; taps = 0; rings = 0; holdsDone = 0; tunes = 0; alive = true;
-  holds = new Map(); pluck = [0, 0, 0, 0]; laneFx = [0, 0, 0, 0]; lastHit = { lane: -1, t: 0 }; keyHeld = {}; slipFx = 0; tapHint = 0;
+  holds = new Map(); pluck = [0, 0, 0, 0]; laneFx = [0, 0, 0, 0]; lastHit = { lane: -1, t: 0 }; keyHeld = {}; slipFx = 0; tapHint = 0; rewind = 0;
   addSong(); Lab.setScore(0);
   Lab.input.onDown = [(x, y, id) => { const l = laneAt(x); if (l >= 0 && l < 4) press(l, id); }];
   Lab.input.onUp = [(x, y, id) => release(id)];
@@ -113,10 +114,11 @@ function update(dt) {
   if (!started) return;
   const m = meta(), base = Math.min(3.2, 1.45 + .2 * m.n), target = base + .3 * clamp((pos - m.start) / (m.end - m.start), 0, 1);
   tempo = Lab.damp(tempo, target, 2.5, dt); pos += tempo * dt; ensure();
+  if (rewind > 0) { const r = Math.min(rewind, dt * 5); pos -= r; rewind -= r; }                              // a missed hole makes the box catch and wind back a beat
   for (const [id, k] of Object.entries(keyHeld)) if (!Lab.input.keys[k]) { delete keyHeld[id]; release(id); }
   for (const [id, tl] of holds) { tl.holdP += tempo * dt / Math.max(.5, tl.d - .75); if (Math.random() < dt * 20) fx.burst(laneX(tl.lane) + Lab.rand(-lw * .3, lw * .3), combY, { n: 1, colors: ["#ffe9a8"], speed: 70, life: .4, size: 2.5, angle: -1.57, spread: .8 });
     if (tl.holdP >= 1) { tl.holdP = 1; holds.delete(id); holdsDone++; score += 3; Lab.setScore(score); Lab.audio.tone({ f: tl.f * 2, type: "sine", dur: .7, vol: .12 }); Lab.sfx("star", { vol: .4 }); fx.text(laneX(tl.lane), combY - 34, "held +3", { color: "#ffe9a8", size: 15 }); pluck[tl.lane] = 1; } }
-  const tl = tiles[next]; if (tl && yOf(tl.b + tl.d) > botY + 2) { tl.st = 2; next++; const q = metas.find(z => z.n === tl.song); slip(tl.lane, true); if (alive && --q.left === 0) songDone(q); }
+  const tl = tiles[next]; if (tl && yOf(tl.b + tl.d) > botY + 2) { tl.st = 2; next++; const q = metas.find(z => z.n === tl.song); slip(tl.lane, true); rewind = 1.3; tempo *= .6; if (alive && --q.left === 0) songDone(q); }
 }
 
 /* ---------- art */

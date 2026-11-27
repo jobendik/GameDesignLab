@@ -548,11 +548,6 @@ window.LAB_GAMES = [
     "t": "Wire Ball",
     "d": "Drag a ring along a wire without touching it.",
     "thumb": "../thumbs/PhoneGameLab2--wire-ball.jpg"
-   },
-   {
-    "slug": "sunny-soak",
-    "t": "Balloon Splash",
-    "d": "Tap balloons to splash them. 30 seconds."
    }
   ]
  },
@@ -566,6 +561,18 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--bedtime-stacks.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Arcade",
+  "items": [
+   {
+    "slug": "sunny-soak",
+    "t": "Sunny Soak",
+    "d": "Lob water balloons. Cool your pals down.",
+    "v2": true,
+    "score": 8
    }
   ]
  }

@@ -1009,6 +1009,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--unicorn-magic-sort.jpg"
   },
   {
@@ -2433,24 +2435,28 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 69,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/70-rhythm-lane",
-   "path": "PhoneGameLab/games/70-rhythm-lane/index.html",
+   "id": "PhoneGameLab/70-coconut-groove",
+   "path": "PhoneGameLab/games/70-coconut-groove/index.html",
    "collection": "PhoneGameLab",
-   "title": "Rhythm Lane",
-   "desc": "Hit notes in their lanes in time with the beat.",
+   "title": "Coconut Groove",
+   "desc": "Strike the steel pans on the beat.",
    "genre": [
     "Skill & Rhythm"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 70,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--70-rhythm-lane.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/basketball",
@@ -3648,16 +3654,18 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab2/sunny-soak",
    "path": "PhoneGameLab2/games/sunny-soak/index.html",
    "collection": "PhoneGameLab2",
-   "title": "Balloon Splash",
-   "desc": "Tap balloons to splash them. 30 seconds.",
+   "title": "Sunny Soak",
+   "desc": "Lob water balloons. Cool your pals down.",
    "genre": [
-    "Minigame"
+    "Arcade"
    ],
    "controls": [
     "touch",
     "mouse"
    ],
-   "v2": false
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/super-balloons",

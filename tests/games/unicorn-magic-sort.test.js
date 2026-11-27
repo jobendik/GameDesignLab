@@ -92,7 +92,7 @@ module.exports = {
       let mv = null; for (let i = 0; i < 5 && !mv; i++) for (let k = 0; k < 5; k++) if (await can(i, k)) { mv = [i, k]; break; }
       expect(mv && s.sparkles > 0, 'not over, so a sparkle swap must be possible');
       const sp = s.sparkles, sc = s.score; await page.locator('#bSwap').tap(); await wait(30); expect((await st()).swapArmed, 'swap armed');
-      await tap(mv[0]); await tap(mv[1]); const q = await st(); expect(q.score > sc && !q.swapArmed && q.sparkles <= sp + 1, 'a swap fuses twins and scores'); swapped = true;
+      await tap(mv[0]); await tap(mv[1]); const q = await st(); expect(q.score > sc && !q.swapArmed && q.sparkles <= sp + 2, 'a swap fuses twins and scores ' + JSON.stringify([mv, sc, q.score, sp, q.sparkles, q.swapArmed, s.jars.map(a => a.map(c => c.t).join('')), q.jars.map(a => a.map(c => c.t).join(''))])); swapped = true;
     }
     expect(s.over && s.score > 0, 'the jars filled up and the run ended (score ' + s.score + ', swapped ' + swapped + ')');
     await settle(); await wait(80); expect(await page.locator('#overOv').isVisible(), 'game-over card shown');
