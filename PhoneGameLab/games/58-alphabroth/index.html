@@ -1,51 +1,276 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Alphabroth</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Word Search", instructions:"Drag across letters to find hidden words.", restart:start});
-const WORDS=["CAT","DOG","SUN","MOON","STAR","TREE","FISH","BIRD"];
-let grid, found, sel, N=10;
-function start(){
-  grid=Array.from({length:N},()=>Array.from({length:N},()=>String.fromCharCode(65+Lab.randInt(0,25))));
-  found=new Set();
-  // place each word
-  const placed=[];
-  for(const w of WORDS){
-    for(let tries=0;tries<50;tries++){
-      const dir=Lab.choose([[0,1],[1,0],[1,1]]);
-      const r=Lab.randInt(0, N-1 - dir[0]*(w.length-1));
-      const c=Lab.randInt(0, N-1 - dir[1]*(w.length-1));
-      let ok=true; for(let i=0;i<w.length;i++){ const cr=r+dir[0]*i, cc=c+dir[1]*i; const cur=grid[cr][cc]; if(placed.find(p=>p.cells.find(cl=>cl[0]===cr&&cl[1]===cc&&cl[2]!==w[i]))){ok=false;break;}}
-      if(ok){ const cells=[]; for(let i=0;i<w.length;i++){ const cr=r+dir[0]*i, cc=c+dir[1]*i; grid[cr][cc]=w[i]; cells.push([cr,cc,w[i]]);} placed.push({word:w, cells}); break;}
+(function(){ "use strict";
+/* ALPHABROTH — a pan of alphabet soup on a gingham tablecloth. Drag a noodle through the pasta letters to fish out
+ * every word on the menu. Each bowl has a theme (kitchen, ocean, space…) drawn from a 440-word bank.
+ * Identity: blue gingham, white enamel pan, tomato broth, cream pasta letters that bob; words come out as a rising
+ *           scale, one note per letter.
+ * Hooks:    SIMMER streak — words found within 12 s of each other multiply (up to ×5);
+ *           a SECRET INGREDIENT — one extra themed word that is not on the menu. Its letters are revealed as you
+ *           clear the menu, and when the menu is done you get a 20 s "last ladle" to fish it out.
+ * Stars:    ★ bowl finished · ★ under par time · ★ secret found.  Boards grow 6×6 → 10×10 and gain diagonals,
+ *           then backwards words. Generated from the bowl number; every word occurs exactly once.            */
+const THEMES = {
+  KITCHEN: "SPOON FORK KNIFE PLATE WHISK LADLE GRATER KETTLE OVEN STOVE APRON RECIPE PANTRY SIEVE TONGS MUG BOWL TEAPOT SPATULA PEELER BLENDER TOASTER FREEZER SKILLET COLANDER JUG TRAY NAPKIN",
+  GARDEN: "TULIP DAISY ROSE FERN IVY HEDGE LAWN SPADE RAKE SEED SOIL MULCH BULB PETAL STEM THORN WEED POND GNOME SHED TROWEL COMPOST BLOSSOM ORCHID LILAC POPPY VIOLET SPROUT",
+  OCEAN: "WHALE SHARK CORAL REEF TIDE WAVE SQUID CRAB SHELL PEARL KELP DOLPHIN OCTOPUS LOBSTER SHRIMP URCHIN SEAL ANCHOR HARBOR BEACH SAND SURF GULL MUSSEL OYSTER TURTLE CURRENT LAGOON",
+  WEATHER: "RAIN SNOW HAIL SLEET STORM CLOUD THUNDER BREEZE GUST FROST FOG MIST DRIZZLE SUNNY HUMID FLOOD DROUGHT TORNADO MONSOON RAINBOW ICICLE SHOWER CHILLY TYPHOON BLIZZARD CYCLONE THAW DEW",
+  MUSIC: "PIANO GUITAR VIOLIN CELLO FLUTE DRUM HARP TRUMPET BANJO ORGAN CHORD MELODY RHYTHM TEMPO LYRIC CHOIR OPERA BALLAD CONCERT ENCORE TUBA OBOE BUGLE SONG TUNE BASS TENOR DUET",
+  SPACE: "PLANET COMET ORBIT ROCKET GALAXY NEBULA METEOR MOON STAR SATURN VENUS MARS JUPITER NEPTUNE EARTH COSMOS LUNAR SOLAR ECLIPSE CRATER GRAVITY PROBE SHUTTLE ASTEROID PLUTO URANUS MERCURY VOID",
+  FARM: "TRACTOR BARN SHEEP GOAT HORSE CHICKEN ROOSTER DUCK GOOSE PIGLET CALF MEADOW HARVEST PLOW FENCE STABLE HAY WHEAT CORN BARLEY ORCHARD SCARECROW SILO DONKEY TURKEY LAMB FARMER CROP",
+  SPORTS: "TENNIS SOCCER RUGBY HOCKEY GOLF BOXING ROWING SKIING SURFING CRICKET CYCLING JUDO KARATE FENCING ARCHERY SAILING DIVING POLO RELAY SPRINT HURDLE GOALIE REFEREE TROPHY MEDAL STADIUM PITCH RACKET",
+  CLOTHES: "JACKET SCARF GLOVE MITTEN SOCK BOOT SANDAL SHIRT BLOUSE SKIRT DRESS JEANS SHORTS SWEATER HOODIE COAT BELT BUTTON ZIPPER COLLAR SLEEVE POCKET CARDIGAN PYJAMAS BERET CAP VEST TIE",
+  BAKERY: "BREAD BAGEL MUFFIN SCONE CROISSANT PRETZEL DONUT COOKIE BISCUIT PASTRY TART PIE CAKE WAFFLE CRUMPET BROWNIE ECLAIR FLOUR YEAST DOUGH BUTTER SUGAR CRUST ICING CUSTARD CINNAMON VANILLA BAGUETTE",
+  FOREST: "OAK PINE BIRCH MAPLE WILLOW CEDAR ACORN MOSS FUNGUS BADGER FOX DEER OWL SQUIRREL HEDGEHOG RABBIT WOLF BEAR BEAVER BRANCH TRUNK ROOT LEAF TWIG BARK STREAM TRAIL CANOPY",
+  TRAVEL: "TICKET PASSPORT LUGGAGE AIRPORT STATION HOTEL HOSTEL MAP COMPASS VOYAGE CRUISE FERRY TRAIN TRAM TAXI BUS SUBWAY VISA TOURIST GUIDE CAMERA SUITCASE POSTCARD JOURNEY ROUTE CUSTOMS BORDER ISLAND",
+  TOOLS: "HAMMER WRENCH PLIERS CHISEL DRILL SAW NAIL SCREW BOLT LADDER RULER CLAMP ANVIL SANDER SHOVEL PICKAXE CROWBAR HATCHET MALLET FILE GLUE TAPE VISE TOOLBOX SPANNER RIVET WASHER PLANE",
+  GROCER: "APPLE PEAR PLUM PEACH CHERRY GRAPE LEMON LIME MANGO MELON BANANA ORANGE PAPAYA KIWI FIG DATE APRICOT COCONUT GUAVA LYCHEE OLIVE TOMATO CARROT ONION PEPPER RADISH TURNIP CELERY",
+  HOME: "SOFA TABLE CHAIR LAMP SHELF MIRROR CARPET CURTAIN PILLOW BLANKET WINDOW DOOR STAIRS ATTIC CELLAR GARAGE CLOSET DRAWER CABINET FAUCET BATHTUB CHIMNEY HALLWAY BALCONY PORCH CUSHION CLOCK VASE",
+  SAFARI: "TIGER LION ZEBRA GIRAFFE MONKEY PANDA KOALA HIPPO RHINO CAMEL LLAMA OTTER PARROT EAGLE FALCON PENGUIN OSTRICH LIZARD GECKO COBRA PYTHON JAGUAR LEOPARD GORILLA WALRUS MOOSE BISON HYENA",
+};
+const TN = Object.keys(THEMES), DIRS = [[0, 1], [1, 0], [1, 1], [-1, 1], [0, -1], [-1, 0], [-1, -1], [1, -1]];
+const NOODLE = ["#fff3c4", "#c8f58a", "#9fe8ff", "#ffd166", "#ffc2dc", "#d6c8ff", "#ffb38a", "#b8f5d8"];
+const fmtT = s => { s = Math.max(0, Math.floor(s)); return ((s / 60) | 0) + ":" + ("0" + (s % 60)).slice(-2); };
+Lab.init({
+  title: "Alphabroth", tagline: "Fish every word out of the soup.", category: "Puzzle & Logic",
+  howto: ["Drag through letters to ladle out a word", "Quick finds keep the pot simmering", "A secret ingredient hides off the menu"],
+  theme: { bg: "#c9d8f0", bg2: "#eef3fb", fg: "#27365e", muted: "#6f7da3", accent: "#e2532f", accent2: "#2f5fb0", light: true },
+  orient: "any", music: { style: "bounce", key: "F", bpm: 94, vol: .3 }, restart: start,
+  attract(dt, t) { if (!grid) { prog = { stars: {} }; load(7); mode = "demo"; demoT = 1; } tick(dt); render(t); },
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, PI = Math.PI;
+let level, N, grid, words, secret, all, theme, par, prog, mode, score, streak, streakT, bestStreak, time, hints, ladleT, ladleR, sel, anchor, miss, hop, ph, hintC, demoT, saveT, winT, genMs, eatUp;
+let cell, gx, gy, land, ui, pressT = {}, bubT = 0;
+
+/* ------------------------------------------------------------------ generator */
+const rev = s => s.split("").reverse().join("");
+function spec(n) { return n <= 1 ? [6, 5, 2, 5] : n === 2 ? [7, 6, 3, 6] : n === 3 ? [7, 7, 4, 7] : n <= 5 ? [8, 8, 8, 8] : n <= 8 ? [8, 9, 8, 8] : n <= 12 ? [9, 10, 8, 9] : [10, 12, 8, 9]; }   // size, words, directions, max length
+function lines(G, n) {
+  const L = [];
+  for (let i = 0; i < n; i++) { let a = "", b = ""; for (let j = 0; j < n; j++) { a += G[i * n + j]; b += G[j * n + i]; } L.push(a, b); }
+  for (let k = 1 - n; k < n; k++) { let a = "", b = ""; for (let r = 0; r < n; r++) { const c = r + k; if (c >= 0 && c < n) { a += G[r * n + c]; b += G[r * n + n - 1 - c]; } } L.push(a, b); }
+  return L.concat(L.map(rev));
+}
+const count = (L, w) => { let k = 0; for (const s of L) { let i = -1; while ((i = s.indexOf(w, i + 1)) >= 0) k++; } return k; };
+function build(n) {
+  const [sz, K, D, maxL] = spec(n), th = TN[(n - 1) % TN.length];
+  for (let a = 0; a < 60; a++) {
+    const rnd = Lab.rng(n * 7919 + a * 104729 + 17), pool = THEMES[th].split(" ").filter(w => w.length <= maxL);
+    for (let i = pool.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0, t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+    const chosen = []; let sec = pool.find(w => w.length >= 4 && w.length <= 7);
+    for (const w of pool) { if (chosen.length >= K) break; if (w === sec || [sec].concat(chosen).some(o => o.includes(w) || w.includes(o) || o.includes(rev(w)) || w.includes(rev(o)))) continue; chosen.push(w); }
+    if (chosen.length < K) continue;
+    const G = new Array(sz * sz).fill(""), placed = []; let ok = true;
+    for (const w of [sec].concat(chosen.slice().sort((x, y) => y.length - x.length))) {
+      const opts = []; let top = 0;
+      for (let d = 0; d < D; d++) { const [dr, dc] = DIRS[d];
+        for (let r = 0; r < sz; r++) for (let c = 0; c < sz; c++) {
+          const er = r + dr * (w.length - 1), ec = c + dc * (w.length - 1); if (er < 0 || er >= sz || ec < 0 || ec >= sz) continue;
+          let o = 0, fit = true; for (let i = 0; i < w.length; i++) { const ch = G[(r + dr * i) * sz + c + dc * i]; if (ch === w[i]) o++; else if (ch) { fit = false; break; } }
+          if (fit && o < w.length) { opts.push([r, c, dr, dc, o]); if (o > top) top = o; } } }
+      if (!opts.length) { ok = false; break; }
+      const best = opts.filter(o => o[4] === top), p = top && rnd() < .75 ? best[(rnd() * best.length) | 0] : opts[(rnd() * opts.length) | 0];
+      for (let i = 0; i < w.length; i++) G[(p[0] + p[2] * i) * sz + p[1] + p[3] * i] = w[i];
+      placed.push({ w, r: p[0], c: p[1], dr: p[2], dc: p[3], found: false, t: 9, col: "#fff" });
+    }
+    if (!ok) continue;
+    const bag = placed.map(p => p.w).join("") + "AEIOURSTLNAEIO";
+    for (let f = 0; f < 30; f++) {
+      const F = G.map(ch => ch || bag[(rnd() * bag.length) | 0]), L = lines(F, sz);
+      if (placed.every(p => count(L, p.w) === 1) && !L.some(s => /ARSE|SHIT|FUCK|CUNT|DICK|COCK|PISS|TITS|SLUT|NAZI/.test(s))) {
+        const order = placed[0].w.split("").map((_, i) => i); for (let i = order.length - 1; i > 1; i--) { const j = 1 + ((rnd() * i) | 0), t = order[i]; order[i] = order[j]; order[j] = t; }
+        placed[0].order = order; placed[0].secret = true;
+        return { N: sz, grid: F, secret: placed[0], words: chosen.map((w, i) => Object.assign(placed.find(p => p.w === w), { col: NOODLE[i % NOODLE.length] })), theme: th, par: K * 11 + 10 };
+      }
     }
   }
-  sel=[];
-  Lab.input.onDown=[(x,y)=>{ const p=pick(x,y); if(p) sel=[p];}];
-  Lab.input.onMove=[(x,y)=>{ if(!sel.length) return; const p=pick(x,y); if(!p) return; if(sel[sel.length-1].r===p.r&&sel[sel.length-1].c===p.c) return; sel.push(p);}];
-  Lab.input.onUp=[()=>{ if(!sel.length) return; const word=sel.map(s=>grid[s.r][s.c]).join("");
-    if(WORDS.includes(word) && !found.has(word)){ found.add(word); Lab.beep(800,.08); Lab.toast(word); Lab.setScore(found.size);
-      sel.forEach(s=>s.found=true);
-      if(found.size===WORDS.length) Lab.win("All found!");
-    }
-    sel=[];
+  return null;
+}
+function load(n) {
+  const t0 = performance.now(), B = build(n); level = n; N = B.N; grid = B.grid; words = B.words; secret = B.secret; all = words.concat(secret); theme = B.theme; par = B.par;
+  score = 0; streak = 0; streakT = 0; bestStreak = 1; time = 0; hints = 0; ladleT = 0; ladleR = 0; sel = null; anchor = null; miss = null; hintC = null; winT = 0; saveT = 0; eatUp = false; mode = "play";
+  hop = new Float32Array(N * N); ph = Array.from({ length: N * N }, (_, i) => (i * 2.399) % TAU);
+  genMs = performance.now() - t0; layout();
+}
+
+/* ------------------------------------------------------------------ layout */
+function layout() {
+  const p = Lab.play, rows = Math.ceil(words.length / 3); land = p.w > p.h * 1.15;
+  if (land) {
+    const side = Lab.clamp(p.w * .34, 250, 380), sq = Math.min(p.h - 16, p.w - side - 30, 640), x0 = p.x + (p.w - side - sq) / 2, top = p.y + (p.h - sq) / 2, bot = top + sq; cell = (sq - 20) / N; gx = x0 + 10; gy = top + 10;
+    const lx = x0 + sq + 22, lw = side - 22, rh = Lab.clamp((sq - 190) / Math.ceil(words.length / 2), 17, 32);
+    ui = { tx: lx + lw / 2, ty: top + 20, sy: top + 44, py: top + 66, list: { x: lx, y: top + 86, w: lw, cols: 2, rh }, secY: top + 86 + Math.ceil(words.length / 2) * rh + 30,
+      prev: { x: lx, y: top, w: 44, h: 44 }, next: { x: lx + lw - 44, y: top, w: 44, h: 44 }, hint: { x: lx, y: bot - 48, w: lw / 2 - 5, h: 44 }, serve: { x: lx + lw / 2 + 5, y: bot - 48, w: lw / 2 - 5, h: 44 } };
+  } else {
+    const U = Lab.clamp(p.h / 720, .8, 1.15), head = 78 * U, sq = Math.min(p.w - 16, p.h - head - rows * 25 * U - 46 * U - 70, 620), rh = Lab.clamp((p.h - head - sq - 46 * U - 84) / rows, 25 * U, 38), foot = rows * rh + 46 * U + 62; cell = (sq - 20) / N;
+    const y0 = p.y + head + Math.max(0, (p.h - head - foot - sq) * .4); gx = p.x + (p.w - sq) / 2 + 10; gy = y0 + 10;
+    const lw = Math.min(p.w - 20, 560), lx = p.x + (p.w - lw) / 2, ly = y0 + sq + 14 * U, by = p.y + p.h - 54;
+    ui = { tx: Lab.W / 2, ty: p.y + 16 * U, sy: p.y + 39 * U, py: p.y + 62 * U, list: { x: lx, y: ly, w: lw, cols: 3, rh }, secY: ly + rows * rh + 18 * U,
+      prev: { x: lx, y: p.y, w: 46, h: 46 }, next: { x: lx + lw - 46, y: p.y, w: 46, h: 46 }, hint: { x: Lab.W / 2 - 148, y: by, w: 142, h: 46 }, serve: { x: Lab.W / 2 + 6, y: by, w: 142, h: 46 } };
+  }
+  for (const k of ["prev", "next", "hint", "serve"]) ui[k].id = k;
+}
+Lab.onResize(() => { if (grid) layout(); });
+const cx = c => gx + (c + .5) * cell, cy = r => gy + (r + .5) * cell;
+const hit = (x, y) => [ui.prev, ui.next, ui.hint, ui.serve].find(b => x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 4 && y <= b.y + b.h + 4);
+function pick(x, y) { const c = Math.floor((x - gx) / cell), r = Math.floor((y - gy) / cell), m = .35; if ((x - gx) / cell < -m || (y - gy) / cell < -m || (x - gx) / cell > N + m || (y - gy) / cell > N + m) return null; return { r: Lab.clamp(r, 0, N - 1), c: Lab.clamp(c, 0, N - 1) }; }
+
+/* ------------------------------------------------------------------ selection */
+function aim(x, y) {   // snap the noodle to the nearest of 8 directions from its first letter
+  const dx = (x - gx) / cell - .5 - sel.c, dy = (y - gy) / cell - .5 - sel.r, old = sel.len + ":" + sel.dr + sel.dc; let len = 1, dr = sel.dr, dc = sel.dc;
+  if (Math.hypot(dx, dy) > .6) { const k = Math.round(Math.atan2(dy, dx) / (PI / 4)); dc = Math.round(Math.cos(k * PI / 4)); dr = Math.round(Math.sin(k * PI / 4));
+    len = Math.max(1, Math.round((dx * dc + dy * dr) / (dc * dc + dr * dr)) + 1);
+    while (len > 1 && (sel.r + dr * (len - 1) < 0 || sel.r + dr * (len - 1) >= N || sel.c + dc * (len - 1) < 0 || sel.c + dc * (len - 1) >= N)) len--; }
+  sel.len = len; sel.dr = dr; sel.dc = dc;
+  if (old !== len + ":" + dr + dc) { Lab.audio.combo(len - 1, { vol: .07 }); hop[(sel.r + dr * (len - 1)) * N + sel.c + dc * (len - 1)] = .5; }
+}
+const spell = s => { let w = ""; for (let i = 0; i < s.len; i++) w += grid[(s.r + s.dr * i) * N + s.c + s.dc * i]; return w; };
+function commit() {
+  const s = sel; sel = null; if (!s) return;
+  if (s.len < 2) { anchor = { r: s.r, c: s.c }; return; }
+  anchor = null; const w = spell(s), h = all.find(o => o.w === w || o.w === rev(w));
+  if (h && !h.found) return find(h);
+  miss = Object.assign(s, { t: .4 }); Lab.sfx(h ? "tick" : "thud", { vol: .4, pitch: h ? .7 : 1.3 });
+}
+function find(w) {
+  w.found = true; w.t = 0; hintC = null; const n = w.w.length, ex = cx(w.c + w.dc * (n - 1)), ey = cy(w.r + w.dr * (n - 1)); if (mode === "demo") return;
+  streak = streakT > 0 ? Math.min(streak + 1, 4) : 0; streakT = 12; const mult = 1 + streak; bestStreak = Math.max(bestStreak, mult);
+  const gain = w.secret ? 150 : n * 10 * mult; score += gain; Lab.setScore(score); Lab.bumpScore(); Lab.buzz(12);
+  for (let i = 0; i < n; i++) Lab.after(i * .045, () => { hop[(w.r + w.dr * i) * N + w.c + w.dc * i] = 1; Lab.audio.combo(i + streak, { vol: .13 }); });
+  Lab.after(n * .045, () => { Lab.sfx(w.secret ? "powerup" : "pop", { pitch: 1 + streak * .08, vol: .7 }); fx.burst(ex, ey, { n: w.secret ? 26 : 10, colors: [w.col, "#fff", "#ffe8b0"], speed: 170, life: .55, size: 3.5, gravity: 260, shape: w.secret ? "star" : "circle" }); });
+  fx.text(ex, ey - cell * .7, "+" + gain + (mult > 1 && !w.secret ? "  ×" + mult : ""), { color: w.secret ? "#ffe066" : "#fff", size: 18 + streak * 2 });
+  if (w.secret) { w.col = "#ffd84a"; Lab.banner("SECRET INGREDIENT!", { color: "#ffd84a", ms: 1300, y: .2 }); Lab.flash("#fff3c4", .3, .35); }
+  const left = words.filter(o => !o.found).length;
+  if (!left && secret.found) return finish();
+  if (!left && mode === "play") { mode = "ladle"; ladleT = 20; Lab.banner("LAST LADLE", { color: "#fff", ms: 1100, y: .2 }); Lab.sfx("whistle", { vol: .5 }); }
+  save();
+}
+function hint() {
+  const pool = (mode === "ladle" ? [secret] : words).filter(w => !w.found); if (mode === "won" || !pool.length) return;
+  const w = pool[(Math.random() * pool.length) | 0]; hintC = { r: w.r, c: w.c, t: 0, w: w.w }; hints++; if (mode === "play") time += 10; Lab.sfx("chime", { pitch: .9 }); fx.text(cx(w.c), cy(w.r) - cell * .7, mode === "play" ? "+10s" : w.w[0] + "…", { color: "#fff", size: 16 }); save();
+}
+function serve() { if (mode === "ladle") finish(); }
+function go(n) { if (n < 1 || n > prog.max || mode === "won") return Lab.sfx("tick", { pitch: .5, vol: .5 }); prog.lvl = n; Lab.store.set("prog", prog); Lab.store.set("save", null); load(n); Lab.setScore(0); Lab.sfx("flip"); }
+const stars = () => 1 + (time <= par ? 1 : 0) + (secret.found ? 1 : 0);
+function save() { if (mode === "play" || mode === "ladle") Lab.store.set("save", { lvl: level, f: all.map(w => w.found), time, hints, score, bs: bestStreak, ladle: mode === "ladle" ? ladleT : 0 }); }
+function finish() {
+  mode = "won"; winT = 0; const bonus = Math.max(0, Math.round(par - time)) * 5, st = stars(), lv = level; score += bonus; Lab.setScore(score);
+  prog.stars[lv] = Math.max(prog.stars[lv] || 0, st); prog.max = Math.max(prog.max, lv + 1); prog.lvl = lv + 1; Lab.store.set("prog", prog); Lab.store.set("save", null);
+  if (bonus) Lab.after(.35, () => { fx.text(Lab.W / 2, gy - 6, "TIME BONUS +" + bonus, { color: "#fff", size: 20, life: 1.3 }); Lab.sfx("coin"); });
+  if (!secret.found) Lab.after(.5, () => { secret.t = 0; secret.shown = true; Lab.sfx("slide", { vol: .5 }); });
+  Lab.after(1.7, () => Lab.win({ title: st === 3 ? "Licked clean!" : "Bowl finished", message: secret.found ? "You even found the secret " + secret.w.toLowerCase() + "." : "The secret ingredient was " + secret.w.toLowerCase() + ".",
+    score, button: "Next bowl", stats: [["Time", fmtT(time) + " / " + fmtT(par)], ["Simmer", "×" + bestStreak], ["Rating", "★".repeat(st) + "☆".repeat(3 - st)]] }));
+}
+function start() {
+  prog = Lab.store.get("prog", null) || { lvl: 1, max: 1, stars: {} }; load(prog.lvl);
+  const sv = Lab.store.get("save", null);
+  if (sv && sv.lvl === level && sv.f && sv.f.length === all.length) { all.forEach((w, i) => { w.found = !!sv.f[i]; if (w.secret && w.found) w.col = "#ffd84a"; }); time = sv.time || 0; hints = sv.hints || 0; score = sv.score || 0; bestStreak = sv.bs || 1; if (sv.ladle > 0) { mode = "ladle"; ladleT = sv.ladle; } }
+  Lab.setScore(score);
+  Lab.input.onDown = [(x, y) => {
+    if (mode !== "play" && mode !== "ladle") return; const b = hit(x, y);
+    if (b) { pressT[b.id] = 1; ({ hint, serve, prev: () => go(level - 1), next: () => go(level + 1) })[b.id](); return; }
+    const p = pick(x, y); if (!p) { anchor = null; return; }
+    if (anchor && (p.r !== anchor.r || p.c !== anchor.c)) { const dr = p.r - anchor.r, dc = p.c - anchor.c;   // tap–tap: second tap in line with the first
+      if (!dr || !dc || Math.abs(dr) === Math.abs(dc)) { sel = { r: anchor.r, c: anchor.c, dr: Math.sign(dr), dc: Math.sign(dc), len: Math.max(Math.abs(dr), Math.abs(dc)) + 1 }; eatUp = true; return commit(); } }
+    anchor = null; sel = { r: p.r, c: p.c, dr: 0, dc: 1, len: 1 }; hop[p.r * N + p.c] = .6; Lab.audio.combo(0, { vol: .07 });
   }];
-  Lab.setScore(0);
-  Lab.loop(()=>draw());
+  Lab.input.onMove = [(x, y) => { if (sel && Lab.input.down) aim(x, y); }];
+  Lab.input.onUp = [(x, y) => { if (eatUp) { eatUp = false; return; } if (sel) { aim(x, y); commit(); } }];
+  Lab.input.onKey = [k => { k = k.toLowerCase(); if (k === "h") hint(); else if (k === "s" || k === "enter") serve(); else if (k === ",") go(level - 1); else if (k === ".") go(level + 1); }];
+  Lab.expose({ get level() { return level; }, get size() { return N; }, get grid() { return grid.join(""); }, get mode() { return mode; }, get score() { return score; }, get time() { return time; }, set time(v) { time = v; }, get par() { return par; }, get streak() { return streak; },
+    get theme() { return theme; }, get genMs() { return genMs; }, get ladleT() { return ladleT; }, set ladleT(v) { ladleT = v; }, get hints() { return hints; }, get hintCell() { return hintC && { r: hintC.r, c: hintC.c }; }, get sel() { return sel && { len: sel.len, dr: sel.dr, dc: sel.dc, w: spell(sel) }; },
+    get words() { return all.map(w => ({ w: w.w, secret: !!w.secret, found: w.found, r: w.r, c: w.c, dr: w.dr, dc: w.dc, x0: cx(w.c), y0: cy(w.r), x1: cx(w.c + w.dc * (w.w.length - 1)), y1: cy(w.r + w.dr * (w.w.length - 1)) })); },
+    cell(r, c) { return { x: cx(c), y: cy(r) }; }, get buttons() { return [ui.prev, ui.next, ui.hint, ui.serve].map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); }, get progress() { return JSON.parse(JSON.stringify(prog)); }, stars, go, spec, build });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
 }
-function pick(x,y){ const cs=cellSize(), off=offset(cs); const c=Math.floor((x-off.x)/cs), r=Math.floor((y-off.y)/cs); if(c<0||c>=N||r<0||r>=N) return null; return {r,c};}
-function cellSize(){ return Math.min((Lab.W-20)/N, (Lab.H-340)/N);}
-function offset(cs){ return {x:(Lab.W-cs*N)/2, y:140};}
-function draw(){
-  const c=Lab.ctx; c.fillStyle="#1c1c2c"; c.fillRect(0,0,Lab.W,Lab.H);
-  const cs=cellSize(), off=offset(cs);
-  for(let r=0;r<N;r++) for(let col=0;col<N;col++){
-    const x=off.x+col*cs, y=off.y+r*cs;
-    const inSel=sel.find(s=>s.r===r&&s.c===col);
-    c.fillStyle = inSel ? "#ffd35a" : "#22253a"; c.fillRect(x+1,y+1,cs-2,cs-2);
-    c.fillStyle="#fff"; c.font=`${cs*0.5}px sans-serif`; c.textAlign="center"; c.textBaseline="middle";
-    c.fillText(grid[r][col], x+cs/2, y+cs/2);
+
+/* ------------------------------------------------------------------ update */
+function tick(dt) {
+  if (mode === "play") { time += dt; streakT = Math.max(0, streakT - dt); if (streakT <= 0) streak = 0; saveT += dt; if (saveT > 4) { saveT = 0; save(); } }
+  else if (mode === "ladle") { const b = ladleT; ladleT -= dt; ladleR = Math.floor((20 - ladleT) / 4); if (Math.ceil(ladleT) !== Math.ceil(b) && ladleT < 5 && ladleT > 0) Lab.sfx("tick", { pitch: 1.4 }); if (ladleT <= 0) finish(); }
+  else if (mode === "won") winT += dt;
+  else if (mode === "demo") { demoT -= dt; if (demoT <= 0) { demoT = 1.5; const w = all.find(o => !o.found); if (w) { find(w); for (let i = 0; i < w.w.length; i++) hop[(w.r + w.dr * i) * N + w.c + w.dc * i] = 1; } else all.forEach(o => { o.found = false; }); } }
+  for (let i = 0; i < hop.length; i++) if (hop[i] > 0) hop[i] = Math.max(0, hop[i] - dt * 3.2);
+  for (const w of all) w.t += dt; if (miss) { miss.t -= dt; if (miss.t <= 0) miss = null; }
+  if (hintC) { hintC.t += dt; if (hintC.t > 5) hintC = null; }
+  for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5);
+  bubT -= dt; if (bubT <= 0 && mode !== "won") { bubT = Lab.rand(.5, 1.3); fx.ring(gx + Math.random() * N * cell, gy + Math.random() * N * cell, { r0: 1, r1: cell * .22, color: "rgba(255,225,190,.5)", life: .5, width: 1.5 }); }
+  if (mode === "play" || mode === "ladle") Lab.music.intensity(mode === "ladle" ? 1 : .2 + .6 * words.filter(w => w.found).length / words.length + streak * .05);
+}
+
+/* ------------------------------------------------------------------ draw */
+function bg() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("ab-bg:" + W + "x" + H, W, H, (g, w, h) => {
+    g.fillStyle = "#edf2fb"; g.fillRect(0, 0, w, h); g.fillStyle = "rgba(74,118,200,.17)";
+    for (let x = 6; x < w; x += 44) g.fillRect(x, 0, 22, h); for (let y = 6; y < h; y += 44) g.fillRect(0, y, w, 22);
+    g.strokeStyle = "rgba(255,255,255,.35)"; g.lineWidth = 1; for (let i = -h; i < w; i += 5) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + h, h); g.stroke(); }   // linen weave
+  });
+}
+function pan(sq) {
+  return Lab.sprite("ab-pan:" + Math.round(sq), sq + 40, sq + 48, (g, w) => {
+    const x = 20, y = 16, r = sq * .09, rnd = Lab.rng(11);
+    draw.rect(g, x - 4, y + 4, sq + 8, sq + 14, r + 6, "rgba(30,50,110,.2)"); draw.rect(g, x - 8, y - 8, sq + 16, sq + 16, r + 8, "#fbfcff", "#2f5fb0", 3); draw.rect(g, x - 2, y - 2, sq + 4, sq + 4, r + 2, "#d7deee");
+    const gr = g.createRadialGradient(x + sq * .42, y + sq * .38, sq * .1, x + sq / 2, y + sq / 2, sq * .78); gr.addColorStop(0, "#f26a3c"); gr.addColorStop(.7, "#dc4a26"); gr.addColorStop(1, "#bf3518");
+    draw.rr(g, x, y, sq, sq, r); g.fillStyle = gr; g.fill(); g.save(); g.clip();
+    for (let i = 0; i < 46; i++) { const px = x + rnd() * sq, py = y + rnd() * sq, k = rnd(); if (k < .5) { g.fillStyle = "rgba(255,196,120,.2)"; g.beginPath(); g.arc(px, py, 2 + rnd() * sq * .02, 0, TAU); g.fill(); } else { g.fillStyle = k < .8 ? "rgba(70,130,50,.5)" : "rgba(40,90,40,.45)"; g.beginPath(); g.ellipse(px, py, 3.2, 1.3, rnd() * PI, 0, TAU); g.fill(); } }
+    g.strokeStyle = "rgba(120,20,0,.28)"; g.lineWidth = 7; draw.rr(g, x, y, sq, sq, r); g.stroke(); g.restore();
+  });
+}
+function letter(ch, size) {
+  return Lab.sprite("ab-l:" + ch + Math.round(size), size * 1.4, size * 1.4, (g, w) => {
+    g.font = Lab.font(size, 800); g.textAlign = "center"; g.textBaseline = "middle"; g.lineJoin = "round";
+    g.fillStyle = "rgba(110,20,0,.35)"; g.fillText(ch, w / 2, w / 2 + size * .11); g.strokeStyle = "#9a2f12"; g.lineWidth = size * .14; g.strokeText(ch, w / 2, w / 2 + size * .03); g.fillStyle = "#ffecc0"; g.fillText(ch, w / 2, w / 2 + size * .03);
+  });
+}
+function capsule(c, r0, c0, dr, dc, len, k, fill, stroke, lw) {
+  const ax = cx(c0), ay = cy(r0), bx = ax + dc * (len - 1) * cell * k, by = ay + dr * (len - 1) * cell * k, R = cell * .4, a = Math.atan2(dr, dc);
+  c.beginPath(); c.arc(ax, ay, R, a + PI / 2, a - PI / 2); c.arc(bx, by, R, a - PI / 2, a + PI / 2); c.closePath();
+  if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) { c.strokeStyle = stroke; c.lineWidth = lw || 2.5; c.stroke(); }
+}
+function button(c, b, label, on, col) {
+  const p = pressT[b.id] || 0; c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2 + p * 2); c.globalAlpha = on ? 1 : .35;
+  draw.rect(c, -b.w / 2, -b.h / 2 + 4, b.w, b.h, 22, "rgba(30,50,110,.3)"); draw.rect(c, -b.w / 2, -b.h / 2, b.w, b.h, 22, col || "#2f5fb0", "#fff", 2);
+  draw.text(c, label, 0, label.length < 2 ? -2 : 1, { size: label.length < 2 ? 28 : 13.5, color: "#fff", weight: 800 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, s = bg(), sq = N * cell + 20; c.drawImage(s, -40, -40, s.w, s.h);
+  const ps = pan(sq); c.drawImage(ps, gx - 30, gy - 26, ps.w, ps.h);
+  const sink = mode === "won" ? Lab.clamp(winT / .8, 0, 1) : 0;
+  for (const w of all) if (w.found || w.shown) { const k = Lab.ease.outCubic(Lab.clamp(w.t / .22, 0, 1)); if (w.shown && !w.found) { c.setLineDash([6, 6]); capsule(c, w.r, w.c, w.dr, w.dc, w.w.length, k, "rgba(255,255,255,.12)", "#ffd84a", 2.5); c.setLineDash([]); } else capsule(c, w.r, w.c, w.dr, w.dc, w.w.length, k, Lab.color.alpha(w.col, .3), w.col, w.secret ? 3.5 : 2.5); }
+  if (miss) { c.globalAlpha = miss.t / .4; const k = Math.sin(miss.t * 40) * 3 * miss.t; c.save(); c.translate(k, 0); capsule(c, miss.r, miss.c, miss.dr, miss.dc, miss.len, 1, "rgba(60,0,0,.25)", "rgba(255,255,255,.6)", 2); c.restore(); c.globalAlpha = 1; }
+  if (sel) capsule(c, sel.r, sel.c, sel.dr, sel.dc, sel.len, 1, "rgba(255,255,255,.38)", "#fff", 3);
+  else if (anchor) { c.beginPath(); c.arc(cx(anchor.c), cy(anchor.r), cell * .4, 0, TAU); c.fillStyle = "rgba(255,255,255,.3)"; c.fill(); c.setLineDash([5, 5]); c.lineDashOffset = -t * 20; c.strokeStyle = "#fff"; c.lineWidth = 2.5; c.stroke(); c.setLineDash([]); }
+  if (hintC) { const k = (hintC.t * 1.4) % 1; c.strokeStyle = `rgba(255,255,255,${1 - k})`; c.lineWidth = 3; c.beginPath(); c.arc(cx(hintC.c), cy(hintC.r), cell * (.35 + k * .35), 0, TAU); c.stroke(); draw.circle(c, cx(hintC.c), cy(hintC.r), cell * .42, "rgba(255,255,255,.25)"); }
+  if (mode === "play" && level === 1 && !all.some(w => w.found) && !sel && time > 1.5) { const w = words[0], n = w.w.length - 1, k = Lab.ease.inOutQuad(Lab.clamp(((time - 1.5) % 2.6) / 1.5, 0, 1));   // first bowl: a ghost noodle shows the gesture
+    c.globalAlpha = .7 * Math.min(1, (2.6 - (time - 1.5) % 2.6) * 2); capsule(c, w.r, w.c, w.dr, w.dc, n * k + 1, 1, "rgba(255,255,255,.25)", "#fff", 2.5); draw.circle(c, cx(w.c + w.dc * n * k) + 6, cy(w.r + w.dr * n * k) + 10, 11, "rgba(255,255,255,.85)", "rgba(39,54,94,.6)", 2); c.globalAlpha = 1; }
+  const fs = cell * .62, isW = sink ? new Uint8Array(N * N) : null; if (sink) for (const w of all) for (let i = 0; i < w.w.length; i++) isW[(w.r + w.dr * i) * N + w.c + w.dc * i] = 1;
+  for (let r = 0; r < N; r++) for (let q = 0; q < N; q++) {
+    const i = r * N + q, sp = letter(grid[i], fs), h = hop[i] > 0 ? Lab.ease.pulse(hop[i]) : 0, sc = (1 + h * .38) * (sink && !isW[i] ? 1 - sink * .35 : 1), x = cx(q) + Math.sin(t * 1.3 + ph[i] * 2) * .9, y = cy(r) + Math.sin(t * 1.7 + ph[i]) * 1.5 - h * cell * .12;
+    if (sink && !isW[i]) c.globalAlpha = 1 - sink * .78; c.drawImage(sp, x - sp.w * sc / 2, y - sp.h * sc / 2, sp.w * sc, sp.h * sc); c.globalAlpha = 1;
   }
-  c.fillStyle="#fff"; c.font="14px sans-serif"; c.textAlign="center";
-  c.fillText(WORDS.map(w=>found.has(w)?"✓"+w:w).join("  "), Lab.W/2, Lab.H-60);
+  if (mode === "demo") return;
+  // header
+  const st = prog.stars[level] || 0, over = time > par;
+  draw.text(c, "BOWL " + level + " · " + theme, ui.tx, ui.ty, { size: 18, color: "#27365e", weight: 800 });
+  if (mode !== "ladle") for (let i = 0; i < 3; i++) draw.star(c, ui.tx - 62 + i * 17, ui.sy, 7, i < st ? "#f0a224" : "rgba(39,54,94,.2)", 5, .5);
+  draw.text(c, mode === "ladle" ? "find the secret · " + Math.ceil(ladleT) + "s" : fmtT(time) + " / " + fmtT(par), ui.tx + (mode === "ladle" ? 0 : 30), ui.sy + 1, { size: 13, color: mode === "ladle" ? "#c2452f" : over ? "#a56a4a" : "#4f5f8c", weight: 700 });
+  button(c, ui.prev, "‹", level > 1); button(c, ui.next, "›", level < prog.max);
+  if (sel && sel.len > 1) { const w = spell(sel), tw = w.length * 13 + 26; draw.rect(c, ui.tx - tw / 2, ui.py - 13, tw, 26, 13, "#27365e"); draw.text(c, w, ui.tx, ui.py + 1, { size: 15, color: "#fff", weight: 800 }); }
+  else if (streak > 0 && mode === "play") { const tw = 104; draw.rect(c, ui.tx - tw / 2, ui.py - 11, tw, 22, 11, "rgba(226,83,47,.16)"); draw.rect(c, ui.tx - tw / 2, ui.py - 11, tw * streakT / 12, 22, 11, "rgba(226,83,47,.3)"); draw.text(c, "SIMMER ×" + (1 + streak), ui.tx, ui.py + 1, { size: 12.5, color: "#c2452f", weight: 800 }); }
+  // menu
+  const L = ui.list, cw = L.w / L.cols, ts = Math.min(17, L.rh * .56, cw / 6.4);
+  words.forEach((w, i) => { const x = L.x + (i % L.cols + .5) * cw, y = L.y + (Math.floor(i / L.cols) + .5) * L.rh, pop = w.found ? 1 + Lab.ease.pulse(Lab.clamp(w.t / .4, 0, 1)) * .25 : 1;
+    c.save(); c.translate(x, y); c.scale(pop, pop); draw.text(c, w.w, 0, 0, { size: ts, color: w.found ? "rgba(39,54,94,.5)" : "#27365e", weight: 800 });
+    if (w.found) { const tw = c.measureText(w.w).width * Math.min(1, w.t / .25); c.strokeStyle = "#e2532f"; c.lineWidth = 2.2; c.lineCap = "round"; c.beginPath(); c.moveTo(-tw / 2 - 3, 0); c.lineTo(-tw / 2 - 3 + tw + 6, 0); c.stroke(); } c.restore(); });
+  const n = secret.w.length, shown = secret.found || secret.shown ? n : Math.min(n - 1, Math.floor(words.filter(w => w.found).length * (n - 2) / words.length) + (mode === "ladle" ? ladleR : 0)), bw = Math.min(22, (L.w - 110) / n), sx = ui.tx - (n * bw) / 2 + (land ? 0 : 46);
+  if (!land) draw.text(c, "SECRET", sx - 10, ui.secY, { size: 11.5, color: "#a07a1a", weight: 800, align: "right" }); else draw.text(c, "SECRET INGREDIENT", ui.tx, ui.secY - 20, { size: 10.5, color: "#a07a1a", weight: 800 });
+  for (let i = 0; i < n; i++) { const on = secret.order.indexOf(i) < shown; draw.rect(c, sx + i * bw + 1.5, ui.secY - 11, bw - 3, 22, 5, secret.found ? "#ffd84a" : "#fff", "#d9b23c", 1.5); if (on) draw.text(c, secret.w[i], sx + (i + .5) * bw, ui.secY + 1, { size: 13, color: "#6a4a00", weight: 800 }); }
+  button(c, ui.hint, mode === "ladle" ? "TASTE" : "TASTE  +10s", mode !== "won"); button(c, ui.serve, "SERVE", mode === "ladle", "#e2532f");
 }
-start();
+Lab.boot();
+})();
 </script></body></html>

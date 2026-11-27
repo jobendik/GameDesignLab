@@ -35,8 +35,9 @@ sea-glass identity; speed levels, shards and pebble rows for late-game variety.
   a wave through the well and packs every column down, closing all buried holes; rows completed that way clear at ×1.5.
   It changes strategy: stack rough and fast and cash in, or keep it as a lifeline.
 - **Touch controls**: drag anywhere — the piece follows in exact column steps and re-anchors at walls so reversing
-  responds immediately; tap rotates (left half counter-clockwise, right half clockwise); a slow downward drag sinks row
-  by row; a flick (≥56 px within 110 ms) hard-drops at once; swipe up or tap the box to hold; a gesture never carries
+  responds immediately; tap rotates (left half counter-clockwise, right half clockwise); a downward drag sinks row by
+  row by distance at any speed (anchored at the last column step, so thumb drift never sinks); a flick (≥56 px at
+  >0.5 px/ms, measured once per frame on the real clock, plus a release check for very short swipes) hard-drops; swipe up or tap the box to hold; a gesture never carries
   over to the next piece. Keyboard: arrows with DAS 160 ms / ARR 35 ms, Z/X/Up, Space, C/Shift, T.
 - **Fundamentals**: 7-bag, ghost piece, hold, three-piece preview, generic wall/floor kicks, 0.5 s lock delay with up to
   14 move resets, hidden spawn rows, soft-drop/hard-drop points, combos, back-to-back fours, clean-sweep bonus.
@@ -47,8 +48,9 @@ sea-glass identity; speed levels, shards and pebble rows for late-game variety.
 
 ## Test results
 - Smoke: pass.
-- Gameplay test `tests/PhoneGameLab/52-tideglass.test.js`: pass — mouse drag moves exactly N columns and back, drag is
-  not a tap, touch taps rotate both ways, slow drag soft-drops without locking, swipe up holds, flick hard-drops, arrow
+- Gameplay test `tests/PhoneGameLab/52-tideglass.test.js`: pass (10/10 consecutive runs, 4 of them under 4 busy CPU
+  loops) — mouse drag moves exactly N columns and back, drag is not a tap, touch taps rotate both ways, steady and very
+  slow downward drags each sink ≥ floor(distance/cell) rows without locking, swipe up holds, flick hard-drops, arrow
   keys and Space, a completed row clears/scores/charges, tide refused below a full meter, tide packs columns, tide-made
   row clears with bonus, pebble row arrives after 9 pieces at level 5, top-out ends the run with best recorded, restart
   resets everything.
@@ -56,6 +58,8 @@ sea-glass identity; speed levels, shards and pebble rows for late-game variety.
 - Subjective assessment from scripted play only; the touch thresholds were tuned by reasoning, not on a real phone.
 
 ## Remaining issues
+- Fixed after the first pass: the sink gesture originally needed >12 px of travel inside a 110 ms window of pointer
+  events, so slow drags (and sparse event delivery) never sank the piece. It is now distance-based.
 - Landscape phones (844×390): the 20-row well is height-bound, cells are ~16 px. Playable through relative drags but small.
 - Rotation uses a generic kick list, not a full SRS table; no spin detection/bonuses.
 - Tap-to-rotate fires on release (needed to tell taps from drags), ~1 frame slower than a button.

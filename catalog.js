@@ -619,13 +619,17 @@ window.GDL_CATALOG = {
    "id": "games/physics-charades",
    "path": "games/physics-charades.html",
    "collection": "arcade",
-   "title": "PHYSICS CHARADES",
-   "desc": "Chain-reaction physics playground.",
+   "title": "Physics Charades — Pose or Splat",
+   "desc": "A foam wall is coming with a charade cut out of it: snap your wobbly contestant",
    "genre": [
-    "Physics"
+    "Arcade",
+    "Physics",
+    "Party"
    ],
    "controls": [
-    "mouse"
+    "touch",
+    "mouse",
+    "keyboard"
    ],
    "thumb": "thumbs/games--physics-charades.jpg"
   },
@@ -744,6 +748,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--puppet-panic.jpg"
   },
   {
@@ -2125,7 +2131,8 @@ window.GDL_CATALOG = {
    "n": 54,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--54-hedgeroll.jpg"
   },
   {
    "id": "PhoneGameLab/55-glasswright",
@@ -2144,7 +2151,8 @@ window.GDL_CATALOG = {
    "n": 55,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--55-glasswright.jpg"
   },
   {
    "id": "PhoneGameLab/56-shuteye-street",
@@ -2163,7 +2171,8 @@ window.GDL_CATALOG = {
    "n": 56,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--56-shuteye-street.jpg"
   },
   {
    "id": "PhoneGameLab/57-soundings",
@@ -2180,40 +2189,46 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 57,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--57-soundings.jpg"
   },
   {
    "id": "PhoneGameLab/58-alphabroth",
    "path": "PhoneGameLab/games/58-alphabroth/index.html",
    "collection": "PhoneGameLab",
-   "title": "Word Search",
-   "desc": "Drag across letters to find hidden words.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 58,
-   "v2": false
-  },
-  {
-   "id": "PhoneGameLab/59-nonogram",
-   "path": "PhoneGameLab/games/59-nonogram/index.html",
-   "collection": "PhoneGameLab",
-   "title": "Nonogram",
-   "desc": "Use hints to fill the correct cells.",
+   "title": "Alphabroth",
+   "desc": "Fish every word out of the soup.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
+   ],
+   "n": 58,
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
+  },
+  {
+   "id": "PhoneGameLab/59-purlwise",
+   "path": "PhoneGameLab/games/59-purlwise/index.html",
+   "collection": "PhoneGameLab",
+   "title": "Purlwise",
+   "desc": "Read the pattern. Knit the picture.",
+   "genre": [
+    "Puzzle & Logic"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
    ],
    "n": 59,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--59-nonogram.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/60-sudoku",
@@ -2250,21 +2265,21 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--61-snake.jpg"
   },
   {
-   "id": "PhoneGameLab/62-slither",
-   "path": "PhoneGameLab/games/62-slither/index.html",
+   "id": "PhoneGameLab/62-ribbon-rodeo",
+   "path": "PhoneGameLab/games/62-ribbon-rodeo/index.html",
    "collection": "PhoneGameLab",
-   "title": "Slither",
-   "desc": "Eat dots, grow long, dodge the snake.",
+   "title": "Ribbon Rodeo",
+   "desc": "Fly a fighter kite. Lasso the whole sky.",
    "genre": [
-    ".io & Idle"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 62,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--62-slither.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/63-agar",

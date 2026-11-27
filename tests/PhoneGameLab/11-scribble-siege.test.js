@@ -34,10 +34,13 @@ module.exports = {
     // eraser: nothing when empty; when full it wipes ink and takes a hit off every doodle
     const b = await game(g => g.btn), e0 = await game(g => g.eraser);
     if (e0 < 1) { expect(!(await game(g => g.erase())), 'eraser does nothing until it is full'); }
-    await game(g => { g.skipTo(1); g.fillEraser(); }); await wait(1300);
+    await game(g => { g.skipTo(1); g.fillEraser(); g.calm(true); }); await wait(1300); // calm: this step checks the eraser, not survival (a stray hit here could end the run first)
     expect((await game(g => g.foes.length)) >= 12, 'a fresh wave of one-hit Blots to wipe');
-    await page.touchscreen.tap(b.x, b.y); await wait(900);
-    expect((await game(g => g.eraser)) === 0 && (await game(g => g.foes.length)) === 0 && (await game(g => g.ebul.length)) === 0, 'tapping ERASE wipes the page');
+    await page.touchscreen.tap(b.x, b.y);
+    // the page is wiped within a few hundred ms, and the next wave arrives ~1.2 s later: poll one atomic read so the check cannot race it
+    let wiped = false;
+    for (let i = 0; i < 12 && !wiped; i++) { await wait(80); wiped = await game(g => g.eraser < 1 && g.foes.length === 0 && g.ebul.length === 0); } // eraser < 1 = spent (stars shed by the wiped doodles can already be recharging it)
+    expect(wiped, 'tapping ERASE wipes the page');
     for (let i = 0; i < 30 && (await game(g => g.wave)) < 2; i++) await wait(100);
     expect((await game(g => g.wave)) === 2, 'clearing the page starts the next wave');
     expect((await game(g => g.foes.filter(f => f.kind === 'spike').length)) === 6, 'wave 2 brings the ink-spitting Spikes');

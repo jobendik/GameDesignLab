@@ -1,0 +1,262 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Purlwise</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PURLWISE — picture-logic on a knitting chart. The numbers beside each row and column are the runs of stitches in
+ * that line; knit the right cells and the swatch turns into a little picture in variegated yarn.
+ * Identity: cranberry wool backdrop (baked knit texture), an oatmeal swatch, chunky V stitches, mustard trim.
+ * Puzzles:  27 authored pictures (5×5 → 10×10) interleaved with procedural 8-way symmetric "Fair Isle" motifs, endless
+ *           after pattern 30. Every puzzle is proven solvable by row/column logic alone (⇒ a unique solution) by the
+ *           same line solver that powers the hint.
+ * Play:     drag to knit / skip (strokes lock to a row or column, a bubble counts the run), finished lines dim and
+ *           auto-skip their gaps, undo, clear. CHECK is optional: off = pure logic, nothing is spoiled; on = a wrong
+ *           stitch is caught at once and counts as a slip. Hints first remove a wrong stitch, otherwise show one cell
+ *           that the highlighted line forces. ★★★ = no slips or hints.                                             */
+const PICS = [
+  ["Heart", ".#.#.##########.###...#..", "#e63946", "#ff8fa3"], ["Pine", "..#...###.#####..#....#..", "#2a9d8f", "#52b788"], ["House", "..#...###.#######.####.##", "#e76f51", "#f4a261"],
+  ["Umbrella", "..###...#####.#######...#......#....#.#....###...", "#457b9d", "#e63946"], ["Apple", "...##.....#....##.##.#####################.##.##.", "#588157", "#d62828"],
+  ["Bell", "...#.....###....###...#####..#####.#######...#...", "#e9a820", "#bc6c25"], ["Tulip", ".#.#.#..#####..#####...###.....#....#.#.#...###..", "#e5548a", "#3a9d5d"],
+  ["Duck", "...###....#.###.#######...####..#.#####.########.######...####..", "#e9a820", "#e76f51"], ["Ghost", "..####...######.##.##.####.##.############################.##.##", "#7b6cd9", "#48bfe3"],
+  ["Cactus", "...##......##.#..#.##.#..#.####..####......##......##....######.", "#3a9d5d", "#b5651d"], ["Snowman", "...##.....####....####.....##....######.################.######.", "#3d5a80", "#48a9c5"],
+  ["Fox", "#......###....#####..############.####.#.######...####.....##...", "#e8590c", "#f4a261"], ["Whale", "......#......##...####.#.######.##########.#####.######...####..", "#48a9c5", "#1d4e89"],
+  ["Fir Tree", "....##.......####.....######.....####.....######...########...######...########.##########....##....", "#52b788", "#1b6b4a"],
+  ["Cat", ".#....#....##..##....######....#.##.#..#.######..#..####...#.######.##.########..#######...##..###..", "#6d597a", "#e56b6f"],
+  ["Fish", "....##.......####..#..#####.##.#.###########################.#########..#####.##...####..#....##....", "#f4a261", "#e63946"],
+  ["Teapot", "....##.......####.....######..#.######.#########.#.#######.#..########..######....######...########.", "#3a86c8", "#1d4e89"],
+  ["Toadstool", "...####....########.##.####.##############.##.####.########....####......#..#......####.....######..", "#d62828", "#c9a27a"],
+  ["Owl", "##......#####....###.########..##.##.##..##.##.##..########..###..###...######....######....#.##.#..", "#9c6644", "#e9a820"],
+  ["Sailboat", "....#.........##........###.....#.####...##.#####.###.######....#.....##########.########...######..", "#e63946", "#1d4e89"],
+  ["Snail", ".............####.....######.#.##....###.#.####.##.#.#..#.##.#.##.#.##.##...#.##..#####.############", "#bc6c25", "#588157"],
+  ["Penguin", "...####.....######....#.##.#....######...###..###.####..########..####.###..###...######...###..###.", "#22333b", "#e9a820"],
+  ["Castle", "#.#.##.#.####.##.######.##.##########################....######....######....######....######....###", "#6c757d", "#3d5a80"],
+  ["Mitten", "..######...########..########..########..########.############.########..######....######....######.", "#e63946", "#9d0208"],
+  ["Sock", "..#####.....#####.....#####.....#####.....#####.....######....########...#######....######.....####.", "#2a9d8f", "#e9a820"],
+  ["Cottage", "....##.......####.##..########.###################.########..##.##.##..##.##.##..#####.##..#####.##.", "#bc4749", "#a98467"],
+  ["Brolly", "...####....########.#####################.##.##.##....#.........#.........#.........#..#......####..", "#e5548a", "#6d597a"],
+];
+const SEQ = [0, 1, 2, 6, 3, 4, 5, 6, 8, 7, 8, 9, 10, 11, 12, 9, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26];   // picture index, or a motif of size = SEQ[i] at the positions in MOT
+const MOT = { 3: 6, 8: 8, 15: 9 }, YARN = [["#e63946", "#e9a820"], ["#2a9d8f", "#3a86c8"], ["#7b6cd9", "#e5548a"], ["#e76f51", "#9d0208"], ["#1d4e89", "#48bfe3"], ["#588157", "#e9a820"]];
+const INK = "#234e57", CREAM = "#f4ead6", MUST = "#f2c14e", WINE = "#5a1f33";
+const fmtT = s => { s = Math.max(0, Math.floor(s)); return ((s / 60) | 0) + ":" + ("0" + (s % 60)).slice(-2); };
+Lab.init({
+  title: "Purlwise", tagline: "Read the pattern. Knit the picture.", category: "Puzzle & Logic",
+  howto: ["Numbers count runs of stitches per line", "Drag to knit, or switch to SKIP for gaps", "Complete the swatch to reveal a picture"],
+  theme: { bg: "#5a1f33", bg2: "#7c2a44", accent: "#f2c14e", accent2: "#3fa7a3" },
+  orient: "any", music: { style: "dream", key: "G", bpm: 84, vol: .4 }, restart: start, formatScore: n => "No. " + Math.round(n),
+  attract(dt, t) { if (!sol) { prog = { stars: {}, times: {} }; load(21); mode = "demo"; } tick(dt); render(t); },
+});
+const { draw, fx } = Lab, TAU = Lab.TAU;
+let level, N, sol, g, rc, cc, rDone, cDone, name, yarn, prog, tool, check, stroke, hist, time, slips, hints, mode, pop, bad, winT, hintM, demoT, saveT, genMs, lineFx;
+let cell, gx, gy, clueW, clueH, fs, land, ui, pressT = {};
+
+/* ------------------------------------------------------------------ line logic (generator proof + hint) */
+function clueOf(a) { const o = []; let k = 0; for (const v of a) { if (v === 1) k++; else if (k) { o.push(k); k = 0; } } if (k) o.push(k); return o; }
+function solveLine(line, clue) {   // line: -1 unknown / 0 gap / 1 stitch → sets every cell all valid arrangements agree on; returns the number set, -1 on contradiction
+  const n = line.length, K = clue.length, memo = new Int8Array((n + 2) * (K + 1)), c1 = new Uint8Array(n), c0 = new Uint8Array(n);
+  const rec = (i, j) => { if (i >= n) return j === K; const key = i * (K + 1) + j; if (memo[key]) return memo[key] === 1; let ok = false;
+    if (line[i] !== 1 && rec(i + 1, j)) { ok = true; c0[i] = 1; }
+    if (j < K) { const L = clue[j]; let fit = i + L <= n && (i + L === n || line[i + L] !== 1); for (let x = i; fit && x < i + L; x++) if (line[x] === 0) fit = false;
+      if (fit && rec(i + L + 1, j + 1)) { ok = true; for (let x = i; x < i + L; x++) c1[x] = 1; if (i + L < n) c0[i + L] = 1; } }
+    memo[key] = ok ? 1 : 2; return ok; };
+  if (!rec(0, 0)) return -1; let ch = 0;
+  for (let i = 0; i < n; i++) if (line[i] < 0 && c1[i] !== c0[i]) { line[i] = c1[i] ? 1 : 0; ch++; }
+  return ch;
+}
+const idx = (kind, i, n) => Array.from({ length: n }, (_, j) => kind ? j * n + i : i * n + j);
+function lineSolvable(S, n) {
+  const G = new Int8Array(n * n).fill(-1);
+  for (let pass = 0; pass < 60; pass++) { let ch = 0;
+    for (let k = 0; k < 2; k++) for (let i = 0; i < n; i++) { const I = idx(k, i, n), l = Int8Array.from(I, q => G[q]), r = solveLine(l, clueOf(I.map(q => S[q]))); if (r < 0) return false; if (r) { ch += r; I.forEach((q, j) => { G[q] = l[j]; }); } }
+    if (!ch) break; }
+  return G.every(v => v >= 0);
+}
+function motif(n, seed) {   // 8-way symmetric knit motif that line logic can solve
+  const h = Math.ceil(n / 2);
+  for (let a = 0; a < 500; a++) { const r = Lab.rng(seed * 7919 + a * 31 + 1), q = []; for (let i = 0; i < h; i++) for (let j = 0; j <= i; j++) q[i * h + j] = q[j * h + i] = r() < .56 ? 1 : 0;
+    const S = new Uint8Array(n * n); let cnt = 0, dull = false; for (let i = 0; i < n; i++) { let row = 0; for (let j = 0; j < n; j++) row += S[i * n + j] = q[Math.min(i, n - 1 - i) * h + Math.min(j, n - 1 - j)]; cnt += row; if (!row || row === n) dull = true; }
+    if (!dull && cnt >= n * n * .4 && cnt <= n * n * .72 && lineSolvable(S, n)) return S; }
+  return Uint8Array.from({ length: n * n }, (_, i) => ((i / n | 0) + i % n) % 2);   // unreachable in practice
+}
+function puzzle(n) {
+  const m = n > SEQ.length ? 10 : MOT[n - 1];
+  if (m) { const r = Lab.rng(n * 53 + 7); return { N: m, sol: motif(m, n), name: "Fair Isle No. " + n, yarn: YARN[(r() * YARN.length) | 0] }; }
+  const P = PICS[SEQ[n - 1]], sz = Math.round(Math.sqrt(P[1].length)); return { N: sz, sol: Uint8Array.from(P[1], ch => ch === "#" ? 1 : 0), name: P[0], yarn: [P[2], P[3]] };
+}
+function load(n) {
+  const t0 = performance.now(), P = puzzle(n); level = n; N = P.N; sol = P.sol; name = P.name; yarn = P.yarn; g = new Uint8Array(N * N); pop = new Float32Array(N * N); bad = new Float32Array(N * N);
+  rc = []; cc = []; for (let i = 0; i < N; i++) { rc.push(clueOf(idx(0, i, N).map(q => sol[q]))); cc.push(clueOf(idx(1, i, N).map(q => sol[q]))); }
+  rDone = new Array(N).fill(false); cDone = new Array(N).fill(false); hist = []; stroke = null; time = 0; slips = 0; hints = 0; winT = 0; hintM = null; demoT = 0; saveT = 0; lineFx = []; mode = "play"; tool = 1;
+  status(true); genMs = performance.now() - t0; layout();
+}
+const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+function status(quiet) {   // which lines already read like their clue (compares with the clue, never with the answer)
+  let all = true;
+  for (let k = 0; k < 2; k++) for (let i = 0; i < N; i++) { const d = same(clueOf(idx(k, i, N).map(q => g[q])), (k ? cc : rc)[i]), A = k ? cDone : rDone;
+    if (d && !A[i] && !quiet) lineFx.push({ k, i, t: 0 }); A[i] = d; if (!d) all = false; }
+  return all;
+}
+
+/* ------------------------------------------------------------------ layout */
+function layout() {
+  const p = Lab.play, mR = Math.max(1, ...rc.map(c => c.length)), mC = Math.max(1, ...cc.map(c => c.length)); land = p.w > p.h * 1.15; let ax, ay, aw, ah;
+  if (land) {
+    const side = Lab.clamp(p.w * .3, 216, 330), px = p.x + p.w - side, bw = (side - 26) / 2, my = p.y + p.h / 2; ax = p.x + 6; aw = p.w - side - 12; ay = p.y + 4; ah = p.h - 8;
+    ui = { tx: px + side / 2 - 6, ty: my - 132, sy: my - 108, tipY: my - 84, prev: { x: px, y: my - 156, w: 44, h: 44 }, next: { x: px + side - 56, y: my - 156, w: 44, h: 44 },
+      knit: { x: px, y: my - 66, w: bw, h: 52 }, skip: { x: px + bw + 8, y: my - 66, w: bw, h: 52 }, btn: ["undo", "clear", "hint", "check"].map((id, i) => ({ id, x: px + (i % 2) * (bw + 8), y: my + 2 + (i >> 1) * 54, w: bw, h: 46 })) };
+  } else {
+    const U = Lab.clamp(p.h / 720, .8, 1.15), head = 62 * U, foot = 136, cw = Math.min(p.w - 16, 440), x0 = p.x + (p.w - cw) / 2, bw = (cw - 24) / 4, by = p.y + p.h - foot + 16; ax = p.x + 6; aw = p.w - 12; ay = p.y + head; ah = p.h - head - foot - 22;
+    ui = { tx: Lab.W / 2, ty: p.y + 15 * U, sy: p.y + 40 * U, tipY: 0, prev: { x: x0, y: p.y, w: 46, h: 46 }, next: { x: x0 + cw - 46, y: p.y, w: 46, h: 46 },
+      knit: { x: x0, y: by, w: cw / 2 - 4, h: 52 }, skip: { x: x0 + cw / 2 + 4, y: by, w: cw / 2 - 4, h: 52 }, btn: ["undo", "clear", "hint", "check"].map((id, i) => ({ id, x: x0 + i * (bw + 8), y: by + 62, w: bw, h: 46 })) };
+  }
+  cell = Math.min((aw - 16) / (N + mR * .5 + .25), (ah - 16) / (N + mC * .6 + .25), 62); clueW = (mR * .5 + .25) * cell; clueH = (mC * .6 + .25) * cell; fs = Lab.clamp(cell * .42, 10.5, 20);
+  gx = ax + (aw - clueW - N * cell) / 2 + clueW; gy = ay + (ah - clueH - N * cell) / 2 + clueH; if (!land) ui.tipY = gy + N * cell + 22;
+  ui.prev.id = "prev"; ui.next.id = "next"; ui.knit.id = "knit"; ui.skip.id = "skip"; ui.all = [ui.prev, ui.next, ui.knit, ui.skip].concat(ui.btn);
+}
+Lab.onResize(() => { if (sol) layout(); });
+const hit = (x, y) => ui.all.find(b => x >= b.x - 3 && x <= b.x + b.w + 3 && y >= b.y - 3 && y <= b.y + b.h + 3);
+const cx = c => gx + (c + .5) * cell, cy = r => gy + (r + .5) * cell;
+
+/* ------------------------------------------------------------------ strokes */
+function paint(i) {
+  const S = stroke; if (S.dead) return;
+  if (S.val === 0) { if (g[i] !== S.from) return; g[i] = 0; pop[i] = .5; Lab.sfx("swish", { vol: .25, pitch: 1.5 }); }
+  else { if (g[i] !== 0 && i !== S.first) return; if (g[i] === S.val) return; let v = S.val;
+    if (check && (v === 1) !== (sol[i] === 1)) { v = 3 - v; slips++; bad[i] = 1; S.dead = true; Lab.sfx("error", { vol: .6 }); Lab.shake(4, .15); Lab.buzz(30); fx.text(cx(i % N), cy(i / N | 0) - cell * .6, "slip!", { color: "#ff8a8a", size: 15 }); }
+    else if (v === 1) { Lab.audio.tone({ f: 330 * Math.pow(1.0595, [0, 2, 4, 7, 9, 12, 14, 16, 19, 21][Math.min(S.n, 9)]), dur: .09, vol: .13, type: "triangle" }); Lab.buzz(5); }
+    else Lab.sfx("tick", { vol: .5, pitch: .8 });
+    g[i] = v; pop[i] = 1; }
+  S.n++; S.changed = true;
+}
+function begin(r, c) {
+  const i = r * N + c, cur = g[i]; hintM = null;
+  stroke = { first: i, r, c, lr: r, lc: c, axis: -1, val: cur === tool ? 0 : tool, from: cur, n: 0, snap: g.slice(), changed: false, dead: false }; paint(i); status();
+}
+function drag(x, y) {
+  const S = stroke; let r = Lab.clamp(Math.floor((y - gy) / cell), 0, N - 1), c = Lab.clamp(Math.floor((x - gx) / cell), 0, N - 1);
+  if (S.axis < 0) { if (r === S.r && c === S.c) return; S.axis = Math.abs(x - cx(S.c)) >= Math.abs(y - cy(S.r)) ? 0 : 1; }   // lock the stroke to the row or column it set off along
+  if (S.axis === 0) r = S.r; else c = S.c;
+  while (S.lr !== r || S.lc !== c) { S.lr += Math.sign(r - S.lr); S.lc += Math.sign(c - S.lc); paint(S.lr * N + S.lc); }
+  status();
+}
+function end() {
+  const S = stroke; stroke = null; if (!S || !S.changed) return; hist.push(S.snap); if (hist.length > 80) hist.shift();
+  for (let k = 0; k < 2; k++) for (let i = 0; i < N; i++) if ((k ? cDone : rDone)[i]) for (const q of idx(k, i, N)) if (!g[q]) { g[q] = 2; pop[q] = .4; }   // finished lines skip their own gaps
+  if (status()) return win(); save();
+}
+function undo() { if (!hist.length || mode !== "play") return Lab.sfx("tick", { pitch: .5, vol: .5 }); g = hist.pop(); status(true); hintM = null; Lab.sfx("swish", { pitch: 1.3, vol: .6 }); save(); }
+function clear() { if (mode !== "play" || !g.some(v => v)) return Lab.sfx("tick", { pitch: .5, vol: .5 }); hist.push(g.slice()); g = new Uint8Array(N * N); status(true); hintM = null; Lab.sfx("slide", { vol: .6 }); save(); }
+function setTool(v) { tool = v; Lab.sfx("flip", { pitch: v === 1 ? 1.1 : .85, vol: .6 }); }
+function toggleCheck() { check = !check; prog.check = check; Lab.store.set("prog", prog); Lab.sfx("click"); Lab.toast(check ? "Check on: wrong stitches are caught" : "Check off: pure logic", 1300, { y: .14 }); }
+function hint() {
+  if (mode !== "play") return; hist.push(g.slice()); hints++;
+  const w = g.findIndex((v, i) => v && (v === 1) !== (sol[i] === 1));
+  if (w >= 0) { g[w] = 0; bad[w] = 1; hintM = { cells: [w], t: 0 }; Lab.sfx("error", { vol: .4, pitch: 1.3 }); Lab.toast("That one didn't belong", 1100, { y: .14 }); }
+  else { let bestL = null;
+    for (let k = 0; k < 2; k++) for (let i = 0; i < N; i++) { const I = idx(k, i, N), l = Int8Array.from(I, q => g[q] === 1 ? 1 : g[q] === 2 ? 0 : -1), n = solveLine(l, (k ? cc : rc)[i]); if (n > 0 && (!bestL || n > bestL.n)) bestL = { k, i, n, I, l }; }
+    if (!bestL) { hist.pop(); hints--; return; }
+    const j = bestL.I.findIndex((q, x) => !g[q] && bestL.l[x] === 1), jj = j >= 0 ? j : bestL.I.findIndex((q, x) => !g[q] && bestL.l[x] === 0), q = bestL.I[jj];
+    g[q] = bestL.l[jj] === 1 ? 1 : 2; pop[q] = 1; hintM = { cells: [q], k: bestL.k, i: bestL.i, t: 0 }; Lab.sfx("chime", { pitch: .9 }); fx.burst(cx(q % N), cy(q / N | 0), { n: 8, colors: [MUST, "#fff"], speed: 110, life: .5, size: 3 }); }
+  if (hints === 1) Lab.toast("Hint used: −1 star", 1100, { y: .14 });
+  if (status()) return win(); save();
+}
+function go(n) { if (n < 1 || n > prog.max || mode === "won") return Lab.sfx("tick", { pitch: .5, vol: .5 }); prog.lvl = n; Lab.store.set("prog", prog); Lab.store.set("save", null); load(n); Lab.setScore(n); Lab.sfx("flip"); }
+const rating = () => { const s = slips + hints; return s === 0 ? 3 : s <= 2 ? 2 : 1; };
+function save() { if (mode === "play") Lab.store.set("save", { lvl: level, g: Array.from(g).join(""), time, slips, hints }); }
+function win() {
+  mode = "won"; winT = 0; stroke = null; hintM = null; const st = rating(), lv = level, t = Math.round(time), old = prog.times[lv];
+  prog.stars[lv] = Math.max(prog.stars[lv] || 0, st); prog.times[lv] = old ? Math.min(old, t) : t; prog.max = Math.max(prog.max, lv + 1); prog.lvl = lv + 1; Lab.store.set("prog", prog); Lab.store.set("save", null);
+  for (let d = 0; d < 2 * N - 1; d++) Lab.after(.25 + d * .055, () => Lab.audio.combo(Math.round(d * 10 / (2 * N - 1)), { vol: .13 }));
+  Lab.after(.25 + 2 * N * .055, () => { Lab.sfx("chime"); Lab.buzz(20); for (let i = 0; i < 4; i++) fx.burst(gx + (i % 2) * N * cell, gy + (i >> 1) * N * cell, { n: 12, colors: [yarn[0], yarn[1], MUST, "#fff"], speed: 190, life: .8, size: 4, gravity: 240, shape: "square" }); });
+  Lab.after(1.5 + N * .11, () => Lab.win({ title: name + "!", message: st === 3 ? "Cast off without a single dropped stitch." : hints ? "Finished with a little help." : "Finished — fewer slips earn more stars.",
+    score: lv, scoreLabel: "Pattern", button: "Next pattern", stats: [["Time", fmtT(t) + (old && old <= t ? " (best " + fmtT(old) + ")" : "")], ["Slips", slips + hints], ["Rating", "★".repeat(st) + "☆".repeat(3 - st)]] }));
+}
+function start() {
+  prog = Lab.store.get("prog", null) || { lvl: 1, max: 1, stars: {}, times: {}, check: false }; prog.times = prog.times || {}; check = !!prog.check; load(prog.lvl);
+  const sv = Lab.store.get("save", null); if (sv && sv.lvl === level && sv.g && sv.g.length === N * N) { g = Uint8Array.from(sv.g, Number); time = sv.time || 0; slips = sv.slips || 0; hints = sv.hints || 0; status(true); }
+  Lab.setScore(level);
+  Lab.input.onDown = [(x, y) => { if (mode !== "play") return; const b = hit(x, y);
+    if (b) { pressT[b.id] = 1; ({ undo, clear, hint, check: toggleCheck, knit: () => setTool(1), skip: () => setTool(2), prev: () => go(level - 1), next: () => go(level + 1) })[b.id](); return; }
+    const c = Math.floor((x - gx) / cell), r = Math.floor((y - gy) / cell); if (c >= 0 && c < N && r >= 0 && r < N) begin(r, c); }];
+  Lab.input.onMove = [(x, y) => { if (stroke && Lab.input.down) drag(x, y); }];
+  Lab.input.onUp = [() => end()];
+  Lab.input.onKey = [k => { if (mode !== "play") return; k = k.toLowerCase(); if (k === "x" || k === " ") setTool(3 - tool); else if (k === "z" || k === "backspace") undo(); else if (k === "c") toggleCheck(); else if (k === "h") hint(); else if (k === "delete") clear(); }];
+  Lab.expose({ get level() { return level; }, get size() { return N; }, get grid() { return Array.from(g).join(""); }, get sol() { return Array.from(sol).join(""); }, get rows() { return rc; }, get cols() { return cc; }, get mode() { return mode; }, get tool() { return tool; },
+    get check() { return check; }, get slips() { return slips; }, get hints() { return hints; }, get time() { return time; }, get name() { return name; }, get genMs() { return genMs; }, get done() { return { rows: rDone.slice(), cols: cDone.slice() }; }, get hist() { return hist.length; },
+    cell(r, c) { return { x: cx(c), y: cy(r) }; }, get buttons() { return ui.all.map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); }, get progress() { return JSON.parse(JSON.stringify(prog)); },
+    proof(n) { const P = puzzle(n); return lineSolvable(P.sol, P.N) ? P.N : 0; }, rating, go, setTool });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+
+/* ------------------------------------------------------------------ update */
+function tick(dt) {
+  if (mode === "play") { time += dt; saveT += dt; if (saveT > 5) { saveT = 0; save(); } Lab.music.intensity(.15 + .75 * (rDone.filter(Boolean).length + cDone.filter(Boolean).length) / (2 * N)); }
+  else if (mode === "won") winT += dt;
+  else if (mode === "demo") { demoT += dt; const n = Math.floor(demoT / .07), order = []; for (let i = 0; i < N * N; i++) if (sol[i]) order.push(i);
+    if (n < order.length) { if (!g[order[n]]) { g[order[n]] = 1; pop[order[n]] = 1; } winT = 0; } else { winT += dt; if (winT > 4) { g.fill(0); demoT = 0; winT = 0; } } }
+  for (let i = 0; i < pop.length; i++) { if (pop[i] > 0) pop[i] = Math.max(0, pop[i] - dt * 4.5); if (bad[i] > 0) bad[i] = Math.max(0, bad[i] - dt * 1.4); }
+  for (const L of lineFx) { if (L.t === 0 && mode === "play") Lab.audio.tone({ f: L.k ? 990 : 880, dur: .16, vol: .08, type: "sine" }); L.t += dt; } lineFx = lineFx.filter(L => L.t < .5);
+  if (hintM) { hintM.t += dt; if (hintM.t > 4) hintM = null; }
+  for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5);
+}
+
+/* ------------------------------------------------------------------ draw */
+function bg() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("pw-bg:" + W + "x" + H, W, H, (g2, w, h) => {
+    draw.vgrad(g2, 0, 0, w, h, ["#7a2942", "#5f2036", "#4e1a2d"]); g2.lineCap = "round"; g2.lineWidth = 3.4;
+    for (let y = -4, r = 0; y < h + 12; y += 12, r++) for (let x = -8; x < w + 16; x += 16) { g2.strokeStyle = "rgba(0,0,0,.16)"; g2.beginPath(); g2.moveTo(x + 2, y + 2); g2.lineTo(x + 8, y + 12); g2.lineTo(x + 14, y + 2); g2.stroke(); g2.strokeStyle = "rgba(255,190,200,.075)"; g2.beginPath(); g2.moveTo(x + 2, y); g2.lineTo(x + 8, y + 10); g2.lineTo(x + 14, y); g2.stroke(); }
+  });
+}
+function stitch(col, s) {
+  return Lab.sprite("pw-st:" + col + Math.round(s * 4), s, s, (q, w) => {
+    const V = (c, lw, dy) => { q.strokeStyle = c; q.lineWidth = lw; q.beginPath(); q.moveTo(w * .24, w * .2 + dy); q.lineTo(w * .5, w * .78 + dy); q.lineTo(w * .76, w * .2 + dy); q.stroke(); };
+    q.lineCap = "round"; q.lineJoin = "round"; draw.rect(q, w * .04, w * .04, w * .92, w * .92, w * .2, Lab.color.shade(col, -.12)); V(Lab.color.shade(col, -.38), w * .3, w * .04); V(Lab.color.shade(col, .1), w * .27, 0); V(Lab.color.shade(col, .42), w * .07, -w * .03);
+  });
+}
+function button(c, b, label, on, active) {
+  const p = pressT[b.id] || 0; c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2 + p * 2); c.globalAlpha = on ? 1 : .4;
+  draw.rect(c, -b.w / 2, -b.h / 2 + 4, b.w, b.h, 16, "rgba(30,5,15,.45)"); draw.rect(c, -b.w / 2, -b.h / 2, b.w, b.h, 16, active ? MUST : CREAM, active ? "#fff" : "rgba(90,31,51,.35)", 2);
+  draw.text(c, label, 0, label.length < 2 ? -2 : 1, { size: label.length < 2 ? 28 : b.h > 50 ? 16 : 12.5, color: WINE, weight: 800 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, s = bg(), G = N * cell, rev = mode === "won" || (mode === "demo" && winT > 0) ? winT : -1; c.drawImage(s, -40, -40, s.w, s.h);
+  const S = stroke, hr = S ? S.lr : -1, hc = S ? S.lc : -1;
+  // swatch
+  draw.rect(c, gx - 9, gy - 3, G + 18, G + 18, 14, "rgba(30,5,15,.4)"); draw.rect(c, gx - 9, gy - 9, G + 18, G + 18, 14, CREAM); c.setLineDash([6, 5]); draw.rect(c, gx - 5, gy - 5, G + 10, G + 10, 10, null, MUST, 1.6); c.setLineDash([]);
+  if (S) { c.fillStyle = "rgba(242,193,78,.2)"; if (S.axis !== 1) c.fillRect(gx, gy + hr * cell, G, cell); if (S.axis !== 0) c.fillRect(gx + hc * cell, gy, cell, G); }
+  if (hintM && hintM.k != null) { c.fillStyle = `rgba(63,167,163,${.2 + .12 * Math.sin(hintM.t * 7)})`; if (hintM.k) c.fillRect(gx + hintM.i * cell, gy, cell, G); else c.fillRect(gx, gy + hintM.i * cell, G, cell); }
+  const la = rev < 0 ? 1 : Math.max(0, 1 - rev / .5);
+  if (la > 0) for (let i = 0; i <= N; i++) { const major = i % 5 === 0 && N > 5; c.strokeStyle = `rgba(90,31,51,${(major ? .55 : .17) * la})`; c.lineWidth = major ? 1.8 : 1; c.beginPath(); c.moveTo(gx + i * cell, gy); c.lineTo(gx + i * cell, gy + G); c.moveTo(gx, gy + i * cell); c.lineTo(gx + G, gy + i * cell); c.stroke(); }
+  for (let r = 0; r < N; r++) { const fin = Lab.color.mix(yarn[0], yarn[1], N > 1 ? r / (N - 1) : 0);
+    for (let q = 0; q < N; q++) { const i = r * N + q, v = g[i], x = gx + q * cell, y = gy + r * cell, p = pop[i] > 0 ? Lab.ease.pulse(pop[i]) : 0;
+      if (v === 1) { const k = rev < 0 ? 0 : Lab.clamp((rev - .25 - (r + q) * .055) / .22, 0, 1), sc = 1 + p * .22 + Lab.ease.pulse(k) * .3, z = cell * sc, o = (cell - z) / 2;
+        if (k < 1) { const sp = stitch(INK, cell); c.drawImage(sp, x + o, y + o, z, z); } if (k > 0) { const sp = stitch(fin, cell); c.globalAlpha = k; c.drawImage(sp, x + o, y + o, z, z); c.globalAlpha = 1; } }
+      else if (v === 2 && la > 0) { const d = cell * (.17 + p * .08); c.strokeStyle = `rgba(122,31,61,${.5 * la})`; c.lineWidth = Math.max(1.6, cell * .07); c.lineCap = "round"; c.beginPath(); c.moveTo(x + cell / 2 - d, y + cell / 2 - d); c.lineTo(x + cell / 2 + d, y + cell / 2 + d); c.moveTo(x + cell / 2 + d, y + cell / 2 - d); c.lineTo(x + cell / 2 - d, y + cell / 2 + d); c.stroke(); }
+      if (bad[i] > 0) { c.fillStyle = `rgba(230,57,70,${bad[i] * .55})`; c.fillRect(x + 1, y + 1, cell - 2, cell - 2); }
+    } }
+  if (hintM) for (const q of hintM.cells) { c.strokeStyle = `rgba(63,167,163,${.6 + .4 * Math.sin(hintM.t * 9)})`; c.lineWidth = 3; draw.rr(c, gx + (q % N) * cell + 2, gy + (q / N | 0) * cell + 2, cell - 4, cell - 4, 5); c.stroke(); }
+  if (mode === "demo") return;
+  // clues
+  const ca = rev < 0 ? 1 : Math.max(.0, 1 - rev / .6); c.globalAlpha = ca;
+  for (let i = 0; i < N; i++) { const R = rc[i].length ? rc[i] : [0], C = cc[i].length ? cc[i] : [0], lfR = lineFx.find(L => !L.k && L.i === i), lfC = lineFx.find(L => L.k && L.i === i), nudge = level === 1 && !g.some(v => v) ? 1 + .14 * Math.sin(t * 6) : 1;
+    if (i === hr && S.axis !== 1) draw.rect(c, gx - clueW, gy + i * cell + 2, clueW - 10, cell - 4, 6, "rgba(242,193,78,.28)"); if (i === hc && S.axis !== 0) draw.rect(c, gx + i * cell + 2, gy - clueH, cell - 4, clueH - 10, 6, "rgba(242,193,78,.28)");
+    R.forEach((v, k) => draw.text(c, v, gx - 12 - (R.length - 1 - k + .5) * cell * .5, cy(i) + 1, { size: fs * (lfR ? 1 + Lab.ease.pulse(lfR.t / .5) * .5 : v === N ? nudge : 1), color: rDone[i] ? "rgba(244,234,214,.42)" : v === N && nudge !== 1 ? MUST : CREAM, weight: 800 }));
+    C.forEach((v, k) => draw.text(c, v, cx(i), gy - 12 - (C.length - 1 - k + .5) * cell * .6 + 1, { size: fs * (lfC ? 1 + Lab.ease.pulse(lfC.t / .5) * .5 : v === N ? nudge : 1), color: cDone[i] ? "rgba(244,234,214,.42)" : v === N && nudge !== 1 ? MUST : CREAM, weight: 800 })); }
+  c.globalAlpha = 1;
+  if (rev > .6 + N * .11) { const k = Lab.ease.outBack(Lab.clamp((rev - .6 - N * .11) / .35, 0, 1)), tw = name.length * 11 + 36; c.save(); c.translate(gx + G / 2, gy - 30); c.scale(k, k); draw.rect(c, -tw / 2, -16, tw, 32, 8, CREAM, MUST, 2); draw.text(c, name.toUpperCase(), 0, 1, { size: 15, color: WINE, weight: 800 }); c.restore(); }
+  if (S && S.val === 1 && S.n > 1 && !S.dead) { const bx = Lab.clamp(Lab.input.x, 24, Lab.W - 24), by = Math.max(Lab.play.y + 20, Lab.input.y - 58); draw.circle(c, bx, by, 17, MUST, "#fff", 2); draw.text(c, S.n, bx, by + 1, { size: 17, color: WINE, weight: 800 }); }
+  // header + tools
+  const st = prog.stars[level] || 0, tip = ["A 5 fills the whole line. Start there!", "1 1 means stitch, gap, stitch", "SKIP marks cells that must stay empty"][level - 1];
+  draw.text(c, land ? "PATTERN " + level : "PATTERN " + level + " · " + N + "×" + N, ui.tx, ui.ty, { size: land ? 16 : 18, color: CREAM, weight: 800 });
+  for (let i = 0; i < 3; i++) draw.star(c, ui.tx - (land ? 62 : 46) + i * 17, ui.sy, 7, i < st ? MUST : "rgba(244,234,214,.22)", 5, .5);
+  draw.text(c, land ? N + "×" + N + " · " + fmtT(time) : fmtT(time), ui.tx + (land ? 44 : 30), ui.sy + 1, { size: 13.5, color: "rgba(244,234,214,.8)", weight: 700 });
+  if (tip && mode === "play" && (land || ui.tipY < ui.knit.y - 14)) draw.text(c, tip, land ? ui.tx : Lab.W / 2, ui.tipY, { size: land ? 11.5 : 13.5, color: MUST, weight: 700 });
+  button(c, ui.prev, "‹", level > 1); button(c, ui.next, "›", level < prog.max);
+  button(c, ui.knit, "KNIT", true, tool === 1); button(c, ui.skip, "SKIP  ×", true, tool === 2);
+  button(c, ui.btn[0], "UNDO", hist.length > 0); button(c, ui.btn[1], "CLEAR", g.some(v => v)); button(c, ui.btn[2], "HINT", mode === "play"); button(c, ui.btn[3], check ? "CHECK ON" : "CHECK OFF", true, check);
+}
+Lab.boot();
+})();
+</script></body></html>

@@ -1,0 +1,417 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Ribbon Rodeo</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* RIBBON RODEO — fighter kites with long ribbon tails over a patchwork valley.
+ * Core: free-steering "grow a tail" arena against eight AI kites. A kite whose nose touches another kite's ribbon is snipped
+ * and bursts into bows. Dash burns your own tail for speed.
+ * Twist (the hook): crossing your OWN ribbon is harmless — it closes a lasso. Every bow inside is collected double and every
+ * rival nose inside is snipped. So the game is about drawing loops, not just blocking.
+ * Arc: one 2:30 "festival". A storm front closes in from 0:25, hunters get bolder and respawn longer; score = bows + snips,
+ * plus a podium bonus if you are still flying at sunset.
+ * Identity: sunny top-down sky, candy-striped ribbons, kites with faces that look where they intend to go. */
+Lab.init({
+  title: "Ribbon Rodeo", tagline: "Fly a fighter kite. Lasso the whole sky.", category: "Arcade & Action",
+  howto: ["Drag to steer; drag far to dash", "Rivals that hit your ribbon get snipped", "Loop your own tail to lasso what's inside"],
+  theme: { bg: "#8fd0ee", bg2: "#d8f1fb", fg: "#1f3550", muted: "#5a7892", accent: "#ff4f6d", accent2: "#ffb703", light: true },
+  orient: "any", music: { style: "bounce", key: "G", bpm: 112, vol: .36 }, restart: start, attract,
+});
+const { draw, fx, clamp, lerp } = Lab, TAU = Lab.TAU, INK = "#1f3550";
+fx.auto = false;                                   // particles live in world space; drawn inside the camera transform
+const GAP = 7, R0 = 1250, R1 = 700, ROUND = 150, BASE = 150, DASH = 270, START = 18;
+const NAMES = ["Mango", "Pip", "Juno", "Tumble", "Biscuit", "Zephyr", "Clover", "Nimbus"];
+const COLS = [["#ff4f6d", "#fff1d6"], ["#ff9f1c", "#fff0cf"], ["#17b8a6", "#d5fbf4"], ["#8e6bff", "#e6deff"], ["#f25fb0", "#ffe0f1"], ["#2f8fe6", "#d9ecff"], ["#6fbf3a", "#e6f8cf"], ["#e0a800", "#fff6c9"], ["#ef6c3d", "#ffe1d2"]];
+const KINDS = {   // skill = how far ahead it looks / how rarely it flies blind; aggr = appetite for cutting others off
+  grazer: { id: "grazer", skill: 1, react: .15, aggr: .1, boosty: .05, wob: .2 },
+  hunter: { id: "hunter", skill: .95, react: .13, aggr: 1, boosty: .75, wob: .08 },
+  scav:   { id: "scav", skill: .8, react: .2, aggr: .4, boosty: .55, wob: .2 },
+  dare:   { id: "dare", skill: .5, react: .27, aggr: .7, boosty: .95, wob: .55 },
+};
+const OFFS = [0, .45, -.45, .9, -.9, 1.5, -1.5, 2.3, -2.3];
+let S, kites, me, bows, cam, T, R, score, kills, lassoBest, lassoN, maxLen, streak, streakT, lassos, lassoCd, stick, boost2, mouseAim, mouseBoost, touchMode,
+  wind, demo = false, clouds, over, wallT, natural, lbT, board = [];
+
+/* ------------------------------------------------------------------ setup */
+function layout() { S = clamp(Math.sqrt(Lab.W * Lab.H) / 600, .85, 1.7); }
+Lab.onResize(layout);
+function start() {
+  demo = false; reset();
+  Lab.setScore(0); Lab.hint("Drag to steer · drag past the ring to dash");
+  Lab.input.onDown = [(x, y, id) => {
+    if (Lab.input.pointerType === "mouse") { mouseAim = { x, y }; mouseBoost = true; touchMode = false; return; }
+    touchMode = true; mouseAim = null;
+    if (!stick) stick = { id, ox: x, oy: y, x, y, on: false, far: false, ang: 0 }; else boost2 = id;
+  }];
+  Lab.input.onMove = [(x, y, dx, dy, id) => {
+    if (stick && id === stick.id) {
+      stick.x = x; stick.y = y; const vx = x - stick.ox, vy = y - stick.oy, m = Math.hypot(vx, vy), ring = ringR();
+      if (m > 8) { stick.on = true; stick.ang = Math.atan2(vy, vx); }
+      stick.far = m > ring;
+      if (m > ring * 1.7) { stick.ox = x - vx / m * ring * 1.7; stick.oy = y - vy / m * ring * 1.7; }
+    } else if (!touchMode) mouseAim = { x, y };
+  }];
+  Lab.input.onUp = [(x, y, id) => { if (stick && id === stick.id) stick = null; if (id === boost2) boost2 = null; mouseBoost = false; }];
+  wind = Lab.audio.loop({ noise: true, bp: 500, vol: 0 });
+  Lab.expose({
+    get me() { return me; }, get kites() { return kites; }, get bows() { return bows; }, get score() { return score; }, get time() { return T; }, get R() { return R; },
+    get kills() { return kills; }, get lassos() { return lassoN; }, get over() { return over; }, ROUND, START, GAP,
+    setTime(v) { T = v; }, grow(n) { me.len += n; }, aim(a) { me.want = a; me.ang = a; mouseAim = null; },
+    step(n) { for (let i = 0; i < n && !over; i++) update(1 / 60); },
+    addBow(x, y, v) { return addBow(x, y, v || 1, 0, true); },
+    clearBots() { for (const k of kites) if (k !== me) { k.alive = false; k.dead = 1e9; k.pts.length = 0; } },
+    /* a straight, non-thinking kite: head at (x,y) flying along ang, body trailing behind it */
+    dummy(x, y, ang, len, speed) { const k = mkKite(x, y, ang, len, null, 3); k.dumb = true; k.safe = 0; k.dsp = speed == null ? BASE : speed; kites.push(k); bbox(k); return k; },
+  });
+  Lab.loop(frame);
+}
+function reset() {
+  layout(); T = 0; R = R0; score = 0; kills = 0; lassoBest = 0; lassoN = 0; streak = 0; streakT = 0; lassos = []; lassoCd = 0; stick = null; boost2 = null;
+  mouseAim = null; mouseBoost = false; touchMode = false; over = false; wallT = 0; natural = 0; lbT = 0; bows = []; kites = []; me = null;
+  if (!demo) { me = mkKite(0, 0, -Math.PI / 2, START, null, 0); me.safe = 2.5; me.name = "You"; kites.push(me); }
+  for (let i = 0; i < 8; i++) { const k = mkKite(0, 0, 0, 12, KINDS.grazer, i + 1); k.name = NAMES[i]; place(k); kites.push(k); }
+  maxLen = START;
+  for (let i = 0; i < 330; i++) scatterBow();
+  clouds = Array.from({ length: 16 }, () => ({ x: Lab.rand(-R0, R0), y: Lab.rand(-R0, R0), s: Lab.rand(.7, 1.6), v: Lab.rand(6, 16) }));
+  cam = { x: 0, y: 0, z: S };
+  for (const k of kites) bbox(k);
+}
+function mkKite(x, y, ang, len, kind, ci) {
+  const k = { x, y, ang, want: ang, len, pts: [], acc: 0, sp: BASE, boost: false, burn: 0, alive: true, dead: 0, safe: 1.5, kind, ci, col: COLS[ci][0], col2: COLS[ci][1], w: 5,
+    think: Math.random() * .3, mood: "graze", prey: null, lockT: 0, tb: null, tbT: 0, look: 0, bb: { x0: 0, y0: 0, x1: 0, y1: 0 }, name: "", dumb: false, flap: Math.random() * TAU };
+  for (let j = 1; j <= len; j++) k.pts.push({ x: x - Math.cos(ang) * GAP * j, y: y - Math.sin(ang) * GAP * j });
+  return k;
+}
+/* (re)spawn a bot somewhere calm; later in the round newcomers are longer and more likely to be predators */
+function place(k) {
+  const heat = clamp(T / ROUND, 0, 1); let x = 0, y = 0;
+  for (let i = 0; i < 12; i++) { const a = Lab.rand(0, TAU), r = Lab.rand(300, R - 140); x = Math.cos(a) * r; y = Math.sin(a) * r; if (!me || Lab.dist(x, y, me.x, me.y) > 420) break; }
+  const ang = Math.atan2(-y, -x) + Lab.rand(-1, 1), len = Lab.randInt(12, Math.round(22 + heat * 60));
+  const kind = Lab.chance(.22 + heat * .5) ? (Lab.chance(.62) ? KINDS.hunter : KINDS.dare) : (Lab.chance(.6) ? KINDS.grazer : KINDS.scav);
+  Object.assign(k, mkKite(x, y, ang, len, kind, k.ci), { name: k.name });
+}
+function scatterBow() { const a = Lab.rand(0, TAU), r = Math.sqrt(Math.random()) * (R - 30); if (addBow(Math.cos(a) * r, Math.sin(a) * r, 1, Lab.randInt(0, 8), false)) natural++; }
+function addBow(x, y, v, ci, drop) { if (bows.length > 680) return null; const b = { x, y, v, ci, ph: Math.random() * TAU, age: 0, dead: false, drop: !!drop }; bows.push(b); return b; }
+const ringR = () => clamp(Math.min(Lab.W, Lab.H) * .16, 50, 74);
+
+/* ------------------------------------------------------------------ simulation */
+function update(dt) {
+  if (!demo) T += dt;
+  const heat = clamp(T / ROUND, 0, 1);
+  R = lerp(R0, R1, clamp((T - 25) / (ROUND - 40), 0, 1));
+  if (me && me.alive) {
+    const ax = Lab.input.axisX(), K = Lab.input.keys;
+    if (ax) { me.want = me.ang + ax * 1.3; mouseAim = null; }
+    else if (stick && stick.on) me.want = stick.ang;
+    else if (mouseAim && !touchMode) { const h = w2s(me.x, me.y), dx = mouseAim.x - h.x, dy = mouseAim.y - h.y; if (dx * dx + dy * dy > 144) me.want = Math.atan2(dy, dx); }
+    me.boost = !!((stick && stick.far) || boost2 != null || mouseBoost || K[" "] || K.Shift || K.ArrowUp || K.w || K.W);
+  }
+  for (const k of kites) {
+    if (!k.alive) { if (k !== me && !k.dumb) { k.dead -= dt; if (k.dead <= 0) place(k); } continue; }
+    k.safe -= dt; k.lockT -= dt; k.tbT -= dt; k.flap += dt * (k.boost ? 22 : 9);
+    if (k.kind) { k.think -= dt; if (k.think <= 0) { think(k, heat); k.think = k.kind.react * Lab.rand(.7, 1.3); } }
+    move(k, dt);
+  }
+  collide();
+  // bows: magnet + eat, storm clears the rim, slow top-up of fresh ones
+  for (const b of bows) { b.age += dt; if (b.x * b.x + b.y * b.y > (R + 6) * (R + 6)) kill0(b); }
+  for (const k of kites) {
+    if (!k.alive || k.dumb) continue; const er = k.w + 11, mg = k === me ? 52 : 44;
+    for (const b of bows) {
+      if (b.dead) continue; const dx = k.x - b.x, dy = k.y - b.y, d2 = dx * dx + dy * dy;
+      if (d2 < er * er) eat(k, b, 1);
+      else if (d2 < mg * mg) { const d = Math.sqrt(d2); b.x += dx / d * 240 * dt; b.y += dy / d * 240 * dt; }
+    }
+  }
+  if (bows.some(b => b.dead)) bows = bows.filter(b => !b.dead);
+  const want = Math.PI * R * R * 6.6e-5; for (let i = 0; i < 2 && natural < want; i++) scatterBow();
+  if (streakT > 0) { streakT -= dt; if (streakT <= 0) streak = 0; }
+  lassoCd -= dt; for (const l of lassos) l.t += dt; if (lassos.length && lassos[0].t > .7) lassos.shift();
+  if (me) { maxLen = Math.max(maxLen, me.len); if (!over && T >= ROUND) sunset(); }
+}
+function kill0(b) { if (!b.dead) { b.dead = true; if (!b.drop) natural--; } }
+function eat(k, b, mult) {
+  kill0(b); k.len = Math.min(420, k.len + b.v);
+  if (k !== me) return;
+  score += b.v * mult; Lab.setScore(score); streak = Math.min(streak + 1, 14); streakT = .7;
+  Lab.audio.combo(streak, { vol: .11 }); fx.burst(b.x, b.y, { n: 3, color: COLS[b.ci][0], speed: 70, life: .3, size: 2.5, gravity: 0 });
+}
+function move(k, dt) {
+  const boosting = k.boost && k.len > 12, turn = boosting ? 2.7 : 3.5;
+  if (k.dumb) k.sp = k.dsp; else { k.ang += clamp(Lab.angleDiff(k.ang, k.want), -turn * dt, turn * dt); k.sp = Lab.damp(k.sp, boosting ? DASH : BASE, 8, dt); }
+  const px = k.x, py = k.y, ca = Math.cos(k.ang), sa = Math.sin(k.ang);
+  k.x += ca * k.sp * dt; k.y += sa * k.sp * dt;
+  const d = Math.hypot(k.x, k.y);
+  if (d > R - 14 && !k.dumb) {                     // the storm wall shoves kites back inside and turns them around
+    k.x *= (R - 14) / d; k.y *= (R - 14) / d; k.ang += Lab.angleDiff(k.ang, Math.atan2(-k.y, -k.x)) * Math.min(1, 7 * dt); if (k.kind) k.want = k.ang;
+    if (k === me) { wallT -= dt; if (wallT <= 0) { wallT = .5; Lab.sfx("thud", { vol: .6 }); Lab.shake(3, .15); } }
+  }
+  k.acc += k.sp * dt;
+  while (k.acc >= GAP) { k.acc -= GAP; k.pts.unshift({ x: k.x - ca * k.acc, y: k.y - sa * k.acc }); }
+  if (boosting) { k.burn += dt * 4.5; while (k.burn >= 1 && k.len > 12) { k.burn--; k.len--; const tl = k.pts[k.pts.length - 1]; if (tl) addBow(tl.x, tl.y, 1, k.ci, true); } }
+  while (k.pts.length > k.len) k.pts.pop();
+  k.w = 5 + Math.min(5, k.len / 50);
+  bbox(k);
+  if (k === me) lassoCheck(px, py);
+}
+function bbox(k) { let x0 = k.x, x1 = k.x, y0 = k.y, y1 = k.y; for (const p of k.pts) { if (p.x < x0) x0 = p.x; else if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; else if (p.y > y1) y1 = p.y; } const b = k.bb; b.x0 = x0; b.x1 = x1; b.y0 = y0; b.y1 = y1; }
+
+/* bot brain: pick something to want (a rival's nose to cut off, a bow, a death pile), then choose the clear heading closest to it.
+   Fallibility comes from short feelers, slow reactions, wobble and the odd blind tick — never from cheating. */
+function think(k, heat) {
+  const P = k.kind; let tx = 0, ty = 0, boost = false; k.mood = "graze";
+  if (k.prey && (!k.prey.alive || k.lockT <= 0 || Lab.dist(k.x, k.y, k.prey.x, k.prey.y) > 650)) k.prey = null;
+  if (!k.prey && P.aggr > .3 && (demo || T > 9) && Lab.chance(P.aggr * .5)) {
+    let bd = (240 + heat * 280) * (.5 + P.aggr * .5);
+    for (const o of kites) { if (o === k || !o.alive || o.safe > 0 || (o.len > k.len * 1.8 && P !== KINDS.dare)) continue; const d = Lab.dist(k.x, k.y, o.x, o.y); if (d < bd) { bd = d; k.prey = o; } }
+    if (k.prey) k.lockT = Lab.rand(2.5, 5.5);
+  }
+  if (k.prey) {                                    // aim across the victim's nose so it runs into our ribbon
+    const o = k.prey, d = Lab.dist(k.x, k.y, o.x, o.y), lead = Math.min(170, d * .9 + 30);
+    tx = o.x + Math.cos(o.ang) * lead; ty = o.y + Math.sin(o.ang) * lead; k.mood = "hunt"; boost = d < 320 && Lab.chance(P.boosty);
+  } else {
+    if (!k.tb || k.tb.dead || k.tbT <= 0) {
+      k.tb = null; let bs = 0; const n = bows.length, lim = (R - 50) * (R - 50);
+      for (let i = 0; i < 16 && n; i++) { const b = bows[(Math.random() * n) | 0]; if (b.dead || b.x * b.x + b.y * b.y > lim) continue; const sc = (P === KINDS.scav ? b.v * b.v : b.v) / (Lab.dist(k.x, k.y, b.x, b.y) + 40); if (sc > bs) { bs = sc; k.tb = b; } }
+      k.tbT = Lab.rand(1.2, 2.4);
+    }
+    if (k.tb) { tx = k.tb.x; ty = k.tb.y; if (k.tb.v > 1 && P.boosty > .4) { k.mood = "scav"; boost = Lab.dist(k.x, k.y, tx, ty) > 150 && Lab.chance(P.boosty); } }
+  }
+  let da = Math.atan2(ty - k.y, tx - k.x) + (Math.random() - .5) * P.wob;
+  if (Math.random() >= (1 - P.skill) * .6) {
+    const F = (46 + k.sp * .3) * (.55 + P.skill * .6), m = k.w + 9; let pick = null;
+    for (const a of OFFS) { const ca = Math.cos(da + a), sa = Math.sin(da + a); if (free(k, k.x + ca * F * .5, k.y + sa * F * .5, m) && free(k, k.x + ca * F, k.y + sa * F, m)) { pick = a; break; } }
+    if (pick === null) { pick = Lab.chance(.5) ? 2.7 : -2.7; k.mood = "panic"; }
+    else if (Math.abs(pick) > .8) k.mood = "dodge";
+    if (pick) boost = false;
+    da += pick;
+  }
+  k.want = da; k.boost = boost && k.len > 16;
+}
+function free(k, x, y, m) {
+  if (x * x + y * y > (R - 30) * (R - 30)) return false;
+  for (const o of kites) {
+    if (o === k || !o.alive) continue; const b = o.bb, q = m + o.w + 4;
+    if (x < b.x0 - q || x > b.x1 + q || y < b.y0 - q || y > b.y1 + q) continue;
+    const r2 = (o.w + m) * (o.w + m); let dx = o.x - x, dy = o.y - y; if (dx * dx + dy * dy < r2) return false;
+    const p = o.pts; for (let j = 0; j < p.length; j += 2) { dx = p[j].x - x; dy = p[j].y - y; if (dx * dx + dy * dy < r2) return false; }
+  }
+  return true;
+}
+function collide() {
+  for (const k of kites) {
+    if (!k.alive || k.safe > 0 || k.dumb) continue;
+    for (const o of kites) {
+      if (o === k || !o.alive) continue; const b = o.bb, q = k.w + o.w;
+      if (k.x < b.x0 - q || k.x > b.x1 + q || k.y < b.y0 - q || k.y > b.y1 + q) continue;
+      const r = k.w * .5 + o.w * .9, r2 = r * r; let hit = false, dx = k.x - o.x, dy = k.y - o.y;
+      if (dx * dx + dy * dy < r2 * 1.6) hit = k.len <= o.len;                       // nose to nose: the shorter tail loses
+      else { const p = o.pts; for (let j = 1; j < p.length; j++) { dx = p[j].x - k.x; dy = p[j].y - k.y; if (dx * dx + dy * dy < r2) { hit = true; break; } } }
+      if (hit) { snip(k, o, "ribbon"); break; }
+    }
+  }
+}
+function snip(k, by, how) {
+  if (!k.alive) return; k.alive = false; k.dead = 3;
+  for (let j = 0; j < k.pts.length; j += 2) addBow(k.pts[j].x + Lab.rand(-8, 8), k.pts[j].y + Lab.rand(-8, 8), 2, k.ci, true);
+  if (demo) return;
+  if (k === me) { const s = w2s(k.x, k.y); fx.clear(); fx.burst(s.x, s.y, { n: 34, colors: [k.col, k.col2, "#fff"], speed: 330, life: .9, size: 5, shape: "shard", gravity: 260 }); fx.ring(s.x, s.y, { r1: 90, color: k.col, width: 6 });
+    Lab.shake(14, .45); Lab.buzz(60); Lab.sfx("crunch"); finish("Tangled!", "You flew into " + by.name + "'s ribbon.", false); return; }
+  fx.burst(k.x, k.y, { n: 16, colors: [k.col, k.col2], speed: 200, life: .6, size: 4, shape: "shard", gravity: 0 }); fx.ring(k.x, k.y, { r1: 60, color: k.col, width: 4 });
+  if (by === me) {
+    kills++; const g = (20 + k.len) * (how === "lasso" ? 2 : 1); score += g; Lab.setScore(score); Lab.bumpScore();
+    fx.text(k.x, k.y - 34, (how === "lasso" ? "LASSO! +" : "SNIP! +") + g, { color: "#fff", size: 24, outline: "rgba(31,53,80,.7)", life: 1.2 });
+    Lab.sfx("snap"); Lab.sfx("chime", { pitch: how === "lasso" ? 1.35 : 1.1 }); Lab.hitstop(.06); Lab.shake(7, .22); Lab.buzz(22);
+  } else if (me && Lab.dist(k.x, k.y, me.x, me.y) < 520) Lab.sfx("snap", { vol: .35, pitch: .8 });
+}
+/* the hook: the nose crossing our own ribbon closes a loop */
+function lassoCheck(px, py) {
+  const k = me, p = k.pts; if (lassoCd > 0 || p.length < 16) return;
+  const ax = px, ay = py, r1 = k.x - px, r2 = k.y - py;
+  for (let i = 9; i < p.length - 1; i++) {
+    const c = p[i], d = p[i + 1], s1 = d.x - c.x, s2 = d.y - c.y, den = r1 * s2 - r2 * s1; if (Math.abs(den) < 1e-9) continue;
+    const t = ((c.x - ax) * s2 - (c.y - ay) * s1) / den, u = ((c.x - ax) * r2 - (c.y - ay) * r1) / den;
+    if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+    const poly = [{ x: k.x, y: k.y }]; for (let j = 0; j <= i; j++) poly.push(p[j]);
+    let a = 0; for (let j = 0, n = poly.length; j < n; j++) { const q = poly[j], w = poly[(j + 1) % n]; a += q.x * w.y - w.x * q.y; }
+    if (Math.abs(a) / 2 > 3200) lasso(poly);
+    return;
+  }
+}
+function inPoly(x, y, poly) { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) c = !c; } return c; }
+function lasso(poly) {
+  let n = 0, got = 0; lassoCd = .5;
+  for (const b of bows) if (!b.dead && inPoly(b.x, b.y, poly)) { n++; got += b.v * 2; fx.burst(b.x, b.y, { n: 4, color: COLS[b.ci][0], speed: 120, life: .4, size: 3, gravity: 0, shape: "star" }); eat(me, b, 2); }
+  let caught = 0; for (const o of kites) if (o !== me && o.alive && inPoly(o.x, o.y, poly)) { caught++; snip(o, me, "lasso"); }
+  lassos.push({ poly, t: 0, hit: n + caught > 0 });
+  if (n + caught === 0) { Lab.sfx("swish", { vol: .5 }); return; }
+  lassoN++; lassoBest = Math.max(lassoBest, n + caught * 10);
+  Lab.sfx("whoosh"); Lab.sfx("powerup", { pitch: 1 + Math.min(.6, n * .04), vol: .6 }); Lab.buzz(16); Lab.bumpScore();
+  if (n) fx.text(me.x, me.y - 26, "LOOP ×2  +" + got, { color: "#ffe9a8", size: 18 + Math.min(10, n), outline: "rgba(31,53,80,.7)" });
+  if (caught) Lab.banner(caught > 1 ? "DOUBLE LASSO!" : "LASSO!", { color: "#fff", ms: 900, y: .22 });
+}
+function rank() { let r = 1; for (const k of kites) if (k !== me && k.alive && !k.dumb && k.len > me.len) r++; return r; }
+function sunset() {
+  const r = rank(), bonus = [300, 150, 75][r - 1] || 0; score += bonus; Lab.setScore(score);
+  fx.clear(); finish(r === 1 ? "Sky champion!" : "Sunset — you placed #" + r, bonus ? "Podium bonus +" + bonus : "Longest tail takes the podium bonus.", true, r);
+}
+function finish(title, message, survived, r) {
+  over = true;
+  const stats = [["Longest tail", maxLen], ["Snips", kills], ["Lassos", lassoN]];
+  Lab.gameover({ title, message, score, stats, win: survived && r === 1, neutral: survived && r !== 1 });
+}
+
+/* ------------------------------------------------------------------ rendering */
+function w2s(x, y) { return { x: (x - cam.x) * cam.z + Lab.W / 2, y: (y - cam.y) * cam.z + Lab.play.y + Lab.play.h / 2 }; }
+function fieldTile() {
+  return Lab.sprite("fields", 480, 480, (g, w) => {
+    const rnd = Lab.rng(11), pal = ["#a9d67a", "#b9de86", "#9ccc6e", "#d8e08a", "#e9d98c", "#c4e39a", "#8fc46a", "#d2c27c"];
+    for (let gy = 0; gy < 4; gy++) for (let gx = 0; gx < 4; gx++) {
+      const x = gx * 120, y = gy * 120, sp = rnd() < .5, cut = 40 + rnd() * 40;
+      const parts = sp ? [[x, y, cut, 120], [x + cut, y, 120 - cut, 120]] : [[x, y, 120, cut], [x, y + cut, 120, 120 - cut]];
+      for (const [px, py, pw, ph] of parts) {
+        const col = pal[(rnd() * pal.length) | 0]; g.fillStyle = col; g.fillRect(px, py, pw, ph);
+        g.strokeStyle = Lab.color.shade(col, -.09); g.lineWidth = 1.5; g.beginPath();
+        if (rnd() < .5) for (let i = 6; i < pw; i += 9) { g.moveTo(px + i, py + 3); g.lineTo(px + i, py + ph - 3); } else for (let i = 6; i < ph; i += 9) { g.moveTo(px + 3, py + i); g.lineTo(px + pw - 3, py + i); }
+        g.stroke(); g.strokeStyle = "#6fa651"; g.lineWidth = 3; g.strokeRect(px, py, pw, ph);
+      }
+    }
+    for (let i = 0; i < 46; i++) { const x = rnd() * w, y = rnd() * w, r = 4 + rnd() * 5; g.fillStyle = "rgba(40,80,40,.25)"; g.beginPath(); g.arc(x + 2, y + 3, r, 0, TAU); g.fill(); g.fillStyle = rnd() < .5 ? "#4f9a4a" : "#62ab52"; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+    g.strokeStyle = "#f3ead0"; g.lineWidth = 5; g.beginPath(); g.moveTo(0, 240); g.bezierCurveTo(120, 200, 200, 290, 480, 240); g.stroke();
+  });
+}
+function cloudSprite() {
+  return Lab.sprite("cloud", 220, 120, (g) => { g.fillStyle = "#fff"; for (const [x, y, r] of [[60, 70, 36], [100, 52, 44], [146, 66, 38], [180, 78, 24], [36, 82, 22], [112, 82, 40]]) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); } });
+}
+function bowSprite(ci) {
+  return Lab.sprite("bow" + ci, 26, 18, (g) => {
+    const c = COLS[ci][0]; g.fillStyle = c; g.strokeStyle = Lab.color.shade(c, -.3); g.lineWidth = 1.5; g.lineJoin = "round";
+    for (const s of [-1, 1]) { g.beginPath(); g.moveTo(13, 9); g.lineTo(13 + s * 11, 2); g.lineTo(13 + s * 11, 16); g.closePath(); g.fill(); g.stroke(); }
+    g.fillStyle = COLS[ci][1]; g.beginPath(); g.arc(13, 9, 3.4, 0, TAU); g.fill(); g.stroke();
+  });
+}
+function ribbonPath(c, k) {
+  const p = k.pts, n = p.length; c.beginPath(); c.moveTo(k.x, k.y);
+  for (let i = 0; i < n - 1; i++) c.lineTo(p[i].x, p[i].y);
+  if (n > 1) { const f = k.acc / GAP, a = p[n - 1], b = p[n - 2]; c.lineTo(lerp(a.x, b.x, f), lerp(a.y, b.y, f)); }
+}
+function drawKite(c, k, t) {
+  if (k.safe > 0 && Math.sin(t * 26) > .2) c.globalAlpha = .45;
+  c.lineCap = "round"; c.lineJoin = "round";
+  ribbonPath(c, k); c.strokeStyle = Lab.color.shade(k.col, -.28); c.lineWidth = k.w * 2 + 3; c.stroke();
+  c.strokeStyle = k.col; c.lineWidth = k.w * 2; c.stroke();
+  c.setLineDash([GAP * 1.6, GAP * 2.4]); c.lineCap = "butt"; c.strokeStyle = k.col2; c.lineWidth = k.w * 1.15; c.stroke(); c.setLineDash([]);
+  const hs = k.w * 2.1, fl = Math.sin(k.flap) * .07;
+  c.save(); c.translate(k.x, k.y); c.rotate(k.ang); c.scale(1 + fl, 1 - fl);
+  c.beginPath(); c.moveTo(hs * 1.45, 0); c.lineTo(0, hs); c.lineTo(-hs * 1.05, 0); c.lineTo(0, -hs); c.closePath();
+  c.fillStyle = k.col; c.fill(); c.strokeStyle = Lab.color.shade(k.col, -.35); c.lineWidth = 2; c.stroke();
+  c.beginPath(); c.moveTo(hs * 1.45, 0); c.lineTo(0, -hs); c.lineTo(-hs * 1.05, 0); c.closePath(); c.fillStyle = "rgba(255,255,255,.28)"; c.fill();
+  c.strokeStyle = "rgba(31,53,80,.35)"; c.lineWidth = 1.2; c.beginPath(); c.moveTo(-hs * 1.05, 0); c.lineTo(hs * 1.45, 0); c.moveTo(0, -hs); c.lineTo(0, hs); c.stroke();
+  // face: pupils look toward where the kite wants to go, brows show mood
+  const look = clamp(Lab.angleDiff(k.ang, k.want), -1, 1), er = hs * .3;
+  for (const s of [-1, 1]) {
+    c.fillStyle = "#fff"; c.beginPath(); c.arc(hs * .42, s * hs * .36, er, 0, TAU); c.fill();
+    c.fillStyle = INK; c.beginPath(); c.arc(hs * .42 + er * .4 * Math.cos(look), s * hs * .36 + er * .45 * Math.sin(look), er * .52, 0, TAU); c.fill();
+  }
+  if (k.mood === "hunt") { c.strokeStyle = INK; c.lineWidth = 2; c.beginPath(); for (const s of [-1, 1]) { c.moveTo(hs * .9, s * hs * .22); c.lineTo(hs * .52, s * hs * .72); } c.stroke(); }
+  c.restore(); c.globalAlpha = 1;
+  if (k.boost && k.len > 12 && !Lab.reducedMotion) { c.strokeStyle = "rgba(255,255,255,.7)"; c.lineWidth = 2; c.beginPath(); for (const s of [-1, 1]) { const ox = -Math.sin(k.ang) * s * hs * 1.2, oy = Math.cos(k.ang) * s * hs * 1.2; c.moveTo(k.x + ox, k.y + oy); c.lineTo(k.x + ox - Math.cos(k.ang) * 34, k.y + oy - Math.sin(k.ang) * 34); } c.stroke(); }
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, heat = clamp(T / ROUND, 0, 1), cx = W / 2, cy = Lab.play.y + Lab.play.h / 2;
+  // far below: patchwork fields (slow parallax), haze and drifting clouds
+  const tile = fieldTile(), gs = S * .62 * Math.sqrt(cam.z / S), ts = 480 * gs, ox = Lab.wrap(cx - cam.x * gs * .55, -ts, 0), oy = Lab.wrap(cy - cam.y * gs * .55, -ts, 0);
+  for (let x = ox - 40; x < W + 40; x += ts) for (let y = oy - 40; y < H + 40; y += ts) c.drawImage(tile, Math.floor(x), Math.floor(y), Math.ceil(ts) + 1, Math.ceil(ts) + 1);
+  c.fillStyle = "rgba(190,232,250,.34)"; c.fillRect(-40, -40, W + 80, H + 80);
+  if (heat > .35) { c.fillStyle = `rgba(255,150,70,${(heat - .35) * .34})`; c.fillRect(-40, -40, W + 80, H + 80); }
+  const cl = cloudSprite(); c.globalAlpha = .5;
+  for (const o of clouds) { const x = cx + (Lab.wrap(o.x + t * o.v - cam.x * .8, -R0, R0)) * cam.z * .8, y = cy + (Lab.wrap(o.y - cam.y * .8, -R0, R0)) * cam.z * .8, w = 220 * o.s * cam.z; if (x > -w && x < W + w && y > -w && y < H + w) c.drawImage(cl, x - w / 2, y - w * .27, w, w * .545); }
+  c.globalAlpha = 1;
+  // world
+  c.save(); c.translate(cx, cy); c.scale(cam.z, cam.z); c.translate(-cam.x, -cam.y);
+  const vx0 = cam.x - cx / cam.z - 30, vx1 = cam.x + (W - cx) / cam.z + 30, vy0 = cam.y - cy / cam.z - 30, vy1 = cam.y + (H - cy) / cam.z + 30;
+  // storm front outside the arena
+  c.fillStyle = "rgba(58,64,104,.74)"; c.beginPath(); c.rect(vx0 - 60, vy0 - 60, vx1 - vx0 + 120, vy1 - vy0 + 120); c.arc(0, 0, R, 0, TAU, true); c.fill("evenodd");
+  const step = 64 / R; c.fillStyle = "#565d92";
+  for (let a = 0; a < TAU; a += step) { const x = Math.cos(a) * (R + 16), y = Math.sin(a) * (R + 16); if (x < vx0 - 50 || x > vx1 + 50 || y < vy0 - 50 || y > vy1 + 50) continue; c.beginPath(); c.arc(x, y, 34 + Math.sin(a * 37 + t * 1.5) * 6, 0, TAU); c.fill(); }
+  c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = 3; c.setLineDash([10, 14]); c.lineDashOffset = t * 30; c.beginPath(); c.arc(0, 0, R - 14, 0, TAU); c.stroke(); c.setLineDash([]);
+  // lasso flashes
+  for (const l of lassos) { const u = l.t / .7; c.beginPath(); l.poly.forEach((p, i) => i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)); c.closePath(); c.fillStyle = `rgba(255,255,255,${(l.hit ? .5 : .16) * (1 - u)})`; c.fill(); c.strokeStyle = `rgba(255,214,102,${1 - u})`; c.lineWidth = 4; c.stroke(); }
+  // bows
+  for (const b of bows) {
+    if (b.x < vx0 || b.x > vx1 || b.y < vy0 || b.y > vy1) continue;
+    const sp = bowSprite(b.ci), s = (b.v > 1 ? 1.05 : .78) * Math.min(1, b.age * 5 + .2) * (1 + Math.sin(t * 4 + b.ph) * .08);
+    c.save(); c.translate(b.x, b.y); c.rotate(Math.sin(t * 2 + b.ph) * .5); c.drawImage(sp, -13 * s, -9 * s, 26 * s, 18 * s); c.restore();
+  }
+  // kite shadows on the land below, then the kites (player last)
+  c.save(); c.translate(9, 14); c.lineCap = "round"; c.lineJoin = "round"; c.strokeStyle = "rgba(30,50,60,.13)";
+  for (const k of kites) if (k.alive && vis(k, vx0, vx1, vy0, vy1)) { ribbonPath(c, k); c.lineWidth = k.w * 2; c.stroke(); }
+  c.restore();
+  for (const k of kites) if (k.alive && k !== me && vis(k, vx0, vx1, vy0, vy1)) drawKite(c, k, t);
+  if (me && me.alive) drawKite(c, me, t);
+  for (const k of kites) {
+    if (!k.alive || k === me || !vis(k, vx0, vx1, vy0, vy1) || demo) continue;
+    draw.text(c, k.name, k.x, k.y - k.w * 2.1 - 13, { size: 11 / cam.z * S, color: "#fff", stroke: "rgba(31,53,80,.55)", strokeW: 3 / cam.z });
+    if (k.mood === "hunt" && k.prey === me) draw.text(c, "!", k.x, k.y - k.w * 2.1 - 30 / cam.z, { size: 20 / cam.z, color: "#ff3355", stroke: "#fff", strokeW: 4 / cam.z });
+  }
+  fx.draw(c);
+  c.restore();
+  if (demo) return;
+  hud(c, t, heat);
+}
+function vis(k, x0, x1, y0, y1) { const b = k.bb; return b.x1 > x0 && b.x0 < x1 && b.y1 > y0 && b.y0 < y1; }
+function hud(c, t, heat) {
+  const W = Lab.W, py = Lab.play.y, left = Lab.play.x + 10, right = Lab.play.x + Lab.play.w - 10;
+  // timer pill with the sinking sun
+  const rem = Math.max(0, ROUND - T), tw = 84, tx = W / 2 - tw / 2, urgent = rem < 20;
+  draw.rect(c, tx, py + 6, tw, 26, 13, urgent && Math.sin(t * 8) > 0 ? "#ff4f6d" : "rgba(255,255,255,.86)");
+  draw.circle(c, tx + 16, py + 19, 7, Lab.color.mix("#ffc933", "#ff6b35", heat));
+  draw.text(c, Math.floor(rem / 60) + ":" + String(Math.floor(rem % 60)).padStart(2, "0"), tx + 52, py + 20, { size: 15, color: urgent && Math.sin(t * 8) > 0 ? "#fff" : INK });
+  // tail chip
+  draw.rect(c, left, py + 6, 88, 26, 13, "rgba(255,255,255,.86)"); draw.text(c, "TAIL", left + 12, py + 20, { size: 10.5, color: "#5a7892", align: "left" });
+  draw.text(c, String(me.len), left + 78, py + 20, { size: 15, color: me.boost && me.len > 12 ? "#ff4f6d" : INK, align: "right" });
+  // leaderboard: top three, plus you
+  lbT -= 1; if (lbT <= 0) { lbT = 12; board = kites.filter(k => k.alive && !k.dumb).sort((a, b) => b.len - a.len); }
+  const mine = board.indexOf(me), rows = board.slice(0, 3); if (mine > 2) rows.push(me);
+  const lw = 112, lx = right - lw, rh = 17; draw.rect(c, lx, py + 6, lw, rows.length * rh + 10, 12, "rgba(255,255,255,.8)");
+  rows.forEach((k, i) => {
+    const y = py + 20 + i * rh, pos = k === me ? mine + 1 : i + 1, col = k === me ? "#ff2f55" : INK;
+    draw.circle(c, lx + 13, y, 4.5, k.col); draw.text(c, pos + ". " + k.name, lx + 22, y + .5, { size: 11.5, color: col, align: "left", weight: k === me ? 800 : 600 });
+    draw.text(c, String(k.len), lx + lw - 9, y + .5, { size: 11.5, color: col, align: "right" });
+  });
+  // minimap
+  const mr = clamp(Math.min(W, Lab.H) * .1, 34, 52), mx = right - mr, my = Lab.H - Lab.safe.bottom - mr - 34, k0 = mr / R0;
+  draw.circle(c, mx, my, mr + 3, "rgba(58,64,104,.55)"); draw.circle(c, mx, my, R * k0, "rgba(255,255,255,.72)");
+  for (const k of kites) if (k.alive && k !== me) draw.circle(c, mx + k.x * k0, my + k.y * k0, 2 + Math.min(2.5, k.len / 60), k.col);
+  if (me.alive) { draw.circle(c, mx + me.x * k0, my + me.y * k0, 4.2, "#fff", "#ff2f55", 2.5); }
+  // floating stick with the dash ring
+  if (stick) {
+    const r = ringR(), far = stick.far && me.len > 12; draw.circle(c, stick.ox, stick.oy, r, far ? "rgba(255,79,109,.16)" : "rgba(255,255,255,.14)", far ? "#ff4f6d" : "rgba(255,255,255,.75)", 3);
+    const vx = stick.x - stick.ox, vy = stick.y - stick.oy, m = Math.hypot(vx, vy) || 1, q = Math.min(m, r * 1.25);
+    draw.circle(c, stick.ox + vx / m * q, stick.oy + vy / m * q, 17, far ? "#ff4f6d" : "rgba(255,255,255,.9)");
+    draw.text(c, "DASH", stick.ox, stick.oy - r - 11, { size: 10.5, color: far ? "#ff2f55" : "rgba(255,255,255,.85)", stroke: far ? "#fff" : "rgba(31,53,80,.4)", strokeW: 3 });
+  }
+}
+function frame(dt, t) {
+  update(dt);
+  if (over) return;
+  follow(me, dt);
+  // audio: wind follows speed, music follows the clock and how close the nearest ribbon is
+  let near = 400; for (const k of kites) if (k !== me && k.alive) near = Math.min(near, Lab.dist(k.x, k.y, me.x, me.y));
+  const dash = me.boost && me.len > 12; wind.set({ vol: dash ? .11 : .028, f: dash ? 950 : 480 });
+  Lab.music.intensity(clamp(.25 + T / ROUND * .45 + (1 - near / 400) * .3, 0, 1));
+  render(t);
+}
+function follow(k, dt) {
+  const la = 46; cam.x = Lab.damp(cam.x, k.x + Math.cos(k.ang) * la, 5, dt); cam.y = Lab.damp(cam.y, k.y + Math.sin(k.ang) * la, 5, dt);
+  cam.z = Lab.damp(cam.z, S * lerp(1.08, .66, clamp((k.len - START) / 190, 0, 1)), 1.6, dt);
+}
+function attract(dt, t) {
+  if (!demo || !kites) { demo = true; reset(); T = 60; }
+  update(dt); let k = kites[0]; for (const o of kites) if (o.alive && (!k.alive || o.len > k.len)) k = o;
+  follow(k, dt * .5); render(t);
+}
+Lab.boot();
+})();
+</script></body></html>

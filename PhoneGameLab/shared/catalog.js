@@ -158,7 +158,8 @@ window.LAB_GAMES = [
     "t": "Hedgeroll",
     "d": "Curl up, roll till you bump, find the burrow.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--54-hedgeroll.jpg"
    },
    {
     "n": 55,
@@ -166,7 +167,8 @@ window.LAB_GAMES = [
     "t": "Glasswright",
     "d": "Swivel the mirrors. Wake every lantern.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--55-glasswright.jpg"
    },
    {
     "n": 56,
@@ -174,21 +176,32 @@ window.LAB_GAMES = [
     "t": "Shuteye Street",
     "d": "Bedtime on the block. Knock the lights out.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--56-shuteye-street.jpg"
    },
    {
     "n": 57,
     "slug": "57-soundings",
     "t": "Soundings",
     "d": "Chart the bay. Buoy every reef.",
-    "v2": true
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--57-soundings.jpg"
+   },
+   {
+    "n": 58,
+    "slug": "58-alphabroth",
+    "t": "Alphabroth",
+    "d": "Fish every word out of the soup.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 59,
-    "slug": "59-nonogram",
-    "t": "Nonogram",
-    "d": "Use hints to fill the correct cells.",
-    "thumb": "../thumbs/PhoneGameLab--59-nonogram.jpg"
+    "slug": "59-purlwise",
+    "t": "Purlwise",
+    "d": "Read the pattern. Knit the picture.",
+    "v2": true
    },
    {
     "n": 60,
@@ -345,6 +358,13 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--52-tideglass.jpg"
+   },
+   {
+    "n": 62,
+    "slug": "62-ribbon-rodeo",
+    "t": "Ribbon Rodeo",
+    "d": "Fly a fighter kite. Lasso the whole sky.",
+    "v2": true
    }
   ]
  },
@@ -591,17 +611,6 @@ window.LAB_GAMES = [
   ]
  },
  {
-  "cat": "Minigame",
-  "items": [
-   {
-    "n": 58,
-    "slug": "58-alphabroth",
-    "t": "Word Search",
-    "d": "Drag across letters to find hidden words."
-   }
-  ]
- },
- {
   "cat": ".io & Idle",
   "items": [
    {
@@ -610,13 +619,6 @@ window.LAB_GAMES = [
     "t": "Snake",
     "d": "Eat fruit — don't bite yourself.",
     "thumb": "../thumbs/PhoneGameLab--61-snake.jpg"
-   },
-   {
-    "n": 62,
-    "slug": "62-slither",
-    "t": "Slither",
-    "d": "Eat dots, grow long, dodge the snake.",
-    "thumb": "../thumbs/PhoneGameLab--62-slither.jpg"
    },
    {
     "n": 63,

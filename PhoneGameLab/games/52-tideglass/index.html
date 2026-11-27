@@ -11,7 +11,7 @@
  *        through the well that packs every column down — all the holes you buried close up — and any rows that
  *        complete are cleared at ×1.5. Stack rough and fast, then cash it in; or save it for an emergency.
  * Touch: drag sideways to move (column-accurate, wall-anchored), tap to rotate (left half = counter-clockwise),
- *        drag down to sink, flick down to drop, swipe up (or tap the box) to hold. Keys: arrows with DAS/ARR, Z/X/Up,
+ *        drag down to sink (by distance, any speed), flick down to drop (by speed, sampled per frame), swipe up (or tap the box) to hold. Keys: arrows with DAS/ARR, Z/X/Up,
  *        Space, C, T. Ghost piece, hold, 3-piece preview, 7-bag, wall/floor kicks, 0.5 s lock delay with move reset.
  * Late game: speed levels every 8 lines; from level 4 small glass shards join the bag; from level 5 the sea pushes
  *        rows of pebbles up from below (countdown shown under the well). */
@@ -123,27 +123,29 @@ function start() {
   Lab.input.onDown = [(x, y) => {
     if (!alive) return; g = null;
     for (const b of btns) if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { b.fn(); return; }
-    if (cur) g = { x0: x, y0: y, col0: cur.x, t0: performance.now(), hOn: false, vOn: false, dead: false, id: curId, hist: [[performance.now(), x, y]], sx: x, sy: y };
+    if (cur) g = { x0: x, y0: y, col0: cur.x, t0: performance.now(), hOn: false, vOn: false, dead: false, id: curId, hist: [[performance.now(), x, y]], sx: x, sy: y, ax: x, ay: y };
   }];
   Lab.input.onMove = [(x, y) => {
     if (!g || g.dead || !Lab.input.down || !cur) return; const now = performance.now(), step = cell * .92;
-    if (g.id !== curId) { g.id = curId; g.x0 = x; g.y0 = y; g.col0 = cur.x; g.hOn = g.vOn = false; g.hist = []; g.fresh = true; }   // a new piece spawned under the finger: re-anchor
-    g.hist.push([now, x, y]); while (g.hist.length > 1 && now - g.hist[0][0] > 110) g.hist.shift();
-    const h0 = g.hist[0], vy = y - h0[2], vx = x - h0[1], dx = x - g.x0, dy = y - g.y0;
-    if (vy > Math.max(56, cell * 1.6) && Math.abs(vx) < vy * .6) { hardDrop(); g.dead = true; return; }                      // flick down
+    if (g.id !== curId) { g.id = curId; g.x0 = x; g.y0 = y; g.col0 = cur.x; g.hOn = g.vOn = false; g.hist = [[now, x, y]]; g.ax = x; g.ay = y; g.fresh = true; }   // a new piece spawned under the finger: re-anchor
+    const dx = x - g.x0, dy = y - g.y0;
     if (!g.hOn && !g.vOn && dy < -38 && -dy > Math.abs(dx) * 1.5) { doHold(); g.dead = true; return; }                        // swipe up
     if (!g.hOn && Math.abs(dx) > 9 && Math.abs(dx) > Math.abs(dy) * .8) g.hOn = true;
-    if (!g.vOn && vy > 12 && vy > Math.abs(vx) * 1.5 && now - g.t0 > 130) { g.vOn = true; g.yv = y - 4; g.rowv = cur.y; }
+    // sink: distance-based (any speed). The anchor is the highest point since the last column step, so thumb drift during a sideways drag never sinks.
+    if (y < g.ay) { g.ay = y; g.ax = x; }
+    if (!g.vOn && y - g.ay > 16 && y - g.ay > Math.abs(x - g.ax) * 1.2 && now - g.t0 > 130) { g.vOn = true; g.yv = g.ay; g.rowv = cur.y; }
     if (g.hOn) {
-      const target = g.col0 + Math.round(dx / step); let blocked = 0;
+      const target = g.col0 + Math.round(dx / step), xb = cur.x; let blocked = 0;
       while (cur.x < target) if (!move(1)) { blocked = 1; break; } while (cur.x > target) if (!move(-1)) { blocked = -1; break; }
-      if (blocked) { g.col0 = cur.x; g.x0 = x - blocked * step * .45; }                                                      // wall-anchored: reversing responds at once
+      if (blocked) { g.col0 = cur.x; g.x0 = x - blocked * step * .45; } if (cur.x !== xb && !g.vOn) { g.ax = x; g.ay = y; }                                                      // wall-anchored: reversing responds at once
     }
     if (g.vOn) { const target = g.rowv + Math.floor((y - g.yv) / cell); while (cur && cur.y < target && sink()); }
   }];
   Lab.input.onUp = [(x, y) => {
-    if (!g) return; const q = g; g = null; if (q.dead || q.hOn || q.vOn || q.fresh || !cur) return;
-    if (Math.hypot(x - q.sx, y - q.sy) < 12 && performance.now() - q.t0 < 320) rotate(x < Lab.W / 2 ? -1 : 1);
+    if (!g) return; const q = g, held = performance.now() - q.t0, fy = y - q.sy; g = null; if (q.dead || q.fresh || !cur) return;
+    if (!q.hOn && held < 260 && fy > Math.max(56, cell * 1.6) && fy > Math.abs(x - q.sx) * 1.7) { hardDrop(); return; }                 // a short swipe that ended before a frame could measure it
+    if (q.hOn || q.vOn) return;
+    if (Math.hypot(x - q.sx, y - q.sy) < 12 && held < 320) rotate(x < Lab.W / 2 ? -1 : 1);
   }];
   Lab.input.onKey = [(k, e) => {
     if (!alive) return; const key = k.length === 1 ? k.toLowerCase() : k;
@@ -182,6 +184,13 @@ function update(dt) {
   if (grounded()) { lockT += dt; if (lockT >= LOCK) lock(false); } else lockT = 0;
 }
 function frame(dt, t) {
+  // flick down = hard drop. Speed is sampled once per frame on the real clock (not per pointer event), so the result
+  // does not depend on how often, or in what bursts, the browser delivers move events.
+  if (g && !g.dead && cur && g.id === curId && Lab.input.down) {
+    const now = performance.now(), x = Lab.input.x, y = Lab.input.y, h = g.hist; h.push([now, x, y]); while (h.length > 2 && now - h[1][0] > 110) h.shift();
+    const fy = y - h[0][2], ms = now - h[0][0];
+    if (fy > Math.max(56, cell * 1.6) && fy > Math.abs(x - h[0][1]) * 1.7 && fy / ms > .5) { hardDrop(); g.dead = true; }
+  }
   update(dt);
   let top = ROWS; for (let r = 0; r < ROWS && top === ROWS; r++) if (board[r].some(v => v)) top = r;
   danger = alive && top < HID + 5; Lab.music.intensity(clamp((ROWS - top) / 16, .15, 1));
