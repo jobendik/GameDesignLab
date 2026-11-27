@@ -2910,7 +2910,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--gulp-and-float.jpg"
   },
   {
    "id": "PhoneGameLab2/happy-connect",
@@ -3255,7 +3256,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--pack-ice.jpg"
   },
   {
    "id": "PhoneGameLab2/pier-pressure",
@@ -3273,7 +3275,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--pier-pressure.jpg"
   },
   {
    "id": "PhoneGameLab2/pinata-drop",

@@ -505,7 +505,8 @@ window.LAB_GAMES = [
     "t": "Pack Ice",
     "d": "Slide ice blocks in from any side. Fill a line to crack it.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--pack-ice.jpg"
    },
    {
     "slug": "stew-patch",
@@ -552,7 +553,8 @@ window.LAB_GAMES = [
     "t": "Gulp & Float",
     "d": "Ride a bubble to the stars. Gulp fireflies, dodge the prickles.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--gulp-and-float.jpg"
    },
    {
     "slug": "lilypad-lunch",
@@ -567,7 +569,8 @@ window.LAB_GAMES = [
     "t": "Pier Pressure",
     "d": "Bumper cars on a sinking pier. Bonk your pals into the bay.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--pier-pressure.jpg"
    },
    {
     "slug": "sunny-soak",
