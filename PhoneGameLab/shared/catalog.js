@@ -81,6 +81,13 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab--07-beetle-box.jpg"
    },
    {
+    "n": 43,
+    "slug": "43-plumpling",
+    "t": "Plumpling",
+    "d": "Slide, squish and serve the tray.",
+    "v2": true
+   },
+   {
     "n": 44,
     "slug": "44-match-3",
     "t": "Match 3",
@@ -318,7 +325,16 @@ window.LAB_GAMES = [
     "t": "Blacktop Buzzer",
     "d": "Night hoops against the clock.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--39-blacktop-buzzer.jpg"
+   },
+   {
+    "n": 41,
+    "slug": "41-goal-flick",
+    "t": "Postage Stamp",
+    "d": "Bend free kicks into the top corner.",
+    "v2": true,
+    "thumb": "../thumbs/PhoneGameLab--41-goal-flick.jpg"
    },
    {
     "n": 42,
@@ -326,7 +342,8 @@ window.LAB_GAMES = [
     "t": "Bamboo Span",
     "d": "Grow a stalk, tip it over, roll across.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--42-bamboo-span.jpg"
    }
   ]
  },
@@ -401,8 +418,9 @@ window.LAB_GAMES = [
    {
     "n": 35,
     "slug": "35-cake-tower",
-    "t": "Cake Tower",
-    "d": "Drop swinging layers — perfect timing.",
+    "t": "Teeter Torte",
+    "d": "Swing it, drop it, keep it standing.",
+    "v2": true,
     "thumb": "../thumbs/PhoneGameLab--35-cake-tower.jpg"
    },
    {
@@ -418,7 +436,8 @@ window.LAB_GAMES = [
     "t": "Tumblepeg",
     "d": "Drop, thump and ping past the quota.",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab--38-tumblepeg.jpg"
    },
    {
     "n": 40,
@@ -426,14 +445,8 @@ window.LAB_GAMES = [
     "t": "Brass Pocket",
     "d": "Pot them all before your shots run dry.",
     "v2": true,
-    "score": 8
-   },
-   {
-    "n": 41,
-    "slug": "41-goal-flick",
-    "t": "Goal Flick",
-    "d": "Flick the ball past the keeper.",
-    "thumb": "../thumbs/PhoneGameLab--41-goal-flick.jpg"
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--40-brass-pocket.jpg"
    }
   ]
  },
@@ -527,7 +540,8 @@ window.LAB_GAMES = [
     "t": "Snug",
     "d": "Become the shape. Slip through.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--33-snug.jpg"
    },
    {
     "n": 34,
@@ -535,7 +549,8 @@ window.LAB_GAMES = [
     "t": "Antiquity",
     "d": "Haul stone. Mind the wobble.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--34-antiquity.jpg"
    }
   ]
  },
@@ -550,17 +565,6 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--37-star-jar.jpg"
-   }
-  ]
- },
- {
-  "cat": "Minigame",
-  "items": [
-   {
-    "n": 43,
-    "slug": "43-plumpling",
-    "t": "2048",
-    "d": "Swipe to slide tiles. Merge equal numbers to reach 2048."
    }
   ]
  },

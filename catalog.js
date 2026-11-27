@@ -1691,7 +1691,8 @@ window.GDL_CATALOG = {
    "n": 33,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--33-snug.jpg"
   },
   {
    "id": "PhoneGameLab/34-antiquity",
@@ -1710,23 +1711,25 @@ window.GDL_CATALOG = {
    "n": 34,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--34-antiquity.jpg"
   },
   {
    "id": "PhoneGameLab/35-cake-tower",
    "path": "PhoneGameLab/games/35-cake-tower/index.html",
    "collection": "PhoneGameLab",
-   "title": "Cake Tower",
-   "desc": "Drop swinging layers — perfect timing.",
+   "title": "Teeter Torte",
+   "desc": "Swing it, drop it, keep it standing.",
    "genre": [
     "Stack & Physics"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 35,
-   "v2": false,
+   "v2": true,
    "thumb": "thumbs/PhoneGameLab--35-cake-tower.jpg"
   },
   {
@@ -1783,7 +1786,8 @@ window.GDL_CATALOG = {
    "n": 38,
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--38-tumblepeg.jpg"
   },
   {
    "id": "PhoneGameLab/39-blacktop-buzzer",
@@ -1802,7 +1806,8 @@ window.GDL_CATALOG = {
    "n": 39,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--39-blacktop-buzzer.jpg"
   },
   {
    "id": "PhoneGameLab/40-brass-pocket",
@@ -1821,23 +1826,25 @@ window.GDL_CATALOG = {
    "n": 40,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--40-brass-pocket.jpg"
   },
   {
    "id": "PhoneGameLab/41-goal-flick",
    "path": "PhoneGameLab/games/41-goal-flick/index.html",
    "collection": "PhoneGameLab",
-   "title": "Goal Flick",
-   "desc": "Flick the ball past the keeper.",
+   "title": "Postage Stamp",
+   "desc": "Bend free kicks into the top corner.",
    "genre": [
-    "Stack & Physics"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 41,
-   "v2": false,
+   "v2": true,
    "thumb": "thumbs/PhoneGameLab--41-goal-flick.jpg"
   },
   {
@@ -1857,23 +1864,25 @@ window.GDL_CATALOG = {
    "n": 42,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--42-bamboo-span.jpg"
   },
   {
    "id": "PhoneGameLab/43-plumpling",
    "path": "PhoneGameLab/games/43-plumpling/index.html",
    "collection": "PhoneGameLab",
-   "title": "2048",
-   "desc": "Swipe to slide tiles. Merge equal numbers to reach 2048.",
+   "title": "Plumpling",
+   "desc": "Slide, squish and serve the tray.",
    "genre": [
-    "Minigame"
+    "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 43,
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab/44-match-3",
