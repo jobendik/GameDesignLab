@@ -1,0 +1,257 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Shuteye Street</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* SHUTEYE STREET — it is bedtime and every house on the street still has lamps on. Knock on a window and that flat
+ * and its neighbours flip their switches; get the whole house dark.
+ * Identity: a townhouse façade at dusk — warm lamp-lit windows with little silhouettes against a plum-and-peach sky,
+ *           lullaby-slow music that thins out as the lights go off, a moon that nods off when you win.
+ * Levels:   each house number is generated from itself by knocking a dark house awake, so it is always solvable.
+ *           A linear solver (Gaussian elimination mod 2 / mod 3 + null-space search) finds the fewest knocks = par
+ *           and powers the hint. Houses grow 3×3 → 5×7.
+ * Variants: knocks that carry diagonally, "busybody" houses where all eight neighbours flip, and three-step lamps
+ *           (bright → dim → off). Undo / restart / hint, stars per house, progress saved.                       */
+Lab.init({
+  title: "Shuteye Street", tagline: "Bedtime on the block. Every knock flips the neighbours.", category: "Puzzle & Logic",
+  howto: ["Tap a window: it and its neighbours flip", "Get every window in the house dark", "Match par knocks for three stars"],
+  theme: { bg: "#15122a", bg2: "#4a2c6a", accent: "#ffd76a", accent2: "#ff8fa3" },
+  orient: "any", music: { style: "chill", key: "Eb", bpm: 72, vol: .42 }, restart: start, formatScore: n => "No. " + n, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU;
+const SHAPES = [[[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]], [[0, 0], [1, 1], [-1, -1], [1, -1], [-1, 1]], [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]];
+const SHAPE_N = ["neighbours", "diagonals", "all around"];
+/* cols, rows, shape, lamp steps, knocks used to scramble */
+const TABLE = [[3, 3, 0, 2, 1], [3, 3, 0, 2, 2], [3, 4, 0, 2, 3], [4, 4, 0, 2, 3], [4, 4, 0, 2, 4], [4, 5, 0, 2, 5], [4, 5, 1, 2, 3], [4, 5, 1, 2, 5], [5, 5, 0, 2, 6], [5, 6, 0, 2, 7], [4, 4, 0, 3, 3],
+  [4, 5, 0, 3, 5], [5, 5, 1, 2, 7], [5, 6, 0, 2, 9], [5, 6, 0, 3, 7], [4, 5, 2, 2, 4], [5, 6, 1, 2, 9], [5, 6, 2, 2, 6], [5, 7, 0, 2, 11], [5, 6, 1, 3, 7], [5, 7, 0, 3, 9], [5, 7, 2, 2, 8]];
+let L, prog, s, vis, moves, hist, hintI, hintT, hintUsed, mode, winT, hover, cursor, kbd, demo, demoT, demoLv = 9, tip;
+let land, flip, cell, gx, gy, bw, bh, pad, baseH, ui = { btn: [] }, pressT = {}, onBtn = false;
+
+/* ------------------------------------------------------------------ solver + generator */
+/* Fewest knocks that darken state s: solve A·x = s (mod k), then search the null space for the lightest solution. */
+function solve(l, st) {
+  const N = l.N, k = l.k, M = [], pc = []; let row = 0;
+  for (let j = 0; j < N; j++) { const r = new Int8Array(N + 1); for (const i of l.nb[j]) r[i] = 1; r[N] = st[j]; M.push(r); }
+  for (let c = 0; c < N && row < N; c++) {
+    let p = -1; for (let r = row; r < N; r++) if (M[r][c]) { p = r; break; } if (p < 0) continue;
+    const t = M[p]; M[p] = M[row]; M[row] = t; const inv = M[row][c];                         // 1⁻¹ = 1, 2⁻¹ = 2 (mod 3)
+    if (inv !== 1) for (let x = c; x <= N; x++) M[row][x] = M[row][x] * inv % k;
+    for (let r = 0; r < N; r++) if (r !== row && M[r][c]) { const f = M[r][c]; for (let x = c; x <= N; x++) M[r][x] = ((M[r][x] - f * M[row][x]) % k + k) % k; }
+    pc[row++] = c;
+  }
+  for (let r = row; r < N; r++) if (M[r][N]) return null;
+  const x = new Int8Array(N), isP = new Uint8Array(N), basis = []; for (let r = 0; r < row; r++) { x[pc[r]] = M[r][N]; isP[pc[r]] = 1; }
+  for (let f = 0; f < N && basis.length < (k === 2 ? 12 : 7); f++) if (!isP[f]) { const v = new Int8Array(N); v[f] = 1; for (let r = 0; r < row; r++) v[pc[r]] = (k - M[r][f]) % k; basis.push(v); }
+  let bw = 1e9, bx = null;
+  (function rec(d) {
+    if (d === basis.length) { let w = 0; for (let i = 0; i < N; i++) w += x[i]; if (w < bw) { bw = w; bx = x.slice(); } return; }
+    for (let c = 0; c < k; c++) { rec(d + 1); const b = basis[d]; for (let i = 0; i < N; i++) x[i] = (x[i] + b[i]) % k; }
+  })(0);
+  return { x: bx, w: bw };
+}
+function spec(n) { if (n <= TABLE.length) return TABLE[n - 1]; const m = n - TABLE.length - 1, b = TABLE[14 + m % 8]; return [b[0], b[1], b[2], b[3], Math.min(14, b[4] + 1 + (m / 8 | 0))]; }
+function build(n) {
+  const [cols, rows, sh, k, p] = spec(n), N = cols * rows, l = { n, cols, rows, N, k, sh, nb: [] };
+  for (let i = 0; i < N; i++) { const c = i % cols, r = (i / cols) | 0; l.nb.push(SHAPES[sh].map(o => [c + o[0], r + o[1]]).filter(o => o[0] >= 0 && o[0] < cols && o[1] >= 0 && o[1] < rows).map(o => o[1] * cols + o[0])); }
+  let best = null;
+  for (let a = 0; a < 30; a++) {
+    const rnd = Lab.rng(n * 4409 + a * 97 + 3), st = new Int8Array(N), ids = Array.from({ length: N }, (_, i) => i);
+    for (let i = N - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0, t = ids[i]; ids[i] = ids[j]; ids[j] = t; }
+    for (let q = 0; q < Math.min(p, N); q++) { const times = k === 3 && rnd() < .35 ? 2 : 1; for (let u = 0; u < times; u++) for (const j of l.nb[ids[q]]) st[j] = (st[j] + 1) % k; }
+    const r = solve(l, st); if (!r || !r.w) continue;
+    if (!best || Math.abs(r.w - p) < Math.abs(best.par - p)) { best = { init: st, par: r.w }; if (r.w === p) break; }
+  }
+  l.init = best.init; l.par = best.par; return l;
+}
+function load(n) {
+  L = build(n); s = L.init.slice(); const rnd = Lab.rng(n * 77 + 1);
+  vis = Array.from({ length: L.N }, (_, i) => ({ prev: s[i], tr: 1, v: (rnd() * 6) | 0, pop: 0 }));
+  moves = 0; hist = []; hintI = -1; hintT = 0; hintUsed = 0; mode = "play"; winT = 0; hover = -1; cursor = (L.N / 2) | 0;
+  tip = { 1: "Tap a window: it and its neighbours flip", 7: "In this house a knock carries diagonally", 11: "Bright lamps dim first, then go out", 16: "Busybodies: all eight neighbours flip" }[n] || "";
+  layout();
+}
+
+/* ------------------------------------------------------------------ layout */
+const X = (c, r) => gx + (flip ? r : c) * cell, Y = (c, r) => gy + (flip ? c : r) * cell;
+const CX = i => X(i % L.cols + .5, ((i / L.cols) | 0) + .5), CY = i => Y(i % L.cols + .5, ((i / L.cols) | 0) + .5);
+function cellAt(x, y) { const u = Math.floor((x - gx) / cell), v = Math.floor((y - gy) / cell), c = flip ? v : u, r = flip ? u : v; return c >= 0 && c < L.cols && r >= 0 && r < L.rows ? r * L.cols + c : -1; }
+function layout() {
+  const P = Lab.play; land = P.w > P.h * 1.05; flip = land;
+  const vc = flip ? L.rows : L.cols, vr = flip ? L.cols : L.rows, top = land ? 40 : 122, bot = land ? 16 : 96, side = land ? 158 : 0; baseH = land ? 30 : 42;
+  const aw = P.w - 56 - side, ah = P.h - top - bot - baseH - 12;
+  cell = Math.floor(Math.min(aw / vc, ah / vr, 90)); bw = cell * vc; bh = cell * vr; pad = cell * .14; gx = P.x + 28 + (aw - bw) / 2; gy = P.y + top + (ah - bh) * (land ? .5 : 1); ui.btn = [];
+  if (land) {
+    const x0 = P.x + P.w - side + 6, w = 68, h = 46, y0 = P.y + P.h - 3 * (h + 8) - 4; ui.tx = x0 + 72; ui.ty = P.y + 22; ui.moon = [gx - pad - 34 > P.x + 30 ? gx - pad - 40 : P.x + 30, P.y + 34, 17];
+    [["undo", 0, 0], ["restart", 1, 0], ["hint", 0, 1, 2], ["prev", 0, 2], ["next", 1, 2]].forEach(b => ui.btn.push({ id: b[0], x: x0 + b[1] * (w + 8), y: y0 + b[2] * (h + 8), w: b[3] ? w * 2 + 8 : w, h }));
+  } else {
+    const w = Math.min(64, (P.w - 28 - 32) / 5), h = 54, x0 = P.x + (P.w - (w * 5 + 32)) / 2, y0 = P.y + P.h - h - 12; ui.tx = P.x + 18; ui.ty = P.y + 22; ui.tipY = y0 - 15; ui.moon = [P.x + P.w * .5, P.y + 78, 21];
+    ["prev", "undo", "restart", "hint", "next"].forEach((id, i) => ui.btn.push({ id, x: x0 + i * (w + 8), y: y0, w, h }));
+  }
+  Lab.sprite.clear("bg:"); Lab.sprite.clear("w:");
+}
+Lab.onResize(() => { if (L) layout(); });
+const hit = (x, y) => ui.btn.find(b => x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 4 && y <= b.y + b.h + 4);
+
+/* ------------------------------------------------------------------ play */
+function flipCells(i, dir) {                                        // dir -1 = a knock (one step darker), +1 = undo
+  const k = L.k, c0 = i % L.cols, r0 = (i / L.cols) | 0;
+  for (const j of L.nb[i]) {
+    const d = Math.abs(j % L.cols - c0) + Math.abs(((j / L.cols) | 0) - r0), v = vis[j]; v.prev = s[j]; s[j] = (s[j] + k + dir) % k; v.tr = -d * .07; v.pop = 1;
+    Lab.audio.tone({ f: (s[j] ? 520 : 300) + (L.rows - ((j / L.cols) | 0)) * 28 + s[j] * 90, dur: .09, vol: .05, type: "sine", delay: d * .06 });
+  }
+}
+function knock(i) {
+  if (mode !== "play" || i < 0) return;
+  flipCells(i, -1); hist.push(i); moves++; hintT = 0; vis[i].pop = 1.4;
+  Lab.sfx("knock", { pitch: 1.25, vol: .55 }); Lab.buzz(8); fx.ring(CX(i), CY(i), { r0: cell * .2, r1: cell * (L.sh === 2 ? 1.5 : 1.2), color: "#fff3d6", width: 3, life: .4 });
+  if (tip && L.n === 1) tip = "";
+  if (s.every(v => !v)) win();
+}
+const rating = () => Math.max(1, Math.min(moves <= L.par ? 3 : moves <= L.par + 2 ? 2 : 1, 3 - hintUsed));
+function win() {
+  mode = "won"; winT = 0; if (demo) return;
+  const st = rating(), lv = L.n;
+  prog.stars[lv] = Math.max(prog.stars[lv] || 0, st); prog.max = Math.max(prog.max, lv + 1); prog.lvl = lv + 1; Lab.store.set("prog", prog);
+  ["G5", "Eb5", "C5", "Eb5", "Bb4"].forEach((n, i) => Lab.audio.note(n, { type: "sine", dur: .5, vol: .1, delay: .15 + i * .2 }));
+  for (let i = 0; i < 4; i++) Lab.after(.2 + i * .28, () => fx.text(gx + bw * (.2 + i * .2), gy - pad - 14, "z", { color: "#fff3d6", size: 16 + i * 4, life: 1.3, vy: -34 }));
+  const total = Object.values(prog.stars).reduce((a, b) => a + b, 0);
+  Lab.after(1.5, () => Lab.win({ title: st === 3 ? "Sweet dreams" : "Lights out", message: st === 3 ? "Not one knock more than needed." : hintUsed ? "Tucked in with a little help." : "It can be done in " + L.par + " knock" + (L.par > 1 ? "s" : "") + ".",
+    score: lv, scoreLabel: "House", button: "Next house", sound: false, stats: [["Knocks", moves + " / par " + L.par], ["Rating", "★".repeat(st) + "☆".repeat(3 - st)], ["Stars banked", total]] }));
+}
+function undo() { if (mode !== "play") return; if (!hist.length) return Lab.sfx("tick", { pitch: .5, vol: .5 }); flipCells(hist.pop(), 1); moves--; hintT = 0; Lab.sfx("flip", { pitch: .8 }); }
+function restart() { if (mode !== "play") return; for (let i = 0; i < L.N; i++) { vis[i].prev = s[i]; vis[i].tr = 0; s[i] = L.init[i]; } moves = 0; hist = []; hintT = 0; Lab.sfx("swish"); }
+function hint() {
+  if (mode !== "play") return; const r = solve(L, s); if (!r) return; const i = r.x.findIndex(v => v > 0); if (i < 0) return;
+  hintI = i; hintT = 4; if (!hintUsed) Lab.toast("Hint used — two stars at most", 1300, { y: .2 }); hintUsed = 1; Lab.sfx("chime", { vol: .6 });
+}
+function go(n) { if (n < 1 || n > prog.max || mode !== "play") return Lab.sfx("tick", { pitch: .5, vol: .5 }); prog.lvl = n; Lab.store.set("prog", prog); load(n); Lab.setScore(n); Lab.sfx("flip"); }
+
+function start() {
+  demo = false; kbd = false; prog = Lab.store.get("prog", null) || { lvl: 1, max: 1, stars: {} };
+  load(prog.lvl); Lab.setScore(L.n);
+  const acts = { undo, restart, hint, prev: () => go(L.n - 1), next: () => go(L.n + 1) };
+  Lab.input.onDown = [(x, y) => { const b = hit(x, y); onBtn = !!b; hover = -1; if (b) { pressT[b.id] = 1; acts[b.id](); return; } if (mode === "play") { hover = cellAt(x, y); if (hover >= 0) { kbd = false; Lab.sfx("tick", { vol: .35, pitch: 1.4 }); } } }];
+  Lab.input.onMove = [(x, y) => { if (hover >= 0 && Lab.input.down && cellAt(x, y) !== hover) hover = -1; }];       // slide off a window to cancel
+  Lab.input.onUp = [(x, y) => { const i = hover; hover = -1; if (i >= 0 && cellAt(x, y) === i) knock(i); }];
+  Lab.input.onKey = [k => {
+    if (mode !== "play") return; const d = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1] }[k];
+    if (d) { const g = flip ? [d[1], d[0]] : d, c = Lab.clamp(cursor % L.cols + g[0], 0, L.cols - 1), r = Lab.clamp(((cursor / L.cols) | 0) + g[1], 0, L.rows - 1); cursor = r * L.cols + c; kbd = true; Lab.sfx("tick", { vol: .4 }); return; }
+    if (k === " " || k === "Enter") { kbd = true; return knock(cursor); } k = k.toLowerCase();
+    if (k === "z" || k === "backspace") undo(); else if (k === "r") restart(); else if (k === "h") hint(); else if (k === "[") go(L.n - 1); else if (k === "]") go(L.n + 1);
+  }];
+  Lab.expose({ get level() { return L.n; }, get cols() { return L.cols; }, get rows() { return L.rows; }, get steps() { return L.k; }, get shape() { return L.sh; }, get cells() { return Array.from(s); }, get lit() { return s.reduce((a, v) => a + (v ? 1 : 0), 0); },
+    get moves() { return moves; }, get par() { return L.par; }, get mode() { return mode; }, get hint() { return hintT > 0 ? hintI : -1; }, get cursor() { return cursor; }, get progress() { return JSON.parse(JSON.stringify(prog)); },
+    get buttons() { return ui.btn.map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); }, nb(i) { return L.nb[i].slice(); }, solution() { const r = solve(L, s); return r ? Array.from(r.x) : null; }, xy(i) { return [CX(i), CY(i)]; }, rating, go });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+function tick(dt) {
+  for (const v of vis) { if (v.tr < 1) v.tr = Math.min(1, v.tr + dt * 4.5); v.pop = Math.max(0, v.pop - dt * 4); }
+  if (hintT > 0) hintT -= dt; if (mode === "won") winT += dt;
+  for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5);
+  if (!demo) Lab.music.intensity(.15 + .85 * s.reduce((a, v) => a + (v ? 1 : 0), 0) / L.N);
+}
+function attract(dt, t) {
+  if (!demo) { demo = true; prog = { stars: {}, max: 1 }; load(demoLv); demoT = 1.4; }
+  tick(dt);
+  if (mode === "play") { demoT -= dt; if (demoT <= 0) { const r = solve(L, s), i = r ? r.x.findIndex(v => v > 0) : -1; if (i >= 0) knock(i); demoT = .9; } }
+  if (mode === "won" && winT > 2) { demoLv = demoLv % 20 + 3; load(demoLv); demoT = 1.2; }
+  render(t);
+}
+
+/* ------------------------------------------------------------------ drawing */
+function bake() {
+  const W = Lab.W, H = Lab.H;
+  return Lab.sprite("bg:" + L.n + ":" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40); const rnd = Lab.rng(L.n * 13 + 5), bx = gx - pad, by = gy - pad, bW = bw + 2 * pad, bH = bh + 2 * pad + baseH, gnd = by + bH;
+    draw.vgrad(g, -40, -40, W + 80, gnd + 40, [[0, "#191a44"], [.45, "#4a2c6a"], [.8, "#b9557a"], [1, "#f2a66a"]]);
+    for (let i = 0; i < 70; i++) { const y = rnd() * gnd * .6; g.globalAlpha = (.3 + rnd() * .6) * (1 - y / (gnd * .62)); g.fillStyle = "#fff"; g.fillRect(rnd() * W, y, 1 + rnd() * 1.2, 1 + rnd() * 1.2); } g.globalAlpha = 1;
+    for (let x = -20; x < W + 20;) { const w = 26 + rnd() * 46, h = 30 + rnd() * Math.min(150, gnd * .28); g.fillStyle = rnd() < .5 ? "#3a2459" : "#2f1e4d"; g.fillRect(x, gnd - h, w, h); g.fillStyle = "rgba(255,215,106,.55)"; for (let q = 0; q < 3; q++) if (rnd() < .5) g.fillRect(x + 5 + rnd() * (w - 12), gnd - h + 6 + rnd() * (h - 14), 3, 4); x += w + rnd() * 6; }
+    g.fillStyle = "#15122a"; g.fillRect(-40, gnd, W + 80, H - gnd + 40); g.fillStyle = "#231d3f"; g.fillRect(-40, gnd, W + 80, 5);
+    // the house: chimney, cornice, brick body, ground floor with door + number plaque
+    draw.rect(g, bx + bW * .16, by - 30, cell * .26, 26, 2, "#3b2a55"); draw.rect(g, bx + bW * .16 - 3, by - 33, cell * .26 + 6, 6, 2, "#2c1f44");
+    draw.rect(g, bx + 5, by + 6, bW, bH - 6, 6, "rgba(0,0,0,.25)"); draw.rect(g, bx, by, bW, bH, 5, "#5d4474");
+    g.save(); draw.rr(g, bx, by, bW, bH, 5); g.clip(); g.strokeStyle = "rgba(20,10,40,.16)"; g.lineWidth = 1;
+    for (let y = by + 8, q = 0; y < by + bH; y += 9, q++) { g.beginPath(); g.moveTo(bx, y); g.lineTo(bx + bW, y); for (let x = bx + (q & 1 ? 9 : 0); x < bx + bW; x += 18) { g.moveTo(x, y); g.lineTo(x, y + 9); } g.stroke(); }
+    g.fillStyle = "rgba(255,170,120,.07)"; g.fillRect(bx, by, bW, bH * .4); g.fillStyle = "#4a3562"; g.fillRect(bx, gnd - baseH, bW, baseH); g.fillStyle = "#e9d9c0"; g.fillRect(bx, gnd - baseH - 3, bW, 4); g.restore();
+    draw.rect(g, bx - 7, by - 9, bW + 14, 13, 4, "#2c1f44"); draw.rect(g, bx - 7, by - 9, bW + 14, 4, 2, "#6d5486");
+    const dw = Math.min(30, baseH * .62), dh = baseH - 7, dx = bx + bW / 2 - dw / 2;
+    draw.rect(g, dx - 3, gnd - dh - 3, dw + 6, dh + 3, 4, "#e9d9c0"); draw.rect(g, dx, gnd - dh, dw, dh, 3, "#c2553f"); draw.circle(g, dx + dw - 6, gnd - dh / 2, 2, "#ffd76a");
+    draw.rect(g, dx + dw + 10, gnd - dh + 2, 40, 18, 5, "#f3e6d0", "#2c1f44", 1.5); draw.text(g, "No." + L.n, dx + dw + 30, gnd - dh + 11.5, { size: 11, color: "#2c1f44", weight: 800 });
+    for (const sx of [bx + bW * .14, bx + bW * .86]) { draw.circle(g, sx, gnd - 7, 9, "#2f5a4a"); draw.circle(g, sx + 7, gnd - 5, 7, "#3a6b57"); draw.circle(g, sx - 7, gnd - 5, 6, "#28503f"); }
+  });
+}
+function winSp(st, v) {
+  const bright = st === 2 || (st === 1 && L.k === 2);
+  return Lab.sprite("w:" + (bright ? 2 : st) + ":" + v + ":" + cell, cell, cell, g => {
+    const w = cell * .58, h = cell * .7, x = (cell - w) / 2, y = (cell - h) / 2 - cell * .03, ink = "rgba(70,40,30,.82)";
+    draw.rect(g, x - 4, y - 4, w + 8, h + 8, 5, "#e9d9c0"); g.save(); draw.rr(g, x, y, w, h, 2); g.clip();
+    if (!st) { draw.vgrad(g, x, y, w, h, ["#1b2347", "#2b3565"]); g.fillStyle = "rgba(255,255,255,.07)"; g.beginPath(); g.moveTo(x, y + h * .5); g.lineTo(x + w * .6, y); g.lineTo(x + w * .85, y); g.lineTo(x, y + h * .75); g.fill(); g.fillStyle = "#232c58"; g.fillRect(x, y, w * .2, h); g.fillRect(x + w * .8, y, w * .2, h); }
+    else {
+      draw.vgrad(g, x, y, w, h, bright ? ["#fff6c4", "#ffd35a"] : ["#f2a65e", "#c9703a"]); g.fillStyle = ink; const bx = x + w / 2, by = y + h;
+      if (v === 1) { g.beginPath(); g.ellipse(bx + w * .08, by - h * .13, w * .17, h * .15, 0, 0, TAU); g.fill(); g.beginPath(); g.arc(bx + w * .12, by - h * .32, w * .1, 0, TAU); g.fill(); g.beginPath(); g.moveTo(bx + w * .03, by - h * .36); g.lineTo(bx + w * .05, by - h * .47); g.lineTo(bx + w * .12, by - h * .4); g.lineTo(bx + w * .2, by - h * .47); g.lineTo(bx + w * .21, by - h * .36); g.fill(); g.lineWidth = w * .05; g.strokeStyle = ink; g.lineCap = "round"; g.beginPath(); g.moveTo(bx - w * .06, by - h * .05); g.quadraticCurveTo(bx - w * .26, by - h * .05, bx - w * .22, by - h * .2); g.stroke(); }                                   // cat
+      else if (v === 2) { g.beginPath(); g.moveTo(bx - w * .12, by - h * .16); g.lineTo(bx + w * .12, by - h * .16); g.lineTo(bx + w * .08, by); g.lineTo(bx - w * .08, by); g.fill(); for (const a of [-.7, 0, .7]) { g.beginPath(); g.ellipse(bx + Math.sin(a) * w * .14, by - h * .28 - Math.cos(a) * h * .04, w * .06, h * .13, a, 0, TAU); g.fill(); } }   // plant
+      else if (v === 3) { g.beginPath(); g.arc(bx - w * .05, by - h * .34, w * .12, 0, TAU); g.fill(); g.beginPath(); g.ellipse(bx - w * .05, by, w * .24, h * .22, 0, 0, TAU); g.fill(); }                                                // someone up late
+      else if (v === 4) { g.fillRect(bx + w * .13, by - h * .3, w * .035, h * .3); g.beginPath(); g.moveTo(bx + w * .05, by - h * .28); g.lineTo(bx + w * .25, by - h * .28); g.lineTo(bx + w * .2, by - h * .44); g.lineTo(bx + w * .1, by - h * .44); g.fill(); }  // lamp
+      g.fillStyle = bright ? "#e2785a" : "#a8553c"; g.beginPath(); g.moveTo(x, y); g.lineTo(x + w * .24, y); g.quadraticCurveTo(x + w * .2, y + h * .6, x, y + h * .85); g.fill(); g.beginPath(); g.moveTo(x + w, y); g.lineTo(x + w * .76, y); g.quadraticCurveTo(x + w * .8, y + h * .6, x + w, y + h * .85); g.fill();
+      if (!bright) { g.fillStyle = "#d9b98a"; g.fillRect(x, y, w, h * .46); g.strokeStyle = "rgba(90,50,30,.35)"; g.lineWidth = 1; for (let q = 1; q < 6; q++) { g.beginPath(); g.moveTo(x, y + h * .46 * q / 6); g.lineTo(x + w, y + h * .46 * q / 6); g.stroke(); } g.fillStyle = "#8a5a3a"; g.fillRect(x, y + h * .46 - 2, w, 3); }   // half-drawn blind = dim
+    }
+    g.restore(); g.fillStyle = "#e9d9c0"; g.fillRect(x + w / 2 - 1.5, y, 3, h); g.fillRect(x, y + h * .46 - 1.5, w, 3); draw.rect(g, x - 8, y + h + 3, w + 16, 6, 2, "#f6ecd9"); g.fillStyle = "rgba(0,0,0,.18)"; g.fillRect(x - 6, y + h + 9, w + 12, 2);
+  });
+}
+const glowSp = () => Lab.sprite("w:glow", 96, 96, g => { const gr = g.createRadialGradient(48, 48, 4, 48, 48, 48); gr.addColorStop(0, "rgba(255,200,100,.55)"); gr.addColorStop(1, "rgba(255,180,90,0)"); g.fillStyle = gr; g.fillRect(0, 0, 96, 96); });
+function icon(c, id, x, y, sz, col) {
+  c.strokeStyle = col; c.fillStyle = col; c.lineWidth = sz * .16; c.lineCap = "round"; c.lineJoin = "round"; c.beginPath();
+  if (id === "prev" || id === "next") { const k = id === "prev" ? -1 : 1; c.moveTo(x - k * sz * .22, y - sz * .42); c.lineTo(x + k * sz * .22, y); c.lineTo(x - k * sz * .22, y + sz * .42); c.stroke(); }
+  else if (id === "undo") { c.arc(x + sz * .05, y + sz * .1, sz * .36, Math.PI * 1.1, Math.PI * .45); c.stroke(); c.beginPath(); c.moveTo(x - sz * .52, y - sz * .42); c.lineTo(x - sz * .3, y - sz * .02); c.lineTo(x - sz * .02, y - sz * .34); c.closePath(); c.fill(); }
+  else if (id === "restart") { c.arc(x, y, sz * .38, -Math.PI * .35, Math.PI * 1.35); c.stroke(); c.beginPath(); c.moveTo(x + sz * .08, y - sz * .62); c.lineTo(x + sz * .5, y - sz * .36); c.lineTo(x + sz * .06, y - sz * .1); c.closePath(); c.fill(); }
+  else draw.text(c, "?", x, y + 1, { size: sz * 1.15, color: col, weight: 800 });
+}
+function rule(c, x, y) {                                            // 3×3 card showing which windows a knock flips
+  draw.rect(c, x - 19, y - 19, 38, 38, 8, "rgba(21,18,42,.55)", "rgba(255,243,214,.3)", 1);
+  for (let r = -1; r <= 1; r++) for (let q = -1; q <= 1; q++) { const u = flip ? r : q, v = flip ? q : r, on = SHAPES[L.sh].some(o => o[0] === q && o[1] === r); draw.rect(c, x + u * 11 - 4.5, y + v * 11 - 4.5, 9, 9, 2, on ? (q || r ? "#ffd76a" : "#fff6c4") : "rgba(255,255,255,.14)"); }
+}
+function render(t) {
+  const c = Lab.ctx, P = Lab.play, bg = bake(), gl = glowSp(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // moon: watches while lamps are on, nods off when the house is dark
+  { const [mx, my, mr] = ui.moon, k = mode === "won" ? ease.outBack(Math.min(1, winT * 1.6)) : 0; c.globalCompositeOperation = "lighter"; c.globalAlpha = .35 + k * .25; c.drawImage(gl, mx - mr * 2.6, my - mr * 2.6, mr * 5.2, mr * 5.2); c.globalAlpha = 1; c.globalCompositeOperation = "source-over";
+    draw.circle(c, mx, my, mr * (1 + k * .12), "#fff3d6"); draw.circle(c, mx - mr * .35, my - mr * .3, mr * .16, "rgba(210,190,160,.5)"); draw.circle(c, mx + mr * .4, my + mr * .35, mr * .11, "rgba(210,190,160,.5)");
+    c.strokeStyle = "#5d4474"; c.lineWidth = 2; c.lineCap = "round"; for (const q of [-1, 1]) { c.beginPath(); if (k > .5) c.arc(mx + q * mr * .33, my - mr * .05, mr * .14, .15 * Math.PI, .85 * Math.PI); else c.arc(mx + q * mr * .33, my - mr * .02, mr * .07, 0, TAU); c.stroke(); }
+    c.beginPath(); c.arc(mx, my + mr * .22, mr * (.2 + k * .1), .15 * Math.PI, .85 * Math.PI); c.stroke(); }
+  c.globalCompositeOperation = "lighter";
+  for (let i = 0; i < L.N; i++) { const v = vis[i], e = Lab.clamp(v.tr, 0, 1), a = (v.prev ? 1 - e : 0) * (v.prev / (L.k - 1)) + (s[i] ? e : 0) * (s[i] / (L.k - 1)); if (a > .01) { c.globalAlpha = a * (.75 + .08 * Math.sin(t * 2.3 + i * 1.7)); c.drawImage(gl, CX(i) - cell * .8, CY(i) - cell * .82, cell * 1.6, cell * 1.6); } }
+  c.globalCompositeOperation = "source-over"; c.globalAlpha = 1;
+  for (let i = 0; i < L.N; i++) {
+    const v = vis[i], x = CX(i), y = CY(i), e = Lab.clamp(v.tr, 0, 1), fl = e > 0 && e < 1 ? (Math.sin(e * 31) > -.2 ? 1 : .55) : 1, k = 1 + ease.pulse(Lab.clamp(v.pop, 0, 1)) * .07 - (hover === i ? .05 : 0);
+    c.save(); c.translate(x, y); c.scale(k, k); c.translate(-cell / 2, -cell / 2);
+    c.drawImage(winSp(0, v.v), 0, 0, cell, cell);
+    if (v.prev && e < 1) { c.globalAlpha = 1 - e; c.drawImage(winSp(v.prev, v.v), 0, 0, cell, cell); }
+    if (s[i] && e > 0) { c.globalAlpha = e * fl; c.drawImage(winSp(s[i], v.v), 0, 0, cell, cell); }
+    c.restore(); c.globalAlpha = 1;
+  }
+  const mark = hover >= 0 ? hover : kbd && mode === "play" ? cursor : -1;
+  if (mark >= 0) for (const j of L.nb[mark]) { const w = cell * .58 + 12, h = cell * .7 + 12; draw.rect(c, CX(j) - w / 2, CY(j) - h / 2 - cell * .03, w, h, 7, null, j === mark ? "#fff" : "rgba(255,255,255,.6)", j === mark ? 3 : 2); }
+  if (hintT > 0 && hintI >= 0 && mode === "play") { const u = (t * 1.5) % 1, x = CX(hintI), y = CY(hintI); c.globalAlpha = Math.min(1, hintT) * (1 - u); draw.circle(c, x, y, cell * (.2 + u * .45), null, "#fff", 3); c.globalAlpha = Math.min(1, hintT); draw.circle(c, x, y, cell * .13, "#ff8fa3", "#fff", 2.5); c.globalAlpha = 1; }
+  if (demo) return;
+  const best = prog.stars[L.n] || 0, kn = "Knocks " + moves + " / par " + L.par, over = moves > L.par, sub = L.k === 3 ? "3-step lamps" : SHAPE_N[L.sh], fg = "#fff3d6", mu = "#cdbfe8";
+  if (land) {
+    draw.text(c, "No. " + L.n, ui.tx - 22, ui.ty + 4, { size: 20, color: fg, weight: 800 }); rule(c, ui.tx + 42, ui.ty + 6); draw.text(c, sub, ui.tx, ui.ty + 36, { size: 12, color: mu, weight: 600 });
+    draw.text(c, kn, ui.tx, ui.ty + 57, { size: 14, color: over ? "#ff9d8a" : fg, weight: 700 });
+    for (let i = 0; i < 3; i++) draw.star(c, ui.tx - 22 + i * 22, ui.ty + 79, 8.5, i < best ? "#ffd76a" : "rgba(255,255,255,.2)", 5, .5);
+    if (tip) { const w = tip.split(" "), h = Math.ceil(w.length / 2); draw.text(c, w.slice(0, h).join(" "), ui.tx, ui.ty + 101, { size: 11.5, color: mu, weight: 600 }); draw.text(c, w.slice(h).join(" "), ui.tx, ui.ty + 115, { size: 11.5, color: mu, weight: 600 }); }
+  } else {
+    draw.text(c, "No. " + L.n, ui.tx, ui.ty, { size: 22, color: fg, weight: 800, align: "left" }); draw.text(c, "Shuteye Street", ui.tx, ui.ty + 22, { size: 13, color: mu, weight: 600, align: "left" });
+    rule(c, ui.tx + 19, ui.ty + 60); draw.text(c, sub, ui.tx + 46, ui.ty + 60, { size: 12.5, color: mu, weight: 600, align: "left" });
+    draw.text(c, kn, P.x + P.w - 18, ui.ty, { size: 15.5, color: over ? "#ff9d8a" : fg, weight: 700, align: "right" });
+    for (let i = 0; i < 3; i++) draw.star(c, P.x + P.w - 70 + i * 22, ui.ty + 23, 8.5, i < best ? "#ffd76a" : "rgba(255,255,255,.2)", 5, .5);
+    if (tip) draw.text(c, tip, P.x + P.w / 2, ui.tipY, { size: 14, color: fg, weight: 700 });
+  }
+  for (const b of ui.btn) {
+    const on = b.id === "prev" ? L.n > 1 : b.id === "next" ? L.n < prog.max : b.id === "undo" ? hist.length > 0 : true, dy = (pressT[b.id] || 0) * 3;
+    c.globalAlpha = on ? 1 : .4; draw.rect(c, b.x, b.y + 4, b.w, b.h, 14, "rgba(0,0,0,.45)"); draw.rect(c, b.x, b.y + dy, b.w, b.h, 14, "#3a2c5c", "#6d5486", 1.5);
+    icon(c, b.id, b.x + b.w / 2, b.y + b.h / 2 + dy, 22, b.id === "hint" ? "#ffd76a" : fg); c.globalAlpha = 1;
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

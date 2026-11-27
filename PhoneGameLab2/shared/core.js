@@ -858,7 +858,7 @@
       stage.appendChild(el);
       if (explicit) { // count-up
         const n = el.querySelector('#lab-final-n'), t0 = performance.now(), dur = reduced ? 1 : Math.min(900, 250 + Math.abs(score) * 4);
-        (function tick() { if (!n.isConnected) return; const u = Math.min(1, (performance.now() - t0) / dur); n.textContent = f(score * ease.outCubic(u)); if (u < 1) requestAnimationFrame(tick); else n.textContent = f(score); })();
+        (function tick() { if (!n.isConnected) return; const u = Math.min(1, (performance.now() - t0) / dur); n.textContent = f(Math.round(score * ease.outCubic(u))); if (u < 1) requestAnimationFrame(tick); else n.textContent = f(score); })();
       }
       setTimeout(() => { if (token === runId) { overlayReady = true; el.classList.add('lab-ready'); } }, 380); // guard against accidental instant restarts
       el.querySelector('#lab-again').onclick = () => { if (!overlayReady) return; unlockAudio(); Lab.sfx('tap'); Lab.restart(); };

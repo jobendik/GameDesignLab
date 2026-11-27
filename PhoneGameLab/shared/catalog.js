@@ -104,7 +104,8 @@ window.LAB_GAMES = [
     "t": "Fountain Court",
     "d": "Turn the tiles. Wake every fountain.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--47-fountain-court.jpg"
    },
    {
     "n": 48,
@@ -112,14 +113,17 @@ window.LAB_GAMES = [
     "t": "Decant",
     "d": "Pour until every bottle holds one flavour.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--48-decant.jpg"
    },
    {
     "n": 49,
     "slug": "49-tall-order",
     "t": "Tall Order",
     "d": "Stack every peg one colour, widest ring first.",
-    "v2": true
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--49-tall-order.jpg"
    },
    {
     "n": 50,
@@ -136,13 +140,6 @@ window.LAB_GAMES = [
     "d": "Slide the scene back together.",
     "v2": true,
     "score": 8
-   },
-   {
-    "n": 52,
-    "slug": "52-tetris",
-    "t": "Tetris",
-    "d": "Fit falling pieces, clear lines.",
-    "thumb": "../thumbs/PhoneGameLab--52-tetris.jpg"
    },
    {
     "n": 53,
@@ -169,10 +166,10 @@ window.LAB_GAMES = [
    },
    {
     "n": 56,
-    "slug": "56-lights-out",
-    "t": "Lights Out",
-    "d": "Toggle cells to turn off every light.",
-    "thumb": "../thumbs/PhoneGameLab--56-lights-out.jpg"
+    "slug": "56-shuteye-street",
+    "t": "Shuteye Street",
+    "d": "Bedtime on the block. Every knock flips the neighbours.",
+    "v2": true
    },
    {
     "n": 57,
@@ -341,6 +338,14 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--42-bamboo-span.jpg"
+   },
+   {
+    "n": 52,
+    "slug": "52-tideglass",
+    "t": "Tideglass",
+    "d": "Stack sea glass, then call the tide.",
+    "v2": true,
+    "score": 8
    }
   ]
  },

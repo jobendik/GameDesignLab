@@ -1982,7 +1982,8 @@ window.GDL_CATALOG = {
    "n": 47,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--47-fountain-court.jpg"
   },
   {
    "id": "PhoneGameLab/48-decant",
@@ -2001,7 +2002,8 @@ window.GDL_CATALOG = {
    "n": 48,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--48-decant.jpg"
   },
   {
    "id": "PhoneGameLab/49-tall-order",
@@ -2018,7 +2020,10 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 49,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--49-tall-order.jpg"
   },
   {
    "id": "PhoneGameLab/50-bolt-hole",
@@ -2059,21 +2064,23 @@ window.GDL_CATALOG = {
    "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/52-tetris",
-   "path": "PhoneGameLab/games/52-tetris/index.html",
+   "id": "PhoneGameLab/52-tideglass",
+   "path": "PhoneGameLab/games/52-tideglass/index.html",
    "collection": "PhoneGameLab",
-   "title": "Tetris",
-   "desc": "Fit falling pieces, clear lines.",
+   "title": "Tideglass",
+   "desc": "Stack sea glass, then call the tide.",
    "genre": [
-    "Puzzle & Logic"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 52,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--52-tetris.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/53-block-blast",
@@ -2131,21 +2138,21 @@ window.GDL_CATALOG = {
    "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/56-lights-out",
-   "path": "PhoneGameLab/games/56-lights-out/index.html",
+   "id": "PhoneGameLab/56-shuteye-street",
+   "path": "PhoneGameLab/games/56-shuteye-street/index.html",
    "collection": "PhoneGameLab",
-   "title": "Lights Out",
-   "desc": "Toggle cells to turn off every light.",
+   "title": "Shuteye Street",
+   "desc": "Bedtime on the block. Every knock flips the neighbours.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 56,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--56-lights-out.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/57-minesweeper",
