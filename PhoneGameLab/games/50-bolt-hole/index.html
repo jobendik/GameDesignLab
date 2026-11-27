@@ -1,0 +1,383 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Bolt Hole</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* BOLT HOLE — tinted acrylic plates are screwed to a pegboard through shared holes. Unscrew a screw and it must be
+ * parked in another free hole; a plate with no screws left drops off the board. Clear every plate within the turn budget.
+ * Identity: bright perspex offcuts on a cream workshop pegboard, steel / brass / black-oxide screws, ratchet clicks.
+ * Logic: a screw pins every plate whose hole it passes through; a solid part of a plate buries whatever is beneath it;
+ *        parking a screw in a plate's own empty hole pins that plate again — so the order and the parking spots matter.
+ * Depth: every level is generated from its number and solved by breadth-first search, so par is the true optimum
+ *        (3 stars = optimal). Later levels add keyed sockets (brass-only, steel-only, black-only), a taller board,
+ *        more layers. Undo is free, a hint costs the third star. Progress and stars persist. */
+Lab.init({
+  title: "Bolt Hole", tagline: "Unscrew, re-park, let the plates drop.", category: "Puzzle & Logic",
+  howto: ["Tap a screw, then tap a free hole to park it", "A plate drops when its last screw comes out", "Clear the board before the turns run out"],
+  theme: { bg: "#ddd6c4", bg2: "#f4efe2", fg: "#2d3142", muted: "#7d8194", accent: "#ef6f4a", accent2: "#1fa6a0", light: true },
+  orient: "any", music: { style: "funk", key: "C", bpm: 92, vol: .28 }, restart: start, attract,
+});
+const { draw, fx, clamp, ease } = Lab, TAU = Lab.TAU, shade = Lab.color.shade;
+const PCOL = ["#ef6f4a", "#1fa6a0", "#f2b33d", "#8a6fe0", "#4a9be8", "#8fbf3f", "#e8659c"];
+const KCOL = [0, "#d3d8e2", "#ecbb47", "#3d4257"], INK = "#2d3142", MUTED = "#8b8fa0";
+const P4 = Array.from({ length: 25 }, (_, i) => Math.pow(4, i));
+const BASE = {
+  I2: { p: [[0, 0], [1, 0]], l: [[0, 1]] }, I3: { p: [[0, 0], [1, 0], [2, 0]], l: [[0, 1, 2]] }, L3: { p: [[0, 0], [1, 0], [1, 1]], l: [[0, 1, 2]] },
+  D2: { p: [[0, 0], [1, 1]], l: [[0, 1]] }, SQ: { p: [[0, 0], [1, 0], [1, 1], [0, 1]], l: [[0, 1, 2, 3, 0]], fill: 1 }, V3: { p: [[0, 0], [1, 1], [2, 0]], l: [[0, 1, 2]] },
+  I4: { p: [[0, 0], [1, 0], [2, 0], [3, 0]], l: [[0, 1, 2, 3]] }, T4: { p: [[0, 0], [1, 0], [2, 0], [1, 1]], l: [[0, 1, 2], [1, 3]] },
+  Z4: { p: [[0, 0], [1, 0], [1, 1], [2, 1]], l: [[0, 1, 2, 3]] }, J4: { p: [[0, 0], [1, 0], [2, 0], [2, 1]], l: [[0, 1, 2, 3]] },
+};
+const cache = {};
+let L, level, maxLv, starMap, plates = [], screws = [], occ = [], held, from, fell, moves, undo, done, hint, hintsUsed, cursor, dragArm, dragging, nopeT = 0, nopeP = -1, live = false, wobT = 0;
+let T = 1, land = false, sp = 80, bx = 0, by = 0, gc = 4, gr = 5, hr = 12, sr = 16, pw = 50, btns = [], info = { x: 0, y: 0, w: 300 };
+
+/* ---------- solver: BFS over (screw kinds per hole, fallen plates). A turn = lift one screw (free plates drop at once)
+ * and park it in any open, matching, empty hole — its own hole only counts if something dropped. */
+function solve(lv, kinds, fallen0, cap) {
+  const n = lv.n, P = lv.plates, full = (1 << P.length) - 1, seen = [];
+  const mark = (f, k) => { const s = seen[f] || (seen[f] = new Set()); if (s.has(k)) return false; s.add(k); return true; };
+  let k0 = 0, o0 = 0; for (let p = 0; p < n; p++) if (kinds[p]) { k0 += kinds[p] * P4[p]; o0 |= 1 << p; }
+  const K = [k0], O = [o0], F = [fallen0], par = [-1], MP = [0], MQ = [0]; mark(fallen0, k0);
+  for (let i = 0; i < K.length; i++) {
+    const key = K[i], oc = O[i], f = F[i];
+    if (f === full) { const out = []; for (let j = i; par[j] >= 0; j = par[j]) out.unshift([MP[j], MQ[j]]); return out; }
+    if (K.length > cap) return null;
+    let solid = 0; for (let j = 0; j < P.length; j++) if (!(f >> j & 1)) solid |= P[j].solid;
+    for (let p = 0; p < n; p++) {
+      if (!(oc >> p & 1) || (solid >> p & 1)) continue;
+      const k = Math.floor(key / P4[p]) % 4, o1 = oc & ~(1 << p); let f1 = f, s1 = 0;
+      for (let j = 0; j < P.length; j++) if (!(f >> j & 1)) { if (!(P[j].hole & o1)) f1 |= 1 << j; else s1 |= P[j].solid; }
+      const free = lv.board & ~o1 & ~s1;
+      for (let q = 0; q < n; q++) {
+        if (!(free >> q & 1) || (q === p && f1 === f) || (lv.sock[q] && lv.sock[q] !== k)) continue;
+        const k1 = key + k * (P4[q] - P4[p]); if (!mark(f1, k1)) continue;
+        K.push(k1); O.push(o1 | 1 << q); F.push(f1); par.push(i); MP.push(p); MQ.push(q);
+      }
+    }
+  }
+  return null;
+}
+function rotShape(b, k) { let p = b.p; for (; k > 0; k--) p = p.map(([x, y]) => [-y, x]); const mx = Math.min(...p.map(q => q[0])), my = Math.min(...p.map(q => q[1])); return { p: p.map(([x, y]) => [x - mx, y - my]), l: b.l, fill: b.fill }; }
+
+/* ---------- generator: stack random plates bottom-to-top (a hole may only sit over holes, so screws reach the board),
+ * sprinkle screws, spare holes and sockets, then keep the candidate whose optimal solution is closest to the level's target. */
+function gen(lv) {
+  if (cache[lv]) return cache[lv];
+  const rnd = Lab.rng(lv * 7919 + 101), ri = (a, b) => a + Math.floor(rnd() * (b - a + 1)), pick = a => a[Math.floor(rnd() * a.length)];
+  const mix = a => { for (let i = a.length - 1; i > 0; i--) { const j = ri(0, i);[a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const C = lv <= 2 ? 3 : 4, R = lv <= 2 ? 4 : lv <= 9 ? 5 : 6, n = C * R, kinds = lv < 6 ? 1 : lv < 13 ? 2 : 3, hi = Math.min(16, 1 + lv + (lv > 3 ? 1 : 0));
+  const names = lv < 3 ? ["I2", "I3", "L3"] : lv < 6 ? ["I2", "I3", "L3", "D2", "SQ", "V3"] : Object.keys(BASE);
+  let np = clamp(1 + Math.floor(lv * .55), 1, 6), best = null;
+  function build() {
+    const pls = [], cover = new Array(n).fill(0), holeOK = new Array(n).fill(true); let scr = 0, holesAll = 0;
+    for (let i = 0; i < np; i++) {
+      let ok = false;
+      for (let tr = 0; tr < 40 && !ok; tr++) {
+        const sh = rotShape(BASE[pick(names)], ri(0, 3)), w = Math.max(...sh.p.map(q => q[0])) + 1, h = Math.max(...sh.p.map(q => q[1])) + 1;
+        if (w > C || h > R) continue;
+        const ox = ri(0, C - w), oy = ri(0, R - h), pts = sh.p.map(([x, y]) => (oy + y) * C + ox + x), over = pts.filter(p => cover[p]).length;
+        if (pts.some(p => cover[p] >= 2) || over === pts.length || (i > 0 && !over && rnd() < .8)) continue;
+        const elig = mix(pts.filter(p => holeOK[p])); if (!elig.length) continue;
+        const holes = elig.slice(0, pts.length <= 2 ? 2 : ri(2, 3)); let hole = 0, solid = 0, pinned = false;
+        for (const p of pts) if (holes.includes(p)) hole |= 1 << p; else solid |= 1 << p;
+        for (const p of holes) { if (scr >> p & 1) pinned = true; else if (rnd() < .7) { scr |= 1 << p; pinned = true; } }
+        if (!pinned) scr |= 1 << holes[0];
+        for (const p of pts) { cover[p]++; if (!(hole >> p & 1)) holeOK[p] = false; }
+        holesAll |= hole; pls.push({ pts, hole, solid, l: sh.l, fill: sh.fill }); ok = true;
+      }
+      if (!ok) return null;
+    }
+    const bare = []; let board = holesAll;
+    for (let p = 0; p < n; p++) { if (!cover[p]) bare.push(p); else if (!(board >> p & 1) && rnd() < .45) board |= 1 << p; }
+    if (!bare.length) return null;
+    mix(bare); const spare = Math.min(bare.length, lv < 3 ? 2 : ri(1, 2)); for (let i = 0; i < spare; i++) board |= 1 << bare[i];
+    const kind = new Array(n).fill(0), sock = new Array(n).fill(0);
+    for (let p = 0; p < n; p++) { if (scr >> p & 1) kind[p] = kinds > 1 ? ri(1, kinds) : 1; if (kinds > 1 && (board >> p & 1) && !(holesAll >> p & 1) && rnd() < .55) sock[p] = ri(1, kinds); }
+    return { C, R, n, plates: pls, board, kind, sock };
+  }
+  for (let att = 0; att < 36; att++) {
+    if (att === 24 && !best) np = Math.max(1, np - 1);
+    const c = build(); if (!c) continue;
+    const sol = solve(c, c.kind, 0, 7000); if (!sol) continue;
+    const par = sol.length, sc = par <= hi ? par : hi - (par - hi) * 1.5;
+    if (!best || sc > best.sc) { c.sc = sc; c.par = par; best = c; }
+    if (par === hi) break;
+  }
+  if (!best) { const kind = new Array(n).fill(0), sock = new Array(n).fill(0); kind[0] = kind[1] = 1; best = { C, R, n, plates: [{ pts: [0, 1], hole: 3, solid: 0, l: [[0, 1]] }], board: 3 | 1 << n - 1 | 1 << n - 2, kind, sock, par: 2 }; }
+  best.budget = best.par + Math.max(2, Math.ceil(best.par * .5));
+  const cols = mix(PCOL.slice()); best.plates.forEach((p, i) => { p.col = cols[i % cols.length]; });
+  return cache[lv] = best;
+}
+
+/* ---------- state */
+const ptx = p => bx + ((land ? (p / L.C | 0) : p % L.C) + .5) * sp, pty = p => by + ((land ? p % L.C : (p / L.C | 0)) + .5) * sp;
+const mkScrew = (p, k) => ({ p, k, ox: 0, oy: 0, lift: 0, a0: Lab.rand(0, TAU), q: 0, land: false, under: -1 });
+function load() {
+  L = gen(level);
+  plates = L.plates.map((p, i) => ({ i, pts: p.pts, hole: p.hole, solid: p.solid, l: p.l, fill: p.fill, col: p.col, gone: false, fall: 0, fy: 0, fvy: 0, fr: 0, fvr: 0, a: 0, va: 0, pop: 0, pin: -1, sag: 0 }));
+  occ = new Array(L.n).fill(null); screws = [];
+  L.kind.forEach((k, p) => { if (k) screws.push(occ[p] = mkScrew(p, k)); });
+  held = null; fell = false; moves = 0; undo = []; done = false; hint = null; hintsUsed = 0; cursor = -1; dragArm = dragging = false; from = -1;
+  layout(); refresh();
+}
+const goneMask = () => plates.reduce((m, p) => m | (p.gone ? 1 << p.i : 0), 0), kindsNow = () => occ.map(s => s ? s.k : 0);
+const left = () => plates.filter(p => !p.gone).length;
+function solidNow() { let m = 0; for (const p of plates) if (!p.gone) m |= p.solid; return m; }
+function occMask() { let m = 0; for (let p = 0; p < L.n; p++) if (occ[p]) m |= 1 << p; return m; }
+const open = p => !(solidNow() >> p & 1);
+const canPlace = q => !!held && q >= 0 && !!(L.board >> q & 1) && !occ[q] && open(q) && (!L.sock[q] || L.sock[q] === held.k) && (q !== from || fell);
+function refresh() {
+  const m = occMask();
+  for (const pl of plates) { let n = 0, pin = -1; for (const p of pl.pts) if ((pl.hole & m) >> p & 1) { n++; pin = p; } pl.pin = n === 1 ? pin : -1; pl.sag = n === 1 ? clamp((pl.cx - ptx(pin)) / sp, -1, 1) * .05 : 0; }
+  for (const s of screws) { s.under = -1; for (const pl of plates) if (!pl.gone && (pl.solid >> s.p & 1)) { s.under = pl.i; break; } }
+}
+function starsNow() { const s = moves <= L.par ? 3 : moves <= L.par + Math.ceil((L.budget - L.par) / 2) ? 2 : 1; return hintsUsed ? Math.min(2, s) : s; }
+const totalStars = () => Object.values(starMap).reduce((a, b) => a + b, 0);
+
+function dropFree() {
+  const m = occMask(); let n = 0;
+  for (const pl of plates) if (!pl.gone && !(pl.hole & m)) {
+    pl.gone = true; pl.fall = 1; pl.fy = 0; pl.fvy = -170 * T; pl.fr = 0; pl.fvr = (pl.cx >= ptx(from) ? 1 : -1) * Lab.rand(.7, 2); n++;
+    Lab.sfx("swish", { pitch: .8 + n * .15 }); fx.text(pl.cx, pl.cy, "FREE", { color: shade(pl.col, -.3), size: 16 * T, outline: "rgba(255,255,255,.8)" });
+  }
+  return n;
+}
+function snap() { return { k: kindsNow(), g: goneMask(), m: moves }; }
+function restore(sn) {
+  occ.fill(null); screws = []; sn.k.forEach((k, p) => { if (k) screws.push(occ[p] = mkScrew(p, k)); });
+  for (const pl of plates) { const g = !!(sn.g >> pl.i & 1); if (pl.gone && !g) { pl.pop = 1; pl.a = 0; pl.va = Lab.rand(-1, 1); } pl.gone = g; if (!g) { pl.fall = 0; pl.fy = pl.fr = 0; } }
+  moves = sn.m; held = null; fell = false; dragging = dragArm = false; hint = null; refresh();
+}
+function lift(s) {
+  undo.push(snap()); hint = null; held = s; from = s.p; occ[from] = null; s.land = false;
+  for (const pl of plates) if (!pl.gone && (pl.hole >> from & 1)) pl.va += (pl.cx >= ptx(from) ? 1 : -1) * 1.1;
+  fell = dropFree() > 0; refresh(); Lab.sfx("click", { pitch: 1.2 }); Lab.buzz(6);
+  if (fell && !left()) place(from);
+}
+function place(q) {
+  const s = held; s.ox += ptx(s.p) - ptx(q); s.oy += pty(s.p) - pty(q); s.p = q; occ[q] = s; s.land = true; held = null; dragging = false; moves++; refresh();
+  for (const pl of plates) if (!pl.gone && (pl.hole >> q & 1)) pl.va += Lab.rand(-.5, .5);
+  const st = starsNow();
+  if (!left()) win(st); else if (moves >= L.budget) lose();
+  else if ((moves === L.par + 1 || moves === L.par + Math.ceil((L.budget - L.par) / 2) + 1) && !hintsUsed) Lab.sfx("tick", { pitch: .5 });
+}
+function cancelHold() { occ[from] = held; held.land = true; held = null; undo.pop(); dragging = false; refresh(); }
+function nope(p) {
+  nopeP = p; nopeT = .4; Lab.sfx("error", { vol: .5 }); Lab.buzz(12);
+  if (p >= 0) for (const pl of plates) if (!pl.gone && (pl.solid >> p & 1)) pl.va += 1.4;
+}
+function tapPoint(p) {
+  if (done) return;
+  if (held) {
+    if (p === from && !fell) { cancelHold(); return; }
+    if (canPlace(p)) { place(p); return; }
+    if (!fell && p >= 0 && occ[p] && open(p)) { cancelHold(); lift(occ[p]); return; }
+    if (!fell && p < 0) { cancelHold(); return; }
+    nope(p); return;
+  }
+  if (p < 0 || !occ[p]) return;
+  if (open(p)) lift(occ[p]); else nope(p);
+}
+function undoMove() {
+  if (done) return;
+  if (held && !fell) { cancelHold(); return; }
+  if (!undo.length) { Lab.sfx("tick", { pitch: .6 }); return; }
+  restore(undo.pop()); Lab.sfx("flip");
+}
+function doHint() {
+  if (done) return;
+  if (held) { if (fell) { Lab.toast("Park the screw first", 900, { y: .16 }); return; } cancelHold(); }
+  const sol = solve(L, kindsNow(), goneMask(), 40000); if (!sol || !sol.length) return;
+  hint = { p: sol[0][0], q: sol[0][1], t: 5 }; if (!hintsUsed) Lab.toast("Hint used: 2 stars max", 1100, { y: .16 }); hintsUsed++; Lab.sfx("chime", { vol: .6 });
+}
+function win(st) {
+  done = true; if (st > (starMap[level] || 0)) { starMap[level] = st; Lab.store.set("stars", starMap); }
+  maxLv = Math.max(maxLv, level + 1); Lab.store.set("max", maxLv); Lab.store.set("level", level + 1);
+  Lab.setScore("★ " + totalStars()); Lab.bumpScore(); const lv = level, m = moves, par = L.par;
+  Lab.after(.25, () => Lab.audio.combo(2 + st)); fx.burst(Lab.W / 2, by + gr * sp / 2, { n: 26, colors: PCOL, speed: 320, life: .9, size: 5, gravity: 500, shape: "square" });
+  Lab.after(.85, () => Lab.win({ title: st === 3 ? "Perfect strip-down!" : "Board clear!", score: lv, scoreLabel: "Level", stats: [["Turns", m + " (par " + par + ")"], ["Stars", "★".repeat(st) + "☆".repeat(3 - st)], ["All stars", totalStars()]], button: "Next level" }));
+}
+function lose() {
+  done = true; const n = left(); Lab.shake(5, .3);
+  Lab.after(.5, () => Lab.gameover({ title: "Out of turns", message: "The best strip-down of level " + level + " takes " + L.par + " turns.", stats: [["Plates left", n], ["Turns used", moves]], button: "Try again" }));
+}
+function go(lv) { if (lv < 1 || lv > maxLv) return; Lab.sfx("tap"); Lab.store.set("level", lv); Lab.restart(); }
+function nearest(x, y) { let b = -1, bd = sp * .56; for (let p = 0; p < L.n; p++) { if (!(L.board >> p & 1)) continue; const d = Math.hypot(x - ptx(p), y - pty(p)); if (d < bd) { bd = d; b = p; } } return b; }
+
+function start() {
+  live = true; level = Lab.store.get("level", 1); maxLv = Math.max(level, Lab.store.get("max", 1)); starMap = Lab.store.get("stars", {});
+  load(); Lab.setScore("★ " + totalStars());
+  if (level === 1) hint = { p: screws[0].p, q: -1, t: 6 };
+  Lab.input.onDown = [(x, y) => {
+    if (done) return; cursor = -1;
+    for (const b of btns) if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { b.t = .16; if (b.id !== "prev" && b.id !== "next") Lab.sfx("tap"); b.fn(); return; }
+    const was = held; tapPoint(nearest(x, y)); dragArm = !!held && held !== was;
+  }];
+  Lab.input.onMove = [(x, y) => {
+    if (!dragArm || !held || !Lab.input.down) return;
+    if (!dragging && Math.hypot(x - Lab.input.startX, y - Lab.input.startY) > 12) dragging = true;
+    if (dragging) { held.ox = x - ptx(from); held.oy = y - pty(from) - (Lab.input.pointerType === "touch" ? 28 * T : 0); }
+  }];
+  Lab.input.onUp = [() => {
+    if (dragging && held) { const p = nearest(ptx(from) + held.ox, pty(from) + held.oy); dragging = false; if (canPlace(p)) place(p); else if (p === from && !fell) cancelHold(); else Lab.sfx("swish", { vol: .4 }); }
+    dragArm = false;
+  }];
+  Lab.input.onKey = [k => {
+    const mv = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[k];
+    if (mv) { if (cursor < 0) cursor = held ? from : screws[0].p; else { const [dx, dy] = land ? [mv[1], mv[0]] : mv; cursor = clamp((cursor / L.C | 0) + dy, 0, L.R - 1) * L.C + clamp(cursor % L.C + dx, 0, L.C - 1); } }
+    else if (k === " " || k === "Enter") { if (cursor >= 0) tapPoint(L.board >> cursor & 1 ? cursor : -1); }
+    else if (k === "z" || k === "u" || k === "Backspace") undoMove(); else if (k === "r") Lab.restart(); else if (k === "h") doHint();
+  }];
+  Lab.expose({
+    get level() { return level; }, get moves() { return moves; }, get par() { return L.par; }, get budget() { return L.budget; }, get plates() { return left(); },
+    get held() { return held ? from : -1; }, get solution() { return solve(L, kindsNow(), goneMask(), 40000); }, get screws() { return screws.map(s => s.p); }, get stars() { return starsNow(); },
+    get done() { return done; }, get undoDepth() { return undo.length; }, get kinds() { return L.kind.filter(k => k).length ? Math.max(...L.kind) : 0; }, get grid() { return [L.C, L.R]; },
+    xy(p) { return [ptx(p), pty(p)]; }, targets() { const o = []; for (let q = 0; q < L.n; q++) if (canPlace(q)) o.push(q); return o; }, button(id) { const b = btns.find(b => b.id === id); return [b.x + b.w / 2, b.y + b.h / 2]; },
+    setLevel(n) { maxLv = Math.max(maxLv, n); Lab.store.set("max", maxLv); Lab.store.set("level", n); Lab.restart(); }, parOf(n) { const g = gen(n); return [g.par, g.plates.length, solve(g, g.kind, 0, 40000).length]; },
+  });
+  Lab.loop(frame);
+}
+function attract(dt, t) { if (!L) { level = Lab.store.get("level", 1); maxLv = level; starMap = {}; load(); } wobT -= dt; if (wobT < 0) { wobT = 1.1; const pl = Lab.choose(plates); if (pl) pl.va += Lab.rand(-1.6, 1.6); } step(dt); render(t); }
+
+function layout() {
+  const P = Lab.play; land = P.w > P.h * 1.1; T = clamp(Math.min(Lab.W, Lab.H) / 390, .82, 1.3); if (!L) return;
+  gc = land ? L.R : L.C; gr = land ? L.C : L.R; btns = [];
+  const defs = [["undo", "Undo", undoMove], ["restart", "Restart", () => Lab.restart()], ["hint", "Hint", doHint]];
+  if (land) {
+    const side = clamp(P.w * .21, 150, 250); sp = Math.min((P.w - side * 2 - 24) / gc, (P.h - 28) / gr, 124); bx = P.x + (P.w - gc * sp) / 2; by = P.y + (P.h - gr * sp) / 2;
+    info = { x: P.x + (bx - P.x) / 2, y: P.y + P.h / 2 - 78 * T, w: Math.min(bx - P.x - 26, 190 * T) };
+    const bw = Math.min(side - 36, 150 * T), bh = 46 * T, cx = bx + gc * sp + (P.x + P.w - bx - gc * sp) / 2;
+    defs.forEach((d, i) => btns.push({ id: d[0], label: d[1], fn: d[2], x: cx - bw / 2, y: P.y + P.h / 2 + (i - 1.5) * (bh + 10 * T) + 5 * T, w: bw, h: bh, t: 0 }));
+  } else {
+    const top = 104 * T, bot = 66 * T; sp = Math.min((P.w - 30) / gc, (P.h - top - bot - 24) / gr, 112); bx = P.x + (P.w - gc * sp) / 2; by = P.y + top + (P.h - top - bot - gr * sp) / 2;
+    info = { x: P.x + P.w / 2, y: P.y + 6 * T, w: P.w - 40 };
+    const bw = Math.min(112 * T, (P.w - 44) / 3), bh = 46 * T, y = Math.min(P.y + P.h - bh - 8 * T, by + gr * sp + 26 * T);
+    defs.forEach((d, i) => btns.push({ id: d[0], label: d[1], fn: d[2], x: P.x + P.w / 2 + (i - 1) * (bw + 10) - bw / 2, y, w: bw, h: bh, t: 0 }));
+  }
+  const nw = 46 * T; btns.push({ id: "prev", fn: () => go(level - 1), x: info.x - 78 * T - nw / 2, y: info.y - 4 * T, w: nw, h: 40 * T, t: 0 }, { id: "next", fn: () => go(level + 1), x: info.x + 78 * T - nw / 2, y: info.y - 4 * T, w: nw, h: 40 * T, t: 0 });
+  hr = sp * .145; sr = sp * .2; pw = sp * .62; Lab.sprite.clear("bg:"); bake(); refresh();
+}
+Lab.onResize(layout);
+
+/* ---------- art: plates are baked once per layout (edge, body, gloss, punched holes) and drawn translucent */
+function bake() {
+  Lab.sprite.clear("pl:");
+  for (const pl of plates) {
+    const xs = pl.pts.map(ptx), ys = pl.pts.map(pty), pad = pw / 2 + 9, ox = Math.min(...xs) - pad, oy = Math.min(...ys) - pad;
+    pl.sx = ox; pl.sy = oy; pl.cx = xs.reduce((a, b) => a + b, 0) / xs.length; pl.cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+    pl.spr = Lab.sprite("pl:" + pl.i, Math.max(...xs) - ox + pad, Math.max(...ys) - oy + pad, g => {
+      g.lineJoin = g.lineCap = "round";
+      const body = (col, lw, dx, dy, nofill) => { g.beginPath(); for (const ln of pl.l) ln.forEach((k, j) => g[j ? "lineTo" : "moveTo"](xs[k] - ox + dx, ys[k] - oy + dy)); g.strokeStyle = g.fillStyle = col; g.lineWidth = lw; if (pl.fill && !nofill) g.fill(); g.stroke(); };
+      body("rgba(70,55,25,.3)", pw, 2, 6); body(shade(pl.col, -.32), pw, 0, 0); body(pl.col, pw - 5, 0, 0); body(shade(pl.col, .16), pw - 16, 0, 0);
+      body("rgba(255,255,255,.34)", pw * .09, -pw * .2, -pw * .2, true);
+      pl.pts.forEach((p, k) => {
+        const x = xs[k] - ox, y = ys[k] - oy;
+        if (pl.hole >> p & 1) { g.globalCompositeOperation = "destination-out"; draw.circle(g, x, y, hr * 1.12, "#000"); g.globalCompositeOperation = "source-over"; draw.circle(g, x, y, hr * 1.12 + 1, null, shade(pl.col, -.5), 2.5); }
+        else draw.circle(g, x, y, hr * .34, shade(pl.col, -.18));
+      });
+    });
+  }
+}
+function screwSprite(k) {
+  const r = sr, sz = r * 2 + 8;
+  return Lab.sprite("sc:" + k + ":" + Math.round(r * 8), sz, sz, g => {
+    const cx = sz / 2, col = KCOL[k], gd = g.createRadialGradient(cx - r * .35, cx - r * .4, r * .1, cx, cx, r);
+    gd.addColorStop(0, shade(col, .5)); gd.addColorStop(.6, col); gd.addColorStop(1, shade(col, -.38)); draw.circle(g, cx, cx, r, gd, shade(col, -.6), 1.6);
+    draw.circle(g, cx, cx, r * .72, null, "rgba(255,255,255,.22)", 1.2);
+    g.strokeStyle = k === 3 ? "#b4bad0" : shade(col, -.62); g.lineCap = "round"; g.lineWidth = r * .24;
+    if (k === 1) { g.beginPath(); g.moveTo(cx - r * .5, cx); g.lineTo(cx + r * .5, cx); g.moveTo(cx, cx - r * .5); g.lineTo(cx, cx + r * .5); g.stroke(); }
+    else if (k === 2) draw.poly(g, cx, cx, r * .46, 6, 0, shade(col, -.58));
+    else { g.beginPath(); for (let i = 0; i < 3; i++) { g.moveTo(cx, cx); g.lineTo(cx + Math.cos(i * TAU / 3 - TAU / 4) * r * .56, cx + Math.sin(i * TAU / 3 - TAU / 4) * r * .56); } g.stroke(); }
+  });
+}
+function holeSprite(k) {
+  const r = hr, sz = r * 2 + 18;
+  return Lab.sprite("ho:" + k + ":" + Math.round(r * 8), sz, sz, g => {
+    const cx = sz / 2;
+    if (k) { if (k === 2) { draw.poly(g, cx, cx, r + 7.5, 6, 0, shade(KCOL[k], -.45)); draw.poly(g, cx, cx, r + 6, 6, 0, KCOL[k]); } else { draw.circle(g, cx, cx, r + 6.5, shade(KCOL[k], k === 3 ? -.5 : -.4)); draw.circle(g, cx, cx, r + 5, KCOL[k]); if (k === 3) for (let i = 0; i < 3; i++) draw.circle(g, cx + Math.cos(i * TAU / 3 - TAU / 4) * (r + 5), cx + Math.sin(i * TAU / 3 - TAU / 4) * (r + 5), 3.4, KCOL[3]); } }
+    draw.circle(g, cx, cx, r + 1.5, "rgba(255,255,255,.7)"); draw.circle(g, cx, cx, r, "#3b3629"); draw.circle(g, cx, cx + r * .22, r * .8, "#211e17");
+  });
+}
+function drawPlate(c, pl) {
+  let px = pl.cx, py = pl.cy; if (!pl.gone && pl.pin >= 0) { px = ptx(pl.pin); py = pty(pl.pin); }
+  c.save(); c.translate(px, py + pl.fy); c.rotate(pl.a + pl.fr); if (pl.pop > 0) { const k = 1 + ease.pulse(pl.pop) * .12; c.scale(k, k); }
+  c.globalAlpha = .82 * (pl.gone ? clamp(1.25 - pl.fy / (Lab.H * .8), 0, 1) : 1); c.drawImage(pl.spr, pl.sx - px, pl.sy - py, pl.spr.w, pl.spr.h); c.restore();
+}
+function drawScrew(c, s) {
+  const x = ptx(s.p) + s.ox, y = pty(s.p) + s.oy, sprt = screwSprite(s.k), up = s.lift, k = 1 + up * .24, jig = s === held && nopeT > 0 ? Math.sin(nopeT * 60) * 3 * nopeT : 0;
+  draw.shadow(c, x + up * 5, y + 3 + up * 12 * T, sr * (1 + up * .1), sr * (.5 + up * .25), .2 + .1 * (1 - up));
+  c.save(); c.translate(x + jig, y - up * 11 * T); c.scale(k, k); c.rotate(s.a0 - up * 7); c.drawImage(sprt, -sprt.w / 2, -sprt.h / 2, sprt.w, sprt.h); c.restore();
+}
+function step(dt) {
+  for (const s of screws) {
+    if (!(dragging && s === held)) { s.ox = Lab.damp(s.ox, 0, 20, dt); s.oy = Lab.damp(s.oy, 0, 20, dt); }
+    const tl = s === held || Math.hypot(s.ox, s.oy) > 4 ? 1 : 0; s.lift = Lab.approach(s.lift, tl, dt * 6.5);
+    const q = Math.floor(s.lift * 4.99); if (q !== s.q) { s.q = q; if (live) Lab.sfx("tick", { pitch: .85 + s.lift * .8, vol: .45 }); }
+    if (s.land && s.lift === 0) { s.land = false; if (live) { Lab.sfx("knock", { pitch: 1.5, vol: .7 }); fx.ring(ptx(s.p), pty(s.p), { r0: sr, r1: sr * 2, color: "rgba(45,49,66,.4)", life: .25, width: 2.5 }); } }
+  }
+  for (const pl of plates) {
+    if (pl.pop > 0) pl.pop = Math.max(0, pl.pop - dt * 3.5);
+    if (pl.gone) {
+      if (!pl.fall) continue; pl.fvy += 2500 * T * dt; pl.fy += pl.fvy * dt; pl.fr += pl.fvr * dt;
+      if (pl.fall === 1 && pl.sy + pl.fy > Lab.H) { pl.fall = 2; Lab.sfx("thud", { pitch: 1.25 - pl.pts.length * .12 }); Lab.shake(3, .14); fx.puff(clamp(pl.cx, 20, Lab.W - 20), Lab.H - 4, { n: 7, color: "#cfc6ae" }); }
+      if (pl.fy > Lab.H * 1.5) pl.fall = 0;
+    } else { pl.va += (-(pl.a - pl.sag) * 120 - pl.va * 6) * dt; pl.a += pl.va * dt; }
+  }
+  if (hint && (hint.t -= dt) <= 0) hint = null; if (nopeT > 0) nopeT -= dt;
+  for (const b of btns) if (b.t > 0) b.t -= dt;
+}
+function frame(dt, t) { step(dt); render(t); }
+
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, pulse = .5 + .5 * Math.sin(t * 6);
+  const bg = Lab.sprite("bg:" + W + "x" + H + ":" + gc + "x" + gr, W + 80, H + 80, g => {
+    draw.vgrad(g, 0, 0, W + 80, H + 80, ["#f4efe2", "#ddd6c4"]);
+    g.strokeStyle = "rgba(120,105,70,.06)"; g.lineWidth = 10; for (let x = -H; x < W + 80; x += 34) { g.beginPath(); g.moveTo(x, H + 80); g.lineTo(x + H + 80, 0); g.stroke(); }
+    const x = bx + 40 - 12, y = by + 40 - 12, w = gc * sp + 24, h = gr * sp + 24;
+    draw.rect(g, x + 3, y + 9, w, h, 30, "rgba(90,70,30,.16)"); draw.rect(g, x, y, w, h, 30, "#fbf8ef", "#cfc5ab", 2.5);
+    for (let i = 0; i < gc * gr; i++) draw.circle(g, bx + 40 + (i % gc + .5) * sp, by + 40 + ((i / gc | 0) + .5) * sp, 3, "#e3dbc6");
+    for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { const rx = x + 15 + u * (w - 30), ry = y + 15 + v * (h - 30); draw.circle(g, rx, ry, 5, "#c9c0a8", "#a99f86", 1.2); }
+  });
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // board holes
+  for (let p = 0; p < L.n; p++) if (L.board >> p & 1) { const hs = holeSprite(L.sock[p]); c.drawImage(hs, ptx(p) - hs.w / 2, pty(p) - hs.h / 2, hs.w, hs.h); }
+  // plates bottom → top, each preceded by the screws it buries
+  for (const pl of plates) { if (pl.gone) continue; for (const s of screws) if (s.under === pl.i && s !== held) drawScrew(c, s); drawPlate(c, pl); }
+  if (held) for (let q = 0; q < L.n; q++) if (canPlace(q)) { draw.circle(c, ptx(q), pty(q), hr + 6 + pulse * 4, null, "rgba(31,166,160," + (.55 + pulse * .4) + ")", 3); }
+  for (const s of screws) if (s.under < 0 && s !== held) drawScrew(c, s);
+  for (const pl of plates) if (pl.gone && pl.fall) drawPlate(c, pl);
+  if (nopeT > 0 && nopeP >= 0) { c.globalAlpha = clamp(nopeT * 3, 0, 1); const x = ptx(nopeP), y = pty(nopeP), r = sr * .7; c.lineCap = "round"; draw.line(c, x - r, y - r, x + r, y + r, "#d9432f", 5); draw.line(c, x + r, y - r, x - r, y + r, "#d9432f", 5); c.globalAlpha = 1; }
+  if (hint) {
+    const a = clamp(hint.t, 0, 1), x = ptx(hint.p), y = pty(hint.p); c.globalAlpha = a;
+    draw.circle(c, x, y, sr + 7 + pulse * 5, null, "#ef6f4a", 3.5);
+    if (hint.q >= 0 && hint.q !== hint.p) { const x2 = ptx(hint.q), y2 = pty(hint.q); c.setLineDash([5, 8]); c.lineDashOffset = -t * 30; draw.line(c, x, y, x2, y2, "rgba(239,111,74,.75)", 3); c.setLineDash([]); draw.circle(c, x2, y2, hr + 6 + pulse * 4, null, "#ef6f4a", 3); }
+    else if (hint.q < 0) draw.text(c, "tap a screw", x, y - sr - 20 * T, { size: 14 * T, color: "#c94f2e", stroke: "rgba(255,255,255,.85)" });
+    c.globalAlpha = 1;
+  }
+  if (held) drawScrew(c, held);
+  if (cursor >= 0) { const x = ptx(cursor), y = pty(cursor), r = sr + 9; c.strokeStyle = INK; c.lineWidth = 3; c.setLineDash([9, 7]); c.lineDashOffset = t * 20; c.beginPath(); c.arc(x, y, r, 0, TAU); c.stroke(); c.setLineDash([]); }
+  // info: level nav, stars, turn pips
+  const ix = info.x, iy = info.y;
+  draw.text(c, "LEVEL " + level, ix, iy + 16 * T, { size: 21 * T, color: INK, weight: 800 });
+  for (const b of btns) if (b.id === "prev" || b.id === "next") {
+    const on = b.id === "prev" ? level > 1 : level < maxLv, d = b.id === "prev" ? -1 : 1, x = b.x + b.w / 2, y = iy + 16 * T, r = 8 * T;
+    c.globalAlpha = on ? (b.t > 0 ? .5 : 1) : .18; c.fillStyle = INK; c.beginPath(); c.moveTo(x + d * r, y); c.lineTo(x - d * r * .7, y - r); c.lineTo(x - d * r * .7, y + r); c.closePath(); c.fill(); c.globalAlpha = 1;
+  }
+  const st = done || moves ? starsNow() : 3, got = starMap[level] || 0;
+  for (let i = 0; i < 3; i++) { const x = ix + (i - 1) * 27 * T, y = iy + 45 * T; draw.star(c, x, y, 11.5 * T, "#b9ae93"); draw.star(c, x, y, 9.5 * T, i < st ? "#f6b732" : "#e9e2d0"); if (i < got) draw.circle(c, x, y + 15 * T, 2.2 * T, "#1fa6a0"); }
+  const n = L.budget, gap = 14 * T, per = Math.max(4, Math.min(n, Math.floor(info.w / gap))), rows = Math.ceil(n / per), half = L.par + Math.ceil((L.budget - L.par) / 2);
+  for (let i = 0; i < n; i++) {
+    const row = i / per | 0, cnt = row < rows - 1 ? per : n - per * (rows - 1), x = ix + (i % per - (cnt - 1) / 2) * gap, y = iy + 74 * T + row * gap, col = i < L.par ? "#f6b732" : i < half ? "#8fa6cf" : "#cf8f63";
+    if (i < moves) draw.circle(c, x, y, 3.2 * T, null, "#b9ae93", 1.6); else draw.circle(c, x, y, (i === moves ? 5.2 + pulse * .8 : 4.6) * T, col, shade(col, -.35), 1.2);
+  }
+  draw.text(c, (n - moves) + " turns left", ix, iy + 74 * T + rows * gap + 3 * T, { size: 12.5 * T, color: n - moves <= 2 ? "#d9432f" : MUTED, weight: 700 });
+  for (const b of btns) if (b.label) {
+    const off = b.id === "undo" && !undo.length && !held, dn = b.t > 0 ? 2 : 0;
+    c.globalAlpha = off ? .45 : 1; draw.rect(c, b.x, b.y + 4, b.w, b.h, 15, "#c9bfa5"); draw.rect(c, b.x, b.y + dn, b.w, b.h, 15, b.id === "hint" && hintsUsed ? "#fdeedd" : "#fffdf6", "#bdb39a", 2);
+    draw.text(c, b.label, b.x + b.w / 2, b.y + b.h / 2 + dn + 1, { size: 16 * T, color: INK, weight: 700 }); c.globalAlpha = 1;
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

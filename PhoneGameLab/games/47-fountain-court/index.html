@@ -1,0 +1,241 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Fountain Court</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* FOUNTAIN COURT — a tiled courtyard with water channels carved into sandstone. Tap a tile to turn it a quarter
+ * turn; water really floods out from the spring, tile by tile. Wake every fountain and leave no channel spilling.
+ * Identity: sandstone tiles on cobalt zellige, turquoise water with ripples that run downstream, brass and moss.
+ * Levels:   generated forever from the court number: a random tree of channels is grown from the spring (so the
+ *           solved court always exists), then tiles are turned. Courts grow 3×3 → 7×9 and fill up completely.
+ * Depth:    tap par (exactly the turns needed = ★★★), mossy tiles that are set in place (anchors to reason from),
+ *           jewelled twins that turn together, leaks that must all be sealed, undo / reset / hint (costs a star). */
+Lab.init({
+  title: "Fountain Court", tagline: "Turn the tiles. Wake every fountain.", category: "Puzzle & Logic",
+  howto: ["Tap a tile to turn it", "Lead the spring to every fountain", "Seal every leak — fewer taps, more stars"],
+  theme: { bg: "#15335f", bg2: "#2a5fa3", accent: "#f2c063", accent2: "#49d0d8" },
+  orient: "any", music: { style: "dream", key: "A", vol: .4 }, restart: start, formatScore: n => "Court " + Math.round(n),
+  attract(dt, t) { if (!tiles) { prog = { stars: {} }; load(12); for (const T of tiles) T.rot = T.sol; flood(); fill.fill(1); mode = "demo"; } tick(dt); render(t); },
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, PI = Math.PI, DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
+const CANON = [0, 1, 5, 3, 7], rotm = (m, k) => { for (; k > 0; k--) m = ((m << 1) & 15) | (m >> 3); return m; };   // end, straight, elbow, tee
+const TABLE = [[3, 3, .7, .45, 0, 0], [3, 4, .85, .7, 0, 0], [4, 4, .85, .85, 0, 0], [4, 4, 1, 1, 0, 0], [4, 5, 1, 1, 0, 0], [5, 5, .9, 1, 0, 0], [5, 5, 1, 1, 2, 0], [5, 6, 1, 1, 2, 0], [5, 6, 1, 1, 2, 1], [5, 6, 1, 1, 1, 1],
+  [6, 6, .92, 1, 3, 1], [6, 6, 1, 1, 3, 1], [6, 7, 1, 1, 3, 2], [6, 7, 1, 1, 3, 2], [6, 8, 1, 1, 4, 2], [6, 8, 1, 1, 3, 2], [7, 8, 1, 1, 5, 2], [7, 8, 1, 1, 4, 3], [7, 9, 1, 1, 5, 3], [7, 9, 1, 1, 4, 3]];
+const GEM = ["#ff6b6b", "#b98bff", "#ffb020"];
+let cols, rows, N, level, tiles, src, founts, order, wet, ent, fill, leaks, nWet, solved, par, prog;
+let taps, hints, hist, mode, introT, cur, flowing, activity, hum, leakT;
+let flip, vc, vr, cell, gx, gy, bw, bh, ui, pressT = {}, land;
+
+/* ------------------------------------------------------------------ generator */
+const spec = n => n <= TABLE.length ? TABLE[n - 1] : [7, 9, 1, 1, 4 - n % 3, 3];
+const nbr = (i, d) => { const c = i % cols + DX[d], r = ((i / cols) | 0) + DY[d]; return c < 0 || r < 0 || c >= cols || r >= rows ? -1 : r * cols + c; };
+const bits = m => (m & 1) + (m >> 1 & 1) + (m >> 2 & 1) + (m >> 3 & 1);
+const mask = i => { const T = tiles[i]; return T.type ? rotm(CANON[T.type], T.rot) : 0; };
+const need = i => { const T = tiles[i], p = T.type === 2 ? 2 : 4; return T.type ? ((T.sol - T.rot) % p + p) % p : 0; };
+function load(n) {
+  level = n; const sp = spec(n), rnd = Lab.rng(n * 9973 + 71), ri = k => (rnd() * k) | 0;
+  cols = sp[0]; rows = sp[1]; N = cols * rows;
+  const m = new Uint8Array(N), target = Math.max(5, Math.round(N * sp[2])), inT = new Uint8Array(N);
+  src = (1 + ri(rows - 2)) * cols + 1 + ri(cols - 2); inT[src] = 1; order = [src]; const live = [src];
+  while (live.length && order.length < target) {   // growing-tree: mostly extend the newest channel, sometimes branch
+    const k = rnd() < .62 ? live.length - 1 : ri(live.length), a = live[k], opts = [0, 1, 2, 3].filter(d => { const b = nbr(a, d); return b >= 0 && !inT[b]; });
+    if (!opts.length || bits(m[a]) >= 3) { live.splice(k, 1); continue; }
+    const d = opts[ri(opts.length)], b = nbr(a, d); m[a] |= 1 << d; m[b] |= 1 << ((d + 2) % 4); inT[b] = 1; live.push(b); order.push(b);
+  }
+  tiles = Array.from(m, (mm, i) => { const nb = bits(mm), type = !nb ? 0 : nb === 1 ? 1 : nb === 3 ? 4 : (mm === 5 || mm === 10) ? 2 : 3; let sol = 0; while (type && rotm(CANON[type], sol) !== mm) sol++;
+    return { type, sol, rot: sol, rot0: sol, lock: false, twin: -1, gem: 0, turns: sol, ang: sol, lift: 0, wig: 0 }; });
+  founts = order.filter(i => i !== src && tiles[i].type === 1);
+  const pool = order.filter(i => i !== src); for (let i = pool.length - 1; i > 0; i--) { const j = ri(i + 1), t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+  pool.filter(i => tiles[i].type > 1).slice(0, sp[4]).forEach(i => tiles[i].lock = true);
+  let nScr = 0; for (const i of pool) { const T = tiles[i]; if (T.lock || (rnd() > sp[3] && nScr >= 2)) continue; T.rot = (T.sol + (T.type === 2 ? 1 : 1 + ri(3))) % 4; nScr++; }
+  for (let g = 0, made = 0; made < sp[5] && g < pool.length; g++) {   // jewelled twins: two free tiles that need the same number of turns
+    const a = pool[g], A = tiles[a]; if (A.lock || A.twin >= 0 || !need(a) || A.type === 2) continue;
+    const b = pool.find(j => j !== a && !tiles[j].lock && tiles[j].twin < 0 && tiles[j].type !== 2 && need(j) === need(a) && Math.abs(j % cols - a % cols) + Math.abs(((j / cols) | 0) - ((a / cols) | 0)) > 1);
+    if (b != null) { A.twin = b; tiles[b].twin = a; A.gem = tiles[b].gem = made++; }
+  }
+  par = 0; tiles.forEach((T, i) => { T.rot0 = T.turns = T.ang = T.rot; if (T.twin < 0 || T.twin > i) par += need(i); });
+  wet = new Uint8Array(N); ent = new Int8Array(N); fill = new Float32Array(N); flowing = new Uint8Array(N); fill[src] = 1;
+  taps = 0; hints = 0; hist = []; mode = "play"; introT = 0; cur = -1; activity = 0; leakT = 0; flood(); layout();
+}
+function flood() {   // breadth-first from the spring through ports that face each other; open ports of wet tiles are leaks
+  wet.fill(0); ent.fill(-1); leaks = []; const q = [src]; wet[src] = 1;
+  for (let h = 0; h < q.length; h++) { const a = q[h], ma = mask(a);
+    for (let d = 0; d < 4; d++) if (ma & (1 << d)) { const b = nbr(a, d);
+      if (b < 0 || !(mask(b) & (1 << ((d + 2) % 4)))) leaks.push(a * 4 + d); else if (!wet[b]) { wet[b] = 1; ent[b] = (d + 2) % 4; q.push(b); } } }
+  nWet = founts.filter(i => wet[i]).length; solved = nWet === founts.length && !leaks.length;
+}
+
+/* ------------------------------------------------------------------ layout */
+function layout() {
+  const p = Lab.play; land = p.w > p.h * 1.15; flip = land && rows > cols; vc = flip ? rows : cols; vr = flip ? cols : rows;
+  const U = Lab.clamp(Math.min(Lab.W, Lab.H) / 390, .85, 1.3);
+  if (land) {
+    const side = Lab.clamp(p.w * .2, 120, 196);
+    cell = Math.min((p.w - side * 2 - 12) / vc, (p.h - 30) / vr, 86); bw = vc * cell; bh = vr * cell; gx = p.x + (p.w - bw) / 2; gy = p.y + (p.h - bh) / 2;
+    const lx = (p.x + gx) / 2, rx = (gx + bw + p.x + p.w) / 2, my = p.y + p.h / 2, w = Math.min(120, side - 24), h = Math.min(48, (p.h - 50) / 3);
+    ui = { tx: lx, ty: my - 52, iy: my - 26, sy: my - 2, sy2: my + 16, two: true, prev: { x: lx - 52, y: my + 36, w: 48, h: 46 }, next: { x: lx + 4, y: my + 36, w: 48, h: 46 },
+      btn: ["undo", "reset", "hint"].map((id, i) => ({ id, x: rx - w / 2, y: my + (i - 1) * (h + 12) - h / 2, w, h })) };
+  } else {
+    const top = 64 * U, bot = 78 * U;
+    cell = Math.min((p.w - 30) / vc, (p.h - top - bot - 30) / vr, 86); bw = vc * cell; bh = vr * cell; gx = p.x + (p.w - bw) / 2; gy = p.y + top + (p.h - top - bot - bh) / 2;
+    const w = Math.min(118, (p.w - 48) / 3), h = 48, x0 = Lab.W / 2 - (w * 3 + 20) / 2, y = p.y + p.h - bot / 2 - h / 2 - 2;
+    ui = { tx: Lab.W / 2, ty: p.y + 15 * U, iy: p.y + 38 * U, sy: p.y + 57 * U, prev: { x: Lab.W / 2 - 132, y: p.y + 2, w: 48, h: 48 }, next: { x: Lab.W / 2 + 84, y: p.y + 2, w: 48, h: 48 },
+      btn: ["undo", "reset", "hint"].map((id, i) => ({ id, x: x0 + i * (w + 10), y, w, h })) };
+  }
+  ui.prev.id = "prev"; ui.next.id = "next";
+}
+Lab.onResize(() => { if (tiles) layout(); });
+const CX = i => gx + ((flip ? (i / cols) | 0 : i % cols) + .5) * cell, CY = i => gy + ((flip ? i % cols : (i / cols) | 0) + .5) * cell;
+const VD = d => flip ? [3, 2, 1, 0][d] : d;   // logical port → on-screen direction (the board is transposed in landscape)
+function pick(x, y) { const a = Math.floor((x - gx) / cell), b = Math.floor((y - gy) / cell); return a < 0 || b < 0 || a >= vc || b >= vr ? -1 : flip ? a * cols + b : b * cols + a; }
+const hit = (x, y) => [ui.prev, ui.next].concat(ui.btn).find(b => x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 4 && y <= b.y + b.h + 4);
+
+/* ------------------------------------------------------------------ actions */
+function spin(i, k) {
+  const T = tiles[i]; T.rot = ((T.rot + k) % 4 + 4) % 4; T.turns += k; T.lift = 1;
+  if (fill[i] > .4) fx.burst(CX(i), CY(i), { n: 7, colors: ["#d6fbff", "#49d0d8"], speed: 110, life: .4, size: 2.6, gravity: 320 });
+  fill[i] = 0;
+}
+function turn(i) {
+  if (mode !== "play" || i < 0) return; const T = tiles[i]; if (!T.type) return;
+  if (T.lock || i === src) { T.wig = 1; Lab.sfx("thud", { vol: .5, pitch: 1.2 }); return; }
+  hist.push(i); taps++; spin(i, 1); if (T.twin >= 0) spin(T.twin, 1);
+  Lab.sfx("knock", { pitch: Lab.rand(1.15, 1.35), vol: .8 }); if (T.twin >= 0) Lab.sfx("click", { pitch: 1.6, vol: .5 }); Lab.buzz(6); flood();
+}
+function undo() { if (!hist.length || mode !== "play") return Lab.sfx("tick", { pitch: .5, vol: .5 }); const i = hist.pop(); taps--; spin(i, -1); if (tiles[i].twin >= 0) spin(tiles[i].twin, -1); Lab.sfx("swish", { pitch: 1.3, vol: .6 }); flood(); }
+function reset() { if (!taps && !hist.length) return Lab.sfx("tick", { pitch: .5, vol: .5 }); tiles.forEach((T, i) => { if (!T.pin && T.rot !== T.rot0) spin(i, ((T.rot0 - T.rot) % 4 + 4) % 4); }); taps = 0; hist = []; Lab.sfx("slide", { vol: .6 }); flood(); }
+function hint() {
+  if (mode !== "play") return; const i = order.find(j => j !== src && !tiles[j].lock && need(j)); if (i == null) return;
+  const k = need(i); for (const j of [i, tiles[i].twin]) if (j >= 0) { spin(j, k); tiles[j].lock = tiles[j].pin = true; }
+  hints++; hist = []; Lab.sfx("chime", { pitch: .9 }); if (hints === 1) Lab.toast("Hint used: −1 star", 1100, { y: .13 }); flood();
+}
+function go(n) { if (n < 1 || n > prog.max) return Lab.sfx("tick", { pitch: .5, vol: .5 }); prog.lvl = n; Lab.store.set("prog", prog); load(n); Lab.setScore(n); Lab.sfx("flip"); }
+const rating = () => Math.max(1, Math.min(taps <= par ? 3 : taps <= Math.ceil(par * 1.4) + 2 ? 2 : 1, 3 - hints));
+function win() {
+  mode = "won"; const st = rating(), lv = level;
+  prog.stars[lv] = Math.max(prog.stars[lv] || 0, st); prog.max = Math.max(prog.max, lv + 1); prog.lvl = lv + 1; Lab.store.set("prog", prog);
+  founts.forEach((i, k) => Lab.after(.1 + k * .08, () => { tiles[i].lift = 1; Lab.audio.combo(k % 9 + 2, { vol: .15 }); fx.burst(CX(i), CY(i), { n: 9, colors: ["#d6fbff", "#49d0d8", "#fff"], speed: 170, life: .6, size: 3, gravity: 300, angle: -PI / 2, spread: 1.3 }); }));
+  const total = Object.values(prog.stars).reduce((a, b) => a + b, 0);
+  Lab.after(.8 + founts.length * .08, () => Lab.win({ title: st === 3 ? "Not a drop wasted" : "The court is awake", message: st === 3 ? "Every tile turned exactly as far as it needed." : hints ? "Solved with a little help." : "Match the tap par for the third star.",
+    score: lv, scoreLabel: "Cleared", button: "Next court", stats: [["Taps", taps + " / par " + par], ["Rating", "★".repeat(st) + "☆".repeat(3 - st)], ["All stars", total]] }));
+}
+function start() {
+  prog = Lab.store.get("prog", null) || { lvl: 1, max: 1, stars: {} };
+  load(prog.lvl); Lab.setScore(level); hum = Lab.audio.loop({ noise: true, bp: 1200, q: .6, vol: 0 });
+  Lab.input.onDown = [(x, y) => { if (mode !== "play") return; const b = hit(x, y); if (b) { pressT[b.id] = 1; ({ undo, reset, hint, prev: () => go(level - 1), next: () => go(level + 1) })[b.id](); return; } cur = -1; turn(pick(x, y)); }];
+  Lab.input.onKey = [k => {
+    if (mode !== "play") return; const d = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 }[k]; k = k.toLowerCase();
+    if (d != null) { if (cur < 0) cur = src; else { const n = nbr(cur, flip ? [3, 2, 1, 0][d] : d); if (n >= 0) cur = n; } Lab.sfx("tick", { vol: .4 }); }
+    else if (k === " " || k === "enter") turn(cur); else if (k === "z" || k === "backspace") undo(); else if (k === "r") reset(); else if (k === "h") hint();
+  }];
+  Lab.expose({ get level() { return level; }, get cols() { return cols; }, get rows() { return rows; }, get taps() { return taps; }, get par() { return par; }, get hints() { return hints; }, get mode() { return mode; }, get solved() { return solved; },
+    get tiles() { return tiles.map((T, i) => ({ type: T.type, rot: T.rot, lock: T.lock || i === src, twin: T.twin, wet: !!wet[i], need: need(i), fill: fill[i] })); }, get fountains() { return [nWet, founts.length]; }, get leaks() { return leaks.length; },
+    get progress() { return JSON.parse(JSON.stringify(prog)); }, get buttons() { return [ui.prev, ui.next].concat(ui.btn).map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); }, xy(i) { return [CX(i), CY(i)]; }, rating, go, turn });
+  if (level === 1) Lab.hint("Tap a tile to turn it");
+  else if (tiles.some(T => T.twin >= 0) && !prog.twin) { prog.twin = 1; Lab.store.set("prog", prog); Lab.hint("Jewelled tiles turn together"); }
+  else if (tiles.some(T => T.lock) && !prog.moss) { prog.moss = 1; Lab.store.set("prog", prog); Lab.hint("Mossy tiles are set in place"); }
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+
+/* ------------------------------------------------------------------ update */
+function tick(dt) {
+  let rising = 0, full = true;
+  for (let i = 0; i < N; i++) {
+    const T = tiles[i]; if (!T.type) continue;
+    T.ang = Lab.damp(T.ang, T.turns, 22, dt); if (Math.abs(T.ang - T.turns) < .004) T.ang = T.turns; T.lift = Lab.damp(T.lift, 0, 9, dt); T.wig = Lab.damp(T.wig, 0, 8, dt);
+    const moving = Math.abs(T.ang - T.turns) > .08, ready = wet[i] && !moving && (i === src || fill[nbr(i, ent[i])] > .5);
+    if (ready) { if (fill[i] < 1) { fill[i] = Math.min(1, fill[i] + dt * 9); rising++; } } else fill[i] = Math.max(0, fill[i] - dt * (moving ? 30 : 5));
+    if (wet[i] && fill[i] < .97) full = false;
+  }
+  for (let k = 0; k < founts.length; k++) {   // fountains chime as the water actually reaches them
+    const i = founts[k], on = fill[i] > .95 ? 1 : fill[i] < .5 ? 0 : flowing[i];
+    if (on !== flowing[i]) { flowing[i] = on; if (mode === "play") { const n = founts.filter(j => flowing[j]).length; if (on) { Lab.audio.combo(n + 1, { vol: .14 }); Lab.sfx("bubble", { pitch: 1.2, vol: .5 }); tiles[i].lift = .7; } else Lab.sfx("drop", { pitch: .7, vol: .35 }); } }
+  }
+  if (mode === "play") {
+    leakT -= dt; if (leakT <= 0) { leakT = .22; for (const L of leaks) { const i = L >> 2, d = VD(L & 3); if (fill[i] > .9 && Math.random() < .6) fx.burst(CX(i) + DX[d] * cell * .5, CY(i) + DY[d] * cell * .5, { n: 1, color: "#8fe9f2", speed: 50, life: .45, size: 2.4, gravity: 260, angle: Math.atan2(DY[d], DX[d]), spread: .9 }); } }
+    activity = Lab.damp(activity, rising ? 1 : 0, 5, dt); const fl = founts.filter(j => flowing[j]).length / Math.max(1, founts.length);
+    if (hum) hum.set({ vol: .012 + activity * .06 + fl * .03, f: 900 + fl * 700 }); Lab.music.intensity(.15 + .7 * fl);
+    if (solved && full) win();
+  }
+  for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5); introT += dt;
+}
+
+/* ------------------------------------------------------------------ draw */
+function bg() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("fc-bg:" + W + "x" + H, W, H, (g, w, h) => {
+    draw.vgrad(g, 0, 0, w, h, ["#2c62a8", "#1d4480", "#132f5c"]);
+    const s = 58; for (let y = -s; y < h + s; y += s) for (let x = -s + ((y / s) & 1) * s / 2; x < w + s; x += s) {   // zellige: eight-point stars
+      draw.star(g, x, y, 17, "rgba(255,255,255,.06)", 8, .62); draw.poly(g, x + s / 2, y, 5, 4, 0, "rgba(242,192,99,.09)"); }
+    draw.vignette(g, .3);
+  });
+}
+function tileSprite(type, lock) {
+  const z = Math.max(8, Math.round(cell));
+  return Lab.sprite("fc-t" + type + (lock ? "L" : "") + ":" + z, z, z, (g, w) => {
+    const h = w / 2, r = Lab.rng(type * 7 + (lock ? 3 : 1));
+    if (!type) {   // decorative paving where no channel runs
+      draw.rect(g, 1.5, 1.5, w - 3, w - 3, w * .12, "#24518f", "#17386a", 1.5); draw.star(g, h, h, w * .3, "rgba(255,255,255,.13)", 8, .6); draw.poly(g, h, h, w * .1, 4, 0, "rgba(242,192,99,.35)"); return;
+    }
+    draw.rect(g, 1.5, 1.5, w - 3, w - 3, w * .13, lock ? "#c6c596" : "#ecd9b0", lock ? "#7c8a56" : "#b89b6a", 1.5);
+    g.fillStyle = lock ? "rgba(84,122,58,.3)" : "rgba(150,110,60,.13)"; for (let i = 0; i < (lock ? 30 : 12); i++) { g.beginPath(); g.arc(5 + r() * (w - 10), 5 + r() * (w - 10), .8 + r() * (lock ? 3 : 1.4), 0, TAU); g.fill(); }
+    draw.rect(g, 3.5, 3.5, w - 7, w - 7, w * .1, null, "rgba(255,255,255,.42)", 1.2);
+    const m = CANON[type];
+    for (const [lw, col] of [[w * .37, "#a58350"], [w * .28, "#c9ab7a"]]) { g.strokeStyle = col; g.lineWidth = lw; g.beginPath(); for (let d = 0; d < 4; d++) if (m & (1 << d)) { g.moveTo(h, h); g.lineTo(h + DX[d] * h, h + DY[d] * h); } g.stroke(); draw.circle(g, h, h, lw / 2, col); }
+    if (type === 1) { draw.circle(g, h, h, w * .33, "#a58350"); draw.circle(g, h, h, w * .27, "#d9c292"); }
+    if (lock) for (const a of [.14, .86]) for (const b of [.14, .86]) draw.circle(g, w * a, w * b, w * .04, "#8a6a3a");
+  });
+}
+function button(c, b, label, on) {
+  const p = pressT[b.id] || 0; c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2 + p * 2); c.globalAlpha = on ? 1 : .4;
+  draw.rect(c, -b.w / 2, -b.h / 2 + 4, b.w, b.h, 11, "#0f2748"); draw.rect(c, -b.w / 2, -b.h / 2, b.w, b.h, 11, "#f6efdc", "#c9ab7a", 1.5);
+  draw.text(c, label, 0, label.length < 2 ? -2 : 1, { size: label.length < 2 ? 30 : 14, color: "#1d4480", weight: 800 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, s = bg(); c.drawImage(s, -40, -40, s.w, s.h);
+  const intro = Lab.ease.outCubic(Lab.clamp(introT / .35, 0, 1)), pad = 10, h = cell / 2;
+  c.save(); c.globalAlpha = intro; c.translate(0, (1 - intro) * 14);
+  draw.rect(c, gx - pad, gy - pad + 6, bw + pad * 2, bh + pad * 2, 16, "rgba(5,16,36,.4)");
+  draw.rect(c, gx - pad, gy - pad, bw + pad * 2, bh + pad * 2, 16, "#f2c063", "#8a6a2a", 1.5); draw.rect(c, gx - pad + 4, gy - pad + 4, bw + pad * 2 - 8, bh + pad * 2 - 8, 12, "#10294d");
+  for (let i = 0; i < N; i++) {
+    const T = tiles[i], sp = tileSprite(T.type, T.lock && !T.pin && i !== src), k = 1 + T.lift * .05;
+    c.save(); c.translate(CX(i) + Math.sin(T.wig * 22) * T.wig * 3, CY(i) - T.lift * 2); if (flip) c.transform(0, 1, 1, 0, 0, 0); c.rotate(T.ang * PI / 2); c.scale(k, k); c.drawImage(sp, -h, -h, cell, cell); c.restore();
+  }
+  // water: every arm is traced upstream → downstream so the ripple dashes run with the flow
+  c.beginPath();
+  for (let i = 0; i < N; i++) {
+    const f = fill[i]; if (f <= .01) continue; const m = mask(i), e = ent[i], x = CX(i), y = CY(i);
+    for (let d = 0; d < 4; d++) if (m & (1 << d)) { const v = VD(d);
+      if (d === e) { const a = Math.min(1, f * 2); c.moveTo(x + DX[v] * h, y + DY[v] * h); c.lineTo(x + DX[v] * h * (1 - a), y + DY[v] * h * (1 - a)); }
+      else { const a = e < 0 ? f : Lab.clamp(f * 2 - 1, 0, 1); if (a > 0) { c.moveTo(x, y); c.lineTo(x + DX[v] * h * a, y + DY[v] * h * a); } } }
+  }
+  c.lineCap = "round"; c.strokeStyle = "#1c93b0"; c.lineWidth = cell * .23; c.stroke(); c.strokeStyle = "#35c4d8"; c.lineWidth = cell * .17; c.stroke();
+  c.lineCap = "butt"; c.setLineDash([cell * .1, cell * .3]); c.lineDashOffset = -t * cell * 1.5; c.strokeStyle = "rgba(225,252,255,.75)"; c.lineWidth = cell * .05; c.stroke(); c.setLineDash([]);
+  // leaks: a spreading puddle with a coral warning ring
+  for (const L of leaks) { const i = L >> 2, d = VD(L & 3); if (fill[i] < .9) continue; const x = CX(i) + DX[d] * h * .96, y = CY(i) + DY[d] * h * .96, r = cell * (.15 + .03 * Math.sin(t * 7 + i));
+    draw.circle(c, x, y, r, "rgba(70,205,225,.8)"); draw.circle(c, x, y, r + 3 + 2 * Math.sin(t * 7 + i), null, "#ff7a66", 2.2); }
+  // fountains, spring, twin jewels
+  for (const i of founts) { const f = fill[i], x = CX(i), y = CY(i); if (f > .5) { draw.circle(c, x, y, cell * .25, "#35c4d8", "#1c93b0", 1.5);
+      if (flowing[i]) { for (let k = 0; k < 6; k++) { const u = (t * 1.3 + k / 6) % 1, a = k * TAU / 6 + i; draw.circle(c, x + Math.cos(a) * u * cell * .27, y + Math.sin(a) * u * cell * .27 - Math.sin(u * PI) * cell * .14, cell * .045 * (1.2 - u), "rgba(255,255,255,.9)"); }
+        draw.circle(c, x, y - cell * .04, cell * .08 + Math.sin(t * 9 + i) * cell * .012, "#fff"); } }
+    else draw.circle(c, x, y, cell * .07, "#8a6a3a"); }
+  { const x = CX(src), y = CY(src), k = 1 + Math.sin(tiles[src].wig * 22) * tiles[src].wig * .06; draw.poly(c, x, y, cell * .4 * k, 8, PI / 8, "#f6efdc"); c.strokeStyle = "#b89b6a"; c.lineWidth = 1.5; c.stroke(); draw.poly(c, x, y, cell * .32 * k, 8, PI / 8, "#35c4d8");
+    for (let j = 0; j < 2; j++) { const u = (t * .7 + j * .5) % 1; draw.circle(c, x, y, cell * .28 * u, null, `rgba(255,255,255,${.7 * (1 - u)})`, 1.6); } draw.circle(c, x, y, cell * .07, "#f2c063", "#8a6a2a", 1.2); }
+  for (let i = 0; i < N; i++) { const T = tiles[i];
+    if (T.twin >= 0) { const x = CX(i) + h * .56, y = CY(i) - h * .56 - T.lift * 2, r = cell * .13 * (1 + T.lift * .5); draw.poly(c, x, y + 1.5, r, 4, 0, "rgba(60,40,20,.4)"); draw.poly(c, x, y, r, 4, 0, GEM[T.gem % 3]); c.strokeStyle = "#fff"; c.lineWidth = 1.4; c.stroke(); draw.poly(c, x - r * .2, y - r * .2, r * .3, 4, 0, "rgba(255,255,255,.7)"); }
+    if (T.pin) draw.circle(c, CX(i) - h * .6, CY(i) - h * .6, cell * .07, "#f2c063", "#8a6a2a", 1.2); }
+  if (mode === "play" && level === 1 && !taps) { const i = order.find(j => need(j)); if (i != null) draw.circle(c, CX(i), CY(i), h * (.82 + .1 * Math.sin(t * 6)), null, `rgba(255,255,255,${.55 + .3 * Math.sin(t * 6)})`, 3); }
+  if (cur >= 0) draw.rect(c, CX(cur) - h + 2, CY(cur) - h + 2, cell - 4, cell - 4, cell * .13, null, "#fff", 3);
+  c.restore();
+  if (mode === "demo") return;
+  const best = prog.stars[level] || 0, a = "taps " + taps + " / " + par, b = "fountains " + founts.filter(j => flowing[j]).length + "/" + founts.length + (leaks.length ? "  ·  leaks " + leaks.length : ""), o = { size: 12.5, color: taps > par ? "#ffc9a8" : "rgba(246,239,220,.85)", weight: 700 };
+  draw.text(c, "COURT " + level, ui.tx, ui.ty, { size: 19, color: "#f6efdc", weight: 800 });
+  for (let i = 0; i < 3; i++) draw.star(c, ui.tx + (i - 1) * 19, ui.iy, 7.5, i < best ? "#f2c063" : "rgba(246,239,220,.22)", 5, .5);
+  if (ui.two) { draw.text(c, a, ui.tx, ui.sy, o); draw.text(c, b, ui.tx, ui.sy2, Object.assign({}, o, { color: leaks.length ? "#ffb3a3" : "rgba(246,239,220,.85)" })); } else draw.text(c, a + "  ·  " + b, ui.tx, ui.sy, o);
+  button(c, ui.prev, "‹", level > 1); button(c, ui.next, "›", level < prog.max);
+  button(c, ui.btn[0], "UNDO", hist.length > 0); button(c, ui.btn[1], "RESET", taps > 0); button(c, ui.btn[2], "HINT", mode === "play");
+}
+Lab.boot();
+})();
+</script></body></html>

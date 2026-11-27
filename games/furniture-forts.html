@@ -262,11 +262,11 @@ function beginBuild(first) {
   G.plan = planNight(G.night); measure(); renderTray(got); renderFore();
   $('dock').classList.remove('off'); $('bReady').classList.remove('dim'); $('bReady').textContent = 'READY';
   AU.music('calm'); banner('NIGHT ' + G.night, '');
-  setHint(G.night === 1 ? 'Drag furniture from the shelf to build a fort around Sir Biscuit' : G.night === 2 ? 'Fix it up — everything still standing is yours to keep' : '');
+  setHint(G.night === 1 ? 'Drag furniture from the shelf to build a fort around Sir Biscuit' : G.night === 2 ? 'Patch it up with the new pieces — cushions snug beside him earn COZY points' : G.night === 3 ? 'The dog steals the first thing he bumps into...' : '');
 }
 function startSiege() {
   if (G.mode !== 'build') return; if (drag) endDrag();
-  const early = Math.floor(G.buildLeft); if (early >= 2 && G.placed > 0) { G.score += early * 2; floatText(0, -150, 'EARLY BIRD +' + early * 2, '#ffd166'); }
+  const early = Math.min(20, Math.floor(G.buildLeft)); if (early >= 2 && G.placed > 0) { G.score += early * 2; floatText(0, -150, 'EARLY BIRD +' + early * 2, '#ffd166'); }
   G.mode = 'siege'; G.siegeT = 0; G.ei = 0; G.settle = 0; G.breachT = 0; G.breached = false;
   Body.setStatic(teddy, false);
   $('dock').classList.add('off'); $('bReady').classList.add('dim'); $('bReady').textContent = 'HANDS OFF!';
@@ -307,7 +307,7 @@ function stepSiege() {
 function endSiege() {
   for (const b of G.proj) { puff(b.position.x, b.position.y, 3); Composite.remove(world, b); } G.proj = [];
   if (G.dog) { dogRelease(); Composite.remove(world, G.dog.b); G.dog = null; } G.quake = null; quakeX = 0; warns.length = 0;
-  measure(); G.mode = 'tally'; G.t = 0; const n = G.night; G.tallest = Math.max(G.tallest, G.height);
+  measure(); G.mode = 'tally'; G.t = 0; setHint(''); const n = G.night; G.tallest = Math.max(G.tallest, G.height);
   if (!G.breached) { const sp = 100 * n, hp = Math.round(G.height * n / 2), cp = Math.round(G.cozy * 100) * n;
     G.gain = sp + hp + cp; G.score += G.gain; G.safeNights++;
     floatText(0, -G.height - 96, 'SAFE +' + sp, '#9df0a8', 0); floatText(0, -G.height - 66, 'HEIGHT +' + hp, '#ffd166', .35); floatText(0, -G.height - 36, 'COZY +' + cp, '#bfe3ff', .7);
@@ -362,7 +362,8 @@ function dogRelease(lost) {
 }
 function stepDog() {
   const d = G.dog, b = d.b; d.t += DT; d.prog = d.prog * .93 + Math.abs(b.velocity.x) * .07;
-  const vm = d.state === 'drag' ? d.vmax * .6 : d.vmax, leave = () => { d.state = 'leave'; b.collisionFilter.mask = C_WORLD; if (b.position.x * d.dir > 0 === false) { } };
+  const vm = d.state === 'drag' ? d.vmax * .6 : d.vmax, leave = () => { d.state = 'leave'; b.collisionFilter.mask = C_WORLD; d.dir = b.position.x < 0 ? -1 : 1; };
+  if (d.t > 12) { dogRelease(); puff(b.position.x, b.position.y, 6); Composite.remove(world, b); G.dog = null; return; }
   if (Math.abs(b.velocity.x) < vm || b.velocity.x * d.dir < 0) Body.applyForce(b, b.position, { x: d.dir * .001 * (.8 * d.P + .1 * b.mass), y: 0 });
   if (d.state === 'run') { if (d.t > .5 && d.prog < .5) d.stuck += DT; else d.stuck = 0;
     if (d.stuck > .5) { d.stuck = 0; const p = d.touch;
@@ -371,7 +372,7 @@ function stepDog() {
         d.c = Constraint.create({ bodyA: b, bodyB: p, length: Math.hypot(p.position.x - b.position.x, p.position.y - b.position.y), stiffness: .35, damping: .1 }); Composite.add(world, d.c);
         AU.bark(); floatText(b.position.x, b.position.y - 54, 'MINE!', '#e8a95c'); }
       else if (d.jumps > 0) { d.jumps--; Body.setVelocity(b, { x: d.dir * 4.5, y: -d.jv }); d.prog = 4; AU.bark(); }
-      else { d.dir = -d.dir; leave(); AU.whine(); } }
+      else { leave(); AU.whine(); } }
     if (d.t > 7) leave(); }
   else if (d.state === 'drag') { d.dragT += DT; if (d.dragT > .6 && d.prog < .4) d.stuck += DT; else d.stuck = 0;
     if (d.stuck > 1.2) { dogRelease(); leave(); AU.whine(); floatText(b.position.x, b.position.y - 54, 'too heavy...', '#fff3d6'); } }
@@ -422,19 +423,22 @@ function pick(p) {
 function startDrag(b, e, p, fromTray) {
   const touch = e.pointerType === 'touch', hh = (b.bounds.max.y - b.bounds.min.y) / 2;
   drag = { body: b, pid: e.pointerId, wx: p.x, wy: p.y, ox: fromTray ? 0 : b.position.x - p.x, oy: fromTray ? -(touch ? hh + 26 : 0) : b.position.y - p.y, ang: Math.round(b.angle / (Math.PI / 2)) * (Math.PI / 2), fromTray };
-  b.gd.pop = 1; AU.pick(); $('bRot').classList.remove('dim'); $('bRot').classList.add('hot');
+  b.gd.pop = 1; b.gd.ghost = true; b.collisionFilter.mask = 0; AU.pick(); $('bRot').classList.remove('dim'); $('bRot').classList.add('hot');   // a carried piece passes through everything; it turns solid when you let go
 }
 function stepDrag() {
   if (!drag) return; const b = drag.body, m = b.bounds, hw = (m.max.x - m.min.x) / 2, hh = (m.max.y - m.min.y) / 2, cxo = (m.min.x + m.max.x) / 2 - b.position.x, cyo = (m.min.y + m.max.y) / 2 - b.position.y;
   const tx = clamp(drag.wx + drag.ox, -RW + hw - cxo + 1, RW - hw - cxo - 1), ty = clamp(drag.wy + drag.oy, -CEIL + hh - cyo, -hh - cyo - 1);
-  let vx = (tx - b.position.x) * .3, vy = (ty - b.position.y) * .3; const sp = Math.hypot(vx, vy), mx = b.gd.ghost ? 80 : 17; if (sp > mx) { vx *= mx / sp; vy *= mx / sp; }
-  Body.setVelocity(b, { x: vx, y: vy }); Body.setAngularVelocity(b, clamp((drag.ang - b.angle) * .3, -.3, .3));
-  if (b.gd.ghost && sp < 30 && !overlapsAny(b, solids(b))) { b.gd.ghost = false; b.collisionFilter.mask = MASK_F; b.gd.pop = .6; }
+  let vx = (tx - b.position.x) * .45, vy = (ty - b.position.y) * .45; const sp = Math.hypot(vx, vy); if (sp > 70) { vx *= 70 / sp; vy *= 70 / sp; }
+  Body.setVelocity(b, { x: vx, y: vy - GR }); Body.setAngularVelocity(b, clamp((drag.ang - b.angle) * .35, -.4, .4));
+  drag.blocked = overlapsAny(b, solids(b));
 }
 function endDrag() {
   if (!drag) return; const b = drag.body;
-  if (b.gd.ghost) { G.tray[b.gd.type]++; removePiece(b); AU.deny(); renderTray(); }
-  else { const v = b.velocity, sp = Math.hypot(v.x, v.y); if (sp > 5) Body.setVelocity(b, { x: v.x * 5 / sp, y: v.y * 5 / sp }); AU.drop(); G.placed++; if (G.night === 1 && G.placed === 1) setHint('Turn a held piece with TURN (or R) · press READY when the fort is done'); }
+  const list = solids(b), x = b.position.x, y0 = b.position.y; let k = 0; Body.setAngle(b, drag.ang);
+  while (k < 70 && overlapsAny(b, list)) { k++; Body.setPosition(b, { x, y: y0 - 6 * k }); }                      // dropped inside something: it pops up on top
+  if (k >= 70 || b.bounds.min.y < -CEIL - 40) { if (drag.fromTray) G.tray[b.gd.type]++; else Body.setPosition(b, { x, y: y0 }); if (drag.fromTray) { removePiece(b); AU.deny(); renderTray(); drag = null; $('bRot').classList.add('dim'); $('bRot').classList.remove('hot'); return; } }
+  b.gd.ghost = false; b.collisionFilter.mask = MASK_F; Body.setVelocity(b, { x: 0, y: 0 }); Body.setAngularVelocity(b, 0);
+  { AU.drop(); G.placed++; b.gd.pop = .5; if (G.night === 1 && G.placed === 1) setHint('Turn a held piece with TURN (or R) · press READY when the fort is done'); }
   drag = null; $('bRot').classList.add('dim'); $('bRot').classList.remove('hot');
 }
 function rotateHeld() { if (!drag) return; drag.ang += Math.PI / 2; drag.body.gd.pop = .7; AU.rot(); }
@@ -448,7 +452,7 @@ function slotDown(type, e) {
   AU.unlock(); if (!canBuild()) return; if (drag) { if (e.pointerId !== drag.pid) rotateHeld(); return; }
   if (!G.tray[type]) { AU.deny(); return; } e.preventDefault(); rect = stage.getBoundingClientRect();
   G.tray[type]--; const p = toWorld(e.clientX, e.clientY), T = TYPES[type], b = makePiece(type, clamp(p.x, -RW + T.w / 2 + 2, RW - T.w / 2 - 2), Math.min(p.y, -T.h / 2 - 2));
-  b.gd.ghost = true; b.collisionFilter.mask = 0; startDrag(b, e, p, true); renderTray();
+  startDrag(b, e, p, true); renderTray();
 }
 addEventListener('pointermove', e => { if (drag && e.pointerId === drag.pid) { const p = toWorld(e.clientX, e.clientY); drag.wx = p.x; drag.wy = p.y; } });
 const up = e => { if (drag && e.pointerId === drag.pid) endDrag(); }; addEventListener('pointerup', up); addEventListener('pointercancel', up);
@@ -496,7 +500,7 @@ function drawType(c, type, id) {
   else if (type === 'chest') { box(c, -38, -26, 76, 52, 6, '#f2b84b'); c.strokeStyle = INK; line(c, -38, -8, 38, -8); c.fillStyle = '#d2452f'; c.fillRect(-36, -8, 72, 4); box(c, -6, -13, 12, 13, 2, '#fff3d6'); c.fillStyle = '#d79a1e'; for (const x of [-24, 24]) { c.beginPath(); for (let i = 0; i < 10; i++) { const a = i * TAU / 10 - 1.57, r = i % 2 ? 3 : 7; c.lineTo(x + Math.cos(a) * r, 10 + Math.sin(a) * r); } c.fill(); } }
   else if (type === 'beanbag') { box(c, -44, -27, 88, 54, 22, '#7fb2ff'); c.strokeStyle = '#4d7fd6'; c.lineWidth = 2; c.beginPath(); c.moveTo(-30, 14); c.quadraticCurveTo(0, 24, 30, 14); c.stroke(); c.strokeStyle = 'rgba(255,255,255,.55)'; c.lineWidth = 3; c.beginPath(); c.moveTo(-28, -12); c.quadraticCurveTo(-18, -20, -4, -20); c.stroke(); }
 }
-function drawPiece(c, b) { const g = b.gd, k = 1 + g.pop * .12; c.save(); c.translate(b.position.x, b.position.y); c.rotate(b.angle); c.translate(g.off.x, g.off.y); c.scale(k, k); if (g.ghost) c.globalAlpha = .55; drawType(c, g.type, g.id); c.restore(); }
+function drawPiece(c, b) { const g = b.gd, k = 1 + g.pop * .12; c.save(); c.translate(b.position.x, b.position.y); c.rotate(b.angle); c.translate(g.off.x, g.off.y); c.scale(k, k); if (g.ghost) c.globalAlpha = drag && drag.blocked ? .45 : .82; drawType(c, g.type, g.id); c.restore(); }
 function drawTeddy(c, t) {
   const b = teddy, g = b.gd, awake = G.mode === 'siege' || g.fallen, br = awake ? 0 : Math.sin(t * 2) * .6;
   c.save(); c.translate(b.position.x, b.position.y); c.rotate(b.angle); c.lineWidth = 2.4; c.strokeStyle = INK; const fur = '#c98a4b', pale = '#f3d9a8';
