@@ -215,12 +215,16 @@ window.GDL_CATALOG = {
    "path": "games/furniture-forts.html",
    "collection": "arcade",
    "title": "Furniture Forts",
-   "desc": "Build forts out of furniture.",
+   "desc": "Stack tables, bookcases and cushions into a fort around sleeping Sir Biscuit, then hold your breath as pillows, the dog, toy rain and the spin-cycle quake test it night after night.",
    "genre": [
+    "Physics",
+    "Strategy",
     "Sandbox"
    ],
    "controls": [
-    "mouse"
+    "touch",
+    "mouse",
+    "keyboard"
    ],
    "thumb": "thumbs/games--furniture-forts.jpg"
   },
@@ -1731,24 +1735,28 @@ window.GDL_CATALOG = {
    "n": 35,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--35-teeter-torte.jpg"
   },
   {
-   "id": "PhoneGameLab/36-sky-high",
-   "path": "PhoneGameLab/games/36-sky-high/index.html",
+   "id": "PhoneGameLab/36-plumb-line",
+   "path": "PhoneGameLab/games/36-plumb-line/index.html",
    "collection": "PhoneGameLab",
-   "title": "Sky High Stack",
-   "desc": "Sliding blocks, only matching overlap stays.",
+   "title": "Plumb Line",
+   "desc": "Set every floor dead true.",
    "genre": [
     "Stack & Physics"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 36,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--36-sky-high.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--36-plumb-line.jpg"
   },
   {
    "id": "PhoneGameLab/37-star-jar",
@@ -1904,24 +1912,26 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 44,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/45-tap-clusters",
-   "path": "PhoneGameLab/games/45-tap-clusters/index.html",
+   "id": "PhoneGameLab/45-shoo",
+   "path": "PhoneGameLab/games/45-shoo/index.html",
    "collection": "PhoneGameLab",
-   "title": "Tap Clusters",
-   "desc": "Tap groups of same-color blocks to pop them.",
+   "title": "Shoo!",
+   "desc": "Scatter the flocks. Sweep the roof.",
    "genre": [
-    "Puzzle & Logic"
+    "Puzzle & Match"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 45,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--45-tap-clusters.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/46-connect-dots",

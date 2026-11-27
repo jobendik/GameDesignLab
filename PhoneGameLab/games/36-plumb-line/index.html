@@ -1,0 +1,201 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Plumb Line</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PLUMB LINE — draft a skyscraper one floor at a time: a floor plate glides over the tower, tap to set it; whatever
+ * overhangs is sliced away and every floor above is that much narrower. Miss the tower completely and the job is over.
+ * Identity: an architect's blueprint — cobalt paper, white line-work, drafting grid, altitude ruler, dimension labels,
+ * a plumb bob hanging from the moving plate that lights up inside the perfect window. No physics, no fall: it stamps.
+ * Depth: PERFECT streaks — from the third in a row each perfect cantilevers the floor wider again (8, 10, 12… up to
+ * the lot width), so precision is the only way back from a bad slice. Every tenth floor is a SKY LOBBY (wider cornice,
+ * bonus) and opens a new zone with its own facade and its own way of moving the plate:
+ * STEADY, SWING (sine), EXPRESS (one-way passes), STUTTER (stop-go), GUSTS (surging speed), FEINT (fake reversals),
+ * FLICKER (the plate fades in and out) — then round again, faster. The paper darkens from cobalt to night as you climb.
+ * Laid out in virtual units (1 u = S px) so a resize never disturbs the tower.                                    */
+Lab.init({
+  title: "Plumb Line", tagline: "Set every floor dead true.", category: "Stack & Physics",
+  howto: ["Tap to set the gliding floor", "Overhang is sliced off for good", "3 perfects in a row grow it back"],
+  theme: { bg: "#143a96", bg2: "#2a5fd0", fg: "#ffffff", muted: "#b9cdf5", accent: "#ffd166", accent2: "#7fd8ff" },
+  orient: "portrait", music: { style: "puzzle", key: "E", bpm: 96, vol: .34 }, restart: start,
+  attract: (dt, t) => { if (!floors) { demo = true; reset(); } update(dt, t); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, C = Lab.color, clamp = Lab.clamp;
+const FH = 30, B0 = 200, ACC = "#ffd166", RED = "#ff8a7a", LINE = "#ffffff";
+const PAT = ["STEADY", "SWING", "EXPRESS", "STUTTER", "GUSTS", "FEINT", "FLICKER"];
+let W, H, S, VW, VH, PX, GY, TOPT, HUDY;
+let demo = false, floors, mv, slices, cam, score, streak, bestStreak, perfects, zone, alive, spawnT, side, now, scenery, clouds, lastOff, grew, shownStreak, pulse;
+
+function layout() { W = Lab.W; H = Lab.H; S = Math.min(W / 390, Lab.play.h / 700); VW = W / S; VH = H / S; PX = VW / 2; GY = VH - Lab.safe.bottom / S - 96; HUDY = Lab.play.y / S; TOPT = HUDY + (GY - HUDY) * .5; }
+Lab.onResize(() => { if (floors) layout(); });
+const tol = w => 4 + w * .012;
+const top = () => floors[floors.length - 1];
+const speed = () => Math.min(440, 185 + zone * 16 + (floors.length - 1) % 10 * 1.5);
+const tri = u => { const m = ((u + 1) % 4 + 4) % 4; return m < 2 ? m - 1 : 3 - m; };
+
+function reset() {
+  layout();
+  floors = [{ x: 0, w: B0, style: 0, base: true, fl: 0 }]; slices = []; mv = null; cam = 0; score = 0; streak = 0; bestStreak = 0; perfects = 0; zone = 0; alive = true; spawnT = .45; side = -1; now = 0; lastOff = 0; grew = 0; shownStreak = 0; pulse = 0;
+  const r = Lab.rng(demo ? 3 : (Math.random() * 1e6) | 0); scenery = [];
+  for (const s of [-1, 1]) { let x = B0 / 2 + 26; while (x < VW / 2 + 60) { const w = 34 + r() * 46, h = (2 + Math.floor(r() * 9)) * FH * .8; scenery.push({ x: s * (x + w / 2), w, h, k: Math.floor(r() * 3) }); x += w + 6 + r() * 16; } }
+  clouds = Array.from({ length: 9 }, (_, i) => ({ x: r() * 600 - 300, alt: 12 + i * 7 + r() * 4, w: 60 + r() * 60, v: (r() < .5 ? -1 : 1) * (5 + r() * 9) }));
+}
+function start() {
+  demo = false; reset(); Lab.setScore(0); Lab.hint("");
+  Lab.input.onDown = [() => { place(); }];
+  Lab.input.onKey = [k => { if (k === " " || k === "Enter" || k === "ArrowDown") place(); }];
+  Lab.expose({
+    get score() { return score; }, get floors() { return floors.length - 1; }, get width() { return top().w; }, get streak() { return streak; }, get bestStreak() { return bestStreak; }, get perfects() { return perfects; },
+    get zone() { return zone + 1; }, get pattern() { return PAT[zone % 7]; }, get alive() { return alive; }, get ready() { return !!mv && alive; }, get speed() { return speed(); }, get tol() { return tol(top().w); },
+    /* signed distance (u) from the gliding plate's centre to the centre of the top floor; null between plates */
+    off() { return mv ? mv.x - top().x : null; }, place, get lastOff() { return lastOff; },
+  });
+  Lab.loop((dt, t) => { update(dt, t); render(t); });
+}
+function spawn() {
+  const t = top(), w = t.w; side = -side;
+  mv = { w, x: 0, u: side, side, dir: -side, s: 0, q: 0, R: w + 30, feintT: Lab.rand(.5, 1.3), slowT: 0, a: 1, in: 0, pat: zone % 7 };
+  mv.x = t.x + mv.u * mv.R;
+}
+function stepMover(dt, t) { // q is the plate's own progress; P(q) ping-pongs 1 → -1 → 1 from its entry side
+  const m = mv, du = speed() / m.R * dt, P = q => tri(1 + q); m.in = Math.min(1, m.in + dt * 6); m.a = 1;
+  if (m.pat === 1) { m.s += du * 1.25; m.u = m.side * Math.cos(m.s); }
+  else if (m.pat === 2) { m.q += du * 1.3; const k = m.q % 2.3; m.u = m.side * (1.15 - k); m.a = clamp((1.15 - Math.abs(m.u)) * 7, 0, 1); }
+  else if (m.pat === 3) { m.s += dt; const k = Math.floor(m.s / .4), f = Math.min(1, (m.s - k * .4) / .22); m.u = m.side * P((k + ease.inOutQuad(f)) * .3); }
+  else if (m.pat === 4) { m.q += du * (1 + .65 * Math.sin(t * 2.3)); m.u = m.side * P(m.q); }
+  else if (m.pat === 5) {
+    if (m.slowT > 0) { m.slowT -= dt; m.u += m.dir * du * .22; if (m.slowT <= 0) { m.dir = -m.dir; m.feintT = Lab.rand(.6, 1.5); } }
+    else { m.u += m.dir * du; m.feintT -= dt; if (m.feintT <= 0 && Math.abs(m.u) < .62) m.slowT = .15; }
+    if (m.u > 1) { m.u = 1; m.dir = -1; } else if (m.u < -1) { m.u = -1; m.dir = 1; }
+  } else { m.q += du; m.u = m.side * P(m.q); if (m.pat === 6) m.a = .12 + .88 * Math.abs(Math.sin(t * 3.1)); }
+  m.x = top().x + m.u * m.R;
+}
+const FX = (x, wy) => [(PX + x) * S, (GY + cam + wy) * S];
+
+function place() {
+  if (!alive || !mv || Lab.paused) return false;
+  const t = top(), m = mv, off = m.x - t.x, n = floors.length, yTop = -n * FH; lastOff = off; mv = null; spawnT = .14;
+  const L = Math.max(t.x - t.w / 2, m.x - m.w / 2), R = Math.min(t.x + t.w / 2, m.x + m.w / 2), ov = R - L;
+  if (ov < 3) { // clean miss: the plate drops past the tower
+    slices.push({ x: m.x, y: yTop, w: m.w, vx: m.dir * 40, vy: 0, rot: 0, vr: (off > 0 ? 1 : -1) * 1.2, t: 0, whole: true });
+    if (demo) { reset(); return true; }
+    alive = false; Lab.sfx("whoosh", { pitch: .7 }); Lab.shake(8, .3); Lab.buzz(40);
+    const p = FX(m.x, yTop); fx.text(p[0], p[1] - 20 * S, "MISSED", { color: RED, size: 22 * S + 6, life: 1.2 });
+    Lab.after(.9, () => Lab.gameover({ title: "Out of plumb", message: "Floor " + n + " missed the tower by " + ((Math.abs(off) - (t.w + m.w) / 2 + 3) / 10).toFixed(1) + " m.", score, stats: [["Floors", n - 1], ["Height", Math.round((n - 1) * 3.5) + " m"], ["Best perfect run", bestStreak]] }));
+    return true;
+  }
+  const perfect = Math.abs(off) <= tol(t.w), f = { x: perfect ? t.x : (L + R) / 2, w: perfect ? m.w : ov, style: zone % 7, fl: 1, perfect, lobby: n % 10 === 0 };
+  grew = 0;
+  if (perfect) { streak++; perfects++; bestStreak = Math.max(bestStreak, streak); if (streak >= 3 && f.w < B0) { grew = Math.min(B0 - f.w, 8 + (streak - 3) * 2, 20); f.w += grew; f.grow = 1; } }
+  else { streak = 0; const sw = m.w - ov, sxc = off > 0 ? R + sw / 2 : L - sw / 2; slices.push({ x: sxc, y: yTop, w: sw, vx: (off > 0 ? 1 : -1) * 50, vy: 0, rot: 0, vr: (off > 0 ? 1 : -1) * 2.5, t: 0 }); }
+  let lobbyGain = 0; if (f.lobby) { lobbyGain = Math.min(B0 - f.w, 36); f.w += lobbyGain; }
+  floors.push(f); pulse = 1;
+  if (demo) { if (f.lobby) zone++; return true; }
+  const gain = 10 + (perfect ? 10 + 5 * Math.min(streak, 10) : 0); score += gain; const p = FX(f.x, yTop);
+  if (perfect) {
+    Lab.audio.combo(Math.min(streak - 1, 14), { type: "sine", vol: .24, dur: .3 }); Lab.sfx("tick"); Lab.hitstop(.03); Lab.buzz(8);
+    fx.text(p[0], p[1] - 22 * S, (streak > 1 ? "PERFECT ×" + streak : "PERFECT") + (grew ? "  +" + (grew / 10).toFixed(1) + " m" : ""), { color: ACC, size: 17 * S + 5, life: 1 });
+    fx.ring(p[0] - f.w / 2 * S, p[1] + FH / 2 * S, { r0: 2, r1: 26 * S, color: ACC, width: 2.5, life: .35 }); fx.ring(p[0] + f.w / 2 * S, p[1] + FH / 2 * S, { r0: 2, r1: 26 * S, color: ACC, width: 2.5, life: .35 });
+    if (grew) Lab.sfx("unlock", { vol: .7, pitch: 1 + streak * .03 });
+  } else {
+    const sw = m.w - ov; Lab.sfx("snap", { pitch: clamp(1.5 - sw / 90, .6, 1.5) }); Lab.sfx("knock", { pitch: .8, vol: .7 }); Lab.shake(2 + sw / 14, .14); Lab.buzz(14);
+    fx.text(FX(off > 0 ? R : L, yTop)[0], p[1] - 16 * S, "−" + (sw / 10).toFixed(1) + " m", { color: RED, size: 14 * S + 4, life: .9 });
+  }
+  if (f.lobby) {
+    zone++; const bonus = 50 * zone; score += bonus;
+    Lab.banner("ZONE " + (zone + 1), { color: "#fff", y: .18, ms: 1300 }); Lab.toast("Sky lobby +" + bonus + " · " + PAT[zone % 7] + (zone >= 7 ? " · faster" : ""), 1900, { y: .26 }); Lab.sfx("levelup"); Lab.flash("#ffffff", .2, .18);
+  }
+  Lab.setScore(score); if (perfect || f.lobby) Lab.bumpScore();
+  return true;
+}
+
+function update(dt, t) {
+  now = t;
+  if (alive) { if (!mv) { spawnT -= dt; if (spawnT <= 0) spawn(); } else stepMover(dt, t); }
+  if (demo && mv && mv.in >= 1) { const o = mv.x - top().x, want = (floors.length * 7919) % 5 === 0 ? 9 : 0; if (Math.abs(o - want) < 3.4) place(); }
+  cam = Lab.damp(cam, Math.max(0, floors.length * FH - (GY - TOPT)), 6, dt);
+  for (const f of floors) if (f.fl > 0) f.fl = Math.max(0, f.fl - dt * 3.5);
+  for (const s of slices) { s.t += dt; s.vy += 1500 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.rot += s.vr * dt; }
+  slices = slices.filter(s => s.t < 1.3);
+  for (const c of clouds) { c.x += c.v * dt; if (c.x > 400) c.x = -400; else if (c.x < -400) c.x = 400; }
+  pulse = Math.max(0, pulse - dt * 4); shownStreak = Lab.damp(shownStreak, Math.min(3, streak), 12, dt);
+  if (!demo) Lab.music.intensity(clamp(.15 + Math.min(streak, 6) * .1 + zone * .06, 0, 1));
+}
+
+/* ---------- drawing (virtual units; the context is scaled by S) */
+function facade(c, f, y) {
+  const x0 = PX + f.x - f.w / 2, w = f.w, g = (step) => Math.floor((x0 - PX) / step) * step + PX;
+  c.fillStyle = f.base ? "rgba(255,255,255,.16)" : "rgba(255,255,255,.07)"; c.fillRect(x0, y, w, FH);
+  c.save(); c.beginPath(); c.rect(x0 + 3, y + 2, w - 6, FH - 4); c.clip(); c.fillStyle = "rgba(255,255,255,.6)"; c.strokeStyle = "rgba(255,255,255,.6)"; c.lineWidth = 1.3;
+  switch (f.style) {
+    case 0: for (let x = g(16); x < x0 + w; x += 16) c.fillRect(x + 6, y + 5, 3, FH - 5); c.fillRect(x0, y + 4, w, 1.5); break;
+    case 1: for (let x = g(14); x < x0 + w; x += 14) c.fillRect(x + 3, y + 8, 8, 14); break;
+    case 2: c.fillRect(x0, y + 9, w, 1.5); c.fillRect(x0, y + 21, w, 1.5); for (let x = g(28); x < x0 + w; x += 28) c.fillRect(x + 13, y + 9, 1.5, 12); break;
+    case 3: c.beginPath(); for (let x = g(22); x < x0 + w; x += 22) { c.moveTo(x + 3, y + FH); c.lineTo(x + 3, y + 14); c.arc(x + 11, y + 14, 8, Math.PI, 0); c.lineTo(x + 19, y + FH); } c.stroke(); break;
+    case 4: for (let x = g(18); x < x0 + w; x += 18) { c.fillRect(x + 5, y + 6, 8, 13); c.fillRect(x + 2, y + 22, 14, 2); } break;
+    case 5: for (let k = 0; k < 5; k++) c.fillRect(x0, y + 6 + k * 5, w, 1.4); break;
+    default: c.beginPath(); for (let x = g(20) - 20; x < x0 + w; x += 20) { c.moveTo(x, y + FH); c.lineTo(x + 20, y); c.moveTo(x, y); c.lineTo(x + 20, y + FH); } c.stroke();
+  }
+  c.restore();
+  if (f.fl > 0) { c.fillStyle = C.alpha(f.perfect ? ACC : "#ffffff", f.fl * .8); c.fillRect(x0, y, w, FH); }
+  c.strokeStyle = LINE; c.lineWidth = 1.7; c.strokeRect(x0, y, w, FH);
+  if (f.lobby) { c.fillStyle = LINE; c.fillRect(x0 - 6, y + FH - 3, w + 12, 3.5); c.fillRect(x0 - 3, y - 1, w + 6, 2.5); }
+  if (f.perfect) { c.fillStyle = ACC; c.beginPath(); c.moveTo(x0 + w + 9, y + FH / 2 - 4); c.lineTo(x0 + w + 13, y + FH / 2); c.lineTo(x0 + w + 9, y + FH / 2 + 4); c.lineTo(x0 + w + 5, y + FH / 2); c.fill(); }
+}
+function render(t) {
+  const c = Lab.ctx, n = floors.length, a = clamp((n - 12) / 80, 0, 1);
+  draw.bg(c, C.mix("#2a5fd0", "#0b1437", a), C.mix("#1a47b0", "#0d1b4a", a));
+  c.save(); c.scale(S, S);
+  const gy = GY + cam;
+  // drafting grid
+  c.fillStyle = "rgba(255,255,255,.06)"; for (let x = PX % 20 - 20; x < VW + 20; x += 20) c.fillRect(x, -40, 1, VH + 80); for (let y = gy % 20 - 40; y < VH + 40; y += 20) c.fillRect(-40, y, VW + 80, 1);
+  c.fillStyle = "rgba(255,255,255,.1)"; for (let x = PX % 100 - 100; x < VW + 100; x += 100) c.fillRect(x, -40, 1.5, VH + 80); for (let y = gy % 100 - 140; y < VH + 40; y += 100) c.fillRect(-40, y, VW + 80, 1.5);
+  // night sky marks, moon, clouds
+  if (a > .25) { c.fillStyle = C.alpha("#ffffff", (a - .25) * .9); for (let i = 0; i < 46; i++) { const hx = (Math.sin(i * 91.7) * .5 + .5) * VW, hy = ((Math.sin(i * 47.3) * .5 + .5) * 1400 + cam * .25) % (VH + 60) - 30, k = i % 3 ? 2 : 3.5; c.fillRect(hx - k, hy, k * 2, 1); c.fillRect(hx, hy - k, 1, k * 2); } }
+  { const my = gy - 78 * FH * .9 + cam * .1; if (my > -80 && my < VH + 80) { c.strokeStyle = "rgba(255,255,255,.7)"; c.lineWidth = 1.5; c.beginPath(); c.arc(PX + 120, my, 30, 0, TAU); c.stroke(); c.setLineDash([3, 4]); c.beginPath(); c.arc(PX + 112, my - 6, 26, -.6, 2.2); c.stroke(); c.setLineDash([]); } }
+  c.strokeStyle = "rgba(255,255,255,.45)"; c.lineWidth = 1.5;
+  for (const cl of clouds) { const y = gy - cl.alt * FH; if (y < -40 || y > VH + 40) continue; const x = PX + cl.x, w = cl.w; c.beginPath(); c.moveTo(x - w / 2, y); c.lineTo(x + w / 2, y); c.arc(x + w * .28, y, w * .22, 0, Math.PI, true); c.arc(x - w * .05, y - w * .06, w * .26, 0, Math.PI, true); c.arc(x - w * .32, y, w * .18, 0, Math.PI, true); c.stroke(); }
+  // street: neighbours, ground hatch, title block
+  if (gy < VH + 400) {
+    c.strokeStyle = "rgba(255,255,255,.42)"; c.lineWidth = 1.3;
+    for (const b of scenery) { const x = PX + b.x - b.w / 2; c.strokeRect(x, gy - b.h, b.w, b.h); c.fillStyle = "rgba(255,255,255,.2)"; if (b.k === 0) for (let yy = gy - b.h + 8; yy < gy - 10; yy += 14) for (let xx = x + 6; xx < x + b.w - 8; xx += 12) c.fillRect(xx, yy, 5, 7); else if (b.k === 1) for (let yy = gy - b.h + 9; yy < gy - 6; yy += 12) c.fillRect(x + 4, yy, b.w - 8, 1.5); else { c.beginPath(); c.moveTo(x, gy - b.h); c.lineTo(x + b.w / 2, gy - b.h - 14); c.lineTo(x + b.w, gy - b.h); c.stroke(); } }
+    c.fillStyle = LINE; c.fillRect(-40, gy, VW + 80, 2.5); c.strokeStyle = "rgba(255,255,255,.3)"; c.lineWidth = 1.2; c.beginPath(); for (let x = -40; x < VW + 60; x += 12) { c.moveTo(x, gy + 3); c.lineTo(x - 12, gy + 15); } c.stroke();
+    const bx = VW - 178, by = gy + 30; c.strokeStyle = "rgba(255,255,255,.7)"; c.lineWidth = 1.5; c.strokeRect(bx, by, 166, 46); c.beginPath(); c.moveTo(bx, by + 24); c.lineTo(bx + 166, by + 24); c.moveTo(bx + 100, by + 24); c.lineTo(bx + 100, by + 46); c.stroke();
+    draw.text(c, "PLUMB LINE TOWER", bx + 83, by + 13, { size: 12, color: "#fff" }); draw.text(c, "ELEVATION A", bx + 50, by + 36, { size: 9.5, color: "rgba(255,255,255,.75)", weight: 600 }); draw.text(c, "1 : 350", bx + 133, by + 36, { size: 9.5, color: "rgba(255,255,255,.75)", weight: 600 });
+  }
+  // altitude ruler
+  c.fillStyle = "rgba(255,255,255,.55)"; c.fillRect(13, Math.max(HUDY + 34, gy - (n + 40) * FH), 1.5, VH);
+  const i0 = Math.max(0, Math.floor((gy - VH) / FH)), i1 = Math.min(i0 + 40, Math.ceil((gy - HUDY - 34) / FH));
+  for (let i = i0; i <= i1; i++) { const y = gy - i * FH; if (y < HUDY + 36) break; c.fillStyle = "rgba(255,255,255,.55)"; c.fillRect(13, y, i % 5 ? 5 : 10, 1.5); if (i % 5 === 0 && i) draw.text(c, i, 27, y, { size: 10, color: "rgba(255,255,255,.7)", align: "left", weight: 600 }); }
+  // tower
+  const tp = top(), topY = gy - n * FH;
+  for (let i = Math.max(0, i0 - 1); i < n; i++) { const y = gy - (i + 1) * FH; if (y < -FH) break; facade(c, floors[i], y); }
+  // plumb lines up from the edges of the top floor + centre mark
+  if (alive) {
+    c.strokeStyle = "rgba(255,255,255,.35)"; c.lineWidth = 1; c.setLineDash([4, 5]); c.beginPath(); for (const s of [-1, 1]) { c.moveTo(PX + tp.x + s * tp.w / 2, topY - 2); c.lineTo(PX + tp.x + s * tp.w / 2, topY - FH - 26); } c.stroke(); c.setLineDash([]);
+    c.fillStyle = LINE; c.beginPath(); c.moveTo(PX + tp.x, topY - 1); c.lineTo(PX + tp.x - 4, topY - 7); c.lineTo(PX + tp.x + 4, topY - 7); c.fill();
+  }
+  if (mv) { // the gliding plate, its dimension line and its plumb bob
+    const m = mv, x0 = PX + m.x - m.w / 2, y = topY - FH - 3, inWin = Math.abs(m.x - tp.x) <= tol(tp.w), al = m.a * ease.outCubic(m.in);
+    c.globalAlpha = al; c.fillStyle = ACC; c.fillRect(x0, y, m.w, FH); c.fillStyle = "rgba(20,40,110,.35)"; for (let x = x0 + 8; x < x0 + m.w - 6; x += 14) c.fillRect(x, y + 9, 7, 12); c.strokeStyle = "#fff"; c.lineWidth = 1.7; c.strokeRect(x0, y, m.w, FH);
+    c.globalAlpha = Math.max(.35, al); c.strokeStyle = "rgba(255,255,255,.8)"; c.lineWidth = 1.2; c.beginPath(); c.moveTo(x0, y - 12); c.lineTo(x0 + m.w, y - 12); c.moveTo(x0, y - 17); c.lineTo(x0, y - 7); c.moveTo(x0 + m.w, y - 17); c.lineTo(x0 + m.w, y - 7); c.stroke();
+    draw.text(c, (m.w / 10).toFixed(1) + " m", PX + m.x, y - 22, { size: 11, color: "#fff", weight: 600 });
+    const bx = PX + m.x, by = y + FH; c.strokeStyle = inWin ? ACC : "rgba(255,255,255,.9)"; c.lineWidth = 1.2; c.beginPath(); c.moveTo(bx, by - FH); c.lineTo(bx, by - 8); c.stroke();
+    c.fillStyle = inWin ? ACC : "#fff"; c.beginPath(); c.moveTo(bx, by + 3); c.lineTo(bx - 5.5, by - 7); c.lineTo(bx + 5.5, by - 7); c.fill(); c.fillRect(bx - 5.5, by - 10, 11, 3); if (inWin) { c.strokeStyle = ACC; c.lineWidth = 2; c.beginPath(); c.arc(bx, by - 3, 11, 0, TAU); c.stroke(); } c.globalAlpha = 1;
+  }
+  for (const s of slices) { c.save(); c.translate(PX + s.x, gy + s.y - FH / 2); c.rotate(s.rot); c.globalAlpha = clamp(1.3 - s.t, 0, 1); c.fillStyle = "rgba(255,138,122,.25)"; c.fillRect(-s.w / 2, -FH / 2, s.w, FH); c.setLineDash([4, 3]); c.strokeStyle = RED; c.lineWidth = 1.6; c.strokeRect(-s.w / 2, -FH / 2, s.w, FH); c.setLineDash([]); c.restore(); } c.globalAlpha = 1;
+  if (!demo) {
+    // readout: floor, zone, streak pips
+    const y0 = HUDY + 18;
+    draw.text(c, "FLOOR " + (n - 1), 14, y0, { size: 13, color: "#fff", align: "left" });
+    draw.text(c, "ZONE " + (zone + 1) + " · " + PAT[zone % 7], 14, y0 + 16, { size: 10.5, color: "rgba(255,255,255,.75)", align: "left", weight: 600 });
+    for (let i = 0; i < 3; i++) { const x = VW - 22 - (2 - i) * 17, on = streak > i; c.save(); c.translate(x, y0); c.rotate(Math.PI / 4); const k = on ? 6 + (i === Math.min(3, streak) - 1 ? pulse * 3 : 0) : 5; c.fillStyle = on ? ACC : "rgba(255,255,255,.22)"; c.fillRect(-k, -k, k * 2, k * 2); c.restore(); }
+    draw.text(c, streak >= 3 ? "GROWING ×" + streak : "3 perfects grow", VW - 12, y0 + 18, { size: 10.5, color: streak >= 3 ? ACC : "rgba(255,255,255,.7)", align: "right", weight: 600 });
+    if (n === 1 && mv) draw.text(c, "Tap when the plumb bob meets the mark", PX, topY - FH - 62, { size: 14, color: "#fff", stroke: "rgba(10,30,90,.8)", strokeW: 4 });
+  }
+  c.restore();
+}
+Lab.boot();
+})();
+</script></body></html>

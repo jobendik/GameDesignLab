@@ -89,13 +89,6 @@ window.LAB_GAMES = [
     "score": 8
    },
    {
-    "n": 45,
-    "slug": "45-tap-clusters",
-    "t": "Tap Clusters",
-    "d": "Tap groups of same-color blocks to pop them.",
-    "thumb": "../thumbs/PhoneGameLab--45-tap-clusters.jpg"
-   },
-   {
     "n": 46,
     "slug": "46-connect-dots",
     "t": "Connect Dots",
@@ -359,6 +352,14 @@ window.LAB_GAMES = [
     "slug": "44-haberdash",
     "t": "Haberdash",
     "d": "Swap buttons, fill the orders.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 45,
+    "slug": "45-shoo",
+    "t": "Shoo!",
+    "d": "Scatter the flocks. Sweep the roof.",
     "v2": true
    }
   ]
@@ -423,14 +424,17 @@ window.LAB_GAMES = [
     "t": "Teeter Torte",
     "d": "Swing it, drop it, keep it standing.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--35-teeter-torte.jpg"
    },
    {
     "n": 36,
-    "slug": "36-sky-high",
-    "t": "Sky High Stack",
-    "d": "Sliding blocks, only matching overlap stays.",
-    "thumb": "../thumbs/PhoneGameLab--36-sky-high.jpg"
+    "slug": "36-plumb-line",
+    "t": "Plumb Line",
+    "d": "Set every floor dead true.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--36-plumb-line.jpg"
    },
    {
     "n": 38,

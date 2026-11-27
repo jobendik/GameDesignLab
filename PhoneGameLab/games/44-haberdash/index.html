@@ -26,7 +26,7 @@ let cs, bx, by, panel, wide, grid, holes, level, moves, movesMax, goals, score, 
 function layout() {
   const P = Lab.play; wide = P.w > P.h * 1.15;
   if (wide) { const pw = clamp(P.w * .24, 150, 250); cs = Math.min((P.h - 14) / ROWS, (P.w - pw - 44) / COLS, 84); bx = P.x + pw + 28 + (P.w - pw - 28 - cs * COLS) / 2; by = P.y + (P.h - cs * ROWS) / 2; panel = { x: bx - pw - 20, y: by + 4, w: pw, h: Math.min(cs * ROWS - 8, 330) }; }
-  else { const ph = clamp(P.h * .125, 80, 104); cs = Math.min((P.w - 18) / COLS, (P.h - ph - 34) / ROWS, 84); bx = P.x + (P.w - cs * COLS) / 2; by = P.y + ph + 18 + (P.h - ph - 34 - cs * ROWS) * .4; panel = { x: bx, y: by - ph - 12, w: cs * COLS, h: ph }; }
+  else { const ph = clamp(P.h * .125, 80, 104); cs = Math.min((P.w - 30) / COLS, (P.h - ph - 34) / ROWS, 84); bx = P.x + (P.w - cs * COLS) / 2; by = P.y + ph + 18 + (P.h - ph - 34 - cs * ROWS) * .4; panel = { x: bx, y: by - ph - 12, w: cs * COLS, h: ph }; }
   Lab.sprite.clear("hb:");
 }
 Lab.onResize(() => { if (grid) layout(); });
@@ -62,7 +62,7 @@ function setupLevel() {
   if (!demo) { Lab.banner("Order " + level, { color: "#ffcf5a", ms: 1000, y: .14 }); if (level === 3) Lab.hint("Match over the torn cells to mend them", { sticky: true }); else if (level === 4) Lab.hint("Match next to yarn tangles to clear them", { sticky: true }); else if (level > 1) Lab.hint(""); }
 }
 function start() {
-  demo = false; layout(); level = 1; score = 0; bestCascade = 0; specials = 0; cursor = -1; drag = null; landT = 0; after = null;
+  demo = false; layout(); level = 1; score = 0; bestCascade = 0; specials = 0; cursor = -1; drag = null; landT = 0; after = null; lastSwap = null;
   Lab.setScore(0); setupLevel(); Lab.hint("Drag a button onto its neighbour", { sticky: true });
   Lab.input.onDown = [(x, y) => { const i = hit(x, y); cursor = -1; if (i < 0) { sel = -1; return; } if (sel >= 0 && adjacent(sel, i)) { trySwap(sel, i); return; } if (grid[i] && grid[i].k !== 6) { sel = i; drag = { i, x, y }; Lab.sfx("tap", { vol: .4 }); } }];
   Lab.input.onMove = [(x, y) => { if (!drag || !Lab.input.down) return; const dx = x - drag.x, dy = y - drag.y; if (Math.max(Math.abs(dx), Math.abs(dy)) < cs * .32) return; const i = drag.i, r = R(i), c = C(i), h = Math.abs(dx) > Math.abs(dy), nr = r + (h ? 0 : Math.sign(dy)), nc = c + (h ? Math.sign(dx) : 0); drag = null; if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) trySwap(i, I(nr, nc)); }];
@@ -77,7 +77,7 @@ function start() {
     get board() { return grid.map(t => t ? t.k + t.sp * 10 : -1); }, get phase() { return phase; }, get score() { return score; }, get moves() { return moves; }, get level() { return level; }, get cascade() { return bestCascade; }, get specials() { return specials; },
     get goals() { return goals.map(g => ({ type: g.type, k: g.k, left: g.left, need: g.need })); }, get holes() { return holes.filter(h => h === 1).length; }, hint() { const m = findMove(); return m && m.map(i => ({ r: R(i), c: C(i), x: X(C(i)), y: Y(R(i)) })); },
     cellXY: (r, c) => ({ x: X(c), y: Y(r) }), setMoves(n) { moves = n; }, setGoals(g) { goals = g.map(q => ({ type: q[0], k: q[1], left: q[2], need: q[2], shown: q[2], pulse: 0 })); },
-    setBoard(m) { for (let i = 0; i < NC; i++) { const v = m[R(i)][C(i)], t = mk(v % 10, R(i), C(i)); t.sp = Math.floor(v / 10); t.rot = 0; grid[i] = t; } holes.fill(0); phase = "idle"; pending = null; sel = -1; }, setHole(r, c) { holes[I(r, c)] = 1; }, swap: (a, b) => trySwap(I(a[0], a[1]), I(b[0], b[1])),
+    setBoard(m) { for (let i = 0; i < NC; i++) { const v = m[R(i)][C(i)], t = mk(v % 10, R(i), C(i)); t.sp = Math.floor(v / 10); t.rot = 0; grid[i] = t; } holes.fill(0); phase = "idle"; pending = null; sel = -1; }, setHole(r, c) { holes[I(r, c)] = 1; }, swap: (a, b) => trySwap(I(a[0], a[1]), I(b[0], b[1])), check() { if (phase === "idle") endTurn(); },
   });
   Lab.loop((dt, t) => { update(dt); render(t); });
 }
@@ -191,11 +191,11 @@ function reshuffle() {
   const ts = cells.map(i => grid[i]); let tries = 0;
   do { Lab.shuffle(ts); cells.forEach((i, j) => { grid[i] = ts[j]; }); } while (++tries < 80 && (findMatches().length || !findMove()));
   cells.forEach((i, j) => { const t = ts[j]; t.r = R(i); t.c = C(i); Lab.tween(t, { x: t.c, y: t.r }, .45, { ease: "inOutCubic" }); });
-  phase = "shuffle"; pt = .5; if (!demo) { Lab.banner("No swaps left: reshuffle", { color: "#fff", ms: 1000, y: .14 }); Lab.sfx("whoosh", { pitch: .8 }); }
+  phase = "shuffle"; pt = .5; cascade = 0; if (!demo) { Lab.banner("No swaps left: reshuffle", { color: "#fff", ms: 1000, y: .14 }); Lab.sfx("whoosh", { pitch: .8 }); }
 }
 function update(dt) {
   if (phase === "swap") { if ((pt -= dt) <= 0) swapDone(); }
-  else if (phase === "back" || phase === "shuffle") { if ((pt -= dt) <= 0) { for (const t of grid) if (t) { t.x = t.c; t.y = t.r; } endTurn(); } }
+  else if (phase === "back" || phase === "shuffle") { if ((pt -= dt) <= 0) { for (const t of grid) if (t) { t.x = t.c; t.y = t.r; } const g = phase === "shuffle" ? findMatches() : []; if (g.length) resolve(g); else endTurn(); } }
   else if (phase === "clear") { for (const t of grid) if (t && t.dying) t.dying = Math.min(1, t.dying + dt / .18); if ((pt -= dt) <= 0) { const f = after; after = null; f(); } }
   else if (phase === "fall") {
     let moving = false; landT -= dt;
@@ -213,7 +213,7 @@ function shapePath(g, k, cx, cy, r) {
   g.beginPath();
   if (k === 0) g.arc(cx, cy, r, 0, TAU);
   else if (k === 1) draw.rr(g, cx - r * .88, cy - r * .88, r * 1.76, r * 1.76, r * .4);
-  else if (k === 2) { for (let i = 0; i <= 60; i++) { const a = i / 60 * TAU, rr = r * (.86 + .15 * Math.cos(a * 6)); g[i ? "lineTo" : "moveTo"](cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } g.closePath(); }
+  else if (k === 2) { for (let i = 0; i <= 60; i++) { const a = i / 60 * TAU, rr = r * (.78 + .24 * Math.abs(Math.cos(a * 3))); g[i ? "lineTo" : "moveTo"](cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } g.closePath(); }
   else if (k === 3) { for (let i = 0; i < 6; i++) { const a = i * TAU / 6 + Math.PI / 6; g[i ? "lineTo" : "moveTo"](cx + Math.cos(a) * r, cy + Math.sin(a) * r); } g.closePath(); }
   else if (k === 4) { const s = r * .98, y = cy + r * .08; g.moveTo(cx, y + s * .9); g.bezierCurveTo(cx - s * 1.5, y - s * .1, cx - s * .8, y - s * 1.1, cx, y - s * .35); g.bezierCurveTo(cx + s * .8, y - s * 1.1, cx + s * 1.5, y - s * .1, cx, y + s * .9); g.closePath(); }
   else { for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .6 : r * 1.04; g[i ? "lineTo" : "moveTo"](cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } g.closePath(); }
@@ -277,7 +277,7 @@ function render(t) {
   }
   c.save(); c.beginPath(); c.rect(bx - 6, by - 6, cs * COLS + 12, cs * ROWS + 12); c.clip();
   for (let pass = 0; pass < 2; pass++) for (let i = 0; i < NC; i++) {
-    const o = grid[i]; if (!o) continue; const lifted = i === sel || (lastSwap && phase === "swap" && i === lastSwap.b); if ((pass === 1) !== lifted) continue;
+    const o = grid[i]; if (!o) continue; const lifted = i === sel || !!(lastSwap && phase === "swap" && i === lastSwap.b); if ((pass === 1) !== lifted) continue;
     const sp = buttonSprite(o.k, o.sp, cs * .9), hint = hintMove && hintMove.includes(i) && phase === "idle";
     let s = 1 + (i === sel ? .12 + .03 * Math.sin(t * 8) : 0) + o.pop * .3 + (o.sp ? .03 * Math.sin(t * 5 + i) : 0); if (o.dying) s *= (1 - o.dying) * (1 + .7 * o.dying);
     c.save(); c.translate(X(o.x), Y(o.y) + cs * o.sq * .3); c.rotate(o.rot + (hint ? Math.sin(t * 14) * .16 : 0)); c.scale(s * (1 + o.sq), s * (1 - o.sq));

@@ -1,0 +1,215 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Shoo!</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* SHOO! — a rooftop at sunrise, stacked with dozing birds. Tap a flock (2+ touching birds of a feather) and it takes off;
+ * the birds above drop down and whole stacks shuffle along the ridge when a column empties.
+ * Scoring:  n·(n−1)·5 per flock, so one flock of 12 beats six flocks of 2 many times over — the game is about *growing*
+ *           flocks before you shoo them. Each roof has a seed quota; when no flock is left the roof is scored (bonus for
+ *           ten or fewer stragglers, big bonus for a clean sweep) and you move on only if the quota was met.
+ * Tools:    touch-down previews the flock and its value, release shoos (slide off to cancel); flocks of 9+ earn a
+ *           whistle that scares off any single bird; grumpy pigeons never flock but bolt when 4+ leave beside them.
+ * Identity: warm morning sky, terracotta roof, square birds with crests (shape-coded), chirps that climb with flock size. */
+Lab.init({
+  title: "Shoo!", tagline: "Scatter the flocks. Sweep the roof.", category: "Puzzle & Match",
+  howto: ["Tap a flock of matching birds to shoo it", "Bigger flocks are worth far more", "Earn the roof's seed quota to move on"],
+  theme: { bg: "#ffd9a8", bg2: "#bfe6ea", fg: "#3a2a2e", muted: "#7a6660", accent: "#e4524a", accent2: "#f2b21f", light: true },
+  orient: "any", music: { style: "bounce", key: "C", vol: .4 }, restart: start, attract,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, rand = Lab.rand, shade = Lab.color.shade;
+const COLS = 8, ROWS = 9, KC = ["#e4524a", "#3f8fdc", "#f2b21f", "#49a862", "#9064cf", "#ee7fb2"], INK = "#3a2a2e";
+const LV = [[4, 0, 1000], [4, 3, 1100], [5, 0, 820], [5, 4, 740], [5, 6, 760], [5, 6, 820], [6, 3, 540], [6, 5, 560]];
+const levelDef = n => n <= LV.length ? LV[n - 1] : [6, 6, 560 + (n - 8) * 30];
+let cs, bx, baseY, wide, ui = {}, cols, flyers, level, score, roofScore, quota, whistles, whistleMode, hover, cursor, state, biggest, sweeps, landT, demo, demoT, chirpN, clouds;
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15;
+  if (wide) { cs = Math.min((P.h - 50) / ROWS, (P.w - 380) / COLS, 78); bx = P.x + (P.w - cs * COLS) / 2; baseY = P.y + P.h - 36; const lw = Math.min(230, bx - P.x - 36); ui = { bar: { x: bx - 22 - lw, y: P.y + 44, w: lw, h: 16 }, btn: { x: bx + cs * COLS + 26 + 34, y: P.y + P.h * .5, r: 34 } }; }
+  else { cs = Math.min((P.w - 24) / COLS, (P.h - 190) / ROWS, 78); bx = P.x + (P.w - cs * COLS) / 2; const spare = P.h - 70 - cs * ROWS; baseY = P.y + P.h - clamp(spare * .45, 70, 190); ui = { bar: { x: P.x + 16, y: P.y + 32, w: P.w - 104, h: 14 }, btn: { x: P.x + P.w - 40, y: P.y + 34, r: 27 } }; }
+  Lab.sprite.clear("sh:");
+}
+Lab.onResize(() => { if (cols) layout(); });
+const X = x => bx + (x + .5) * cs, Y = y => baseY - (y + .5) * cs;
+const mkBird = (k, c, i) => ({ k, x: c, y: i, vy: 0, sq: 0, hold: 0, wait: 0, blink: rand(1, 6), ph: rand(0, TAU), gone: false });
+function deal() {
+  const d = levelDef(level); quota = d[2]; roofScore = 0; hover = null; whistleMode = false; flyers = flyers || [];
+  do { cols = []; for (let c = 0; c < COLS; c++) { const col = []; for (let i = 0; i < ROWS; i++) col.push(mkBird(Lab.randInt(0, d[0] - 1), c, i)); cols.push(col); } for (let p = 0; p < d[1]; p++) cols[Lab.randInt(0, COLS - 1)][Lab.randInt(0, ROWS - 1)].k = 6; } while (!anyGroup());
+  for (let c = 0; c < COLS; c++) cols[c].forEach((b, i) => { b.y = i + ROWS + 1.5 + c * .7 + rand(0, .5); });
+  state = "play";
+  if (!demo) { Lab.banner("Roof " + level, { color: "#e4524a", ms: 1000, y: .1 }); if (level === 2) Lab.hint("Pigeons never flock: shoo 4+ beside them", { sticky: true }); else if (level > 1) Lab.hint(""); }
+}
+function start() {
+  demo = false; layout(); level = 1; score = 0; whistles = 1; biggest = 0; sweeps = 0; cursor = null; flyers = []; landT = 0; chirpN = 0;
+  Lab.setScore(0); deal(); Lab.hint("Tap a flock · bigger is better", { sticky: true });
+  Lab.input.onDown = [(x, y) => { cursor = null; if (Math.hypot(x - ui.btn.x, y - ui.btn.y) < ui.btn.r + 10) { toggleWhistle(); return; } setHover(cellAt(x, y)); }];
+  Lab.input.onMove = [(x, y) => { if (Lab.input.down || Lab.input.pointerType === "mouse") setHover(cellAt(x, y)); }];
+  Lab.input.onUp = [(x, y) => { const p = cellAt(x, y); if (p && (whistleMode || (hover && hover.keys.has(p.c * 100 + p.i)))) shoo(p.c, p.i); else if (p && !hover) nope(p); if (Lab.input.pointerType !== "mouse") hover = null; }];
+  Lab.input.onKey = [k => {
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[k];
+    if (k === "w" || k === "W") return toggleWhistle();
+    if (!cursor) { if (d || k === " " || k === "Enter") { cursor = { c: 0, i: 0 }; setHover(cursor); } return; }
+    if (d) { const c = clamp(cursor.c + d[0], 0, Math.max(0, cols.filter(q => q.length).length - 1)); cursor = { c, i: clamp(cursor.i + d[1], 0, Math.max(0, cols[c].length - 1)) }; setHover(cursor); }
+    else if (k === " " || k === "Enter") { shoo(cursor.c, cursor.i); cursor.i = clamp(cursor.i, 0, Math.max(0, (cols[cursor.c] || []).length - 1)); setHover(cursor); }
+  }];
+  Lab.expose({
+    get cols() { return cols.map(q => q.map(b => b.k)); }, get score() { return score; }, get roofScore() { return roofScore; }, get quota() { return quota; }, get level() { return level; }, get whistles() { return whistles; }, get whistleMode() { return whistleMode; },
+    get state() { return state; }, get left() { return cols.reduce((a, q) => a + q.length, 0); }, get settled() { return cols.every((q, c) => q.every((b, i) => b.y === i && Math.abs(b.x - c) < .01)); }, get hover() { return hover && { n: hover.n, pts: hover.pts }; },
+    groups() { const seen = new Set(), out = []; cols.forEach((q, c) => q.forEach((b, i) => { if (seen.has(c * 100 + i)) return; const g = group(c, i); g.forEach(p => seen.add(p[0] * 100 + p[1])); if (g.length >= 2) out.push({ c, i, n: g.length }); })); return out; },
+    cellXY: (c, i) => ({ x: X(c), y: Y(i) }), shoo, setCols(m) { cols = m.map((q, c) => q.map((k, i) => mkBird(k, c, i))); while (cols.length < COLS) cols.push([]); hover = null; state = "play"; }, setWhistles(n) { whistles = n; }, setQuota(n) { quota = n; }, get button() { return ui.btn; },
+  });
+  Lab.loop((dt, t) => { update(dt); render(t); });
+}
+function cellAt(x, y) { const c = Math.floor((x - bx) / cs), i = Math.floor((baseY - y) / cs); return c >= 0 && c < COLS && i >= 0 && cols[c] && i < cols[c].length ? { c, i } : null; }
+function group(c, i) {
+  const b = cols[c] && cols[c][i]; if (!b || b.k === 6) return b ? [[c, i]] : [];
+  const seen = new Set(), st = [[c, i]], out = [];
+  while (st.length) { const [a, j] = st.pop(), key = a * 100 + j; if (a < 0 || a >= COLS || j < 0 || !cols[a][j] || cols[a][j].k !== b.k || seen.has(key)) continue; seen.add(key); out.push([a, j]); st.push([a + 1, j], [a - 1, j], [a, j + 1], [a, j - 1]); }
+  return out;
+}
+function anyGroup() { for (let c = 0; c < COLS; c++) for (let i = 0; i < cols[c].length; i++) { const k = cols[c][i].k; if (k === 6) continue; if ((cols[c][i + 1] && cols[c][i + 1].k === k) || (cols[c + 1] && cols[c + 1][i] && cols[c + 1][i].k === k)) return true; } return false; }
+function setHover(p) {
+  if (!p || state !== "play") { hover = null; return; }
+  if (whistleMode) { hover = { keys: new Set([p.c * 100 + p.i]), n: 1, pts: 0, c: p.c, i: p.i }; return; }
+  if (hover && hover.keys.has(p.c * 100 + p.i)) return;
+  const g = group(p.c, p.i); if (g.length < 2) { hover = null; return; }
+  let top = g[0]; for (const q of g) if (q[1] > top[1]) top = q;
+  hover = { keys: new Set(g.map(q => q[0] * 100 + q[1])), n: g.length, pts: g.length * (g.length - 1) * 5, c: top[0], i: top[1] }; if (!demo) Lab.sfx("tick", { pitch: .9 + Math.min(g.length, 16) * .05, vol: .35 });
+}
+function toggleWhistle() { if (state !== "play") return; if (!whistles) { Lab.sfx("tick", { pitch: .6 }); return; } whistleMode = !whistleMode; hover = null; Lab.sfx("tap"); Lab.hint(whistleMode ? "Whistle: tap any one bird" : "", { sticky: whistleMode }); }
+function nope(p) { const b = cols[p.c][p.i]; b.sq = .22; if (!demo) Lab.sfx("tick", { pitch: .6, vol: .5 }); }
+function shoo(c, i) {
+  if (state !== "play" || !cols[c] || !cols[c][i]) return false;
+  if (whistleMode) { whistleMode = false; whistles--; Lab.sfx("whistle"); Lab.hint(""); takeOff([[c, i]], c, i); return finish(); }
+  const g = group(c, i), n = g.length; if (n < 2) { nope({ c, i }); return false; }
+  const pts = n * (n - 1) * 5, seen = new Set(), pig = [];
+  if (n >= 4) for (const [a, j] of g) for (const [x, y] of [[a + 1, j], [a - 1, j], [a, j + 1], [a, j - 1]]) if (cols[x] && cols[x][y] && cols[x][y].k === 6 && !seen.has(x * 100 + y)) { seen.add(x * 100 + y); pig.push([x, y]); }
+  const gain = pts + pig.length * 25; score += gain; roofScore += gain; biggest = Math.max(biggest, n);
+  fx.text(X(c), Y(i) - cs * .7, "+" + gain, { color: n >= 8 ? "#e4524a" : INK, size: 18 + Math.min(18, n * 1.5), outline: "rgba(255,255,255,.8)" });
+  if (!demo) {
+    Lab.bumpScore(); Lab.buzz(8 + Math.min(30, n * 2)); if (n >= 8) { Lab.shake(Math.min(9, n * .6), .25); Lab.sfx("whoosh", { pitch: .9 }); } if (pig.length) Lab.audio.tone({ f: 330, f2: 220, dur: .25, type: "triangle", vol: .14 });
+    if (n >= 9 && whistles < 3) { whistles++; Lab.sfx("powerup", { vol: .6 }); fx.text(ui.btn.x, ui.btn.y + ui.btn.r + 14, "+1", { color: "#e4524a", size: 20, outline: "rgba(255,255,255,.8)", vy: 30 }); }
+    if (Lab.hint && score === gain) Lab.hint("");
+  }
+  takeOff(g.concat(pig), c, i); return finish();
+}
+function takeOff(cells, c0, i0) {
+  const hold = []; chirpN = 0;
+  for (const [c, i] of cells) { const b = cols[c][i], delay = Math.hypot(c - c0, i - i0) * .04; b.gone = true; hold[c] = Math.max(hold[c] || 0, delay); flyers.push({ k: b.k, x: b.x, y: b.y, vx: rand(-2.2, 2.2) + (c - c0) * .5, vy: rand(5, 8), t: 0, delay, ph: b.ph, up: false }); }
+  for (let c = 0; c < COLS; c++) if (hold[c] != null) { cols[c] = cols[c].filter(b => !b.gone); for (const b of cols[c]) b.hold = hold[c] + .06; }
+  if (cols.some((q, c) => !q.length && cols.slice(c + 1).some(r => r.length))) { cols = cols.filter(q => q.length); while (cols.length < COLS) cols.push([]); for (const q of cols) for (const b of q) b.wait = .22; }
+  flyers.sort((a, b) => a.delay - b.delay);
+}
+function finish() {
+  hover = null; if (demo) return true; Lab.setScore(score);
+  if (!anyGroup()) {
+    state = "ending"; const left = cols.reduce((a, q) => a + q.length, 0), bonus = (left <= 9 ? (10 - left) * 40 : 0) + (left === 0 ? 600 : 0); score += bonus; roofScore += bonus; const pass = roofScore >= quota; if (left === 0) sweeps++;
+    Lab.after(.7, () => {
+      Lab.setScore(score); if (bonus) { Lab.bumpScore(); fx.text(Lab.W / 2, baseY - cs * 4.5, (left ? left + " left" : "Clean sweep") + "  +" + bonus, { color: INK, size: 22, outline: "rgba(255,255,255,.85)", life: 1.4 }); }
+      Lab.banner(pass ? (left === 0 ? "Clean sweep!" : "Roof cleared!") : "Quota missed", { color: pass ? "#e4524a" : "#7a6660", ms: 1300, y: .1 }); Lab.sfx(pass ? "levelup" : "thud"); if (left === 0) Lab.sfx("chime");
+      if (pass) { const all = []; cols.forEach((q, c) => q.forEach((b, i) => all.push([c, i]))); if (all.length) takeOff(all, 3.5, 0); }
+    });
+    Lab.after(2.3, () => { if (roofScore >= quota) { level++; deal(); } else Lab.gameover({ title: "The flock stayed put", message: "Roof " + level + " needed " + quota + " seeds.", score, stats: [["Roofs cleared", level - 1], ["Biggest flock", biggest], ["Clean sweeps", sweeps]] }); });
+  }
+  return true;
+}
+function update(dt) {
+  landT -= dt;
+  for (let c = 0; c < COLS; c++) for (let i = 0; i < cols[c].length; i++) {
+    const b = cols[c][i]; b.sq = Lab.damp(b.sq, 0, 11, dt); b.blink -= dt; if (b.blink < -.13) b.blink = rand(1.5, 6);
+    if (b.hold > 0) { b.hold -= dt; continue; }
+    if (b.y > i) { b.vy += 44 * dt; b.y -= b.vy * dt; if (b.y <= i) { b.y = i; if (b.vy > 3) { b.sq = Math.min(.3, b.vy * .02); if (landT <= 0 && !demo) { Lab.sfx("tap", { pitch: .6 + c * .06, vol: .3 }); landT = .035; } } b.vy = 0; } }
+    if (b.wait > 0) b.wait -= dt; else if (b.x !== c) { b.x = Lab.damp(b.x, c, 13, dt); if (Math.abs(b.x - c) < .01) { b.x = c; b.sq = Math.max(b.sq, .1); } }
+  }
+  for (const f of flyers) {
+    if (f.delay > 0) { f.delay -= dt; continue; }
+    if (!f.up) { f.up = true; fx.burst(X(f.x), Y(f.y), { n: 3, color: f.k === 6 ? "#8f96a3" : KC[f.k], speed: 90, life: .6, size: 4, gravity: 260, shape: "shard" }); if (!demo && chirpN < 16) { const fq = Lab.audio.scaleFreq(chirpN++, 81); Lab.audio.tone({ f: fq, f2: fq * 1.3, dur: .07, vol: .09 }); } }
+    f.t += dt; f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 7 * dt;
+  }
+  if (flyers.some(f => f.t > 1.3)) flyers = flyers.filter(f => f.t <= 1.3);
+  if (!demo) Lab.music.intensity(clamp(.25 + roofScore / quota * .6, 0, 1));
+}
+
+/* ---------- art */
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80, hy = baseY + 40;
+  return Lab.sprite("sh:bg", W, H, g => {
+    draw.vgrad(g, 0, 0, W, hy + 40, [[0, "#a9dbe6"], [.5, "#fdf0c4"], [1, "#ffcf9a"]]); g.fillStyle = "#ffcf9a"; g.fillRect(0, hy + 40, W, H);
+    const sx = W * .22, sy = hy - cs * 3.2; draw.glow(g, sx, sy, cs * 6, "#fff3b0", .7); draw.circle(g, sx, sy, cs * 1.1, "#fff6cf");
+    const rnd = Lab.rng(11);
+    for (let l = 0; l < 2; l++) { g.fillStyle = l ? "#e7ad88" : "#f3cfa6"; let x = -20; while (x < W) { const w = 40 + rnd() * 70, h = (l ? 30 : 70) + rnd() * (l ? 70 : 90), y = hy - h; g.fillRect(x, y, w, H); if (rnd() < .6) { g.beginPath(); g.moveTo(x - 4, y); g.lineTo(x + w / 2, y - w * .32); g.lineTo(x + w + 4, y); g.fill(); } if (rnd() < .5) g.fillRect(x + w * .2, y - w * .4, 8, w * .4); x += w + rnd() * 14; } }
+    // the roof the birds sit on
+    const ry = hy - 3, tw = Math.max(26, cs * .6), th = tw * .62; g.fillStyle = "#b9452f"; g.fillRect(0, ry, W, H);
+    for (let r = 0, y = ry; y < H + th; r++, y += th) for (let x = (r % 2) * tw / 2 - tw; x < W + tw; x += tw) { g.fillStyle = (r + Math.round(x / tw)) % 3 ? "#cf5a3f" : "#c44f37"; g.beginPath(); g.moveTo(x, y); g.lineTo(x + tw, y); g.lineTo(x + tw, y + th * .55); g.arc(x + tw / 2, y + th * .55, tw / 2, 0, Math.PI); g.fill(); g.strokeStyle = "rgba(90,30,20,.35)"; g.lineWidth = 1.5; g.beginPath(); g.arc(x + tw / 2, y + th * .55, tw / 2, 0, Math.PI); g.stroke(); }
+    draw.rect(g, -10, ry - 7, W + 20, 13, 6, "#8f3323"); g.fillStyle = "rgba(255,255,255,.18)"; g.fillRect(0, ry - 6, W, 3);
+  });
+}
+function birdSprite(k) {
+  const s = Math.round(cs), m = Math.round(s * .16), sz = s + m * 2;
+  return Lab.sprite("sh:b:" + k + ":" + s, sz, sz, g => {
+    const col = k === 6 ? "#8f96a3" : KC[k], dk = shade(col, -.32), cx = sz / 2, w = s * .86, h = s * .82, x = cx - w / 2, top = m + s * .14; g.lineJoin = g.lineCap = "round";
+    g.fillStyle = dk; g.beginPath(); g.moveTo(x + w * .9, top + h * .52); g.lineTo(x + w * 1.12, top + h * .36); g.lineTo(x + w * 1.1, top + h * .7); g.fill();
+    g.fillStyle = dk; g.strokeStyle = dk; g.lineWidth = s * .06;   // crests: a different silhouette per kind
+    if (k === 0) { g.beginPath(); g.moveTo(cx - s * .14, top + 4); g.lineTo(cx + s * .04, top - s * .2); g.lineTo(cx + s * .16, top + 4); g.fill(); }
+    else if (k === 1) for (const sd of [-1, 1]) { g.beginPath(); g.arc(cx + sd * s * .2, top + s * .02, s * .1, 0, TAU); g.fill(); }
+    else if (k === 2) for (const a of [-.6, 0, .6]) { g.beginPath(); g.moveTo(cx, top + 4); g.lineTo(cx + Math.sin(a) * s * .2, top + 4 - Math.cos(a) * s * .2); g.stroke(); draw.circle(g, cx + Math.sin(a) * s * .2, top + 4 - Math.cos(a) * s * .2, s * .045, dk); }
+    else if (k === 3) draw.rect(g, cx - s * .2, top - s * .09, s * .4, s * .16, s * .06, dk);
+    else if (k === 4) for (const o of [-.16, 0, .16]) { g.beginPath(); g.moveTo(cx + (o - .07) * s, top + 4); g.lineTo(cx + o * s, top - s * (o ? .1 : .18)); g.lineTo(cx + (o + .07) * s, top + 4); g.fill(); }
+    else if (k === 5) { g.beginPath(); g.arc(cx + s * .08, top - s * .04, s * .1, 0, TAU); g.lineWidth = s * .05; g.stroke(); }
+    const gr = g.createLinearGradient(0, top, 0, top + h); gr.addColorStop(0, shade(col, .16)); gr.addColorStop(1, shade(col, -.12));
+    draw.rr(g, x, top, w, h, s * .34); g.fillStyle = gr; g.fill(); g.strokeStyle = dk; g.lineWidth = s * .045; g.stroke();
+    g.fillStyle = shade(col, .45); g.beginPath(); g.ellipse(cx, top + h * .76, w * .3, h * .19, 0, 0, TAU); g.fill();
+    g.fillStyle = dk; for (const sd of [-1, 1]) { g.beginPath(); g.ellipse(cx + sd * w * .41, top + h * .6, w * .09, h * .2, sd * .2, 0, TAU); g.fill(); }
+    g.fillStyle = k === 6 ? "#e79aa5" : "#f58f1e"; g.beginPath(); g.moveTo(cx - s * .085, top + h * .44); g.lineTo(cx + s * .085, top + h * .44); g.lineTo(cx, top + h * .6); g.fill();
+    g.fillStyle = "rgba(255,255,255,.3)"; g.beginPath(); g.ellipse(x + w * .28, top + h * .14, w * .14, h * .05, -.3, 0, TAU); g.fill();
+  });
+}
+function drawBird(c, k, x, y, sc, sq, blink, alert, flap, t) {
+  const sp = birdSprite(k), s = cs;
+  c.save(); c.translate(x, y + s * .5); c.scale(sc * (1 + sq), sc * (1 - sq)); c.translate(0, -s * .5);
+  if (flap != null) { c.fillStyle = shade(k === 6 ? "#8f96a3" : KC[k], -.32); const a = Math.sin(flap) * .9; for (const sd of [-1, 1]) { c.beginPath(); c.moveTo(sd * s * .3, 0); c.lineTo(sd * s * (.3 + .55 * Math.cos(a)), -s * .55 * Math.sin(a) - s * .05); c.lineTo(sd * s * .34, s * .22); c.fill(); } }
+  c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h);
+  const ey = -s * .12, er = s * (alert ? .115 : .095);
+  for (const sd of [-1, 1]) {
+    const ex = sd * s * .18;
+    if (blink < 0 && !alert) { c.strokeStyle = INK; c.lineWidth = s * .04; c.beginPath(); c.moveTo(ex - er, ey); c.lineTo(ex + er, ey); c.stroke(); continue; }
+    draw.circle(c, ex, ey, er, "#fff"); draw.circle(c, ex + (alert ? 0 : sd * -s * .015), ey + (alert ? -s * .02 : s * .01), s * (alert ? .04 : .05), INK);
+    if (k === 6) { c.fillStyle = "#6f7683"; c.beginPath(); c.arc(ex, ey, er + .5, Math.PI * 1.05, Math.PI * 1.95); c.fill(); }
+  }
+  c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  if (!clouds) clouds = Array.from({ length: 5 }, (_, i) => ({ x: rand(0, 1), y: rand(.04, .3), s: rand(.7, 1.3), v: rand(.004, .012) }));
+  c.fillStyle = "rgba(255,255,255,.7)"; for (const q of clouds) { const x = ((q.x + t * q.v) % 1.3 - .15) * W, y = Lab.play.y + q.y * (baseY - Lab.play.y), s = q.s * Math.max(22, cs * .6); c.beginPath(); c.ellipse(x, y, s * 1.6, s * .5, 0, 0, TAU); c.ellipse(x - s * .6, y - s * .3, s * .7, s * .5, 0, 0, TAU); c.ellipse(x + s * .4, y - s * .4, s * .8, s * .55, 0, 0, TAU); c.fill(); }
+  for (let col = 0; col < COLS; col++) for (let i = cols[col].length - 1; i >= 0; i--) {
+    const b = cols[col][i], hv = hover && hover.keys.has(col * 100 + i), y = Y(b.y) - (hv ? Math.abs(Math.sin(t * 9 + b.ph)) * cs * .06 : 0) - (b.wait <= 0 && b.x !== col ? Math.abs(Math.sin((b.x - col) * Math.PI)) * cs * .12 : 0);
+    if (i === 0 && b.y === 0) draw.shadow(c, X(b.x), baseY, cs * .36, cs * .07, .16);
+    drawBird(c, b.k, X(b.x), y, hv ? 1.08 : state === "ending" && roofScore < quota ? .96 : 1, b.sq, b.blink, hv, b.y > i + .3 ? t * 30 + b.ph : null, t);
+  }
+  for (const f of flyers) { const k = f.delay > 0 ? 1.08 : Math.max(.25, 1 - f.t * .6); if (f.delay <= 0) c.globalAlpha = clamp(1.6 - f.t * 1.4, 0, 1); drawBird(c, f.k, X(f.x) + (f.delay > 0 ? 0 : Math.sin(f.t * 9 + f.ph) * cs * .1), Y(f.y), k, 0, 1, true, f.delay > 0 ? null : f.t * 34 + f.ph, t); c.globalAlpha = 1; }
+  if (cursor && cols[cursor.c] && cols[cursor.c].length) { c.setLineDash([6, 5]); c.lineDashOffset = -t * 20; draw.rect(c, bx + cursor.c * cs + 1, baseY - (cursor.i + 1) * cs + 1, cs - 2, cs - 2, cs * .3, null, INK, 3); c.setLineDash([]); }
+  if (hover && state === "play" && !demo) {
+    const hx = clamp(X(hover.c), 44, W - 44), hy = Y(hover.i) - cs * .78, txt = whistleMode ? "Shoo!" : "+" + hover.pts, w = 26 + txt.length * 11;
+    draw.rect(c, hx - w / 2, hy - 15, w, 30, 15, "#fff", INK, 2); c.fillStyle = "#fff"; c.beginPath(); c.moveTo(hx - 6, hy + 14); c.lineTo(hx, hy + 22); c.lineTo(hx + 6, hy + 14); c.fill(); draw.text(c, txt, hx, hy + 1, { size: 17, color: hover.n >= 8 ? "#e4524a" : INK });
+  }
+  if (demo) return;
+  // quota bar + whistle button
+  const b = ui.bar, k = clamp(roofScore / quota, 0, 1), pk = hover && !whistleMode ? clamp((roofScore + hover.pts) / quota, 0, 1) : k, met = roofScore >= quota;
+  draw.text(c, "ROOF " + level, b.x, b.y - 13, { size: 12, color: "#7a5a4e", align: "left" }); draw.text(c, roofScore + " / " + quota + " seeds", b.x + b.w, b.y - 13, { size: 12, color: met ? "#2f8a4a" : "#7a5a4e", align: "right" });
+  draw.rect(c, b.x, b.y, b.w, b.h, b.h / 2, "rgba(255,255,255,.6)", "rgba(58,42,46,.35)", 1.5); if (pk > k) draw.rect(c, b.x, b.y, Math.max(b.h, b.w * pk), b.h, b.h / 2, "rgba(242,178,31,.55)"); if (k > 0) draw.rect(c, b.x, b.y, Math.max(b.h, b.w * k), b.h, b.h / 2, met ? "#49a862" : "#e4524a");
+  if (wide) draw.text(c, met ? "Quota met: keep sweeping" : "Fill the bar before flocks run out", b.x, b.y + b.h + 16, { size: 12, color: "#7a5a4e", align: "left", weight: 600, maxWidth: b.w });
+  const w = ui.btn, on = whistles > 0, pul = whistleMode ? 1 + .08 * Math.sin(t * 10) : 1; c.globalAlpha = on ? 1 : .5;
+  draw.circle(c, w.x, w.y + 3, w.r, "rgba(0,0,0,.18)"); draw.circle(c, w.x, w.y, w.r * pul, whistleMode ? "#ffe9a8" : "#fff", whistleMode ? "#e4524a" : INK, whistleMode ? 4 : 2);
+  const u = w.r / 27; draw.rect(c, w.x - 13 * u, w.y - 6 * u, 16 * u, 9 * u, 3 * u, "#e4524a"); draw.circle(c, w.x + 5 * u, w.y + 1 * u, 8.5 * u, "#e4524a"); draw.circle(c, w.x + 5 * u, w.y + 1 * u, 3.5 * u, "#fff"); draw.circle(c, w.x - 14 * u, w.y - 8 * u, 3 * u, null, "#b03a33", 2);
+  draw.circle(c, w.x + w.r * .7, w.y + w.r * .7, 10, INK); draw.text(c, String(whistles), w.x + w.r * .7, w.y + w.r * .7 + 1, { size: 13, color: "#fff" }); c.globalAlpha = 1;
+}
+function attract(dt, t) {
+  if (!demo) { demo = true; layout(); level = 1; score = 0; whistles = 0; flyers = []; cursor = null; landT = 0; deal(); demoT = 2.2; }
+  demoT -= dt; if (demoT <= 0) { demoT = 1.1; const g = []; cols.forEach((q, c) => q.forEach((b, i) => { if (b.k !== 6 && ((q[i + 1] && q[i + 1].k === b.k) || (cols[c + 1] && cols[c + 1][i] && cols[c + 1][i].k === b.k))) g.push([c, i]); })); if (g.length) { const p = Lab.choose(g); shoo(p[0], p[1]); } else deal(); }
+  update(dt); render(t);
+}
+Lab.boot();
+})();
+</script></body></html>
