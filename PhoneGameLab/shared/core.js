@@ -57,7 +57,7 @@
   Lab.wrap = (v, a, b) => { const r = b - a; return ((v - a) % r + r) % r + a; };
   Lab.angleDiff = (a, b) => { let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; };
   Lab.TAU = TAU;
-  Lab.fmt = n => { n = Math.round(n); const a = Math.abs(n); return a >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : a >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : a >= 1e4 ? (n / 1e3).toFixed(1) + 'K' : String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); };
+  Lab.fmt = n => { n = Math.round(n); const a = Math.abs(n); return a >= 1e18 ? n.toExponential(2).replace('+', '') : a >= 1e15 ? (n / 1e15).toFixed(2) + 'Qa' : a >= 1e12 ? (n / 1e12).toFixed(2) + 'T' : a >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : a >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : a >= 1e4 ? (n / 1e3).toFixed(1) + 'K' : String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); };
   Lab.fmtTime = s => { s = Math.max(0, s); const m = Math.floor(s / 60), r = s - m * 60; return m + ':' + (r < 10 ? '0' : '') + r.toFixed(1); };
 
   const ease = Lab.ease = {

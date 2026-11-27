@@ -1,0 +1,201 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Chute First</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* CHUTE FIRST — a toy-factory sorting table seen from above. A block drops on the turntable; flick it (or tap a chute,
+ * or use the arrow keys) into the chute whose label it fits before the ring around the table runs out.
+ * Brain:   the labels are the game. Rounds change the rule: 2 → 3 → 4 colours, then SHAPES (colour becomes a decoy),
+ *          then NOT rules ("red" / "not red"), then "two colours + the rest". Later rounds shuffle the chutes
+ *          mid-round (SWITCH!) and, in memory rounds, the labels fade out after a few blocks.
+ * Reflex:  the next block drops the instant you flick, so you go as fast as you can think. Faster sorts score more;
+ *          every 5 in a row raises the multiplier (max ×5); a spotless round pays a bonus. Three mistakes end the run.
+ * Look:    sunny yellow factory floor, chunky navy outlines, dice-pipped blocks (pips double the colour so nothing
+ *          is colour-only), marching-toy music. */
+Lab.init({
+  title: "Chute First", tagline: "Sort first. Think faster.", category: "Reflex & Taps",
+  howto: ["Flick each block into the chute it fits", "The labels change: colour, shape, NOT…", "5 in a row raises your multiplier"],
+  theme: { bg: "#ffc83a", bg2: "#ffe27a", accent: "#2f7de1", accent2: "#e8483f", fg: "#1f2a44", light: true },
+  orient: "any", music: { style: "march", key: "A", bpm: 108, vol: .3 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, NAVY = "#1f2a44";
+const COL = ["#e8483f", "#2f7de1", "#f5b914", "#1fae7a"], CN = ["red", "blue", "yellow", "green"], SN = ["circle", "square", "triangle", "star"];
+const DV = { L: [-1, 0], R: [1, 0], U: [0, -1], D: [0, 1] }, DK = ["L", "R", "U", "D"];
+let cx, cy, bs, cs, Dx, Dy, round, rule, queue, total, cur, timer, timerMax, lives, score, streak, bestStreak, sorted, intro, pauseT, flyers, cfx, roundMiss, doneInRound, reveal, alive, lastType, padKick, lastTick, used;
+
+function layout() {
+  const P = Lab.play; bs = clamp(Math.min(P.w * .2, P.h * .19), 46, 110); cs = bs * 1.26;
+  Dx = Math.min(P.w / 2 - cs * .6, bs * 3.2); Dy = Math.min(P.h / 2 - cs * .6, bs * 3.2, Dx * 1.55); cx = P.x + P.w / 2; cy = P.y + P.h / 2;
+  Lab.sprite.clear("cf:");
+}
+Lab.onResize(() => { if (cfx) layout(); });
+const chuteXY = d => ({ x: cx + DV[d][0] * Dx, y: cy + DV[d][1] * Dy });
+
+/* ---------- rules */
+const test = (s, it) => s.kind === "c" ? it.c === s.v : s.kind === "s" ? it.s === s.v : s.kind === "nc" ? it.c !== s.v : s.kind === "ns" ? it.s !== s.v : false;
+function target(it, r) { r = r || rule; return r.slots.find(s => s.kind !== "else" && test(s, it)) || r.slots.find(s => s.kind === "else") || null; }
+function makeRule(n) {
+  const fixed = ["", "c2", "c3", "c4", "s2", "nc", "s4", "ce", "ns"]; let T = fixed[n];
+  if (!T) do T = Lab.choose(["c4", "s4", "nc", "ns", "ce", "se", "c3", "s3"]); while (T === lastType);
+  lastType = T; const dim = T[1] === "c" || T[1] === "s" ? T[1] : T[0], vals = Lab.shuffle([0, 1, 2, 3]); let slots, t1, t2;
+  if (T[0] === "n") { slots = [{ kind: dim, v: vals[0] }, { kind: "n" + dim, v: vals[0] }]; t1 = (dim === "c" ? CN : SN)[vals[0]].toUpperCase(); t2 = "or NOT"; }
+  else if (T[1] === "e") { slots = [{ kind: dim, v: vals[0] }, { kind: dim, v: vals[1] }, { kind: "else" }]; t1 = "TWO " + (dim === "c" ? "COLOURS" : "SHAPES"); t2 = "+ THE REST"; }
+  else { slots = vals.slice(0, +T[1]).map(v => ({ kind: dim, v })); t1 = "SORT BY"; t2 = dim === "c" ? "COLOUR" : "SHAPE"; }
+  const title = t1 + " " + t2;
+  const dirs = Lab.shuffle(slots.length === 2 ? ["L", "R"] : slots.length === 3 ? ["L", "R", "D"] : ["L", "R", "U", "D"]); slots.forEach((s, i) => { s.dir = dirs[i]; s.flip = 0; });
+  const cnt = 8 + Math.min(n, 6) * 2;
+  return { type: T, title, t1, t2, slots, cnt, shapes: n === 1 ? [0] : n === 2 ? [0, 1] : [0, 1, 2, 3], switchAt: n >= 9 && n % 2 === 1 ? Math.floor(cnt / 2) : -1, fade: n >= 10 && n % 3 === 1 };
+}
+function gen() {
+  const slot = Lab.choose(rule.slots); let it, tries = 0;
+  do it = { c: Lab.randInt(0, 3), s: Lab.choose(rule.shapes) }; while (target(it) !== slot && ++tries < 80);
+  if (target(it) !== slot) it = rule.slots[0].kind === "c" ? { c: rule.slots[0].v, s: 0 } : { c: 0, s: rule.slots[0].v };
+  return it;
+}
+function startRound(n) {
+  round = n; rule = makeRule(n); queue = Array.from({ length: rule.cnt }, gen); total = rule.cnt; cur = null; roundMiss = 0; doneInRound = 0; reveal = 0;
+  timerMax = Math.max(1.15, 3.3 - n * .2); intro = 1.5; pauseT = 0;
+  for (const d of DK) cfx[d] = { sq: 0, glow: 0, col: "#fff" };
+  rule.slots.forEach((s, i) => Lab.after(.25 + i * .12, () => { s.flip = .001; Lab.sfx("flip", { pitch: 1 + i * .12 }); }));
+  if (n > 1) Lab.sfx("whoosh");
+}
+function start() {
+  layout(); lives = 3; score = 0; streak = 0; bestStreak = 0; sorted = 0; flyers = []; cfx = {}; alive = true; lastType = ""; padKick = 0; lastTick = 9;
+  Lab.setScore(0); Lab.input.swipeEarly = true; startRound(1);
+  used = false; Lab.input.onDown = [() => { used = false; }];
+  Lab.input.onSwipe = [(dx, dy) => flick(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "R" : "L") : (dy > 0 ? "D" : "U"))];
+  Lab.input.onTap = [(x, y) => { for (const d of DK) { const p = chuteXY(d); if (Math.abs(x - p.x) < cs * .62 && Math.abs(y - p.y) < cs * .62) { flick(d); return; } } }];
+  Lab.input.onKey = [k => { const d = { ArrowLeft: "L", ArrowRight: "R", ArrowUp: "U", ArrowDown: "D", a: "L", d: "R", w: "U", s: "D" }[k]; if (d) flick(d); }];
+  Lab.expose({
+    get score() { return score; }, get lives() { return lives; }, get round() { return round; }, get streak() { return streak; }, get sorted() { return sorted; }, get left() { return queue.length + (cur ? 1 : 0); }, get intro() { return intro > 0 || pauseT > 0; },
+    get mult() { return mult(); }, get cur() { return cur && { c: cur.c, s: cur.s }; }, get answer() { return cur ? target(cur).dir : null; }, get timer() { return timer; },
+    get rule() { return { type: rule.type, fade: rule.fade, switchAt: rule.switchAt, slots: rule.slots.map(s => ({ dir: s.dir, kind: s.kind, v: s.v })) }; },
+    get pad() { return { x: cx, y: cy }; }, chute(d) { return chuteXY(d); }, flick, setTimer(s) { timer = s; }, skipTo(n) { startRound(n); }, setLives(n) { lives = n; },
+  });
+  Lab.loop((dt, t) => { update(dt); render(t); });
+}
+const mult = () => Math.min(5, 1 + Math.floor(streak / 5));
+function nextBlock() {
+  if (!queue.length) { cur = null; const perfect = roundMiss === 0, b = perfect ? 50 * Math.min(round, 10) : 0;
+    if (b) { score += b; Lab.setScore(score); Lab.bumpScore(); fx.text(cx, cy - bs, "PERFECT ROUND +" + b, { color: "#fff", size: 20, outline: NAVY }); fx.burst(cx, cy, { n: 26, colors: COL, speed: 320, life: .8, size: 5, gravity: 300, shape: "square" }); }
+    Lab.sfx("levelup"); intro = 9; Lab.after(.7, () => { if (alive) startRound(round + 1); }); return; }
+  if (queue.length === rule.switchAt) { rule.switchAt = -1; const dirs = rule.slots.map(s => s.dir); let nd; do nd = Lab.shuffle(dirs.slice()); while (nd.every((d, i) => d === dirs[i])); rule.slots.forEach((s, i) => { s.dir = nd[i]; s.flip = .001; }); pauseT = .85; reveal = 2; Lab.sfx("whoosh", { pitch: 1.3 }); Lab.sfx("flip"); }
+  const it = queue.shift(); cur = { c: it.c, s: it.s, drop: 0, ox: 0, oy: 0, rot: Lab.rand(-.12, .12) }; timer = timerMax + (doneInRound === 0 ? .8 : 0); lastTick = 9;
+}
+function flick(dir) {
+  if (!alive || !cur || intro > 0 || pauseT > 0) return false;
+  const slot = rule.slots.find(s => s.dir === dir); if (!slot) { padKick = 1; Lab.sfx("tick", { pitch: .6 }); return false; }
+  const want = target(cur), ok = want === slot, p = chuteXY(dir), f = { c: cur.c, s: cur.s, x: cx + cur.ox, y: cy + cur.oy, sc: 1, rot: cur.rot, a: 1 };
+  flyers.push(f); Lab.tween(f, { x: p.x, y: p.y, sc: .45, rot: f.rot + DV[dir][0] * 1.2 + DV[dir][1] * .6 }, .13, { ease: "inQuad", onDone() { flyers.splice(flyers.indexOf(f), 1); arrive(dir, ok, f.c); } });
+  Lab.sfx("swish", { pitch: 1 + Math.min(streak, 20) * .02, vol: .7 });
+  if (ok) {
+    streak++; bestStreak = Math.max(bestStreak, streak); sorted++; const sp = clamp(timer / timerMax, 0, 1), pts = (10 + Math.round(sp * 10)) * mult();
+    score += pts; Lab.setScore(score); Lab.audio.combo(Math.min(streak - 1, 14), { vol: .16 });
+    fx.text(p.x - DV[dir][0] * cs * .9, p.y - DV[dir][1] * cs * .9 - 8, "+" + pts, { color: "#fff", size: 17 + mult() * 2, outline: NAVY });
+    if (streak % 5 === 0 && streak <= 20) { Lab.toast("×" + mult() + " multiplier", 800, { y: .64 }); Lab.sfx("powerup", { vol: .6 }); Lab.bumpScore(); }
+  } else miss(want.dir, dir);
+  doneInRound++; used = true; if (alive) nextBlock(); return ok;
+}
+function arrive(dir, ok, c) { const e = cfx[dir], p = chuteXY(dir); e.sq = 1; e.glow = 1; e.col = ok ? "#5fe08a" : "#ff5a4f"; if (ok) { Lab.sfx("pop", { pitch: 1.1 + c * .1, vol: .6 }); fx.burst(p.x, p.y, { n: 6, colors: [COL[c], "#fff"], speed: 150, life: .35, size: 4, shape: "square" }); } }
+function miss(rightDir, wrongDir) {
+  lives--; streak = 0; roundMiss++; reveal = 1.8; Lab.sfx("error"); Lab.sfx("hurt", { vol: .6 }); Lab.shake(8, .25); Lab.flash("#ff5a4f", .2, .18); Lab.buzz(40);
+  cfx[rightDir].glow = 1.6; cfx[rightDir].col = "#5fe08a"; if (wrongDir) cfx[wrongDir].sq = 1;
+  if (lives <= 0) { alive = false; cur = null; Lab.after(.55, () => Lab.gameover({ title: "Line jammed", message: "Stopped in round " + round + " — " + rule.title.toLowerCase() + ".", score, stats: [["Round", round], ["Sorted", sorted], ["Best streak", bestStreak]] })); }
+}
+function update(dt) {
+  for (const d of DK) { const e = cfx[d]; e.sq = Lab.damp(e.sq, 0, 12, dt); e.glow = Math.max(0, e.glow - dt * 2); }
+  for (const s of rule.slots) if (s.flip > 0 && s.flip < 1) s.flip = Math.min(1, s.flip + dt * 4);
+  padKick = Lab.damp(padKick, 0, 10, dt); reveal = Math.max(0, reveal - dt);
+  if (!alive) return;
+  if (intro > 0) { intro -= dt; if (intro <= 0) nextBlock(); return; }
+  if (pauseT > 0) { pauseT -= dt; return; }
+  if (!cur) return;
+  cur.drop = Math.min(1, cur.drop + dt * 7);
+  if (Lab.input.down && !used) { cur.ox = clamp((Lab.input.x - Lab.input.startX) * .5, -bs * .4, bs * .4); cur.oy = clamp((Lab.input.y - Lab.input.startY) * .5, -bs * .4, bs * .4); } else { cur.ox = Lab.damp(cur.ox, 0, 20, dt); cur.oy = Lab.damp(cur.oy, 0, 20, dt); }
+  timer -= dt; const f = timer / timerMax;
+  if (f < .4 && Math.ceil(f * 10) < lastTick) { lastTick = Math.ceil(f * 10); Lab.sfx("tick", { pitch: 1.6 - f, vol: .6 }); }
+  Lab.music.intensity(clamp(.3 + round * .05 + (1 - f) * .25, 0, 1));
+  if (timer <= 0) { const want = target(cur), g = { c: cur.c, s: cur.s, x: cx, y: cy, sc: 1, rot: cur.rot, a: 1 }; flyers.push(g); Lab.tween(g, { sc: .1, rot: 3, a: 0 }, .3, { ease: "inQuad", onDone() { flyers.splice(flyers.indexOf(g), 1); } }); Lab.sfx("drop"); fx.text(cx, cy - bs, "too slow", { color: "#fff", size: 17, outline: NAVY }); miss(want.dir); doneInRound++; if (alive) nextBlock(); }
+}
+
+/* ---------- art */
+function shapePath(g, s, r) {
+  g.beginPath();
+  if (s === 0) g.arc(0, 0, r, 0, TAU);
+  else if (s === 1) draw.rr(g, -r * .88, -r * .88, r * 1.76, r * 1.76, r * .26);
+  else if (s === 2) { g.moveTo(0, -r * 1.02); g.lineTo(r * 1.02, r * .8); g.lineTo(-r * 1.02, r * .8); g.closePath(); }
+  else for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .55 : r * 1.1; g[i ? "lineTo" : "moveTo"](Math.cos(a) * rr, Math.sin(a) * rr); }
+  if (s === 3) g.closePath();
+}
+function pips(g, n, r, col) { const P = [[[0, 0]], [[-1, 0], [1, 0]], [[-1, .8], [1, .8], [0, -.9]], [[-1, -1], [1, -1], [-1, 1], [1, 1]]][n]; g.fillStyle = col; for (const p of P) { g.beginPath(); g.arc(p[0] * r * 1.5, p[1] * r * 1.5, r, 0, TAU); g.fill(); } }
+function paintBlock(g, c, s, r, grey) {
+  const col = grey ? "#e6e9f0" : COL[c]; g.lineJoin = "round"; g.save(); g.translate(0, s === 2 ? r * .1 : 0);
+  g.save(); g.translate(0, r * .13); shapePath(g, s, r); g.fillStyle = grey ? "#aab2c2" : Lab.color.shade(col, -.3); g.fill(); g.lineWidth = Math.max(3, r * .13); g.strokeStyle = NAVY; g.stroke(); g.restore();
+  shapePath(g, s, r); g.fillStyle = col; g.fill(); g.lineWidth = Math.max(3, r * .13); g.strokeStyle = NAVY; g.stroke();
+  g.save(); shapePath(g, s, r); g.clip(); g.fillStyle = "rgba(255,255,255,.28)"; g.beginPath(); g.ellipse(-r * .3, -r * .6, r * .7, r * .34, -.4, 0, TAU); g.fill(); g.restore();
+  if (!grey) pips(g, c, r * .125, Lab.color.shade(col, -.45)); g.restore();
+}
+function blockSprite(c, s, sz, grey) { sz = Math.round(sz); return Lab.sprite("cf:b" + c + s + ":" + sz + (grey ? "g" : ""), sz, sz, g => { g.translate(sz / 2, sz / 2); paintBlock(g, c, s, sz * .36, grey); }); }
+function drawBlock(c, col, s, x, y, sz, sc, rot, a, grey) { const sp = blockSprite(col, s, sz, grey); c.save(); c.translate(x, y); if (rot) c.rotate(rot); c.scale(sc, sc); if (a != null) c.globalAlpha = a; c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore(); }
+function chip(c, v, r) { draw.rr(c, -r, -r, r * 2, r * 2, r * .5); c.fillStyle = COL[v]; c.fill(); c.lineWidth = Math.max(2.5, r * .12); c.strokeStyle = NAVY; c.stroke(); pips(c, v, r * .15, Lab.color.shade(COL[v], -.45)); }
+function label(c, s, r) { // the rule drawn inside a chute, r = half size of the icon area
+  if (s.kind === "else") { draw.text(c, "THE", 0, -r * .34, { size: r * .42, color: NAVY }); draw.text(c, "REST", 0, r * .26, { size: r * .56, color: NAVY }); return; }
+  const neg = s.kind[0] === "n", dim = neg ? s.kind[1] : s.kind;
+  c.save(); if (neg) c.translate(0, r * .16); const k = neg ? .7 : .86;
+  if (dim === "c") chip(c, s.v, r * k * .82); else { const sp = blockSprite(0, s.v, r * 2.5 * k, true); c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); }
+  if (neg) { c.lineCap = "round"; c.strokeStyle = "#fff"; c.lineWidth = r * .34; c.beginPath(); c.moveTo(-r * .72, r * .62); c.lineTo(r * .72, -r * .62); c.stroke(); c.strokeStyle = "#e8483f"; c.lineWidth = r * .2; c.stroke(); draw.text(c, "NOT", 0, -r * .98, { size: r * .44, color: "#e8483f" }); }
+  c.restore();
+}
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80; return Lab.sprite("cf:bg", W, H, g => {
+    draw.vgrad(g, 0, 0, W, H, ["#ffe27a", "#ffc83a"]); g.strokeStyle = "rgba(255,255,255,.2)"; g.lineWidth = 22; for (let x = -H; x < W; x += 64) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x + H, H); g.stroke(); }
+    g.translate(40, 40); g.lineCap = "round";
+    for (const d of DK) { const p = chuteXY(d); g.strokeStyle = "rgba(160,100,0,.28)"; g.lineWidth = bs * .86; g.beginPath(); g.moveTo(cx, cy); g.lineTo(p.x, p.y); g.stroke(); }
+    for (const d of DK) { const p = chuteXY(d); g.strokeStyle = "#f3a71c"; g.lineWidth = bs * .7; g.beginPath(); g.moveTo(cx, cy); g.lineTo(p.x, p.y); g.stroke(); g.strokeStyle = "rgba(255,255,255,.35)"; g.lineWidth = 3; g.setLineDash([2, 14]); g.beginPath(); g.moveTo(cx, cy); g.lineTo(p.x, p.y); g.stroke(); g.setLineDash([]); }
+    draw.shadow(g, cx, cy + bs * .16, bs * .98, bs * .9, .2); draw.circle(g, cx, cy, bs * .92, "#fffaf0", NAVY, 4); draw.circle(g, cx, cy, bs * .7, null, "rgba(31,42,68,.12)", 3);
+  });
+}
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(), P = Lab.play; c.drawImage(bg, -40, -40, bg.w, bg.h);
+  const fadeA = rule.fade && doneInRound >= 4 && reveal <= 0 && intro <= 0 ? .0 : 1;
+  for (const d of DK) {
+    const p = chuteXY(d), s = rule.slots.find(q => q.dir === d), e = cfx[d] || { sq: 0, glow: 0 }, h = cs / 2;
+    c.save(); c.translate(p.x, p.y); c.scale(1 + e.sq * .12, 1 - e.sq * .1);
+    if (e.glow > 0) { c.globalAlpha = Math.min(1, e.glow); draw.rect(c, -h - 7, -h - 7, cs + 14, cs + 14, cs * .26, e.col); c.globalAlpha = 1; }
+    draw.rect(c, -h, -h + 5, cs, cs, cs * .22, "rgba(31,42,68,.3)");
+    if (!s) { draw.rect(c, -h, -h, cs, cs, cs * .22, "#c9a23a", "rgba(31,42,68,.45)", 3.5); c.strokeStyle = "rgba(31,42,68,.22)"; c.lineWidth = 5; c.lineCap = "round"; for (const k of [-.22, 0, .22]) { c.beginPath(); c.moveTo(-h * .5, k * cs + h * .14); c.lineTo(h * .5, k * cs - h * .14); c.stroke(); } }
+    else {
+      const fl = Math.cos((1 - ease.outCubic(s.flip)) * Math.PI); c.scale(Math.max(.04, Math.abs(fl)), 1);
+      draw.rect(c, -h, -h, cs, cs, cs * .22, fl > 0 ? "#fffdf6" : "#2c3a5e", NAVY, 4);
+      if (fl > 0) { draw.rect(c, -h + 7, -h + 7, cs - 14, cs - 14, cs * .16, null, "rgba(31,42,68,.1)", 2.5); c.globalAlpha = Lab.damp(s.shown == null ? 1 : s.shown, fadeA, 8, 1 / 60); s.shown = c.globalAlpha; label(c, s, h * .74); c.globalAlpha = 1; if (s.shown < .5) draw.text(c, "?", 0, 2, { size: cs * .5, color: "rgba(31,42,68," + (.5 - s.shown) + ")" }); }
+    }
+    c.restore();
+  }
+  // turntable ring = time left for this block
+  if (cur && intro <= 0) { const f = clamp(timer / timerMax, 0, 1); c.lineCap = "round"; c.strokeStyle = f > .5 ? "#1fae7a" : f > .25 ? "#f58a14" : "#e8483f"; c.lineWidth = Math.max(5, bs * .09) + (f < .25 ? Math.sin(t * 30) * 1.5 : 0); c.beginPath(); c.arc(cx, cy, bs * .92 + padKick * 4, -Math.PI / 2, -Math.PI / 2 + f * TAU); c.stroke(); }
+  if (intro > 0 && intro <= 1.5 && alive) { const k = ease.outBack(clamp((1.5 - intro) * 4, 0, 1)) * clamp(intro * 8, 0, 1); c.save(); c.translate(cx, cy); c.scale(k, k); draw.text(c, "ROUND " + round, 0, -bs * .5, { size: bs * .15, color: "rgba(31,42,68,.55)" }); draw.text(c, rule.t1, 0, -bs * .16, { size: bs * .24, color: NAVY, maxWidth: bs * 1.5 }); draw.text(c, rule.t2, 0, bs * .22, { size: bs * .32, color: "#e8483f", maxWidth: bs * 1.55 }); c.restore(); }
+  if (pauseT > 0) draw.text(c, "SWITCH!", cx, cy - bs * 1.22, { size: bs * .34 * (1 + ease.pulse(clamp(pauseT / .85, 0, 1)) * .25), color: "#e8483f", stroke: "#fff" });
+  if (cur) { const d = ease.outBack(cur.drop), sc = 1.7 - .7 * d; c.globalAlpha = .2 * cur.drop; draw.shadow(c, cx + cur.ox, cy + cur.oy + bs * .3, bs * .4, bs * .14, 1); c.globalAlpha = 1; drawBlock(c, cur.c, cur.s, cx + cur.ox + Math.sin(padKick * 25) * padKick * 5, cy + cur.oy, bs * 1.25, sc, cur.rot, clamp(cur.drop * 3, 0, 1)); }
+  for (const f of flyers) drawBlock(c, f.c, f.s, f.x, f.y, bs * 1.25, f.sc, f.rot, f.a);
+  // corners: next blocks, lives, multiplier, round progress
+  const ty = P.y + 18, m = mult(), ms = clamp(bs * .44, 22, 34);
+  draw.text(c, "NEXT", P.x + 14, ty, { size: 11, color: "rgba(31,42,68,.6)", align: "left" });
+  for (let i = 0; i < Math.min(3, queue.length); i++) drawBlock(c, queue[i].c, queue[i].s, P.x + 14 + ms * .5 + i * ms * 1.05, ty + 14 + ms * .5, ms * 1.2, 1 - i * .12, 0, 1 - i * .25);
+  for (let i = 0; i < 3; i++) { const hx = P.x + P.w - 22 - i * 26; draw.heart(c, hx, ty + 2, 9.5, i < lives ? "#e8483f" : "rgba(31,42,68,.18)"); if (i < lives) { c.strokeStyle = NAVY; c.lineWidth = 2; c.stroke(); } }
+  draw.text(c, "ROUND " + round, P.x + P.w - 12, ty + 26, { size: 12, color: "rgba(31,42,68,.7)", align: "right" });
+  const by = P.y + P.h - 20, done = total - queue.length - (cur ? 1 : 0), pw = clamp(P.w * .22, 70, 150);
+  draw.rect(c, P.x + P.w - 12 - pw, by - 5, pw, 10, 5, "rgba(31,42,68,.18)"); draw.rect(c, P.x + P.w - 12 - pw, by - 5, Math.max(10, pw * clamp(done / total, 0, 1)), 10, 5, NAVY); draw.text(c, done + " / " + total, P.x + P.w - 12, by - 18, { size: 12, color: "rgba(31,42,68,.7)", align: "right" });
+  draw.text(c, "×" + m, P.x + 14, by - 12, { size: 26 + m * 2, color: m > 1 ? "#e8483f" : "rgba(31,42,68,.45)", align: "left", stroke: m > 1 ? "#fff" : null });
+  for (let i = 0; i < 5; i++) draw.circle(c, P.x + 20 + i * 12, by + 6, 4, m >= 5 || i < streak % 5 ? NAVY : "rgba(31,42,68,.2)");
+  // first two blocks of a run: show the flick
+  if (round === 1 && sorted < 2 && cur && intro <= 0 && alive) { const w = target(cur), v = DV[w.dir], k = (t * .9) % 1, e = ease.outCubic(clamp(k * 1.5, 0, 1)), L = Math.min(Dx, Dy) * .62; c.globalAlpha = 1 - k; draw.circle(c, cx + v[0] * L * e, cy + v[1] * L * e + bs * .1, 15, "rgba(255,255,255,.9)", NAVY, 3); c.globalAlpha = 1; }
+}
+function attract(dt, t) {
+  if (!cfx) { layout(); cfx = {}; for (const d of DK) cfx[d] = { sq: 0, glow: 0 }; round = 7; lives = 3; streak = 12; score = 0; total = 20; queue = [{ c: 2, s: 3 }, { c: 0, s: 1 }, { c: 3, s: 2 }, { c: 1, s: 0 }]; intro = 0; reveal = 0; doneInRound = 0; padKick = 0; flyers = []; timerMax = 2; timer = 1.3; alive = false;
+    rule = { slots: [{ dir: "L", kind: "c", v: 0, flip: 1 }, { dir: "R", kind: "nc", v: 0, flip: 1 }, { dir: "U", kind: "s", v: 3, flip: 1 }, { dir: "D", kind: "else", flip: 1 }] }; cur = { c: 1, s: 2, drop: 1, ox: 0, oy: 0, rot: .08 }; }
+  cur.ox = Math.sin(t * 1.6) * bs * .22; cur.rot = Math.sin(t * 1.6) * .1; timer = 1 + Math.sin(t * .8) * .8; render(t);
+}
+Lab.boot();
+})();
+</script></body></html>

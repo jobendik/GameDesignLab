@@ -1,0 +1,285 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Pocket Reef</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* POCKET REEF — an idle game you can watch. Tap the clam for pearls, invite reef creatures that make pearls on their own.
+ * Everything you own is on screen: shrimp hop on the sand, clownfish circle anemones, seahorses hang in the kelp, turtles,
+ * an octopus, mantas and finally a whale drift through, each puffing pearls up to the counter.
+ * Depth: ×2 milestones at 10/25/50/100… of a kind, synergies (each creature of the tier below boosts the next by 1 %),
+ * tap polish, kelp (global), golden bubbles (lump sum or ×5 frenzy), and the prestige loop: TURN THE TIDE trades the reef
+ * for starfish (+10 % each, forever). Offline/paused time pays 50 % for up to 2 h, stamped through Lab.store.
+ * The reef persists: "restart" reloads the save; wiping is a deliberate double-tap in the Tide tab. Best = lifetime pearls. */
+const SUF = ["", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No"];
+function fmt(n) { n = Math.floor(n + 1e-9); if (n < 1e4) return Lab.fmt(n); const e = Math.min(SUF.length - 1, Math.floor(Math.log10(n) / 3)), v = n / Math.pow(1000, e); return (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + SUF[e]; }
+const fmt1 = n => n < 10 && n % 1 ? n.toFixed(1) : fmt(n);
+Lab.init({
+  title: "Pocket Reef", tagline: "Tap a clam. Grow a reef. Let it hum.", category: "Strategy & Idle",
+  howto: ["Tap the clam for pearls", "Spend pearls on creatures that earn for you", "Turn the tide for starfish that boost everything"],
+  theme: { bg: "#0c5c7a", bg2: "#3fb6c9", accent: "#ff7a59", accent2: "#ffd23f" },
+  orient: "any", music: { style: "dream", key: "A", bpm: 76, vol: .4 }, restart: start, attract, formatScore: fmt, autoPause: false,
+});
+const { draw, fx, clamp, lerp } = Lab, TAU = Lab.TAU, INK = "#16324a";
+const GEN = [
+  { n: "Shrimp", cost: 15, pps: 1, cap: 10, col: "#ff8fa3" }, { n: "Clownfish", cost: 120, pps: 8, cap: 8, col: "#ff8c2e" }, { n: "Seahorse", cost: 1300, pps: 50, cap: 6, col: "#f4c430" },
+  { n: "Turtle", cost: 14000, pps: 340, cap: 4, col: "#5fbf7a" }, { n: "Octopus", cost: 160000, pps: 2400, cap: 3, col: "#b57be6" }, { n: "Manta", cost: 2e6, pps: 18000, cap: 2, col: "#3d6fb6" },
+  { n: "Whale", cost: 3e7, pps: 150000, cap: 1, col: "#27496d" },
+];
+const SYN = [null, "Anemone homes", "Tail holding", "Cleaning crew", "Shell garden", "Ink lessons", "Whale song"];
+const MILE = [10, 25, 50, 100, 150, 200, 300, 400], GROW = 1.15, OFF_CAP = 7200, OFF_EFF = .5, STAR_DIV = 1e5;
+let S, sc, pn, tab, mode, scroll, hits, drag, agents, motes, bub, clam, gold, frenzy, goldT, bump, streak, streakT, away, confirm, wipeArm, lastNow, saveT, demo = false, newRow = -1, newT = 0;
+
+/* ------------------------------------------------------------------ model */
+const fresh = () => ({ pearls: 0, tide: 0, life: 0, own: [0, 0, 0, 0, 0, 0, 0], syn: [0, 0, 0, 0, 0, 0, 0], polish: 0, kelp: 0, star: 0, tides: 0, taps: 0, t: Date.now() });
+function load() { const d = Lab.store.get("save", null), f = fresh(); if (!d || typeof d !== "object") return f; for (const k in f) if (typeof d[k] === typeof f[k] && (!Array.isArray(f[k]) || (Array.isArray(d[k]) && d[k].length === f[k].length))) f[k] = d[k]; return f; }
+function save() { if (demo || !S) return; S.t = Date.now(); Lab.store.set("save", S); Lab.submitScore(Math.floor(S.life)); }
+const mile = n => { let m = 1; for (const k of MILE) if (n >= k) m *= 2; return m; };
+const nextMile = n => MILE.find(k => k > n);
+const each = i => GEN[i].pps * mile(S.own[i]) * (S.syn[i] ? 1 + .01 * S.own[i - 1] : 1) * globalMul();
+const globalMul = () => (1 + .25 * S.kelp) * (1 + .1 * S.star);
+function pps() { let p = 0; for (let i = 0; i < GEN.length; i++) p += each(i) * S.own[i]; return p * (frenzy > 0 ? 5 : 1); }
+const tapVal = () => Math.pow(2, S.polish) * (1 + .1 * S.star) + pps() * .03;
+function costOf(i, k) { const c = GEN[i].cost * Math.pow(GROW, S.own[i]); return c * (Math.pow(GROW, k) - 1) / (GROW - 1); }
+function maxBuy(i) { const c = GEN[i].cost * Math.pow(GROW, S.own[i]); return Math.max(0, Math.floor(Math.log(S.pearls * (GROW - 1) / c + 1) / Math.log(GROW) + 1e-9)); }
+const polishCost = () => 60 * Math.pow(6, S.polish), kelpCost = () => 2000 * Math.pow(9, S.kelp), synCost = i => GEN[i].cost * 12;
+const starGain = () => Math.floor(Math.sqrt(S.tide / STAR_DIV));
+function earn(v) { S.pearls += v; S.tide += v; S.life += v; }
+function buy(i, k) {
+  k = k === "max" ? maxBuy(i) : k || 1; const c = costOf(i, k); if (k < 1 || S.pearls + 1e-6 < c) { deny(); return false; }
+  const before = S.own[i], m0 = mile(before); S.pearls -= c; S.own[i] += k; sync(); save();
+  if (!demo) { Lab.sfx("pickup", { pitch: 1.3 - i * .09 }); Lab.buzz(8); if (before === 0) { Lab.banner(/^[AEIOU]/.test(GEN[i].n) ? "An " + GEN[i].n + "!" : "A " + GEN[i].n + "!", { color: "#fff", ms: 1100, y: .16 }); Lab.sfx("chime"); } else if (mile(S.own[i]) > m0) { Lab.toast(GEN[i].n + " ×" + mile(S.own[i]) + " milestone!", 1300, { y: .2 }); Lab.sfx("levelup"); } }
+  return true;
+}
+function buyUp(kind, i) {
+  const c = kind === "polish" ? polishCost() : kind === "kelp" ? kelpCost() : synCost(i);
+  if ((kind === "syn" && S.syn[i]) || S.pearls + 1e-6 < c) { deny(); return false; }
+  S.pearls -= c; if (kind === "polish") S.polish++; else if (kind === "kelp") S.kelp++; else S.syn[i] = 1; save(); if (!demo) { Lab.sfx("powerup", { pitch: 1.1 }); Lab.buzz(10); } return true;
+}
+function deny() { if (!demo) Lab.sfx("tick", { pitch: .55, vol: .5 }); }
+function prestige() {
+  const g = starGain(); if (g < 1) { deny(); return false; }
+  const f = fresh(), life = S.life, tide = S.tide; f.star = S.star + g; f.tides = S.tides + 1; f.life = life; f.taps = S.taps; S = f; frenzy = 0; gold = null; sync(); save();
+  Lab.flash("#fff", .5, .7); fx.clear();
+  Lab.win({ title: "The tide turns", message: "+" + g + " starfish — every pearl is now worth ×" + (1 + .1 * S.star).toFixed(1), score: Math.floor(life), scoreLabel: "Lifetime pearls", stats: [["Starfish", S.star], ["Tides turned", S.tides], ["This tide", fmt(tide)]], button: "New tide" });
+  return true;
+}
+function offline(sec) { const p = pps(), s = Math.min(sec, OFF_CAP), g = p * s * OFF_EFF; away = { sec, gain: g, capped: sec > OFF_CAP }; if (g > 0) earn(g); return g; }
+function tapClam(x, y) {
+  const v = tapVal(); earn(v); S.taps++; clam.sq = 1; clam.open = 1; streak = Math.min(streak + 1, 16); streakT = .45; bump = 1;
+  const p = clamPos(); motes.push({ x: p.x, y: p.y - p.r * .3, t: 0, big: true });
+  Lab.sfx("bubble", { pitch: 1 + streak * .05, vol: .7 }); if (streak % 4 === 0) Lab.audio.combo(streak / 4 + 2, { vol: .1 }); Lab.buzz(6);
+  fx.text(x == null ? p.x : x, (y == null ? p.y - p.r : y) - 18, "+" + fmt1(v), { color: "#fff", size: 17 + Math.min(8, streak * .5), life: .7 }); fx.burst(p.x, p.y - p.r * .2, { n: 5, colors: ["#fff", "#bfefff"], speed: 130, life: .45, size: 3, gravity: -120, shape: "ring" });
+}
+function popGold() {
+  const p = { x: sc.x + gold.x * sc.w, y: sc.y + gold.y * sc.h }; gold = null; goldT = Lab.rand(40, 70);
+  Lab.sfx("powerup"); Lab.sfx("chime", { pitch: 1.3 }); Lab.buzz(30); fx.burst(p.x, p.y, { n: 26, colors: ["#ffd23f", "#fff3b0", "#fff"], speed: 260, life: .8, shape: "star", gravity: 60 });
+  if (Lab.chance(.5) && pps() > 0) { frenzy = 15; Lab.banner("FRENZY ×5", { color: "#ffd23f", ms: 1200, y: .2 }); }
+  else { const g = Math.max(pps() * 45, tapVal() * 30); earn(g); bump = 1; fx.text(p.x, p.y - 20, "+" + fmt(g), { color: "#ffd23f", size: 26, life: 1.2 }); }
+}
+
+/* ------------------------------------------------------------------ lifecycle + input */
+function start() {
+  demo = false; S = load(); init(); layout();
+  const gap = (Date.now() - S.t) / 1000; away = null;
+  if (gap > 20 && pps() > 0) { const g = offline(gap); Lab.toast("While you were away: +" + fmt(g) + " pearls" + (away.capped ? " (2h cap)" : ""), 2600, { y: .14 }); Lab.sfx("coin"); }
+  lastNow = Date.now(); save();
+  Lab.input.onDown = [(x, y) => {
+    if (inR(pn, x, y)) { if (y > pn.y + pn.tabH) drag = { y, moved: 0 }; return; }
+    if (gold && Lab.dist(x, y, sc.x + gold.x * sc.w, sc.y + gold.y * sc.h) < 40) return popGold();
+    if (inR(sc, x, y)) tapClam(x, y);
+  }];
+  Lab.input.onMove = [(x, y, dx, dy) => { if (drag && Lab.input.down) { drag.moved += Math.abs(dy); scroll[tab] -= dy; } }];
+  Lab.input.onUp = [() => { drag = null; }];
+  Lab.input.onTap = [(x, y) => { if (!inR(pn, x, y)) return; for (const h of hits) if (inR(h, x, y)) { h.fn(); return; } }];
+  Lab.input.onKey = [k => { if (k === " " || k === "Enter") tapClam(); else if (k >= "1" && k <= "7") buy(+k - 1, mode); }];
+  Lab.expose({
+    get S() { return S; }, get pps() { return pps(); }, get tapVal() { return tapVal(); }, get away() { return away; }, get tab() { return tab; }, get mode() { return mode; }, get frenzy() { return frenzy; },
+    get starGain() { return starGain(); }, get agents() { return agents.length; }, GEN, OFF_CAP, OFF_EFF,
+    clamXY() { const p = clamPos(); return { x: p.x, y: p.y }; }, hit(id) { const h = hits.find(h => h.id === id); return h ? { x: h.x + h.w / 2, y: h.y + h.h / 2 } : null; },
+    grant(v) { earn(v); }, setPearls(v) { S.pearls = v; }, fast(sec) { earn(pps() * sec); }, costOf, buy(i, k) { return buy(i, k); }, save, prestige,
+    backdate(sec) { save(); saveT = 1e9; S.t = Date.now() - sec * 1000; Lab.store.set("save", S); }, wipe() { S = fresh(); sync(); save(); }, spawnGold() { goldT = 0; },
+  });
+  Lab.loop(frame);
+}
+function init() { tab = 0; mode = 1; scroll = [0, 0, 0]; hits = []; drag = null; agents = []; motes = []; clam = { sq: 0, open: 0 }; gold = null; frenzy = 0; goldT = Lab.rand(25, 45); bump = 0; streak = 0; streakT = 0; confirm = 0; wipeArm = 0; saveT = 5;
+  bub = Array.from({ length: 14 }, () => ({ x: Math.random(), y: Math.random(), s: Lab.rand(1.5, 4), v: Lab.rand(.03, .08) })); sync(); }
+function layout() {
+  const P = Lab.play, land = Lab.W > Lab.H * 1.1;
+  if (land) { const pw = clamp(P.w * .44, 300, 430); sc = { x: 0, y: P.y, w: Lab.W - pw, h: Lab.H - P.y }; pn = { x: Lab.W - pw, y: P.y, w: pw, h: Lab.H - P.y, tabH: 40 }; }
+  else { const sh = Math.round(clamp(P.h * .5, 250, 430)); sc = { x: 0, y: P.y, w: Lab.W, h: sh }; pn = { x: 0, y: P.y + sh, w: Lab.W, h: Lab.H - P.y - sh, tabH: 42 }; }
+  Lab.sprite.clear("reef");
+}
+Lab.onResize(() => { if (sc) layout(); });
+if (typeof addEventListener === "function") { addEventListener("pagehide", save); Lab.canvas.addEventListener("wheel", e => { if (scroll && !demo) scroll[tab] += e.deltaY * .6; }, { passive: true }); }
+const inR = (b, x, y) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+const clamPos = () => ({ x: sc.x + sc.w / 2, y: sc.y + sc.h - Math.min(64, sc.h * .2), r: clamp(Math.min(sc.w, sc.h) * .15, 38, 58) });
+const counterPos = () => ({ x: sc.x + sc.w / 2, y: sc.y + 30 });
+/* visible creatures mirror what is owned (capped per kind so the tank stays readable) */
+function sync() {
+  for (let i = 0; i < GEN.length; i++) {
+    const want = Math.min(GEN[i].cap, S.own[i]), have = agents.filter(a => a.i === i);
+    for (let k = have.length; k < want; k++) agents.push({ i, k, x: Lab.chance(.5) ? -.1 : 1.1, y: .5, dir: 1, ph: Math.random() * TAU, sp: Lab.rand(.8, 1.2), emit: Lab.rand(.5, 3), born: 0 });
+    if (have.length > want) agents = agents.filter(a => a.i !== i || a.k < want);
+  }
+}
+function frame(dt, t) {
+  // real time that passed while paused or in the background pays like offline time
+  const now = Date.now(), gap = (now - lastNow) / 1000; lastNow = now;
+  if (gap > 2) { const g = offline(gap); if (gap > 20 && g > 0) Lab.toast("While you were away: +" + fmt(g) + " pearls", 2200, { y: .14 }); }
+  step(dt); if (Lab.over) return;
+  saveT -= dt; if (saveT <= 0) { saveT = 5; save(); }
+  Lab.setScore(Math.floor(S.pearls)); Lab.music.intensity(clamp(.2 + Math.log10(1 + pps()) / 8 + (frenzy > 0 ? .3 : 0), 0, 1));
+  render(t, dt);
+}
+function step(dt) {
+  earn(pps() * dt);
+  if (frenzy > 0) frenzy -= dt;
+  clam.sq = Math.max(0, clam.sq - dt * 6); clam.open = Math.max(0, clam.open - dt * 2.2); bump = Math.max(0, bump - dt * 5); newT -= dt;
+  if (streakT > 0) { streakT -= dt; if (streakT <= 0) streak = 0; } confirm -= dt; wipeArm -= dt;
+  if (!demo) { if (gold) { gold.y -= dt * .085; gold.x += Math.sin(gold.y * 14) * dt * .05; if (gold.y < -.1) { gold = null; goldT = Lab.rand(30, 50); } } else { goldT -= dt; if (goldT <= 0 && S.life > 50) { gold = { x: Lab.rand(.15, .85), y: 1.05 }; Lab.sfx("star", { vol: .5 }); } } }
+  const fz = frenzy > 0 ? 2 : 1, cp = counterPos();
+  for (const a of agents) {
+    a.born += dt; a.ph += dt * a.sp * fz; const G = a.i, k = a.k, u = dt * a.sp * fz; let tx, ty;
+    if (G === 0) { a.x += a.dir * u * .06; if (a.x > .95) a.dir = -1; if (a.x < .05) a.dir = 1; ty = .9 - Math.abs(Math.sin(a.ph * 2.2)) * .035 + (k % 3) * .012; a.y = lerp(a.y, ty, .1); }
+    else if (G === 1) { const ax = k % 2 ? .8 : .2; tx = ax + Math.cos(a.ph * .9 + k) * (.09 + k * .008); ty = .7 + Math.sin(a.ph * 1.3 + k * 2) * .07; a.dir = tx > a.x ? 1 : -1; a.x = lerp(a.x, tx, .06); a.y = lerp(a.y, ty, .06); }
+    else if (G === 2) { tx = [.1, .33, .67, .9, .22, .78][k]; ty = .5 + Math.sin(a.ph * .8 + k) * .1; a.x = lerp(a.x, tx, .03); a.y = lerp(a.y, ty, .05); a.dir = k % 2 ? -1 : 1; }
+    else if (G === 3 || G === 5 || G === 6) { const sp = G === 3 ? .05 : G === 5 ? .04 : .016, m = G === 6 ? .35 : .15; a.x += a.dir * u * sp; if (a.x > 1 + m) a.dir = -1; if (a.x < -m) a.dir = 1; ty = (G === 3 ? .42 + k * .06 : G === 5 ? .2 + k * .08 : .34) + Math.sin(a.ph * .5) * .04; a.y = lerp(a.y, ty, .03); }
+    else { tx = [.12, .88, .5][k] + Math.sin(a.ph * .2) * .03; ty = .8 - Math.max(0, Math.sin(a.ph * .35 + k * 2)) * .2; a.x = lerp(a.x, tx, .03); a.y = lerp(a.y, ty, .04); }
+    a.emit -= dt * fz; if (a.emit <= 0 && motes.length < 40) { a.emit = Lab.rand(1.6, 3.6); motes.push({ x: sc.x + a.x * sc.w, y: sc.y + a.y * sc.h, t: 0 }); }
+  }
+  for (const m of motes) { m.t += dt * (m.big ? 2.4 : 1.1); if (m.t >= 1 && !m.big) bump = Math.max(bump, .25); }
+  if (motes.length && motes.some(m => m.t >= 1)) motes = motes.filter(m => m.t < 1);
+  for (const b of bub) { b.y -= b.v * dt; if (b.y < -.05) { b.y = 1.05; b.x = Math.random(); } }
+}
+
+/* ------------------------------------------------------------------ creatures (drawn facing right, origin at the body centre) */
+function creature(c, i, s, ph) {
+  const col = GEN[i].col, dk = Lab.color.shade(col, -.35), w = Math.sin(ph * 6);
+  c.lineCap = "round"; c.lineJoin = "round";
+  if (i === 0) { c.strokeStyle = col; c.lineWidth = s * .3; c.beginPath(); c.arc(0, 0, s * .34, Math.PI * .95, Math.PI * 2.1); c.stroke(); c.fillStyle = dk; c.beginPath(); c.moveTo(-s * .34, s * .05); c.lineTo(-s * .62, s * .3 + w * s * .06); c.lineTo(-s * .2, s * .32); c.fill(); c.strokeStyle = dk; c.lineWidth = 1.2; c.beginPath(); c.moveTo(s * .36, -s * .05); c.lineTo(s * .75, -s * .3 + w * s * .05); c.moveTo(s * .36, 0); c.lineTo(s * .8, -s * .08); c.stroke(); draw.circle(c, s * .3, -s * .06, s * .06, "#16324a"); }
+  else if (i === 1) { c.fillStyle = col; c.beginPath(); c.moveTo(-s * .45, 0); c.lineTo(-s * .8, -s * .28 + w * s * .08); c.lineTo(-s * .8, s * .28 + w * s * .08); c.fill(); c.beginPath(); c.ellipse(0, 0, s * .52, s * .32, 0, 0, TAU); c.fill(); c.save(); c.clip(); c.fillStyle = "#fff"; c.fillRect(-s * .2, -s * .4, s * .13, s * .8); c.fillRect(s * .14, -s * .4, s * .12, s * .8); c.restore(); c.strokeStyle = "#16324a"; c.lineWidth = 1.3; c.beginPath(); c.ellipse(0, 0, s * .52, s * .32, 0, 0, TAU); c.stroke(); draw.circle(c, s * .36, -s * .06, s * .06, "#16324a"); }
+  else if (i === 2) { c.strokeStyle = col; c.lineWidth = s * .26; c.beginPath(); c.moveTo(s * .05, -s * .42); c.quadraticCurveTo(-s * .3, -s * .1, s * .02, s * .15); c.quadraticCurveTo(s * .22, s * .4, -s * .08, s * .5 + w * s * .03); c.stroke(); draw.circle(c, s * .08, -s * .48, s * .2, col); c.lineWidth = s * .12; c.beginPath(); c.moveTo(s * .2, -s * .44); c.lineTo(s * .46, -s * .36); c.stroke(); c.fillStyle = dk; c.beginPath(); c.moveTo(-s * .14, -s * .2); c.lineTo(-s * .36, -s * .1 + w * s * .05); c.lineTo(-s * .12, s * .04); c.fill(); draw.circle(c, s * .12, -s * .52, s * .05, "#16324a"); }
+  else if (i === 3) { c.fillStyle = Lab.color.shade(col, .15); for (const [x, y, a] of [[s * .2, -s * .22, -.9 + w * .3], [s * .2, s * .22, .9 - w * .3], [-s * .35, -s * .18, -2.2], [-s * .35, s * .18, 2.2]]) { c.save(); c.translate(x, y); c.rotate(a); c.beginPath(); c.ellipse(s * .2, 0, s * .26, s * .1, 0, 0, TAU); c.fill(); c.restore(); } draw.circle(c, s * .56, 0, s * .16, Lab.color.shade(col, .15)); draw.circle(c, s * .62, -s * .05, s * .035, "#16324a"); c.fillStyle = dk; c.beginPath(); c.ellipse(0, 0, s * .46, s * .34, 0, 0, TAU); c.fill(); c.fillStyle = col; for (const [x, y] of [[0, 0], [-s * .22, -s * .12], [s * .22, -s * .12], [-s * .22, s * .12], [s * .22, s * .12]]) { c.beginPath(); c.arc(x, y, s * .1, 0, TAU); c.fill(); } }
+  else if (i === 4) { c.strokeStyle = col; c.lineWidth = s * .12; for (let k = -2; k <= 2; k++) { c.beginPath(); c.moveTo(k * s * .13, s * .1); c.quadraticCurveTo(k * s * .26 + Math.sin(ph * 3 + k) * s * .12, s * .4, k * s * .22 + Math.sin(ph * 3 + k + 1) * s * .14, s * .68); c.stroke(); } c.fillStyle = col; c.beginPath(); c.ellipse(0, -s * .12, s * .4, s * .36, 0, 0, TAU); c.fill(); for (const e of [-1, 1]) { draw.circle(c, e * s * .15, -s * .05, s * .09, "#fff"); draw.circle(c, e * s * .15 + s * .02, -s * .04, s * .045, "#16324a"); } c.fillStyle = "rgba(255,255,255,.25)"; c.beginPath(); c.ellipse(-s * .14, -s * .28, s * .1, s * .06, -.5, 0, TAU); c.fill(); }
+  else if (i === 5) { const f = .75 + w * .25; c.fillStyle = col; c.beginPath(); c.moveTo(s * .5, 0); c.quadraticCurveTo(s * .1, -s * .1, -s * .1, -s * .55 * f); c.quadraticCurveTo(-s * .2, -s * .1, -s * .4, 0); c.quadraticCurveTo(-s * .2, s * .1, -s * .1, s * .55 * f); c.quadraticCurveTo(s * .1, s * .1, s * .5, 0); c.fill(); c.strokeStyle = col; c.lineWidth = s * .04; c.beginPath(); c.moveTo(-s * .38, 0); c.lineTo(-s * .95, w * s * .05); c.stroke(); c.fillStyle = "rgba(255,255,255,.35)"; c.beginPath(); c.ellipse(s * .12, 0, s * .2, s * .07, 0, 0, TAU); c.fill(); draw.circle(c, s * .36, -s * .06, s * .03, "#fff"); }
+  else { c.fillStyle = col; c.beginPath(); c.moveTo(s * .5, s * .02); c.quadraticCurveTo(s * .42, -s * .26, 0, -s * .24); c.quadraticCurveTo(-s * .3, -s * .2, -s * .5, -s * .04); c.lineTo(-s * .68, -s * .2 + w * s * .03); c.lineTo(-s * .62, 0); c.lineTo(-s * .7, s * .14 + w * s * .03); c.lineTo(-s * .5, s * .04); c.quadraticCurveTo(-s * .2, s * .2, s * .2, s * .16); c.quadraticCurveTo(s * .46, s * .14, s * .5, s * .02); c.fill(); c.fillStyle = "#9fc3dd"; c.beginPath(); c.moveTo(s * .46, s * .06); c.quadraticCurveTo(s * .1, s * .2, -s * .3, s * .1); c.quadraticCurveTo(s * .1, s * .1, s * .46, s * .06); c.fill(); draw.circle(c, s * .3, -s * .04, s * .018, "#fff"); c.fillStyle = col; c.beginPath(); c.moveTo(s * .05, s * .12); c.lineTo(-s * .08, s * .3); c.lineTo(s * .16, s * .15); c.fill(); }
+}
+const SIZE = [.07, .09, .11, .17, .17, .3, .66];   // fraction of the scene's smaller side
+function reef() {
+  return Lab.sprite("reef" + sc.w + "x" + sc.h, sc.w, sc.h, (g, w, h) => {
+    const rnd = Lab.rng(31), by = h * .86;
+    g.fillStyle = "rgba(10,60,80,.35)"; for (const [x, r] of [[.08, .2], [.3, .14], [.62, .17], [.9, .22]]) { g.beginPath(); g.ellipse(w * x, by, w * r, h * .2, 0, Math.PI, 0); g.fill(); }
+    const sg = g.createLinearGradient(0, by - 14, 0, h); sg.addColorStop(0, "#f7e3b5"); sg.addColorStop(1, "#e3c486"); g.fillStyle = sg; g.beginPath(); g.moveTo(0, h); g.lineTo(0, by); for (let x = 0; x <= w; x += w / 8) g.quadraticCurveTo(x + w / 16, by - 12 + rnd() * 10, x + w / 8, by - rnd() * 6); g.lineTo(w, h); g.fill();
+    for (let i = 0; i < 60; i++) { g.fillStyle = rnd() < .5 ? "rgba(190,150,90,.5)" : "rgba(255,255,255,.6)"; g.beginPath(); g.arc(rnd() * w, by + 4 + rnd() * (h - by), .8 + rnd() * 1.6, 0, TAU); g.fill(); }
+    for (const [x, col, n] of [[.2, "#ff8fb1", 9], [.8, "#b28cff", 9]]) for (let k = 0; k < n; k++) { const a = -Math.PI * (.15 + .7 * k / (n - 1)), l = h * (.07 + rnd() * .03); g.strokeStyle = col; g.lineWidth = Math.max(4, w * .014); g.lineCap = "round"; g.beginPath(); g.moveTo(w * x, by + 4); g.quadraticCurveTo(w * x + Math.cos(a) * l * .4, by - l * .5, w * x + Math.cos(a) * l, by + 4 + Math.sin(a) * l); g.stroke(); draw.circle(g, w * x + Math.cos(a) * l, by + 4 + Math.sin(a) * l, Math.max(2.5, w * .008), "#fff3"); }
+    for (const [x, col] of [[.05, "#ff7a59"], [.42, "#ff9f7a"], [.6, "#ffb347"], [.95, "#ff7a59"]]) { g.strokeStyle = col; g.lineCap = "round"; const br = (bx, yy, l, a, d) => { g.lineWidth = d * 2 + 2; const ex = bx + Math.cos(a) * l, ey = yy + Math.sin(a) * l; g.beginPath(); g.moveTo(bx, yy); g.lineTo(ex, ey); g.stroke(); if (d > 0) { br(ex, ey, l * .7, a - .5, d - 1); br(ex, ey, l * .7, a + .45, d - 1); } }; br(w * x, by + 6, h * .055, -Math.PI / 2, 2); }
+    for (const [x, r] of [[.12, .05], [.88, .055], [.5, .03]]) { g.fillStyle = "#7c8ea0"; g.beginPath(); g.ellipse(w * x, by + 6, w * r * 1.3, h * r * .7, 0, Math.PI, 0); g.fill(); g.fillStyle = "rgba(255,255,255,.2)"; g.beginPath(); g.ellipse(w * x - w * r * .4, by - h * r * .3, w * r * .4, h * r * .15, -.4, 0, TAU); g.fill(); }
+  });
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, m = Math.min(sc.w, sc.h, 500);
+  draw.vgrad(c, -40, -40, W + 80, H + 80, [[0, "#57c8d6"], [.35, "#2a93b3"], [1, "#0d4f73"]]);
+  c.save(); c.beginPath(); c.rect(sc.x - 40, -40, sc.w + 80, sc.y + sc.h + 40); c.clip();
+  if (frenzy > 0) { c.fillStyle = `rgba(255,210,63,${.12 + .05 * Math.sin(t * 8)})`; c.fillRect(sc.x, 0, sc.w, sc.y + sc.h); }
+  for (let i = 0; i < 5; i++) { const x = sc.x + sc.w * (.1 + i * .2) + Math.sin(t * .3 + i) * 20, a = .05 + .04 * Math.sin(t * .7 + i * 2); c.fillStyle = `rgba(255,255,255,${a})`; c.beginPath(); c.moveTo(x - 14, -40); c.lineTo(x + 26, -40); c.lineTo(x + 90 - i * 30, sc.y + sc.h); c.lineTo(x - 10 - i * 30, sc.y + sc.h); c.fill(); }
+  const far = agents.filter(a => a.i === 6); for (const a of far) drawAgent(c, a, m, .55);
+  const rf = reef(); c.drawImage(rf, sc.x, sc.y, rf.w, rf.h);
+  // kelp sways; seahorses hang around it
+  for (const [kx, kh] of [[.1, .5], [.33, .38], [.67, .42], [.9, .52]]) { const bx = sc.x + sc.w * kx, by = sc.y + sc.h * .87, hh = sc.h * kh; c.strokeStyle = "#2f9e6e"; c.lineWidth = Math.max(5, m * .02); c.lineCap = "round"; c.beginPath(); c.moveTo(bx, by); c.bezierCurveTo(bx + Math.sin(t * .9 + kx * 9) * 16, by - hh * .4, bx - Math.sin(t * .7 + kx * 5) * 18, by - hh * .7, bx + Math.sin(t * .8 + kx * 7) * 22, by - hh); c.stroke(); c.strokeStyle = "#57c48d"; c.lineWidth = 2; c.stroke(); }
+  for (let i = 0; i < Math.min(S.star, 12); i++) draw.star(c, sc.x + sc.w * (.06 + (i * .618 % 1) * .88), sc.y + sc.h * (.93 + (i % 3) * .02), Math.max(6, m * .022), i % 2 ? "#ff7a59" : "#ffb347");
+  for (const b of bub) { c.strokeStyle = "rgba(255,255,255,.4)"; c.lineWidth = 1.2; c.beginPath(); c.arc(sc.x + b.x * sc.w + Math.sin(t + b.s) * 5, sc.y + b.y * sc.h, b.s, 0, TAU); c.stroke(); }
+  for (const i of [5, 3, 2, 4, 1]) for (const a of agents) if (a.i === i) drawAgent(c, a, m, 1);
+  // the clam
+  const p = clamPos(), sq = clam.sq, op = clam.open, r = p.r;
+  draw.shadow(c, p.x, p.y + r * .5, r * 1.1, r * .22, .22);
+  c.save(); c.translate(p.x, p.y + r * .45); c.scale(1 + sq * .12, 1 - sq * .1);
+  c.fillStyle = "#7a2d52"; c.beginPath(); c.ellipse(0, -r * .5, r * .9, r * (.16 + op * .4), 0, 0, TAU); c.fill();
+  if (op > .05) { c.fillStyle = "#ff9ec4"; c.beginPath(); c.ellipse(0, -r * .36, r * .7, r * (.08 + op * .16), 0, 0, TAU); c.fill(); draw.circle(c, 0, -r * (.46 + op * .2), r * .15 * Math.min(1, op * 2), "#fff", "#bfe6f5", 1.5); }
+  const shell = (flip, lift) => { c.save(); c.translate(0, -r * .42 - lift); c.scale(1, flip); c.fillStyle = "#ffd9e6"; c.strokeStyle = "#c97aa0"; c.lineWidth = 2.5; c.beginPath(); c.moveTo(-r, 0); for (let i = 0; i < 5; i++) { const a0 = Math.PI - i * Math.PI / 5, a1 = a0 - Math.PI / 5, am = (a0 + a1) / 2; c.quadraticCurveTo(Math.cos(am) * r * 1.12, -Math.sin(am) * r * .78, Math.cos(a1) * r, -Math.sin(a1) * r * .62); } c.closePath(); c.fill(); c.stroke(); c.strokeStyle = "rgba(201,122,160,.6)"; c.lineWidth = 1.5; c.beginPath(); for (let i = 1; i < 5; i++) { const a = Math.PI - i * Math.PI / 5; c.moveTo(0, -r * .04); c.lineTo(Math.cos(a) * r * .92, -Math.sin(a) * r * .56); } c.stroke(); c.restore(); };
+  shell(-1, -r * .02); shell(1, op * r * .5);
+  if (op < .3) for (const e of [-1, 1]) { draw.circle(c, e * r * .28, -r * .62, r * .1, "#fff"); draw.circle(c, e * r * .28 + r * .02, -r * .61, r * .05, INK); }
+  c.restore();
+  for (const a of agents) if (a.i === 0) drawAgent(c, a, m, 1);
+  if (gold) { const gx = sc.x + gold.x * sc.w, gy = sc.y + gold.y * sc.h; draw.glow(c, gx, gy, 46, "#ffd23f", .5); draw.circle(c, gx, gy, 20, "rgba(255,226,120,.55)", "#fff3b0", 2.5); draw.star(c, gx, gy, 9 + Math.sin(t * 6) * 1.5, "#fff"); }
+  // pearls on their way to the counter
+  const cp = counterPos();
+  for (const q of motes) { const e = Lab.ease.inOutQuad(Math.min(1, q.t)), x = lerp(q.x, cp.x, e) + Math.sin(e * Math.PI) * (q.big ? 0 : 24), y = lerp(q.y, cp.y, e) - (q.big ? Math.sin(e * Math.PI) * 30 : 0); c.globalAlpha = q.t > .85 ? (1 - q.t) / .15 : 1; draw.circle(c, x, y, q.big ? 6 : 3.4, "#fff", "rgba(190,230,255,.9)", 1.2); c.globalAlpha = 1; }
+  c.restore();
+  if (demo) return;
+  // counter
+  const ps = pps(), big = 30 * (1 + bump * .1), txt = fmt(S.pearls), tw = (c.font = Lab.font(big), c.measureText(txt).width);
+  draw.circle(c, cp.x - tw / 2 - 16, cp.y, 9, "#fff", "#bfefff", 2); draw.circle(c, cp.x - tw / 2 - 19, cp.y - 3, 2.5, "#dff6ff");
+  draw.text(c, txt, cp.x + 6, cp.y + 1, { size: big, color: "#fff", shadow: "rgba(8,50,80,.5)" });
+  draw.text(c, fmt1(ps) + " / sec" + (frenzy > 0 ? "  ×5 " + Math.ceil(frenzy) + "s" : "") + (S.star ? "   ★" + S.star : ""), cp.x, cp.y + 27, { size: 13.5, color: frenzy > 0 ? "#ffe27a" : "#d6f3fb", shadow: "rgba(8,50,80,.4)" });
+  if (S.life < 12 && S.taps < 3) draw.text(c, "tap the clam", p.x, p.y - r * 1.25 + Math.sin(t * 4) * 3, { size: 15, color: "#fff", shadow: "rgba(8,50,80,.5)" });
+  panel(c, t);
+}
+function drawAgent(c, a, m, alpha) { const s = m * SIZE[a.i] * Math.min(1, a.born * 2 + .3); c.save(); c.translate(sc.x + a.x * sc.w, sc.y + a.y * sc.h); c.scale(a.dir, 1); c.globalAlpha = alpha; if (a.i !== 2 && a.i !== 4) c.rotate(Math.sin(a.ph * 2) * .06); creature(c, a.i, s, a.ph); c.restore(); c.globalAlpha = 1; }
+
+/* ------------------------------------------------------------------ shop panel */
+function panel(c, t) {
+  const x0 = pn.x, y0 = pn.y, w = pn.w, pad = 10; hits = [];
+  draw.vgrad(c, x0, y0, w, pn.h + 40, ["#f7e3b5", "#edd09a"]); c.fillStyle = "rgba(160,120,60,.35)"; c.fillRect(x0, y0, w, 2);
+  // tabs + buy-amount toggle
+  const tw = (w - pad * 2 - 74) / 3, names = ["Creatures", "Upgrades", "Tide"];
+  for (let i = 0; i < 3; i++) { const b = { x: x0 + pad + i * tw, y: y0 + 6, w: tw - 5, h: pn.tabH - 10, id: "tab" + i, fn: () => { tab = i; Lab.sfx("click"); } }; hits.push(b); const badge = i === 2 && starGain() > 0;
+    draw.rect(c, b.x, b.y, b.w, b.h, 10, tab === i ? "#16324a" : "rgba(22,50,74,.1)"); draw.text(c, names[i] + (badge ? " ★" : ""), b.x + b.w / 2, b.y + b.h / 2 + 1, { size: 13, color: tab === i ? "#fff" : badge ? "#c2410c" : INK }); }
+  const mb = { x: x0 + w - pad - 70, y: y0 + 6, w: 70, h: pn.tabH - 10, id: "mode", fn: () => { mode = mode === 1 ? 10 : mode === 10 ? "max" : 1; Lab.sfx("click", { pitch: 1.2 }); } }; hits.push(mb);
+  draw.rect(c, mb.x, mb.y, mb.w, mb.h, 10, "#fffaf0", "rgba(22,50,74,.35)", 1.5); draw.text(c, "BUY " + (mode === "max" ? "MAX" : "×" + mode), mb.x + mb.w / 2, mb.y + mb.h / 2 + 1, { size: 12, color: INK });
+  // list
+  const ly = y0 + pn.tabH + 2, lh = pn.h - pn.tabH - 2 - Lab.safe.bottom, rh = 60, rows = tab === 0 ? rowsGen() : tab === 1 ? rowsUp() : null;
+  c.save(); c.beginPath(); c.rect(x0, ly, w, lh + 40); c.clip();
+  if (!rows) { tide(c, x0 + pad, ly + 6, w - pad * 2, lh, t); c.restore(); return; }
+  const maxS = Math.max(0, rows.length * rh + 8 - lh); scroll[tab] = clamp(scroll[tab], 0, maxS);
+  rows.forEach((r, i) => {
+    const y = ly + 4 + i * rh - scroll[tab]; if (y > ly + lh || y < ly - rh) return;
+    const b = { x: x0 + pad, y, w: w - pad * 2, h: rh - 6 }; draw.rect(c, b.x, b.y, b.w, b.h, 12, r.locked ? "rgba(255,250,240,.45)" : "#fffaf0", "rgba(22,50,74,.12)", 1);
+    c.save(); c.translate(b.x + 30, b.y + b.h / 2); if (r.locked) c.globalAlpha = .25; r.icon(c, t); c.restore();
+    draw.text(c, r.locked ? "???" : r.title, b.x + 60, b.y + 18, { size: 14.5, color: INK, align: "left" });
+    if (r.count != null && !r.locked) { const nw = (c.font = Lab.font(14.5), c.measureText(r.title).width); draw.rect(c, b.x + 66 + nw, b.y + 9, 30, 18, 9, "#16324a"); draw.text(c, String(r.count), b.x + 81 + nw, b.y + 18.5, { size: 11.5, color: "#fff" }); }
+    draw.text(c, r.locked ? "keep earning…" : r.sub, b.x + 60, b.y + 38, { size: 11, color: "#6b7f8f", align: "left", weight: 600, maxWidth: b.w - 60 - 96 });
+    const bb = { x: b.x + b.w - 88, y: b.y + 7, w: 80, h: b.h - 14, id: r.id, fn: r.fn }, frac = r.done ? 1 : clamp(S.pearls / r.cost, 0, 1), can = !r.done && frac >= 1;
+    if (y + rh > ly + 8 && y < ly + lh - 8) hits.push(bb, { x: b.x, y: b.y, w: b.w, h: b.h, id: r.id + ":row", fn: r.fn });
+    draw.rect(c, bb.x, bb.y, bb.w, bb.h, 11, r.done ? "rgba(22,50,74,.12)" : can ? "#ff7a59" : "#e8d9bb");
+    if (!can && !r.done) { c.save(); draw.rr(c, bb.x, bb.y, bb.w, bb.h, 11); c.clip(); c.fillStyle = "rgba(255,122,89,.35)"; c.fillRect(bb.x, bb.y, bb.w * frac, bb.h); c.restore(); }
+    if (r.done) draw.text(c, "OWNED", bb.x + bb.w / 2, bb.y + bb.h / 2 + 1, { size: 11.5, color: "#6b7f8f" });
+    else { if (r.qty) draw.text(c, "+" + r.qty, bb.x + bb.w / 2, bb.y + bb.h * .3, { size: 10.5, color: can ? "#fff" : "#8a7a5c" }); draw.circle(c, bb.x + 13, bb.y + bb.h * (r.qty ? .66 : .5), 4.5, "#fff", can ? "#ffd9cf" : "#c9b48c", 1.5); draw.text(c, fmt(r.cost), bb.x + bb.w / 2 + 6, bb.y + bb.h * (r.qty ? .66 : .5) + 1, { size: 13.5, color: can ? "#fff" : "#8a7a5c" }); }
+  });
+  if (maxS > 0) { const th = lh * lh / (rows.length * rh + 8); draw.rect(c, x0 + w - 5, ly + 3 + (lh - th - 6) * (scroll[tab] / maxS), 3, th, 2, "rgba(22,50,74,.3)"); }
+  c.restore();
+}
+function rowsGen() {
+  return GEN.map((G, i) => {
+    const k = mode === "max" ? Math.max(1, maxBuy(i)) : mode, nm = nextMile(S.own[i]), locked = !S.own[i] && S.life < G.cost * .25 && i > 0 && !S.own[i - 1];
+    return { id: "gen" + i, title: G.n, count: S.own[i], locked, qty: k > 1 ? k : 0, cost: costOf(i, k), fn: () => buy(i, mode), icon: (c, t) => { c.scale(1, 1); creature(c, i, i === 6 ? 44 : i === 5 ? 27 : i === 3 ? 30 : 34, t * .5); },
+      sub: fmt1(each(i)) + "/s each" + (S.own[i] ? " · " + fmt1(each(i) * S.own[i]) + "/s" : "") + (nm ? " · ×2 at " + nm : "") };
+  });
+}
+function rowsUp() {
+  const dot = col => (c) => { draw.circle(c, 0, 0, 17, col); draw.star(c, 0, 0, 9, "#fff"); }, r = [];
+  r.push({ id: "polish", title: "Pearl polish", count: S.polish, cost: polishCost(), fn: () => buyUp("polish"), icon: dot("#7fd6ff"), sub: "Taps ×2  (now +" + fmt1(tapVal()) + " a tap)" });
+  r.push({ id: "kelp", title: "Kelp forest", count: S.kelp, cost: kelpCost(), fn: () => buyUp("kelp"), icon: dot("#2f9e6e"), sub: "All creatures +25%" });
+  for (let i = 1; i < GEN.length; i++) r.push({ id: "syn" + i, title: SYN[i], done: !!S.syn[i], cost: synCost(i), fn: () => buyUp("syn", i), locked: !S.own[i] && !S.syn[i], icon: (c, t) => creature(c, i, 30, t * .5), sub: "Each " + GEN[i - 1].n + ": " + GEN[i].n + " +1%" + (S.syn[i] ? "  (now +" + S.own[i - 1] + "%)" : "") });
+  return r;
+}
+function tide(c, x, y, w, h, t) {
+  const g = starGain(), need = STAR_DIV * (g + 1) * (g + 1), cx = x + w / 2;
+  draw.star(c, x + 22, y + 22, 15, "#ff7a59"); draw.text(c, S.star + " starfish  ·  pearls ×" + (1 + .1 * S.star).toFixed(1), x + 46, y + 16, { size: 14.5, color: INK, align: "left" });
+  draw.text(c, "Tides turned: " + S.tides + "  ·  lifetime " + fmt(S.life), x + 46, y + 35, { size: 11, color: "#6b7f8f", align: "left", weight: 600 });
+  const b = { x, y: y + 52, w, h: 54, id: "prestige", fn: () => { if (g < 1) return deny(); if (confirm > 0) prestige(); else { confirm = 3; Lab.sfx("click"); } } }; hits.push(b);
+  draw.rect(c, b.x, b.y, b.w, b.h, 14, g > 0 ? (confirm > 0 ? "#c2410c" : "#ff7a59") : "#e8d9bb");
+  draw.text(c, g > 0 ? (confirm > 0 ? "Tap again — the reef resets" : "TURN THE TIDE  +" + g + " ★") : "TURN THE TIDE", cx, b.y + 20, { size: 15, color: g > 0 ? "#fff" : "#8a7a5c" });
+  draw.text(c, g > 0 ? "next ★ at " + fmt(need) + " this tide" : "first ★ at " + fmt(STAR_DIV) + " pearls this tide (" + fmt(S.tide) + ")", cx, b.y + 39, { size: 11, color: g > 0 ? "#ffe9e2" : "#8a7a5c", weight: 600 });
+  draw.text(c, "Starfish stay forever: each adds +10% to every pearl.", cx, y + 124, { size: 11.5, color: "#6b7f8f", weight: 600, maxWidth: w });
+  draw.text(c, "Closed or paused, the reef earns 50% for up to 2 hours.", cx, y + 142, { size: 11.5, color: "#6b7f8f", weight: 600, maxWidth: w });
+  const wb = { x: cx - 80, y: y + 158, w: 160, h: 30, id: "wipe", fn: () => { if (wipeArm > 0) { S = fresh(); sync(); save(); wipeArm = 0; Lab.toast("Fresh reef", 900, { y: .2 }); } else { wipeArm = 3; Lab.sfx("click"); } } }; hits.push(wb);
+  draw.rect(c, wb.x, wb.y, wb.w, wb.h, 10, wipeArm > 0 ? "#c2410c" : null, "rgba(22,50,74,.3)", 1.5); draw.text(c, wipeArm > 0 ? "Tap again to erase" : "Start over (erase all)", cx, wb.y + 16, { size: 11.5, color: wipeArm > 0 ? "#fff" : "#6b7f8f" });
+}
+function attract(dt, t) {
+  if (!demo || !S) { demo = true; S = load(); if (!S.own[0]) S.own = [8, 6, 4, 3, 2, 1, 1]; init(); layout(); }
+  step(dt); render(t);
+}
+Lab.boot();
+})();
+</script></body></html>

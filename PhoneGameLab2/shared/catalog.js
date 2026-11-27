@@ -4,13 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 1,
-    "slug": "2048",
-    "t": "2048",
-    "d": "Swipe to merge equal tiles up to 2048.",
-    "thumb": "../thumbs/PhoneGameLab2--2048.jpg"
-   },
-   {
     "n": 2,
     "slug": "balloon-splash",
     "t": "Balloon Splash",
@@ -562,6 +555,18 @@ window.LAB_GAMES = [
     "t": "Wire Ball",
     "d": "Drag a ring along a wire without touching it.",
     "thumb": "../thumbs/PhoneGameLab2--wire-ball.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Puzzle",
+  "items": [
+   {
+    "slug": "bedtime-stacks",
+    "t": "Bedtime Stacks",
+    "d": "Slide the books. Bring Olli his bedtime story.",
+    "v2": true,
+    "score": 8
    }
   ]
  }

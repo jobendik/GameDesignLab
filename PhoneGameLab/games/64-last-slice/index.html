@@ -1,50 +1,377 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Last Slice</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Tower Defense", instructions:"Tap to place towers (10 gold). They auto-fire at enemies on the path.", restart:start});
-let path, towers, enemies, bullets, gold, lives, wave, spawnT, waveCount;
-function start(){
-  path=[{x:0,y:Lab.H*0.3},{x:Lab.W*0.7,y:Lab.H*0.3},{x:Lab.W*0.7,y:Lab.H*0.6},{x:Lab.W*0.2,y:Lab.H*0.6},{x:Lab.W*0.2,y:Lab.H*0.85},{x:Lab.W,y:Lab.H*0.85}];
-  towers=[]; enemies=[]; bullets=[]; gold=30; lives=10; wave=1; spawnT=0; waveCount=10;
+(function(){ "use strict";
+/* LAST SLICE — a picnic-blanket tower defence. Bugs march a crumb trail toward your pie; condiments fight back.
+ * Towers (3 tiers each): Shaker (fast, cheap, hits air, weak to armour) · Pepper (splash, ground only) ·
+ * Honey (slows ground bugs, tier 3 burns) · Popper (slow sniper, ignores armour, hits air, picks the toughest).
+ * Bugs: ants, sprinting fire ants, armoured beetles, wasps that fly straight over the blanket, grubs that split into mites,
+ * and a stag-beetle boss on waves 6 and 12. Twelve waves on a freshly generated trail each run.
+ * Rhythm: build any time; once a wave has finished marching in, a countdown starts — call the next wave early for sugar
+ * and score. 2× speed. Win → next, tougher picnic (score multiplier); lose → one picnic easier.
+ * UI: tap a square (range preview) then a card, or arm a card then tap squares. Tap a tower to upgrade / sell. */
+Lab.init({
+  title: "Last Slice", tagline: "Bugs want your pie. Not on your blanket.", category: "Strategy & Idle",
+  howto: ["Tap a square, then a condiment to build", "Tap a tower to upgrade or sell it", "Call waves early for bonus sugar"],
+  theme: { bg: "#7fbf5a", bg2: "#a9d97a", fg: "#3a2416", muted: "#6b5a44", accent: "#e2453c", accent2: "#f2a03d", light: true },
+  orient: "any", music: { style: "march", key: "C", bpm: 104, vol: .3 }, restart: start, attract,
+});
+const { draw, fx, clamp, lerp } = Lab, TAU = Lab.TAU, INK = "#3a2416";
+const TW = [
+  { id: "salt", name: "Shaker", cost: 50, up: [45, 80], range: [2.3, 2.5, 2.8], rate: [3, 3.6, 4.4], dmg: [2, 3, 4], air: true, note: "fast · air" },
+  { id: "pepper", name: "Pepper", cost: 80, up: [70, 120], range: [2, 2.2, 2.5], rate: [.9, 1, 1.15], dmg: [9, 14, 22], splash: [.9, 1.05, 1.25], note: "splash" },
+  { id: "honey", name: "Honey", cost: 60, up: [50, 90], range: [1.7, 1.95, 2.25], slow: [.35, .45, .55], dps: [0, 0, 2.5], note: "slows" },
+  { id: "cork", name: "Popper", cost: 110, up: [90, 150], range: [3.6, 4, 4.5], rate: [.6, .7, .85], dmg: [26, 42, 70], air: true, pierce: true, note: "pierce · air" },
+];
+const EN = {
+  ant: { hp: 10, sp: 1.25, r: .2, gold: 4, gap: .6 }, runner: { hp: 7, sp: 2.3, r: .16, gold: 4, gap: .38 }, beetle: { hp: 36, sp: .75, r: .27, gold: 10, armor: 2, gap: 1 },
+  wasp: { hp: 16, sp: 1.6, r: .22, gold: 7, fly: true, gap: .7 }, grub: { hp: 30, sp: .95, r: .25, gold: 6, split: 3, gap: .9 }, mite: { hp: 6, sp: 1.9, r: .12, gold: 2, gap: .3 },
+  stag: { hp: 220, sp: .55, r: .4, gold: 60, armor: 3, leak: 3, boss: true, gap: 2 },
+};
+const WAVES = [[["ant", 8]], [["ant", 10], ["runner", 4]], [["ant", 6], ["runner", 6], ["beetle", 2]], [["wasp", 6], ["ant", 8]], [["grub", 4], ["runner", 8], ["beetle", 2]],
+  [["beetle", 5], ["ant", 10], ["stag", 1]], [["wasp", 10], ["runner", 10], ["beetle", 3]], [["grub", 8], ["beetle", 4]], [["ant", 14], ["wasp", 8], ["beetle", 4]], [["runner", 20], ["grub", 6], ["beetle", 5]],
+  [["beetle", 8], ["wasp", 12], ["grub", 6]], [["ant", 12], ["runner", 12], ["wasp", 10], ["beetle", 6], ["grub", 6], ["stag", 2]]];
+const SLICES = 8, GOLD0 = 150, CALL = 16;
+let C, R, land0, path, onPath, flyLen, cs, gx, gy, panel, cards, bNext, bSpeed, stats, landNow, towers, enemies, shots, puffs, gold, lives, wave, queue, spawnT, nextT, speed, score, kills,
+  sel, armed, hover, lvl, demo = false, over, won, seedN = 0, spots, pieBump, earlyBonus, leakT, cleared, shotSfx = 0;
+
+/* ------------------------------------------------------------------ setup */
+function start() {
+  demo = false; reset(Lab.W > Lab.H * 1.15);
   Lab.setScore(0);
-  Lab.input.onTap=[(x,y)=>{ if(gold<10) return; // not too close to path
-    for(let i=0;i<path.length-1;i++){ const d=pointToSeg(x,y,path[i],path[i+1]); if(d<26) return;}
-    for(const t of towers) if(Lab.dist(x,y,t.x,t.y)<30) return;
-    towers.push({x,y,r:80,cd:0, dmg:1}); gold-=10; Lab.beep(500,.05);
+  Lab.input.onTap = [tap];
+  Lab.input.onMove = [(x, y) => { hover = Lab.input.pointerType === "touch" ? null : cellAt(x, y); }];
+  Lab.input.onKey = [k => {
+    if (k >= "1" && k <= "4") pickCard(+k - 1); else if (k === " " || k === "n" || k === "N") callNext(); else if (k === "f" || k === "F") toggleSpeed();
+    else if ((k === "u" || k === "U") && sel && sel.tower) upgrade(sel.tower); else if ((k === "x" || k === "X") && sel && sel.tower) sell(sel.tower);
   }];
-  Lab.loop(dt=>{
-    spawnT-=dt;
-    if(spawnT<=0 && waveCount>0){ enemies.push({i:0, t:0, hp:wave+1, sp:50+wave*5, alive:true}); waveCount--; spawnT=1.2;}
-    if(!enemies.length && waveCount<=0){ wave++; waveCount=10+wave*2; gold+=10; Lab.toast("Wave "+wave);}
-    for(const e of enemies){ const a=path[e.i], b=path[e.i+1]; if(!b){ e.alive=false; lives--; continue;}
-      const seg=Math.hypot(b.x-a.x,b.y-a.y); e.t+=e.sp*dt/seg;
-      if(e.t>=1){ e.t=0; e.i++; }
-    }
-    for(const t of towers){ t.cd-=dt; if(t.cd<=0){ let best=null, bd=t.r;
-      for(const e of enemies) if(e.alive){ const p=enemyPos(e); const d=Lab.dist(p.x,p.y,t.x,t.y); if(d<bd){bd=d; best=e;}}
-      if(best){ const p=enemyPos(best); bullets.push({x:t.x,y:t.y, tx:p.x,ty:p.y, target:best, sp:300, dmg:t.dmg}); t.cd=0.6;}}}
-    for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i]; const p=b.target.alive?enemyPos(b.target):{x:b.tx,y:b.ty};
-      const dx=p.x-b.x, dy=p.y-b.y, d=Math.hypot(dx,dy)||0.01;
-      b.x+=dx/d*b.sp*dt; b.y+=dy/d*b.sp*dt;
-      if(d<10){ if(b.target.alive){ b.target.hp-=b.dmg; if(b.target.hp<=0){ b.target.alive=false; gold+=2;}} bullets.splice(i,1);}
-    }
-    enemies=enemies.filter(e=>e.alive);
-    Lab.setScore("G:"+gold+" L:"+lives+" W:"+wave);
-    if(lives<=0){ Lab.gameover({title:"Overrun",message:"Wave "+wave}); return;}
-    draw();
+  Lab.expose({
+    get gold() { return gold; }, get lives() { return lives; }, get wave() { return wave; }, get towers() { return towers; }, get enemies() { return enemies; }, get score() { return score; },
+    get kills() { return kills; }, get speed() { return speed; }, get nextT() { return nextT; }, get queue() { return queue.length; }, get sel() { return sel; }, get armed() { return armed; },
+    get spots() { return spots; }, get path() { return path; }, get level() { return lvl; }, get won() { return won; }, get over() { return over; }, TW, GOLD0, SLICES, WAVES: WAVES.length,
+    cellXY(c, r) { return { x: gx + (c + .5) * cs, y: gy + (r + .5) * cs }; }, btn(id) { const b = id === "next" ? bNext : id === "speed" ? bSpeed : cards[id]; return { x: b.x + b.w / 2, y: b.y + b.h / 2 }; },
+    setGold(v) { gold = v; }, setLevel(v) { lvl = v; }, build(c, r, type) { return build(c, r, type, true); }, upgrade(t) { return upgrade(t, true); }, clearTowers() { towers = []; sel = null; },
+    callNext() { return callNext(true); }, step(n) { for (let i = 0; i < n && !over; i++) sim(1 / 60); }, spawn(type) { return spawn(type); },
+  });
+  Lab.loop(frame);
+}
+function reset(land) {
+  land0 = land; C = land ? 13 : 8; R = land ? 7 : 12; lvl = demo ? 1 : Lab.store.get("lvl", 1);
+  towers = []; enemies = []; shots = []; puffs = []; gold = GOLD0; lives = SLICES; wave = 0; queue = []; spawnT = 0; nextT = -1; speed = 1; score = 0; kills = 0;
+  sel = null; armed = -1; hover = null; over = false; won = false; pieBump = 0; earlyBonus = 0; leakT = 0; cleared = 0; seedN++;
+  genPath(); layout();
+}
+function genPath() {
+  path = []; onPath = {}; const M = land0 ? C : R, N = land0 ? R : C, put = (m, n) => { const p = land0 ? { c: m, r: n } : { c: n, r: m }; path.push(p); onPath[p.c + "," + p.r] = true; };
+  let n = Lab.randInt(1, N - 2), m = 0, side = n < N / 2 ? 1 : -1; put(-1, n); put(0, n);
+  for (;;) {
+    m++; put(m, n); if (m >= M - 2) break;
+    const target = side > 0 ? Lab.randInt(N - 3, N - 1) : Lab.randInt(0, 2); while (n !== target) { n += Math.sign(target - n); put(m, n); }
+    side = -side; m++; put(m, n); if (m >= M - 2) break;
+  }
+  put(m + 1, n);
+  const a = path[0], b = path[path.length - 1]; flyLen = Math.hypot(b.c - a.c, b.r - a.r);
+  // build spots ranked by how much trail they can see (used by the attract scene and tests)
+  spots = []; for (let c = 0; c < C; c++) for (let r = 0; r < R; r++) { if (onPath[c + "," + r]) continue; let s = 0; for (const p of path) if (Math.hypot(p.c - c, p.r - r) <= 2.3) s++; spots.push({ c, r, s }); }
+  spots.sort((p, q) => q.s - p.s);
+}
+function layout() {
+  const P = Lab.play; landNow = Lab.W > Lab.H * 1.15; let area;
+  if (landNow) { const pw = clamp(P.w * .22, 156, 236); area = { x: P.x + 8, y: P.y + 6, w: P.w - pw - 22, h: P.h - 12 }; panel = { x: P.x + P.w - pw - 8, y: P.y + 4, w: pw, h: P.h - 10 }; }
+  else { const ph = 138; area = { x: P.x + 6, y: P.y + 40, w: P.w - 12, h: P.h - 40 - ph - 8 }; panel = { x: P.x + 8, y: P.y + P.h - ph - 4, w: P.w - 16, h: ph }; }
+  cs = Math.floor(Math.min(area.w / C, area.h / R)); gx = Math.round(area.x + (area.w - C * cs) / 2); gy = Math.round(area.y + (area.h - R * cs) / 2);
+  cards = [];
+  if (landNow) {
+    const cw = (panel.w - 6) / 2, ch = clamp((panel.h - 64 - 104) / 2, 50, 76); stats = { x: panel.x, y: panel.y, w: panel.w, h: 58 };
+    for (let i = 0; i < 4; i++) cards.push({ x: panel.x + (i % 2) * (cw + 6), y: panel.y + 64 + Math.floor(i / 2) * (ch + 6), w: cw, h: ch });
+    const y = panel.y + 64 + 2 * (ch + 6); bNext = { x: panel.x, y, w: panel.w, h: 46 }; bSpeed = { x: panel.x, y: y + 52, w: panel.w, h: Math.min(40, panel.y + panel.h - y - 52) };
+  } else {
+    const cw = (panel.w - 18) / 4; stats = { x: P.x + 8, y: P.y + 5, w: P.w - 16, h: 30 };
+    for (let i = 0; i < 4; i++) cards.push({ x: panel.x + i * (cw + 6), y: panel.y, w: cw, h: 76 });
+    bSpeed = { x: panel.x, y: panel.y + 84, w: 70, h: 50 }; bNext = { x: panel.x + 78, y: panel.y + 84, w: panel.w - 78, h: 50 };
+  }
+  Lab.sprite.clear("board");
+}
+Lab.onResize(() => { if (path) layout(); });
+
+/* ------------------------------------------------------------------ input */
+const inR = (b, x, y) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+function cellAt(x, y) { const c = Math.floor((x - gx) / cs), r = Math.floor((y - gy) / cs); return c >= 0 && c < C && r >= 0 && r < R ? { c, r } : null; }
+const towerAt = (c, r) => towers.find(t => t.c === c && t.r === r);
+function tap(x, y) {
+  if (over) return;
+  if (inR(bNext, x, y)) return callNext();
+  if (inR(bSpeed, x, y)) return toggleSpeed();
+  for (let i = 0; i < 4; i++) if (inR(cards[i], x, y)) return pickCard(i);
+  const cell = cellAt(x, y);
+  if (!cell) { sel = null; return; }
+  const t = towerAt(cell.c, cell.r);
+  if (t) { sel = { c: t.c, r: t.r, tower: t }; armed = -1; Lab.sfx("tap", { pitch: 1.2 }); return; }
+  if (onPath[cell.c + "," + cell.r]) { sel = null; Lab.sfx("tick", { pitch: .6, vol: .5 }); return; }
+  if (armed >= 0) { build(cell.c, cell.r, armed); return; }           // armed card: every tap on a free square builds
+  sel = { c: cell.c, r: cell.r, tower: null }; Lab.sfx("tap");
+}
+function pickCard(i) {
+  if (sel && sel.tower) { if (i === 1 || i === 2) upgrade(sel.tower); else if (i === 3) sell(sel.tower); return; }
+  if (sel) { if (build(sel.c, sel.r, i)) sel = null; return; }          // square chosen first: the card builds there
+  armed = armed === i ? -1 : i; Lab.sfx("click");
+}
+function build(c, r, i, quiet) {
+  const T = TW[i]; if (!T || c < 0 || r < 0 || c >= C || r >= R || onPath[c + "," + r] || towerAt(c, r)) return null;
+  if (gold < T.cost) { if (!quiet) { Lab.sfx("error"); Lab.toast("Need " + T.cost + " sugar", 700, { y: .5 }); } return null; }
+  gold -= T.cost; const t = { c, r, type: i, tier: 0, cd: 0, spent: T.cost, kick: 1, aim: -Math.PI / 2, pop: 1 }; towers.push(t);
+  if (!quiet) { const p = xy(c + .5, r + .5); Lab.sfx("drop", { pitch: 1.1 - i * .08 }); Lab.sfx("knock"); fx.puff(p.x, p.y + cs * .25, { n: 8, color: "rgba(255,255,255,.7)" }); Lab.buzz(10); }
+  return t;
+}
+function upgrade(t, quiet) {
+  const T = TW[t.type]; if (t.tier >= 2) return false; const cost = T.up[t.tier];
+  if (gold < cost) { if (!quiet) { Lab.sfx("error"); Lab.toast("Need " + cost + " sugar", 700, { y: .5 }); } return false; }
+  gold -= cost; t.spent += cost; t.tier++; t.pop = 1;
+  if (!quiet) { const p = xy(t.c + .5, t.r + .5); Lab.sfx("powerup", { pitch: 1 + t.tier * .15 }); fx.burst(p.x, p.y, { n: 14, colors: ["#ffd166", "#fff"], speed: 160, life: .5, shape: "star", gravity: 0 }); fx.ring(p.x, p.y, { r1: cs * TW[t.type].range[t.tier], color: "#ffd166", width: 4, life: .5 }); }
+  return true;
+}
+function sell(t) { const back = Math.round(t.spent * .7); gold += back; towers = towers.filter(o => o !== t); sel = null; const p = xy(t.c + .5, t.r + .5); Lab.sfx("coin"); fx.text(p.x, p.y, "+" + back, { color: "#fff", size: 18 }); }
+function toggleSpeed() { speed = speed === 1 ? 2 : 1; Lab.sfx("click", { pitch: speed === 2 ? 1.4 : 1 }); }
+function callNext(quiet) {
+  if (over || queue.length || wave >= WAVES.length) return false;
+  if (wave > 0 && nextT > 0) { const b = Math.ceil(nextT) * 2; gold += b; earlyBonus += b; score += b * 5 * lvl; if (!quiet) { Lab.sfx("coin", { pitch: 1.3 }); fx.text(bNext.x + bNext.w / 2, bNext.y - 8, "+" + b + " sugar", { color: "#fff", size: 18, outline: "rgba(58,36,22,.6)" }); } }
+  wave++; nextT = -1; spawnT = .4; if (!demo) Lab.setScore(score);
+  for (const [type, n] of WAVES[wave - 1]) for (let i = 0; i < n; i++) queue.push(type);
+  if (!quiet && !demo) { Lab.sfx("whistle"); Lab.banner("WAVE " + wave, { color: "#fff", ms: 900, y: .3 }); if (WAVES[wave - 1].some(g => g[0] === "stag")) Lab.sfx("warn", { pitch: .6 }); }
+  return true;
+}
+
+/* ------------------------------------------------------------------ simulation (all positions in cell units) */
+function pathPos(d) { const i = clamp(Math.floor(d), 0, path.length - 2), f = clamp(d - i, 0, 1), a = path[i], b = path[i + 1]; return { x: lerp(a.c, b.c, f) + .5, y: lerp(a.r, b.r, f) + .5, dx: b.c - a.c, dy: b.r - a.r }; }
+function spawn(type, d, hpMul) {
+  const E = EN[type], m = (hpMul || (1 + (Math.max(1, wave) - 1) * .14) * (1 + (lvl - 1) * .18)), hp = Math.round(E.hp * m);
+  const e = { type, E, d: d || 0, hp, max: hp, x: 0, y: 0, ang: 0, off: Lab.rand(-.16, .16), slow: 0, slowT: 0, flash: 0, ph: Math.random() * TAU, dead: false, prog: 0 };
+  place(e); enemies.push(e); return e;
+}
+function place(e) {
+  if (e.E.fly) { const a = path[0], b = path[path.length - 1], u = clamp(e.d / flyLen, 0, 1); e.x = lerp(a.c, b.c, u) + .5; e.y = lerp(a.r, b.r, u) + .5 + Math.sin(e.d * 2 + e.ph) * .18; e.ang = Math.atan2(b.r - a.r, b.c - a.c); e.prog = u; }
+  else { const p = pathPos(e.d); e.x = p.x - p.dy * e.off; e.y = p.y + p.dx * e.off; e.ang += Lab.angleDiff(e.ang, Math.atan2(p.dy, p.dx)) * .2; e.prog = e.d / (path.length - 1); }
+}
+function hurt(e, dmg, pierce) {
+  if (e.dead) return; e.hp -= pierce ? dmg : Math.max(.5, dmg - (e.E.armor || 0)); e.flash = .12;
+  if (e.hp > 0) return;
+  e.dead = true; kills++; gold += e.E.gold; score += e.E.gold * 10 * lvl;
+  if (e.E.split) for (let i = 0; i < e.E.split; i++) spawn("mite", Math.max(0, e.d - i * .28), e.max / EN.grub.hp);
+  if (demo) return; const p = xy(e.x, e.y);
+  fx.burst(p.x, p.y, { n: e.E.boss ? 30 : 7, colors: [bugCol(e.type), "#fff"], speed: e.E.boss ? 260 : 120, life: .45, size: e.E.boss ? 5 : 3, gravity: 200 });
+  if (e.E.gold >= 6) fx.text(p.x, p.y - 12, "+" + e.E.gold, { color: "#fff", size: 13, life: .6 });
+  Lab.sfx("pop", { pitch: e.E.boss ? .5 : 1.5 - e.E.r * 2, vol: e.E.boss ? 1 : .45 }); if (e.E.boss) { Lab.shake(8, .3); Lab.hitstop(.05); Lab.sfx("explode", { vol: .6 }); }
+  Lab.setScore(score);
+}
+function sim(dt) {
+  // spawning + wave rhythm
+  if (queue.length) { spawnT -= dt; if (spawnT <= 0) { const type = queue.shift(); spawn(type); spawnT = EN[type].gap * (wave > 8 ? .8 : 1); if (!queue.length && wave < WAVES.length) nextT = CALL; } }
+  else if (nextT > 0) { nextT -= dt; if (nextT <= 0) { nextT = 0; callNext(); } }
+  // bugs
+  for (const e of enemies) {
+    if (e.dead) continue; e.flash -= dt; e.slowT -= dt; if (e.slowT <= 0) e.slow = 0;
+    e.d += e.E.sp * (1 - e.slow) * dt; place(e);
+    if (e.E.fly ? e.d >= flyLen - .45 : e.d >= path.length - 1.45) { e.dead = true; if (!demo) leak(e); }
+  }
+  // towers
+  for (const t of towers) {
+    const T = TW[t.type], rg = T.range[t.tier], cx = t.c + .5, cy = t.r + .5; t.cd -= dt; t.kick = Math.max(0, t.kick - dt * 5); t.pop = Math.max(0, t.pop - dt * 3);
+    if (T.slow) { for (const e of enemies) if (!e.dead && !e.E.fly && Math.hypot(e.x - cx, e.y - cy) <= rg + e.E.r) { e.slow = Math.max(e.slow, T.slow[t.tier]); e.slowT = .35; if (T.dps[t.tier]) hurt(e, T.dps[t.tier] * dt, true); } continue; }
+    if (t.cd > 0) continue;
+    let best = null, bv = -1;
+    for (const e of enemies) { if (e.dead || (e.E.fly && !T.air) || Math.hypot(e.x - cx, e.y - cy) > rg + e.E.r) continue; const v = T.pierce ? e.hp + e.prog : e.prog; if (v > bv) { bv = v; best = e; } }
+    if (!best) continue;
+    t.cd = 1 / T.rate[t.tier]; t.kick = 1; t.aim = Math.atan2(best.y - cy, best.x - cx);
+    if (T.id === "salt") shots.push({ k: 0, x: cx, y: cy - .25, tgt: best, dmg: T.dmg[t.tier] });
+    else if (T.id === "pepper") shots.push({ k: 1, x: cx, y: cy - .3, sx: cx, sy: cy - .3, tx: best.x, ty: best.y, t: 0, dmg: T.dmg[t.tier], rad: T.splash[t.tier] });
+    else { hurt(best, T.dmg[t.tier], true); puffs.push({ k: 1, x0: cx, y0: cy - .3, x: best.x, y: best.y, t: 0 }); if (!demo) { Lab.sfx("pop", { pitch: .75, vol: .8 }); Lab.sfx("snap", { vol: .5 }); const p = xy(best.x, best.y); fx.sparks(p.x, p.y, t.aim, { n: 5, color: "#f6e7c1" }); } }
+    if (T.id === "salt" && !demo && shotSfx <= 0) { shotSfx = .09; Lab.sfx("tick", { pitch: 1.6 + t.tier * .2, vol: .22 }); }
+  }
+  shotSfx -= dt;
+  for (const s of shots) {
+    if (s.k === 0) { const e = s.tgt; if (e.dead) { s.dead = true; continue; } const dx = e.x - s.x, dy = e.y - s.y, d = Math.hypot(dx, dy), st = 9 * dt; if (d <= st + e.E.r) { hurt(e, s.dmg); s.dead = true; } else { s.x += dx / d * st; s.y += dy / d * st; } }
+    else { s.t += dt / .38; s.x = lerp(s.sx, s.tx, s.t); s.y = lerp(s.sy, s.ty, s.t) - Math.sin(Math.PI * Math.min(1, s.t)) * .8;
+      if (s.t >= 1) { s.dead = true; puffs.push({ k: 0, x: s.tx, y: s.ty, r: s.rad, t: 0 }); for (const e of enemies) if (!e.dead && !e.E.fly && Math.hypot(e.x - s.tx, e.y - s.ty) <= s.rad + e.E.r) hurt(e, s.dmg); if (!demo) Lab.sfx("thud", { pitch: 1.3, vol: .5 }); } }
+  }
+  for (const p of puffs) p.t += dt * (p.k ? 5 : 2.4);
+  if (shots.some(s => s.dead)) shots = shots.filter(s => !s.dead);
+  if (puffs.length && puffs[0].t >= 1) puffs = puffs.filter(p => p.t < 1);
+  if (enemies.some(e => e.dead)) enemies = enemies.filter(e => !e.dead);
+  if (!demo && wave > cleared && !queue.length && !enemies.length) { cleared = wave; const b = 10 + wave * 4; gold += b; if (wave < WAVES.length) { Lab.sfx("coin"); Lab.toast("Wave " + wave + " cleared  +" + b + " sugar", 1100, { y: .16 }); } }
+  pieBump = Math.max(0, pieBump - dt * 3); leakT -= dt;
+  if (!demo && !over && wave >= WAVES.length && !queue.length && !enemies.length) finish(true);
+}
+function leak(e) {
+  lives = Math.max(0, lives - (e.E.leak || 1)); pieBump = 1; const p = xy(path[path.length - 1].c + .5, path[path.length - 1].r + .5);
+  fx.burst(p.x, p.y, { n: 12, colors: ["#e8a24a", "#b23a48", "#fff3d6"], speed: 190, life: .6, size: 4 }); Lab.shake(7, .25); Lab.buzz(30); Lab.flash("#e2453c", .2, .25);
+  if (leakT <= 0) { leakT = .25; Lab.sfx("crunch"); Lab.sfx("hurt", { vol: .6 }); }
+  if (lives <= 0 && !over) finish(false);
+}
+function finish(win) {
+  over = true; won = win; const stats = [["Wave", Math.min(wave, WAVES.length) + "/" + WAVES.length], ["Bugs squashed", kills], ["Picnic", "#" + lvl]];
+  if (win) { score += lives * 200 * lvl; Lab.setScore(score); Lab.store.set("lvl", lvl + 1); stats[0] = ["Slices left", lives + "/" + SLICES]; Lab.win({ title: "Pie saved!", message: "Picnic #" + (lvl + 1) + " brings tougher bugs and ×" + (lvl + 1) + " score.", score, stats, button: "Next picnic" }); }
+  else { Lab.store.set("lvl", Math.max(1, lvl - 1)); Lab.gameover({ title: "Not a crumb left", message: "The bugs got the last slice.", score, stats }); }
+}
+
+/* ------------------------------------------------------------------ rendering */
+const xy = (cx, cy) => ({ x: gx + cx * cs, y: gy + cy * cs });
+const bugCol = t => ({ ant: "#3b2a22", runner: "#c2452d", beetle: "#2e6f73", wasp: "#f0b429", grub: "#8fbf4d", mite: "#b9d67a", stag: "#5b2a50" })[t];
+function grass() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("board:grass" + W + "x" + H, W, H, (g) => {
+    draw.vgrad(g, 0, 0, W, H, ["#8ccf63", "#6fb551"]); const rnd = Lab.rng(9); g.lineCap = "round";
+    for (let i = 0; i < 520; i++) { const x = rnd() * W, y = rnd() * H, h = 5 + rnd() * 8; g.strokeStyle = rnd() < .5 ? "rgba(60,130,50,.5)" : "rgba(170,225,120,.55)"; g.lineWidth = 2; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rnd() - .5) * 5, y - h); g.stroke(); }
+    for (let i = 0; i < 26; i++) { const x = rnd() * W, y = rnd() * H; g.fillStyle = rnd() < .5 ? "#fff" : "#ffe27a"; for (let k = 0; k < 5; k++) { g.beginPath(); g.arc(x + Math.cos(k * 1.257) * 3.4, y + Math.sin(k * 1.257) * 3.4, 2.2, 0, TAU); g.fill(); } g.fillStyle = "#f2a03d"; g.beginPath(); g.arc(x, y, 1.8, 0, TAU); g.fill(); }
   });
 }
-function enemyPos(e){ const a=path[e.i], b=path[e.i+1]; return {x:Lab.lerp(a.x,b.x,e.t), y:Lab.lerp(a.y,b.y,e.t)};}
-function pointToSeg(px,py,a,b){ const dx=b.x-a.x, dy=b.y-a.y; const t=Lab.clamp(((px-a.x)*dx+(py-a.y)*dy)/(dx*dx+dy*dy),0,1); const x=a.x+t*dx, y=a.y+t*dy; return Math.hypot(px-x,py-y);}
-function draw(){
-  const c=Lab.ctx; c.fillStyle="#23331a"; c.fillRect(0,0,Lab.W,Lab.H);
-  c.strokeStyle="#6a5a3a"; c.lineWidth=40; c.lineCap="round"; c.lineJoin="round"; c.beginPath();
-  for(let i=0;i<path.length;i++){ if(i===0) c.moveTo(path[i].x,path[i].y); else c.lineTo(path[i].x,path[i].y);} c.stroke();
-  for(const t of towers){ c.beginPath(); c.fillStyle="#69d"; c.arc(t.x,t.y,12,0,Lab.TAU); c.fill();
-    c.strokeStyle="rgba(105,153,221,.2)"; c.beginPath(); c.arc(t.x,t.y,t.r,0,Lab.TAU); c.stroke();}
-  for(const e of enemies){ const p=enemyPos(e); c.beginPath(); c.fillStyle="#e74"; c.arc(p.x,p.y,10,0,Lab.TAU); c.fill();
-    c.fillStyle="#0f0"; c.fillRect(p.x-12, p.y-16, 24*Math.max(0,e.hp)/( /* approx */ 5), 3);}
-  for(const b of bullets){ c.beginPath(); c.fillStyle="#fff"; c.arc(b.x,b.y,3,0,Lab.TAU); c.fill();}
+function board() {
+  const w = C * cs + 28, h = R * cs + 28;
+  return Lab.sprite("board:" + seedN + ":" + cs, w, h, (g) => {
+    g.fillStyle = "rgba(30,60,20,.25)"; draw.rr(g, 6, 9, w - 8, h - 8, 10); g.fill();
+    draw.rect(g, 2, 2, w - 4, h - 4, 10, "#fff6e8", "#c93a33", 3); g.save(); draw.rr(g, 8, 8, w - 16, h - 16, 6); g.clip(); g.translate(14, 14);
+    const q = cs / 2; g.fillStyle = "rgba(226,69,60,.3)";
+    for (let i = 0; i < C * 2 + 2; i += 2) g.fillRect(i * q - q, -q, q, R * cs + cs); for (let j = 0; j < R * 2 + 2; j += 2) g.fillRect(-q, j * q - q, C * cs + cs, q);
+    // the crumb trail
+    const tr = (col, lw) => { g.strokeStyle = col; g.lineWidth = lw; g.lineCap = "round"; g.lineJoin = "round"; g.beginPath(); path.forEach((p, i) => g[i ? "lineTo" : "moveTo"]((p.c + .5) * cs, (p.r + .5) * cs)); g.stroke(); };
+    tr("rgba(120,70,30,.5)", cs * .74); tr("#f3d9a4", cs * .66); tr("#fbe8c0", cs * .46);
+    const rnd = Lab.rng(seedN * 7 + 3);
+    for (let i = 0; i < path.length - 1; i++) for (let k = 0; k < 3; k++) { const a = path[i], b = path[i + 1], f = rnd(), x = (lerp(a.c, b.c, f) + .5 + (rnd() - .5) * .5) * cs, y = (lerp(a.r, b.r, f) + .5 + (rnd() - .5) * .5) * cs; g.fillStyle = rnd() < .5 ? "#c98a45" : "#e2b06a"; g.beginPath(); g.arc(x, y, 1.2 + rnd() * 2.2, 0, TAU); g.fill(); }
+    g.restore();
+    g.strokeStyle = "rgba(201,58,51,.55)"; g.lineWidth = 1.5; g.setLineDash([5, 5]); draw.rr(g, 8, 8, w - 16, h - 16, 6); g.stroke();
+  });
 }
-start();
+function drawTower(c, type, tier, x, y, s, t) {
+  const kick = t ? t.kick : 0, pop = t ? t.pop : 0, k = 1 + (pop > 0 ? Math.sin(pop * Math.PI) * .25 : 0), id = TW[type].id;
+  draw.shadow(c, x, y + s * .3, s * .3, s * .1, .22);
+  c.save(); c.translate(x, y + s * .3); c.scale(k * (1 + kick * .08), k * (1 - kick * .1));
+  if (id === "salt") {
+    draw.rect(c, -s * .2, -s * .52, s * .4, s * .52, s * .1, "#fdfdfb", "#9aa4ad", 1.5); c.fillStyle = "#6fb7e8"; c.fillRect(-s * .2 + 1, -s * .3, s * .4 - 2, s * .11);
+    c.fillStyle = "#b9c2ca"; c.beginPath(); c.arc(0, -s * .52, s * .2, Math.PI, 0); c.fill(); c.strokeStyle = "#7d8790"; c.lineWidth = 1.5; c.stroke(); c.fillStyle = "#5b646c"; for (const o of [-.08, 0, .08]) { c.beginPath(); c.arc(s * o, -s * .62, s * .022, 0, TAU); c.fill(); }
+  } else if (id === "pepper") {
+    c.fillStyle = "#6b3f24"; c.strokeStyle = "#3d2413"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(-s * .22, 0); c.quadraticCurveTo(-s * .08, -s * .26, -s * .19, -s * .46); c.lineTo(s * .19, -s * .46); c.quadraticCurveTo(s * .08, -s * .26, s * .22, 0); c.closePath(); c.fill(); c.stroke();
+    draw.circle(c, 0, -s * .56, s * .15, "#7d4a2a", "#3d2413", 1.5); draw.circle(c, 0, -s * .72, s * .06, "#d9dde0", "#7d8790", 1); c.fillStyle = "rgba(255,255,255,.2)"; c.fillRect(-s * .12, -s * .42, s * .06, s * .36);
+  } else if (id === "honey") {
+    draw.rect(c, -s * .25, -s * .42, s * .5, s * .42, s * .13, "#f2a516", "#a8650b", 1.5); c.fillStyle = "rgba(255,240,170,.55)"; c.fillRect(-s * .17, -s * .34, s * .08, s * .24);
+    draw.rect(c, -s * .28, -s * .52, s * .56, s * .13, s * .05, "#fff3d6", "#a8650b", 1.5); c.strokeStyle = "#8a5a2b"; c.lineWidth = s * .05; c.lineCap = "round"; c.beginPath(); c.moveTo(s * .1, -s * .5); c.lineTo(s * .26, -s * .78); c.stroke();
+  } else {
+    c.rotate(t ? clamp(Math.cos(t.aim), -1, 1) * .28 : .2);
+    c.fillStyle = "#2f7d4f"; c.strokeStyle = "#1b4d30"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(-s * .17, 0); c.lineTo(-s * .17, -s * .36); c.quadraticCurveTo(-s * .16, -s * .5, -s * .06, -s * .56); c.lineTo(-s * .06, -s * .76); c.lineTo(s * .06, -s * .76); c.lineTo(s * .06, -s * .56); c.quadraticCurveTo(s * .16, -s * .5, s * .17, -s * .36); c.lineTo(s * .17, 0); c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = "#f2d16b"; c.fillRect(-s * .07, -s * .77, s * .14, s * .14); c.fillStyle = "#fff6e8"; c.fillRect(-s * .13, -s * .3, s * .26, s * .16);
+    if (kick < .5) draw.rect(c, -s * .05, -s * .88, s * .1, s * .12, 2, "#c79a63", "#8a5a2b", 1);
+  }
+  c.restore();
+  for (let i = 0; i <= tier; i++) draw.star(c, x + (i - tier / 2) * s * .2, y + s * .42, s * .085, "#ffd23f");
+}
+function drawBug(c, e, t, icon) {
+  const p = icon || xy(e.x, e.y), r = icon ? icon.r : e.E.r * cs, w = Math.sin(t * (e.E.sp * 14) + e.ph), col = e.flash > 0 ? "#fff" : bugCol(e.type);
+  if (icon) { } else if (e.E.fly) draw.shadow(c, p.x + r * .5, p.y + r * 1.9, r * .8, r * .35, .2); else draw.shadow(c, p.x, p.y + r * .35, r * 1.1, r * .5, .16);
+  c.save(); c.translate(p.x, p.y); c.rotate(e.ang);
+  if (e.slow > 0) { c.fillStyle = "rgba(242,165,22,.55)"; c.beginPath(); c.ellipse(-r * .3, 0, r * 1.5, r * 1.05, 0, 0, TAU); c.fill(); }
+  c.strokeStyle = e.type === "wasp" ? "#3b2a22" : Lab.color.shade(bugCol(e.type), -.4); c.lineWidth = Math.max(1, r * .18); c.lineCap = "round";
+  if (e.type === "wasp") {
+    c.fillStyle = "rgba(255,255,255,.7)"; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(-r * .1, s * r * .7, r * .5, r * (.5 + w * .25), s * .5, 0, TAU); c.fill(); }
+    c.fillStyle = col; c.beginPath(); c.ellipse(0, 0, r * 1.1, r * .6, 0, 0, TAU); c.fill(); c.beginPath(); for (const o of [-.35, .15]) { c.moveTo(r * o, -r * .52); c.lineTo(r * o, r * .52); } c.stroke(); c.fillStyle = "#3b2a22"; c.beginPath(); c.moveTo(-r * 1.1, 0); c.lineTo(-r * 1.5, -r * .15); c.lineTo(-r * 1.5, r * .15); c.fill();
+  } else if (e.type === "grub" || e.type === "mite") {
+    c.fillStyle = col; for (let i = 2; i >= 0; i--) { c.beginPath(); c.arc(-i * r * .62 + r * .5, Math.sin(t * 9 + e.ph + i) * r * .12, r * (.62 - i * .07), 0, TAU); c.fill(); c.stroke(); }
+  } else {
+    c.beginPath(); for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) { c.moveTo(i * r * .45, 0); c.lineTo(i * r * .55 + w * s * r * .22 * (i ? 1 : -1), s * r * 1.05); } c.stroke();
+    c.fillStyle = col;
+    if (e.type === "beetle" || e.type === "stag") { c.beginPath(); c.ellipse(-r * .1, 0, r * .95, r * .78, 0, 0, TAU); c.fill(); c.strokeStyle = "rgba(255,255,255,.4)"; c.beginPath(); c.moveTo(-r * 1, 0); c.lineTo(r * .5, 0); c.stroke(); c.beginPath(); c.arc(-r * .2, -r * .3, r * .3, Math.PI, Math.PI * 1.6); c.stroke(); c.fillStyle = Lab.color.shade(bugCol(e.type), -.35); c.beginPath(); c.arc(r * .85, 0, r * .36, 0, TAU); c.fill();
+      if (e.type === "stag") { c.strokeStyle = "#2a1226"; c.lineWidth = r * .16; c.beginPath(); for (const s of [-1, 1]) { c.moveTo(r * 1.05, s * r * .15); c.quadraticCurveTo(r * 1.7, s * r * .6, r * 1.6, s * r * .08); } c.stroke(); } }
+    else { for (const [o, k] of [[-.75, .5], [-.05, .36], [.6, .42]]) { c.beginPath(); c.ellipse(r * o, 0, r * k * 1.1, r * k, 0, 0, TAU); c.fill(); } }
+  }
+  c.restore();
+  if (e.hp < e.max) { const bw = Math.max(16, r * 2.4), u = clamp(e.hp / e.max, 0, 1); draw.rect(c, p.x - bw / 2, p.y - r - 9, bw, 4.5, 2, "rgba(58,36,22,.6)"); draw.rect(c, p.x - bw / 2, p.y - r - 9, bw * u, 4.5, 2, e.E.armor ? "#7fd0e8" : u > .5 ? "#7bd66a" : "#ffb03b"); }
+}
+function ring(c, cx, cy, rg, ok) { const p = xy(cx, cy); draw.circle(c, p.x, p.y, rg * cs, ok ? "rgba(255,255,255,.2)" : "rgba(226,69,60,.16)", ok ? "#fff" : "#e2453c", 2); c.setLineDash([6, 6]); draw.circle(c, p.x, p.y, rg * cs, null, "rgba(58,36,22,.5)", 1.5); c.setLineDash([]); }
+function render(t) {
+  const c = Lab.ctx, g = grass(); c.drawImage(g, -40, -40, g.w, g.h);
+  const b = board(); c.drawImage(b, gx - 14, gy - 14, b.w, b.h);
+  // build squares light up while choosing
+  if (!demo && (armed >= 0 || sel)) { c.fillStyle = "rgba(255,255,255,.34)"; for (const s of spots) if (!towerAt(s.c, s.r)) { const p = xy(s.c + .5, s.r + .5); c.beginPath(); c.arc(p.x, p.y, 3, 0, TAU); c.fill(); } }
+  // honey puddles under everything
+  for (const tw of towers) if (TW[tw.type].slow) { const p = xy(tw.c + .5, tw.r + .5), rg = TW[tw.type].range[tw.tier] * cs; c.fillStyle = "rgba(242,165,22,.14)"; c.beginPath(); c.arc(p.x, p.y, rg, 0, TAU); c.fill(); c.strokeStyle = "rgba(196,120,10,.35)"; c.lineWidth = 2; c.setLineDash([3, 7]); c.lineDashOffset = -t * 8; c.stroke(); c.setLineDash([]); }
+  // the pie
+  const end = path[path.length - 1], pp = xy(end.c + .5, end.r + .5), pr = cs * .62 * (1 + pieBump * .12);
+  draw.shadow(c, pp.x + 2, pp.y + 5, pr * 1.1, pr * 1.0, .2); draw.circle(c, pp.x, pp.y, pr * 1.12, "#f4f7fa", "#b8c4cf", 2);
+  for (let i = 0; i < SLICES; i++) { if (i >= lives) continue; const a0 = -Math.PI / 2 + i * TAU / SLICES, a1 = a0 + TAU / SLICES; c.beginPath(); c.moveTo(pp.x, pp.y); c.arc(pp.x, pp.y, pr, a0, a1); c.closePath(); c.fillStyle = "#b23a48"; c.fill(); c.strokeStyle = "#e8a24a"; c.lineWidth = pr * .2; c.beginPath(); c.arc(pp.x, pp.y, pr * .9, a0 + .03, a1 - .03); c.stroke(); c.strokeStyle = "#f3c77a"; c.lineWidth = pr * .09; c.beginPath(); c.moveTo(pp.x + Math.cos(a0 + .39) * pr * .2, pp.y + Math.sin(a0 + .39) * pr * .2); c.lineTo(pp.x + Math.cos(a0 + .39) * pr * .78, pp.y + Math.sin(a0 + .39) * pr * .78); c.stroke(); }
+  // selection / preview
+  const pv = sel ? sel : (armed >= 0 && hover && !onPath[hover.c + "," + hover.r] && !towerAt(hover.c, hover.r) ? hover : null);
+  if (pv && !demo) {
+    const p = xy(pv.c, pv.r);
+    if (pv.tower) ring(c, pv.c + .5, pv.r + .5, TW[pv.tower.type].range[pv.tower.tier], true);
+    else { const ty = armed >= 0 ? armed : 0; ring(c, pv.c + .5, pv.r + .5, TW[ty].range[0], gold >= TW[ty].cost); }
+    draw.rect(c, p.x + 2, p.y + 2, cs - 4, cs - 4, 8, pv.tower ? null : "rgba(255,255,255,.5)", "#fff", 3); c.setLineDash([6, 5]); c.lineDashOffset = -t * 14; draw.rect(c, p.x + 2, p.y + 2, cs - 4, cs - 4, 8, null, INK, 1.5); c.setLineDash([]);
+    if (!pv.tower && armed >= 0) { c.globalAlpha = .6; drawTower(c, armed, 0, p.x + cs / 2, p.y + cs / 2, cs, null); c.globalAlpha = 1; }
+  }
+  // ground bugs, towers (sorted by row), flyers on top
+  for (const e of enemies) if (!e.E.fly) drawBug(c, e, t);
+  for (const tw of towers.slice().sort((a, b2) => a.r - b2.r)) { const p = xy(tw.c + .5, tw.r + .5); drawTower(c, tw.type, tw.tier, p.x, p.y, cs, tw); }
+  for (const e of enemies) if (e.E.fly) drawBug(c, e, t);
+  for (const s of shots) { const p = xy(s.x, s.y); if (s.k === 0) draw.circle(c, p.x, p.y, 2.6, "#fff", "#9aa4ad", 1); else draw.circle(c, p.x, p.y, 5, "#4a2d1a"); }
+  for (const p of puffs) {
+    if (p.k === 0) { const q = xy(p.x, p.y), e = Lab.ease.outCubic(p.t); c.globalAlpha = (1 - p.t) * .7; draw.circle(c, q.x, q.y, p.r * cs * (.4 + e * .6), "#6b4a35"); c.globalAlpha = (1 - p.t) * .8; for (let i = 0; i < 6; i++) draw.circle(c, q.x + Math.cos(i * 1.05 + p.x) * p.r * cs * e * .8, q.y + Math.sin(i * 1.05 + p.x) * p.r * cs * e * .8, cs * .12 * (1 - p.t * .5), "#3d2413"); c.globalAlpha = 1; }
+    else { const a = xy(p.x0, p.y0), b2 = xy(p.x, p.y); c.globalAlpha = 1 - p.t; draw.line(c, a.x, a.y, b2.x, b2.y, "#fff6e8", 3); const m = Math.min(1, p.t * 3); draw.circle(c, lerp(a.x, b2.x, m), lerp(a.y, b2.y, m), 4, "#c79a63"); c.globalAlpha = 1; }
+  }
+  if (!demo && !towers.length && wave === 0) { const tx = gx + C * cs / 2, ty = gy + R * cs - 14; draw.text(c, sel ? "Now pick a condiment" : armed >= 0 ? "Tap a square beside the trail" : "Tap a square beside the trail to build", tx, ty, { size: 14.5, color: "#fff", stroke: "rgba(58,36,22,.75)", strokeW: 4 }); }
+  if (!demo) ui(c, t);
+}
+function sugar(c, x, y, s) { draw.rect(c, x - s / 2, y - s / 2, s, s, s * .22, "#fff", "#a98a5c", 1.5); c.fillStyle = "#e8dcc6"; c.fillRect(x - s * .22, y - s * .22, s * .2, s * .2); }
+function chip(c, x, y, w, h, fill) { draw.rect(c, x, y, w, h, Math.min(12, h / 2), fill || "rgba(255,246,232,.94)", "rgba(58,36,22,.25)", 1.5); }
+function ui(c, t) {
+  // stats: slices · sugar · wave
+  const s = stats, third = landNow ? s.w : s.w / 3, sh = landNow ? 17 : s.h, row = i => landNow ? { x: s.x, y: s.y + 2 + i * 19 } : { x: s.x + i * third, y: s.y };
+  if (landNow) chip(c, s.x, s.y, s.w, s.h); else for (let i = 0; i < 3; i++) chip(c, s.x + i * third + (i ? 3 : 0), s.y, third - (i ? 3 : 3), s.h);
+  let r0 = row(0); draw.heart(c, r0.x + 17, r0.y + sh / 2, 6.5, "#e2453c"); draw.text(c, lives + " slices", r0.x + 30, r0.y + sh / 2 + 1, { size: 13.5, color: lives <= 2 ? "#c2261d" : INK, align: "left" });
+  r0 = row(1); sugar(c, r0.x + 18, r0.y + sh / 2, 11); draw.text(c, Lab.fmt(gold), r0.x + 30, r0.y + sh / 2 + 1, { size: 14, color: INK, align: "left" });
+  r0 = row(2); draw.text(c, "Wave " + wave + "/" + WAVES.length + (lvl > 1 ? " · #" + lvl : ""), r0.x + (landNow ? 12 : third / 2), r0.y + sh / 2 + 1, { size: 13, color: INK, align: landNow ? "left" : "center" });
+  // cards
+  const T = sel && sel.tower;
+  if (T) {
+    const W = TW[T.type], k = cards[0], u = { x: cards[1].x, y: cards[1].y, w: landNow ? cards[1].w : cards[2].x + cards[2].w - cards[1].x, h: cards[1].h }, u2 = landNow ? cards[2] : null, sl = cards[3], max = T.tier >= 2, can = !max && gold >= W.up[T.tier];
+    chip(c, k.x, k.y, k.w, k.h); drawTower(c, T.type, T.tier, k.x + k.w / 2, k.y + k.h * .42, Math.min(k.h * .7, 50), null); draw.text(c, W.name, k.x + k.w / 2, k.y + k.h - 9, { size: 11.5, color: INK });
+    for (const b of u2 ? [u, u2] : [u]) {
+      chip(c, b.x, b.y, b.w, b.h, max ? "rgba(255,246,232,.6)" : can ? "#ffd23f" : "rgba(255,246,232,.94)");
+      if (b === u || !u2) { draw.text(c, max ? "MAX TIER" : "UPGRADE", b.x + b.w / 2, b.y + b.h * .34, { size: 13.5, color: INK }); if (!max) { sugar(c, b.x + b.w / 2 - 16, b.y + b.h * .7, 10); draw.text(c, String(W.up[T.tier]), b.x + b.w / 2 - 6, b.y + b.h * .7 + 1, { size: 13.5, color: can ? INK : "#c2261d", align: "left" }); } }
+      if (b === u2 || !u2) { const tx = u2 ? b.x + b.w / 2 : b.x + b.w - 8, al = u2 ? "center" : "right"; if (!max) { const d = W.dmg ? "dmg " + W.dmg[T.tier] + "→" + W.dmg[T.tier + 1] : "slow " + W.slow[T.tier] * 100 + "→" + Math.round(W.slow[T.tier + 1] * 100) + "%"; if (u2) { draw.text(c, d, tx, b.y + b.h * .36, { size: 11, color: INK, align: al }); draw.text(c, "range +", tx, b.y + b.h * .68, { size: 11, color: "#6b5a44", align: al }); } else draw.text(c, d, b.x + 8, b.y + b.h - 10, { size: 10.5, color: "#6b5a44", align: "left" }); } }
+    }
+    chip(c, sl.x, sl.y, sl.w, sl.h, "#f6c9c0"); draw.text(c, "SELL", sl.x + sl.w / 2, sl.y + sl.h * .36, { size: 13, color: "#8f1e17" }); draw.text(c, "+" + Math.round(T.spent * .7), sl.x + sl.w / 2, sl.y + sl.h * .68, { size: 13, color: INK });
+  } else for (let i = 0; i < 4; i++) {
+    const k = cards[i], W = TW[i], can = gold >= W.cost, on = armed === i;
+    chip(c, k.x, k.y, k.w, k.h, on ? "#ffd23f" : "rgba(255,246,232,.94)"); if (on || (sel && can)) { c.strokeStyle = on ? INK : "#e2453c"; c.lineWidth = 2.5; c.setLineDash(on ? [] : [5, 4]); c.lineDashOffset = -t * 10; draw.rr(c, k.x + 1, k.y + 1, k.w - 2, k.h - 2, 11); c.stroke(); c.setLineDash([]); }
+    c.globalAlpha = can ? 1 : .42; const ts = Math.min(k.h * .62, k.w * .6, 46);
+    drawTower(c, i, -1, k.x + (landNow ? ts * .5 + 4 : k.w / 2), k.y + (landNow ? k.h * .42 : ts * .62), ts, null);
+    if (landNow) { draw.text(c, W.name, k.x + k.w - 6, k.y + k.h * .28, { size: 11.5, color: INK, align: "right" }); draw.text(c, String(W.cost), k.x + k.w - 6, k.y + k.h * .6, { size: 13.5, color: INK, align: "right" }); sugar(c, k.x + k.w - 34 - (W.cost > 99 ? 7 : 0), k.y + k.h * .6 - 1, 9); draw.text(c, W.note, k.x + k.w / 2, k.y + k.h - 8, { size: 9.5, color: "#6b5a44" }); }
+    else { draw.text(c, W.name, k.x + k.w / 2, k.y + k.h - 28, { size: 12, color: INK }); sugar(c, k.x + k.w / 2 - 15, k.y + k.h - 12, 9.5); draw.text(c, String(W.cost), k.x + k.w / 2 - 6, k.y + k.h - 11, { size: 13.5, color: INK, align: "left" }); }
+    c.globalAlpha = 1;
+  }
+  // speed + next wave
+  chip(c, bSpeed.x, bSpeed.y, bSpeed.w, bSpeed.h, speed === 2 ? "#ffd23f" : null); { const mx = bSpeed.x + bSpeed.w / 2, my = bSpeed.y + bSpeed.h / 2; c.fillStyle = INK; for (let i = 0; i < speed; i++) { const x = mx - 24 + i * 10; c.beginPath(); c.moveTo(x, my - 7); c.lineTo(x + 10, my); c.lineTo(x, my + 7); c.fill(); } draw.text(c, speed + "×", mx + 12, my + 1, { size: 15, color: INK }); }
+  const b = bNext, ready = !queue.length && wave < WAVES.length, first = wave === 0, pulse = ready ? .5 + .5 * Math.sin(t * 5) : 0;
+  chip(c, b.x, b.y, b.w, b.h, ready ? Lab.color.mix("#e2453c", "#f2733d", pulse) : "rgba(255,246,232,.6)");
+  if (ready && nextT > 0) { c.save(); draw.rr(c, b.x, b.y, b.w, b.h, 12); c.clip(); c.fillStyle = "rgba(0,0,0,.16)"; c.fillRect(b.x, b.y, b.w * (1 - nextT / CALL), b.h); c.restore(); }
+  const small = b.w < 200;
+  if (first) draw.text(c, "START WAVE 1", b.x + b.w / 2, b.y + b.h * .32, { size: small ? 13 : 16, color: "#fff" });
+  else if (ready) { draw.text(c, "CALL WAVE " + (wave + 1) + "  +" + Math.ceil(nextT) * 2, b.x + b.w / 2, b.y + b.h * .3, { size: small ? 12.5 : 15, color: "#fff" }); }
+  else draw.text(c, wave >= WAVES.length ? "FINAL WAVE" : queue.length + " still coming", b.x + b.w / 2, b.y + b.h * (wave >= WAVES.length ? .5 : .3), { size: 12.5, color: "#6b5a44" });
+  // what the next wave brings (mini bugs + counts) so the build phase is a decision
+  if (wave < WAVES.length && !first || first) { const gsz = WAVES[Math.min(wave, WAVES.length - 1)], n = gsz.length, step = Math.min(46, (b.w - 12) / n), x0 = b.x + b.w / 2 - step * (n - 1) / 2, y = b.y + b.h * (first ? .78 : .7), col = ready ? "#fff" : "#6b5a44";
+    if (wave < WAVES.length) gsz.forEach(([type, k], i) => { const x = x0 + i * step; drawBug(c, { type, E: EN[type], ang: 0, ph: i, flash: 0, slow: 0, hp: 1, max: 1 }, t, { x: x - 9, y, r: type === "stag" ? 7 : 5 }); draw.text(c, String(k), x + 3, y + 1, { size: 10.5, color: col, align: "left" }); }); }
+}
+function frame(dt, t) {
+  for (let i = 0; i < speed && !over; i++) sim(dt);
+  if (over) return;
+  Lab.music.intensity(clamp(.15 + enemies.length / 26 + wave / 30, 0, 1));
+  render(t);
+}
+let demoT = 0;
+function attract(dt, t) {
+  if (!demo || !path) { demo = true; reset(Lab.W > Lab.H * 1.15); gold = 9999; [0, 1, 2, 3, 0, 1].forEach((ty, i) => { const s = spots[i * 3]; const tw = build(s.c, s.r, ty, true); if (tw && i < 3) tw.tier = 1; }); wave = 3; }
+  demoT -= dt; if (demoT <= 0) { demoT = Lab.rand(.5, 1.1); spawn(Lab.choose(["ant", "ant", "runner", "beetle", "wasp", "grub"])); }
+  sim(dt); render(t);
+}
+Lab.boot();
+})();
 </script></body></html>

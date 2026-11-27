@@ -65,6 +65,14 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--08-swindle.jpg"
+   },
+   {
+    "n": 68,
+    "slug": "68-chute-first",
+    "t": "Chute First",
+    "d": "Sort first. Think faster.",
+    "v2": true,
+    "score": 8
    }
   ]
  },
@@ -379,7 +387,8 @@ window.LAB_GAMES = [
     "t": "Ribbon Rodeo",
     "d": "Fly a fighter kite. Lasso the whole sky.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--62-ribbon-rodeo.jpg"
    },
    {
     "n": 63,
@@ -387,14 +396,16 @@ window.LAB_GAMES = [
     "t": "Big Drip",
     "d": "Be the biggest drop on the glass.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--63-big-drip.jpg"
    },
    {
     "n": 67,
     "slug": "67-lantern-noodles",
     "t": "Lantern Noodles",
     "d": "Build bowls fast. Remember your regulars.",
-    "v2": true
+    "v2": true,
+    "score": 8
    }
   ]
  },
@@ -451,18 +462,11 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab--18-one-breath.jpg"
    },
    {
-    "n": 68,
-    "slug": "68-sort-baskets",
-    "t": "Sort Baskets",
-    "d": "Fling falling items into the right basket.",
-    "thumb": "../thumbs/PhoneGameLab--68-sort-baskets.jpg"
-   },
-   {
     "n": 69,
-    "slug": "69-piano-tiles",
-    "t": "Piano Tiles",
-    "d": "Tap the black tiles — never miss one.",
-    "thumb": "../thumbs/PhoneGameLab--69-piano-tiles.jpg"
+    "slug": "69-punchline",
+    "t": "Punchline",
+    "d": "Tap the punched holes. Your taps play the tune.",
+    "v2": true
    },
    {
     "n": 70,
@@ -642,25 +646,25 @@ window.LAB_GAMES = [
   ]
  },
  {
-  "cat": "Minigame",
+  "cat": "Strategy & Idle",
   "items": [
    {
     "n": 64,
     "slug": "64-last-slice",
-    "t": "Tower Defense",
-    "d": "Tap to place towers (10 gold). They auto-fire at enemies on the path."
-   }
-  ]
- },
- {
-  "cat": ".io & Idle",
-  "items": [
+    "t": "Last Slice",
+    "d": "Bugs want your pie. Not on your blanket.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--64-last-slice.jpg"
+   },
    {
     "n": 65,
-    "slug": "65-idle-clicker",
-    "t": "Idle Clicker",
-    "d": "Tap, buy upgrades, automate income.",
-    "thumb": "../thumbs/PhoneGameLab--65-idle-clicker.jpg"
+    "slug": "65-pocket-reef",
+    "t": "Pocket Reef",
+    "d": "Tap a clam. Grow a reef. Let it hum.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--65-pocket-reef.jpg"
    }
   ]
  }

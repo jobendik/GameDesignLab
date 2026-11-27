@@ -1,0 +1,182 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Punchline</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PUNCHLINE — a music-box paper roll. Every punched hole is the next note of a real tune and YOUR tap plays it, so the
+ * melody only exists if you keep up. Tap the lowest hole's lane; a wrong lane or a hole that slides off the roll is a
+ * slip (three and the box winds down).
+ * Twist:  the brass COMB. A hole can be tapped any time it is on the roll, but tapped while it crosses the comb it
+ *         rings (octave shimmer) and scores more; consecutive ringing notes build an "in tune" flow bonus. Early taps
+ *         are safe but dull — letting holes ride down to the comb is where the points (and the actual rhythm) are.
+ * Holds:  long slots (≥2 beats) keep paying while held and finish with a bonus.
+ * Set:    five public-domain tunes (Ode to Joy, Minuet in G, Sakura, Greensleeves, Hall of the Mountain King), each
+ *         a little faster and speeding up as it goes, then round again; a tune without a slip winds a life back.
+ * No backing track: the left hand (a bass note per bar) follows your taps, so tempo is truly in your hands.          */
+Lab.init({
+  title: "Punchline", tagline: "Tap the punched holes. Your taps play the tune.", category: "Skill & Rhythm",
+  howto: ["Tap the lane of the lowest hole", "Holes ring for more on the brass comb", "Hold long slots; three slips end the roll"],
+  theme: { bg: "#3a2416", bg2: "#5a3a22", accent: "#d9a441", accent2: "#c8452c" },
+  orient: "any", restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, INKB = "#1b2f4f", BRASS = "#d9a441", RED = "#c8452c";
+const OJ = "E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 ", MN = "D5 G4:.5 A4:.5 B4:.5 C5:.5 D5 G4 G4 E5 C5:.5 D5:.5 E5:.5 F#5:.5 G5 G4 G4 C5 D5:.5 C5:.5 B4:.5 A4:.5 B4 C5:.5 B4:.5 A4:.5 G4:.5 ",
+  SK = "A4 B4 C5 B4 A4 B4:.5 A4:.5 F4:2 E4 C4 E4 F4 E4 E4:.5 C4:.5 B3:2 ", GA = "D5:2 B4 G4:1.5 A4:.5 B4 ", GB = "C5:1.5 B4:.5 A4 G#4:1.5 F#4:.5 G#4 A4:3 ", GC = "C5:2 A4 A4:1.5 G#4:.5 A4 B4:2 G#4 ",
+  MK = "A4:.5 B4:.5 C5:.5 D5:.5 E5:.5 C5:.5 E5 D#5:.5 B4:.5 D#5 D5:.5 A#4:.5 D5 A4:.5 B4:.5 C5:.5 D5:.5 E5:.5 C5:.5 E5:.5 A5:.5 G5:.5 E5:.5 C5:.5 E5:.5 ";
+const SONGS = [
+  { t: "Ode to Joy", bar: 4, pick: 0, up: 12, roots: "C G C G C G C C G G G G C G C C", n: OJ + "E4:1.5 D4:.5 D4:2 " + OJ + "D4:1.5 C4:.5 C4:2 D4 D4 E4 C4 D4 E4:.5 F4:.5 E4 C4 D4 E4:.5 F4:.5 E4 D4 C4 D4 G3:2 " + OJ + "D4:1.5 C4:.5 C4:2" },
+  { t: "Minuet in G", bar: 3, pick: 0, up: 0, roots: "G G C G C G D D G G C G C G D G", n: MN + "F#4 G4:.5 A4:.5 B4:.5 G4:.5 A4:3 " + MN + "A4 B4:.5 A4:.5 G4:.5 F#4:.5 G4:3" },
+  { t: "Sakura", bar: 4, pick: 0, up: 12, roots: "A A A F A E A F A E A A F E", n: "A4 A4 B4:2 A4 A4 B4:2 " + SK + SK + "A4 A4 B4:2 A4 A4 B4:2 E4 F4 B4:.5 A4:.5 F4 E4:4" },
+  { t: "Greensleeves", bar: 3, pick: 1, up: 0, roots: "A A G G A A E E A A G G A E A C C G G A A E E C C G G A E A", n: "A4 C5:2 D5 E5:1.5 F#5:.5 E5 " + GA + GC + "E4:2 A4 C5:2 D5 E5:1.5 F#5:.5 E5 " + GA + GB + "G5:3 G5:1.5 F#5:.5 E5 " + GA + GC + "E4:3 G5:3 G5:1.5 F#5:.5 E5 " + GA + GB.trim() },
+  { t: "Hall of the Mountain King", bar: 4, pick: 0, up: 0, roots: "A A A C A A A A A A A C A A A A", n: MK + "G5:2 " + MK + "A4:2 " + MK + "G5:2 " + MK + "A5:2" },
+];
+const midiOf = n => Math.round(69 + 12 * Math.log2(Lab.audio.noteFreq(n) / 440));
+let rx, rw, mg, lw, topY, botY, combY, PPB, pos, tempo, started, tiles, next, metas, songN, endBeat, score, lives, flow, bestFlow, taps, rings, holdsDone, tunes, alive, holds, pluck, laneFx, lastHit, keyHeld, slipFx, tapHint;
+
+function layout() {
+  const P = Lab.play; rw = Math.min(P.w, 560); rx = P.x + (P.w - rw) / 2; mg = clamp(rw * .04, 12, 22); lw = (rw - mg * 2) / 4;
+  topY = P.y + 30; botY = Lab.H - Lab.safe.bottom - 10; combY = topY + (botY - topY) * .8; PPB = clamp((botY - topY) * .17, 56, 150); Lab.sprite.clear("pl:");
+}
+Lab.onResize(() => { if (tiles) layout(); });
+const yOf = b => combY - (b - pos) * PPB, laneX = l => rx + mg + (l + .5) * lw, laneAt = x => Math.floor((x - rx - mg) / lw);
+
+function addSong() {
+  const k = songN % SONGS.length, S = SONGS[k], start = endBeat + (songN ? 4 : 0), roots = S.roots.split(" ");
+  const toks = S.n.split(" ").map(s => { const p = s.split(":"); return [midiOf(p[0]) + S.up, p[1] ? +p[1] : 1]; }), ms = toks.map(t => t[0]), lo = Math.min(...ms), hi = Math.max(...ms);
+  let b = start, prev = null, lastBar = -1, cnt = 0;
+  for (const [m, d] of toks) {
+    let L = Math.min(3, Math.floor((m - lo) / (hi - lo + 1) * 4));
+    if (prev && m !== prev.m && L === prev.lane) { L += m > prev.m ? 1 : -1; if (L < 0) L = 1; if (L > 3) L = 2; }
+    const rel = b - start - S.pick, bar = Math.floor(rel / S.bar + 1e-6); let bass = null; if (rel >= -1e-6 && bar !== lastBar) { bass = roots[bar % roots.length]; lastBar = bar; }
+    prev = { b, d, lane: L, m, f: Lab.audio.noteFreq(m), hold: d >= 2, st: 0, song: songN, bass, anim: 0, holdP: -1, ring: false }; tiles.push(prev); b += d; cnt++;
+  }
+  metas.push({ n: songN, k, start, end: b, title: S.t, bar: S.bar, pick: S.pick, slips: 0, left: cnt }); endBeat = b; songN++;
+}
+function start() {
+  layout(); tiles = []; metas = []; songN = 0; endBeat = 0; next = 0; pos = 0; tempo = 0; started = false; score = 0; lives = 3; flow = 0; bestFlow = 0; taps = 0; rings = 0; holdsDone = 0; tunes = 0; alive = true;
+  holds = new Map(); pluck = [0, 0, 0, 0]; laneFx = [0, 0, 0, 0]; lastHit = { lane: -1, t: 0 }; keyHeld = {}; slipFx = 0; tapHint = 0;
+  addSong(); Lab.setScore(0);
+  Lab.input.onDown = [(x, y, id) => { const l = laneAt(x); if (l >= 0 && l < 4) press(l, id); }];
+  Lab.input.onUp = [(x, y, id) => release(id)];
+  Lab.input.onKey = [k => { const l = { d: 0, f: 1, j: 2, k: 3, 1: 0, 2: 1, 3: 2, 4: 3, ArrowLeft: 0, ArrowDown: 1, ArrowUp: 2, ArrowRight: 3 }[k.length === 1 ? k.toLowerCase() : k]; if (l != null) { keyHeld["k" + l] = k; press(l, "k" + l); } }];
+  Lab.expose({
+    get score() { return score; }, get lives() { return lives; }, get flow() { return flow; }, get started() { return started; }, get tempo() { return tempo; }, get pos() { return pos; }, get song() { const m = meta(); return m ? { n: m.n, title: m.title } : null; },
+    get tunes() { return tunes; }, get rings() { return rings; }, get holdsDone() { return holdsDone; }, get taps() { return taps; },
+    get next() { const t = tiles[next]; return t ? { lane: t.lane, hold: t.hold, d: t.d, x: laneX(t.lane), y: clamp(yOf(t.b + t.d / 2), topY + 12, botY - 12), onComb: onComb(t), visible: yOf(t.b) > topY + 6, holdP: t.holdP } : null; },
+    laneX, press, release, setLives(n) { lives = n; }, autoplay(n) { let c = 0; while (c < n && alive && tiles[next]) { const t = tiles[next]; started = true; pos = Math.max(pos, t.b + .05); press(t.lane, "auto"); release("auto"); c++; ensure(); } return c; },
+  });
+  Lab.loop((dt, t) => { update(dt); render(t); });
+}
+const meta = () => { const t = tiles[next]; return t ? metas.find(m => m.n === t.song) : metas[metas.length - 1]; };
+const onComb = t => pos >= t.b - .3 && pos <= t.b + Math.max(t.d, .5) + .12;
+function ensure() { while (endBeat < pos + 14) addSong(); if (next > 90) { tiles.splice(0, 50); next -= 50; } while (metas.length > 3 && metas[0].end < pos - 12) metas.shift(); }
+
+function voice(f, long, ring) {
+  const a = Lab.audio; a.tone({ f, type: "sine", dur: long ? 2.2 : 1.1, vol: .26 }); a.tone({ f: f * 2, type: "triangle", dur: .32, vol: .06 }); a.noise({ dur: .012, vol: .05, hp: 5000 });
+  if (ring) { a.tone({ f: f * 2, type: "sine", dur: .9, vol: .07, delay: .02 }); a.tone({ f: f * 3, type: "sine", dur: .5, vol: .028 }); }
+}
+function press(lane, id) {
+  if (!alive) return false; const tl = tiles[next]; if (!tl) return false;
+  if (!started) { if (lane !== tl.lane) { tapHint = 1; Lab.sfx("tick", { pitch: .7 }); return false; } started = true; Lab.toast("Let holes reach the brass comb — they ring", 2600, { y: .2 }); }
+  if (yOf(tl.b) <= topY + 6) { Lab.sfx("tick", { pitch: .7, vol: .5 }); return false; }                       // nothing on the roll yet
+  if (lane !== tl.lane) { if (lane === lastHit.lane && Lab.now() - lastHit.t < .09) return false; slip(lane, false); return false; } // double-tap bounce is forgiven
+  const m = metas.find(q => q.n === tl.song), ring = onComb(tl);
+  tl.st = 1; tl.anim = 1; tl.ring = ring; next++; taps++; lastHit = { lane, t: Lab.now() }; pluck[lane] = 1; laneFx[lane] = 1;
+  let pts = 1; if (ring) { flow++; rings++; bestFlow = Math.max(bestFlow, flow); pts = 2 + Math.min(6, Math.floor(flow / 5)); } else flow = 0;
+  score += pts; Lab.setScore(score); voice(tl.f, tl.hold, ring); Lab.buzz(ring ? 10 : 5);
+  if (tl.bass) { const bf = Lab.audio.noteFreq(tl.bass + "2"); Lab.audio.tone({ f: bf, type: "triangle", dur: 1.3, vol: .2 }); Lab.audio.tone({ f: bf * 1.5, type: "sine", dur: 1, vol: .07, delay: .01 }); }
+  const x = laneX(lane), y = clamp(yOf(tl.b), topY, botY);
+  if (ring) { fx.ring(x, combY, { r0: 8, r1: lw * .6, color: BRASS, width: 4, life: .3 }); fx.burst(x, combY, { n: 5, colors: ["#ffe9a8", BRASS], speed: 160, life: .35, size: 3, angle: -1.57, spread: 1.4, shape: "spark" }); if (flow % 10 === 0) { fx.text(x, combY - 30, "in tune ×" + flow, { color: "#ffe9a8", size: 17 }); Lab.sfx("chime", { vol: .5 }); } }
+  else fx.burst(x, y, { n: 3, colors: ["#fff6dc"], speed: 80, life: .25, size: 2.5 });
+  if (tl.hold) { tl.holdP = 0; holds.set(id, tl); }
+  if (--m.left === 0) songDone(m);
+  return true;
+}
+function release(id) { const tl = holds.get(id); if (tl) { holds.delete(id); if (tl.holdP < 1) tl.holdP = -1 - tl.holdP; } }
+function slip(lane, missed) {
+  lives--; flow = 0; slipFx = 1; laneFx[lane] = -1; const m = meta(); if (m) m.slips++;
+  Lab.audio.tone({ f: missed ? 98 : 131, f2: 70, type: "square", dur: .22, vol: .12, lp: 900 }); Lab.audio.noise({ dur: .08, vol: .16, lp: 1200 }); Lab.shake(6, .22); Lab.buzz(35);
+  fx.text(laneX(lane), missed ? botY - 26 : combY - 26, missed ? "missed" : "wrong lane", { color: "#ffb4a2", size: 15 });
+  if (lives <= 0) { alive = false; holds.clear(); Lab.sfx("slide", { pitch: .5 }); Lab.after(.5, () => Lab.gameover({ title: "The box wound down", message: "Stopped in " + (m ? m.title : "the roll") + ".", score, stats: [["Tunes", tunes], ["Best flow", bestFlow], ["Rang", taps ? Math.round(rings / taps * 100) + "%" : "0%"]] })); }
+}
+function songDone(m) {
+  tunes++; const bonus = 20 * Math.min(10, m.n + 1) + (m.slips ? 0 : 20); score += bonus; Lab.setScore(score); Lab.bumpScore();
+  Lab.banner(m.slips ? "Encore!" : "Flawless!", { color: "#ffe9a8", ms: 1300, y: .32 }); Lab.sfx("levelup", { vol: .7 }); fx.text(Lab.W / 2, Lab.H * .42, "+" + bonus, { color: "#ffe9a8", size: 24 });
+  if (!m.slips && lives < 3) { lives++; Lab.toast("A slip wound back", 1400, { y: .46 }); }
+}
+function update(dt) {
+  for (let l = 0; l < 4; l++) { pluck[l] = Math.max(0, pluck[l] - dt * 2.4); laneFx[l] = Lab.damp(laneFx[l], 0, 7, dt); }
+  slipFx = Math.max(0, slipFx - dt * 2.5); tapHint = Math.max(0, tapHint - dt * 3);
+  for (const t of tiles) if (t.anim > 0) t.anim = Math.max(0, t.anim - dt * 3.5);
+  if (!alive) { tempo = Lab.damp(tempo, 0, 3, dt); pos += tempo * dt; return; }
+  if (!started) return;
+  const m = meta(), base = Math.min(3.2, 1.45 + .2 * m.n), target = base + .3 * clamp((pos - m.start) / (m.end - m.start), 0, 1);
+  tempo = Lab.damp(tempo, target, 2.5, dt); pos += tempo * dt; ensure();
+  for (const [id, k] of Object.entries(keyHeld)) if (!Lab.input.keys[k]) { delete keyHeld[id]; release(id); }
+  for (const [id, tl] of holds) { tl.holdP += tempo * dt / Math.max(.5, tl.d - .75); if (Math.random() < dt * 20) fx.burst(laneX(tl.lane) + Lab.rand(-lw * .3, lw * .3), combY, { n: 1, colors: ["#ffe9a8"], speed: 70, life: .4, size: 2.5, angle: -1.57, spread: .8 });
+    if (tl.holdP >= 1) { tl.holdP = 1; holds.delete(id); holdsDone++; score += 3; Lab.setScore(score); Lab.audio.tone({ f: tl.f * 2, type: "sine", dur: .7, vol: .12 }); Lab.sfx("star", { vol: .4 }); fx.text(laneX(tl.lane), combY - 34, "held +3", { color: "#ffe9a8", size: 15 }); pluck[tl.lane] = 1; } }
+  const tl = tiles[next]; if (tl && yOf(tl.b + tl.d) > botY + 2) { tl.st = 2; next++; const q = metas.find(z => z.n === tl.song); slip(tl.lane, true); if (alive && --q.left === 0) songDone(q); }
+}
+
+/* ---------- art */
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80; return Lab.sprite("pl:bg", W, H, g => {
+    g.translate(40, 40); draw.vgrad(g, -40, -40, W, H, ["#4a2f1c", "#2e1b10"]); const rnd = Lab.rng(3);
+    g.strokeStyle = "rgba(0,0,0,.18)"; g.lineWidth = 2; for (let i = 0; i < 70; i++) { const x = -40 + rnd() * W, y = -40 + rnd() * H, l = 60 + rnd() * 240; g.beginPath(); g.moveTo(x, y); g.bezierCurveTo(x + 6, y + l * .3, x - 6, y + l * .7, x, y + l); g.stroke(); }
+    g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(rx - 7, -40, rw + 14, H);
+    const pg = g.createLinearGradient(rx, 0, rx + rw, 0); pg.addColorStop(0, "#e6d3a6"); pg.addColorStop(.08, "#f4e7c3"); pg.addColorStop(.92, "#f4e7c3"); pg.addColorStop(1, "#e2cd9c"); g.fillStyle = pg; g.fillRect(rx, -40, rw, H);
+    for (let i = 0; i < 500; i++) { g.fillStyle = rnd() > .5 ? "rgba(120,90,40,.07)" : "rgba(255,255,255,.14)"; g.fillRect(rx + rnd() * rw, -40 + rnd() * H, 1 + rnd() * 9, 1); }
+    g.strokeStyle = "rgba(27,47,79,.11)"; g.lineWidth = 1.5; g.setLineDash([5, 9]); for (let l = 1; l < 4; l++) { g.beginPath(); g.moveTo(rx + mg + l * lw, -40); g.lineTo(rx + mg + l * lw, H); g.stroke(); } g.setLineDash([]);
+    const dg = g.createLinearGradient(0, combY, 0, botY); dg.addColorStop(0, "rgba(200,69,44,0)"); dg.addColorStop(1, "rgba(200,69,44,.3)"); g.fillStyle = dg; g.fillRect(rx, combY, rw, botY - combY + 40);
+  });
+}
+function slot(c, x, y, w, h, fill, stroke, lwd) { draw.rect(c, x, y, w, h, Math.min(13, h / 2, w / 2), fill, stroke, lwd); }
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(), P = Lab.play, W = Lab.W, H = Lab.H; c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // roll furniture: sprocket holes, bar lines, tune headers (all scroll with pos)
+  const b0 = Math.floor((pos - (botY - combY) / PPB) * 2) / 2, b1 = pos + (combY - topY) / PPB + 1;
+  c.fillStyle = "rgba(60,36,18,.55)"; for (let b = b0; b < b1; b += .5) { const y = yOf(b); c.beginPath(); c.arc(rx + mg * .5, y, mg * .2, 0, TAU); c.arc(rx + rw - mg * .5, y, mg * .2, 0, TAU); c.fill(); }
+  for (const m of metas) {
+    if (m.start > b1 + 4 || m.end < b0) continue;
+    for (let b = m.start + m.pick, j = 0; b <= m.end + 1e-6; b += m.bar, j++) { const y = yOf(b); if (y < topY - 10 || y > botY + 10) continue; draw.line(c, rx + mg, y, rx + rw - mg, y, "rgba(27,47,79,.2)", j % 4 ? 1.2 : 2.2); if (j % 4 === 0 && b < m.end) draw.text(c, String(j + 1), rx + mg + 4, y - 8, { size: 10, color: "rgba(27,47,79,.4)", align: "left" }); }
+    const hy = yOf(m.start - (m.n ? 2 : 1.6)); if (hy > topY - 30 && hy < botY + 30) { draw.text(c, "No. " + (m.n + 1), rx + rw / 2, hy - 20, { size: 13, color: RED }); draw.text(c, m.title, rx + rw / 2, hy + 2, { size: Math.min(24, rw * .058), color: INKB, maxWidth: rw - mg * 2 - 10 }); draw.line(c, rx + rw * .3, hy + 20, rx + rw * .7, hy + 20, RED, 2); }
+  }
+  // holes
+  for (let i = Math.max(0, next - 8); i < tiles.length; i++) {
+    const tl = tiles[i], yb = yOf(tl.b), yt = yOf(tl.b + tl.d); if (yb < topY - 10) break; if (yt > H + 10) continue;
+    const x = rx + mg + tl.lane * lw + 5, w = lw - 10, h = Math.max(14, yb - yt - 5), y = yb - 2.5 - h;
+    if (tl.st === 0) {
+      slot(c, x, y + 3, w, h, "rgba(27,47,79,.25)"); slot(c, x, y, w, h, tl.hold ? "#27456f" : INKB, i === next ? BRASS : "#0f1d33", i === next ? 3.5 : 2);
+      c.fillStyle = "rgba(255,255,255,.12)"; draw.rr(c, x + 5, y + 4, w - 10, Math.min(8, h * .25), 4); c.fill();
+      if (tl.hold) { slot(c, x + w * .36, y + 9, w * .28, h - 18, RED); draw.text(c, "HOLD", x + w / 2, y + h - 22, { size: Math.min(12, lw * .13), color: "#ffe9a8" }); }
+    } else if (tl.st === 1) {
+      const a = tl.anim, k = ease.outCubic(1 - a); slot(c, x + k * 3, y + k * 2, w - k * 6, h - k * 4, a > 0 ? Lab.color.mix("#fff6dc", tl.ring ? "#ffd166" : "#f0dca8", a) : "#fff6dc", tl.ring ? BRASS : "rgba(150,110,50,.55)", tl.ring ? 3 : 2);
+      if (tl.hold && tl.holdP !== -1) { const p = tl.holdP < 0 ? -1 - tl.holdP : tl.holdP; c.save(); draw.rr(c, x + 3, y + 2, w - 6, h - 4, 10); c.clip(); c.fillStyle = tl.holdP >= 1 ? "#ffd166" : tl.holdP < 0 ? "rgba(200,69,44,.35)" : "#f2c14e"; c.fillRect(x, y + h * (1 - p), w, h * p); c.restore(); }
+    } else { c.globalAlpha = .6; slot(c, x, y, w, h, "#9a4a3a", "#6a2a1e", 2); c.globalAlpha = 1; draw.text(c, "×", x + w / 2, y + h / 2, { size: 20, color: "#ffd9cf" }); }
+  }
+  // lane flashes + the brass comb
+  for (let l = 0; l < 4; l++) if (Math.abs(laneFx[l]) > .02) { c.fillStyle = laneFx[l] > 0 ? "rgba(255,225,150," + laneFx[l] * .22 + ")" : "rgba(200,69,44," + -laneFx[l] * .4 + ")"; c.fillRect(rx + mg + l * lw, topY, lw, botY - topY); }
+  for (let l = 0; l < 4; l++) { const px = rx + mg + l * lw + 8, off = Math.sin(pluck[l] * 34) * pluck[l] * 5, th = clamp((botY - combY) * .32, 14, 30); draw.rect(c, px, combY + 2 + off, lw - 16, th, 6, "#b9862e", "#7a5417", 2); c.fillStyle = "rgba(255,240,190,.5)"; c.fillRect(px + 5, combY + 5 + off, lw - 26, 3); }
+  draw.vgrad(c, rx, combY - 5, rw, 10, ["#f6d27a", "#b9862e"]); c.strokeStyle = "#7a5417"; c.lineWidth = 1.5; c.strokeRect(rx, combY - 5, rw, 10);
+  for (const x of [rx + mg * .5, rx + rw - mg * .5]) draw.circle(c, x, combY, 3, "#7a5417");
+  if (!started && alive && tiles[next]) { const tl = tiles[next], x = laneX(tl.lane), bob = Math.sin(t * 5) * 5 + Math.sin(tapHint * 20) * tapHint * 6; draw.text(c, "TAP", x, yOf(tl.b + tl.d) - 44 + bob, { size: 20, color: RED }); c.fillStyle = RED; c.beginPath(); c.moveTo(x - 9, yOf(tl.b + tl.d) - 28 + bob); c.lineTo(x + 9, yOf(tl.b + tl.d) - 28 + bob); c.lineTo(x, yOf(tl.b + tl.d) - 14 + bob); c.fill(); }
+  // wooden rails with brass plate: slips left, flow, tune
+  draw.vgrad(c, -40, -40, W + 80, topY + 40, ["#5a3a22", "#3a2416"]); c.fillStyle = "rgba(0,0,0,.35)"; c.fillRect(-40, topY, W + 80, 5); c.fillStyle = "#6b4526"; c.fillRect(-40, topY - 2, W + 80, 2);
+  draw.vgrad(c, -40, botY, W + 80, H - botY + 40, ["#4a2f1c", "#2e1b10"]); c.fillStyle = "rgba(0,0,0,.3)"; c.fillRect(-40, botY - 4, W + 80, 4);
+  const py = topY - 15, m = meta();
+  for (let i = 0; i < 3; i++) { const lx = rx + 16 + i * 20, on = i < lives, sh = !on && i === lives ? slipFx : 0; draw.circle(c, lx + Math.sin(sh * 40) * sh * 4, py, 6.5, on ? BRASS : "rgba(0,0,0,.35)", on ? "#7a5417" : "rgba(255,255,255,.12)", 1.5); if (on) draw.circle(c, lx - 2, py - 2, 2, "rgba(255,245,210,.8)"); }
+  if (m) draw.text(c, m.title.toUpperCase(), rx + rw / 2, py, { size: 10.5, color: "rgba(255,233,168,.75)", maxWidth: rw - 190 });
+  draw.text(c, flow > 1 ? "IN TUNE ×" + flow : Math.round(tempo * 60) + " BPM", rx + rw - 12, py, { size: 11.5, color: flow > 1 ? "#ffe9a8" : "rgba(255,233,168,.55)", align: "right" });
+  if (m && started) { const p = clamp((pos - m.start) / (m.end - m.start), 0, 1); c.fillStyle = "rgba(255,233,168,.18)"; c.fillRect(rx, topY - 3, rw, 2); c.fillStyle = BRASS; c.fillRect(rx, topY - 3, rw * p, 2); }
+}
+function attract(dt, t) {
+  if (!tiles) { layout(); tiles = []; metas = []; songN = 1; endBeat = 0; next = 0; started = true; alive = true; lives = 3; flow = 14; tempo = 1.7; pluck = [0, 0, 0, 0]; laneFx = [0, 0, 0, 0]; slipFx = 0; tapHint = 0; holds = new Map(); addSong(); pos = 0; }
+  pos += dt * 1.3; while (tiles[next] && tiles[next].b < pos) { const tl = tiles[next++]; tl.st = 1; tl.ring = true; tl.anim = 1; pluck[tl.lane] = 1; if (tl.hold) tl.holdP = 1; }
+  if (pos > endBeat - 6) { tiles = []; metas = []; endBeat = 0; next = 0; pos = 0; songN = (songN % 4) + 1; addSong(); }
+  for (let l = 0; l < 4; l++) pluck[l] = Math.max(0, pluck[l] - dt * 2.4); for (const q of tiles) if (q.anim > 0) q.anim = Math.max(0, q.anim - dt * 3.5);
+  render(t);
+}
+Lab.boot();
+})();
+</script></body></html>

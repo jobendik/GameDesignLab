@@ -1,0 +1,298 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Bedtime Stacks</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* BEDTIME STACKS — Olli the owl can't sleep without a story. The reading rug is a 4×4 slide-and-merge board, and Olli
+ * sits ON it: every swipe slides him along with the books, and nothing passes him.
+ * Core idea kept: swipe, equal tiles merge (Vol.1 + Vol.1 = Vol.2 …).
+ * Twists:  OLLI IS A PIECE — a wandering wall that is also the goal: slide the volume he is thinking of INTO him and he
+ *          reads it (the book leaves the rug: space!), then wishes for another, higher one.  Quick reads earn up to 3 stars.
+ *          DUST BUNNIES roll in later (never merge; slide them into Olli and he hoots them away).
+ *          Every third book finishes a chapter and a GOLDEN BOOK arrives: it merges with anything.
+ * Identity: night-time reading nook — indigo floorboards, moonlit window patch, amber lamp, plum rug, pastel hardbacks;
+ *          soft "dream" music that thickens as the rug fills; page-flip + chime when Olli reads. */
+let demo = false, demoT = 0;
+Lab.init({
+  title: "Bedtime Stacks", tagline: "Slide the books. Bring Olli his bedtime story.", category: "Puzzle", kicker: "Pocket Pals",
+  howto: ["Swipe: every book slides, and so does Olli", "Two equal volumes make the next one", "Slide the book he wants into Olli"],
+  theme: { bg: "#1a1634", bg2: "#3a2f63", accent: "#ffb52e", accent2: "#ff9d7a" },
+  orient: "any", music: { style: "dream", key: "F", vol: .45 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, shade = Lab.color.shade, INK = Pals.ink;
+const N = 4, DUR = .12, MAXT = 11;
+const COL = [null, "#9fd8cb", "#ffc2a8", "#ffe08a", "#b9a3ff", "#8fd3ff", "#ff9eb5", "#8ed081", "#ffa94d", "#7f97ff", "#e879b9", "#ff7a6b"];
+const WISH = [2, 3, 3, 4, 3, 4, 5, 4, 5, 6, 5, 6, 6, 7, 6, 7, 7, 8];
+const DIRS = { L: [0, -1], R: [0, 1], U: [-1, 0], D: [1, 0] }, tally = { m: 0, e: 0 };
+let S, wide, side, bx, by, cell, gap, pad, card = {}, shelf = {};
+let tiles, ghosts, olli, wish, wishMoves, reads, moves, score, maxTier, over, anim, events, queue, wildDue, dustClock, bump, lastDir, lookT,
+  joyT, wowT, hootT, olliSq, chapter, readPile, clock, idle, bubble, told, stars3;
+
+const wishFor = n => n < WISH.length ? WISH[n] : Math.min(MAXT - 1, 7 + Math.floor((n - WISH.length + 2) / 3));
+const quickLimit = w => 4 + 3 * Math.pow(2, w - 2);
+const starsNow = () => wishMoves <= quickLimit(wish) ? 3 : wishMoves <= quickLimit(wish) * 2 ? 2 : 1;
+function snd(name, o) { if (!demo) Lab.sfx(name, o); }
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15;
+  if (wide) {
+    side = Math.min(P.h - 14, P.w * .52); S = side / 370; bx = P.x + (P.w - side) / 2; by = P.y + (P.h - side) / 2;
+    const pw = Math.min(230 * Math.max(S, .8), bx - P.x - 28);
+    card = { x: bx - 14 - pw, y: by, w: pw, h: side, v: true }; shelf = { x: bx + side + 14, y: by, w: pw, h: side };
+  } else {
+    S = Math.min(P.w / 390, P.h / 720); const hh = 108 * S; let sh = 96 * S;
+    side = Math.min(P.w - 20, P.h - hh - sh - 40 * S); sh = clamp(P.h - hh - side - 70 * S, 96 * S, 170 * S); const total = hh + side + sh + 24 * S, y0 = P.y + Math.max(4, (P.h - total) * .4);
+    bx = P.x + (P.w - side) / 2; card = { x: bx, y: y0, w: side, h: hh, v: false }; by = y0 + hh + 12 * S; shelf = { x: bx, y: by + side + 12 * S, w: side, h: sh };
+  }
+  pad = side * .035; gap = side * .025; cell = (side - pad * 2 - gap * 3) / N;
+  Lab.sprite.clear("bk"); Lab.sprite.clear("bsbg");
+}
+Lab.onResize(() => { if (tiles) layout(); });
+
+function add(kind, tier, r, c) { const t = { kind, tier, r, c, fr: r, fc: c, pop: 0, born: 0, show: null }; tiles.push(t); return t; }
+function gridOf() { const g = Array.from({ length: N }, () => Array(N).fill(null)); for (const t of tiles) g[t.r][t.c] = t; return g; }
+function empties() { const g = gridOf(), e = []; for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (!g[r][c]) e.push([r, c]); return e; }
+function reset() {
+  tiles = []; ghosts = []; score = 0; reads = 0; moves = 0; maxTier = 1; over = false; anim = null; queue = []; wildDue = false; dustClock = 0;
+  bump = { t: 0, dr: 0, dc: 0 }; lastDir = null; lookT = 0; joyT = wowT = hootT = 0; olliSq = 0; chapter = 1; readPile = []; clock = 0; idle = 0; bubble = 0; told = {}; stars3 = 0;
+  olli = add("olli", 0, 2, 1); olli.born = 1;
+  for (let i = 0; i < 3; i++) { const [r, c] = Lab.choose(empties()); add("book", 1, r, c).born = 1; }
+  wish = wishFor(0); wishMoves = 0;
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0);
+  Lab.input.swipeEarly = true;
+  Lab.input.onSwipe = [(dx, dy) => move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "R" : "L") : (dy > 0 ? "D" : "U"))];
+  Lab.input.onKey = [k => { const d = { ArrowLeft: "L", ArrowRight: "R", ArrowUp: "U", ArrowDown: "D", a: "L", d: "R", w: "U", s: "D" }[k]; if (d) move(d); }];
+  if (!wide) Lab.hint("Swipe to slide the books");
+  Lab.expose({
+    get score() { return score; }, get wish() { return wish; }, get reads() { return reads; }, get moves() { return moves; }, get over() { return over; },
+    get busy() { return !!anim; }, get stars() { return starsNow(); }, get chapter() { return chapter; }, move,
+    peek(d) { const ok = slide(d, true); return { ok, merges: tally.m, eats: tally.e }; },
+    grid() { const g = gridOf(); return g.map(row => row.map(t => !t ? "" : t.kind === "olli" ? "O" : t.kind === "dust" ? "d" : t.kind === "wild" ? "w" : "b" + t.tier)); },
+    set(rows, w) { tiles = []; ghosts = []; anim = null; queue = []; rows.forEach((row, r) => row.forEach((s, c) => { if (!s) return; const t = s === "O" ? (olli = add("olli", 0, r, c)) : s === "d" ? add("dust", 0, r, c) : s === "w" ? add("wild", 0, r, c) : add("book", +s.slice(1), r, c); t.born = 1; })); if (w) { wish = w; wishMoves = 0; } },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- rules ---------- */
+function mergeable(a, b) { if (a.kind === "wild" && b.kind === "wild") return false; if (a.kind === "wild") return b.kind === "book" && b.tier < MAXT; if (b.kind === "wild") return a.kind === "book" && a.tier < MAXT; return a.kind === "book" && b.kind === "book" && a.tier === b.tier && a.tier < MAXT; }
+function accepts(t) { return t.kind === "dust" || (t.kind === "book" && t.tier === wish); }
+/* Slides every line toward `dir`. dry=true only answers "would anything happen?". */
+function slide(dir, dry) {
+  const [dr, dc] = DIRS[dir], g = gridOf(); let moved = false, ate = false; tally.m = tally.e = 0;
+  if (!dry) for (const t of tiles) { t.fr = t.r; t.fc = t.c; }
+  for (let i = 0; i < N; i++) {
+    let target = 0, last = null, lastMerged = false;
+    for (let p = 0; p < N; p++) {
+      const at = q => dr ? [dr > 0 ? N - 1 - q : q, i] : [i, dc > 0 ? N - 1 - q : q], [r, c] = at(p), t = g[r][c];
+      if (!t) continue;
+      if (last && !lastMerged && t.kind !== "olli" && last.kind !== "olli" && mergeable(last, t)) {
+        moved = true; lastMerged = true; tally.m++; if (dry) continue;
+        const nt = (last.kind === "wild" ? t.tier : last.tier) + 1;
+        ghosts.push({ kind: t.kind, tier: t.tier, fr: r, fc: c, r: last.r, c: last.c }); t.dead = true;
+        if (!last.show) last.show = { kind: last.kind, tier: last.tier }; last.kind = "book"; last.tier = nt; events.push({ k: "merge", into: last, tier: nt });
+      } else if (last && last.kind === "olli" && !ate && accepts(t)) {
+        moved = true; ate = true; tally.e++; if (dry) continue;
+        ghosts.push({ kind: t.kind, tier: t.tier, fr: r, fc: c, r: last.r, c: last.c }); t.dead = true; events.push({ k: t.kind === "dust" ? "dust" : "read", tier: t.tier });
+      } else if (last && t.kind === "olli" && !ate && accepts(last)) {   // Olli slides into the book himself
+        moved = true; ate = true; tally.e++;
+        if (!dry) { ghosts.push({ kind: last.kind, tier: last.tier, fr: last.r, fc: last.c, r: last.r, c: last.c }); last.dead = true; t.r = last.r; t.c = last.c; events.push({ k: last.kind === "dust" ? "dust" : "read", tier: last.tier }); }
+        last = t; lastMerged = false;
+      } else {
+        const [nr, nc] = at(target); if (nr !== r || nc !== c) moved = true;
+        if (!dry) { t.r = nr; t.c = nc; } last = t; lastMerged = false; target++;
+      }
+    }
+  }
+  if (!dry) tiles = tiles.filter(t => !t.dead);
+  return moved;
+}
+function move(dir) {
+  if (over || !DIRS[dir]) return false;
+  if (anim) { if (queue.length < 2) queue.push(dir); return true; }
+  const [dr, dc] = DIRS[dir]; lastDir = [dc, dr]; lookT = .6; idle = 0;
+  if (!slide(dir, true)) { bump = { t: .16, dr, dc }; snd("knock", { pitch: .7, vol: .5 }); return false; }
+  events = []; const or = olli.r, oc = olli.c; slide(dir, false); anim = { t: 0, ev: events, olliMoved: or !== olli.r || oc !== olli.c };
+  moves++; wishMoves++; dustClock++; snd("slide", { pitch: Lab.rand(.9, 1.15), vol: .5 });
+  return true;
+}
+function settle() {
+  const ev = anim.ev; if (anim.olliMoved) olliSq = .2; anim = null; ghosts = [];
+  for (const t of tiles) { t.fr = t.r; t.fc = t.c; t.show = null; }
+  let n = 0;
+  for (const e of ev) {
+    if (e.k === "merge") {
+      const [x, y] = xy(e.into.r, e.into.c), gain = Math.pow(2, e.tier); e.into.pop = 1; score += gain; n++;
+      if (e.tier > maxTier) { maxTier = e.tier; if (e.tier >= 6 && !demo) Lab.toast("Volume " + e.tier + "!", 900, { y: .16 }); }
+      fx.burst(x, y, { n: 6 + e.tier * 2, colors: [COL[e.tier], "#fff6e3", "#ffb52e"], speed: 120 + e.tier * 18, life: .5, size: 3 + e.tier * .3, gravity: 160, shape: "square" });
+      fx.text(x, y - cell * .42, "+" + gain, { size: 15 + Math.min(10, e.tier), color: "#fff6e3" });
+      if (!demo) { Lab.audio.combo(e.tier - 2 + n, { vol: .22 }); Lab.sfx("pop", { pitch: 1.25 - e.tier * .05, vol: .7 }); if (e.tier >= 5) { Lab.shake(2 + e.tier * .6, .18); Lab.buzz(10); } }
+      if (e.tier === wish) { wowT = 1; if (!told.bring && reads === 0 && !demo) { told.bring = 1; Lab.toast("Now slide it into Olli!", 1800, { y: .16 }); } }
+    } else if (e.k === "read") readBook(e.tier);
+    else { const [x, y] = xy(olli.r, olli.c); score += 5; hootT = .7; fx.puff(x, y - cell * .1, { n: 12, color: "#d9d0f0" }); fx.text(x, y - cell * .5, "Hoo! +5", { size: 16, color: "#e7defc" }); snd("whoosh", { pitch: 1.3 }); }
+  }
+  if (!demo) { Lab.setScore(score); if (ev.length) Lab.bumpScore(); }
+  if (!ev.some(e => e.k === "read")) spawn();          // a read book buys a breather: nothing new arrives that move
+  const e = empties().length; Lab.music.intensity(.2 + (1 - e / 12) * .7);
+  if (!["L", "R", "U", "D"].some(d => slide(d, true))) {
+    if (demo) { reset(); return; }
+    over = true; queue = []; snd("thud", { pitch: .7 });
+    Lab.after(.9, () => Lab.gameover({ title: "Oops! The rug is full", message: reads ? "Olli dozed off after " + reads + (reads === 1 ? " story." : " stories.") : "Not even one story… try again?", score, stats: [["Stories read", reads], ["Top volume", maxTier], ["3-star reads", stars3]] }));
+    return;
+  }
+  if (queue.length) move(queue.shift());
+}
+function readBook(tier) {
+  const [x, y] = xy(olli.r, olli.c), st = starsNow(), gain = tier * 20 * st;
+  reads++; score += gain; joyT = 1.4; olliSq = -.25; readPile.push(tier); if (st === 3) stars3++;
+  fx.burst(x, y, { n: 22, colors: ["#ffe08a", "#fff6e3", COL[tier]], speed: 260, life: .8, size: 5, gravity: 240, shape: "star" });
+  fx.ring(x, y, { r0: cell * .3, r1: cell * 1.2, color: "#ffe08a", width: 4 });
+  fx.text(x, y - cell * .62, "+" + gain + (st > 1 ? "  " + "★".repeat(st) : ""), { size: 22, color: "#ffe08a" });
+  if (!demo) { Lab.sfx("flip"); Lab.sfx("chime", { pitch: 1 + st * .08 }); Lab.audio.combo(4 + st, { vol: .25 }); Lab.shake(4, .2); Lab.buzz(18); }
+  if (reads % 3 === 0) { chapter++; wildDue = true; if (!demo) { Lab.banner("Chapter " + chapter, { color: "#ffe08a", ms: 1100, y: .18 }); Lab.after(.25, () => Lab.sfx("levelup", { vol: .7 })); } }
+  wish = wishFor(reads); wishMoves = 0; bubble = 0;
+}
+function spawn() {
+  const e = empties(); if (!e.length) return; const [r, c] = Lab.choose(e); let t;
+  if (wildDue) { wildDue = false; t = add("wild", 0, r, c); if (!told.wild && !demo) { told.wild = 1; Lab.toast("Golden book: merges with anything", 2000, { y: .16 }); } snd("star", { vol: .6 }); }
+  else if (reads >= 3 && dustClock >= (reads >= 9 ? 8 : 11) && tiles.filter(x => x.kind === "dust").length < 2 && e.length > 4) {
+    dustClock = 0; t = add("dust", 0, r, c); if (!told.dust && !demo) { told.dust = 1; Lab.toast("Dust bunny! Slide it into Olli", 2000, { y: .16 }); } snd("bubble", { pitch: .6, vol: .5 });
+  } else { const p2 = reads < 2 ? .08 : Math.min(.32, .1 + reads * .018), u = Math.random(); t = add("book", reads >= 10 && u < .08 ? 3 : u < p2 ? 2 : 1, r, c); }
+  return t;
+}
+
+/* ---------- frame ---------- */
+function update(dt) {
+  clock += dt; idle += dt;
+  if (anim) { anim.t += dt; if (anim.t >= DUR) settle(); }
+  bump.t = Math.max(0, bump.t - dt); joyT = Math.max(0, joyT - dt); wowT = Math.max(0, wowT - dt); hootT = Math.max(0, hootT - dt); lookT = Math.max(0, lookT - dt);
+  olliSq = Lab.damp(olliSq, 0, 9, dt); bubble = Lab.damp(bubble, 1, 10, dt);
+  for (const t of tiles) { if (t.pop > 0) t.pop = Math.max(0, t.pop - dt * 4.5); if (t.born < 1) t.born = Math.min(1, t.born + dt * 6); }
+}
+function frame(dt, t) { update(dt); render(t); }
+function attract(dt, t) {
+  if (!demo) { demo = true; layout(); reset(); demoT = .9; }
+  if ((demoT -= dt) <= 0 && !anim) { demoT = .8; const ds = ["L", "R", "U", "D"].filter(d => slide(d, true)); if (ds.length) move(Lab.choose(ds)); else reset(); }
+  update(dt); render(t);
+}
+function xy(r, c) { return [bx + pad + c * (cell + gap) + cell / 2, by + pad + r * (cell + gap) + cell / 2]; }
+function posOf(t) {
+  const k = anim ? ease.outCubic(clamp(anim.t / DUR, 0, 1)) : 1; let [x, y] = xy(lerp(t.fr, t.r, k), lerp(t.fc, t.c, k));
+  if (bump.t > 0) { const b = Math.sin(bump.t / .16 * Math.PI) * 6 * S; x += bump.dc * b; y += bump.dr * b; }
+  return [x, y];
+}
+
+/* ---------- art ---------- */
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("bsbg" + W + "x" + H, W, H, g => {
+    draw.vgrad(g, 0, 0, W, H, ["#2c2452", "#1d1838", "#15112b"]);
+    g.strokeStyle = "rgba(255,255,255,.035)"; g.lineWidth = 2; const ph = 54;
+    for (let y = 20, i = 0; y < H; y += ph, i++) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); for (let x = (i % 2 ? 70 : 190); x < W; x += 250) { g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + ph); g.stroke(); } }
+    // moonlit window patch on the floor
+    g.save(); g.translate(W * .62, H * .1); g.transform(1, 0, -.45, 1, 0, 0); const ww = Math.min(W * .5, 300), wh = Math.min(H * .34, 300);
+    g.fillStyle = "rgba(150,180,255,.09)"; g.fillRect(0, 0, ww, wh); g.fillStyle = "#1b1735"; g.globalAlpha = .55; g.fillRect(ww * .47, 0, ww * .06, wh); g.fillRect(0, wh * .47, ww, wh * .06); g.restore();
+    draw.glow(g, W * .08, H * .12, Math.max(W, H) * .55, "#ffb52e", .2);
+    draw.glow(g, W * .9, H * .95, Math.max(W, H) * .4, "#7b6cff", .12);
+  });
+}
+function bookSprite(kind, tier, s) {
+  s = Math.round(s);
+  return Lab.sprite("bk" + kind + tier + ":" + s, s, s, g => {
+    const wild = kind === "wild", col = wild ? "#ffcf4a" : COL[tier], m = s * .09, w = s - m * 2 - s * .04, h = s - m * 2 - s * .03, r = s * .1;
+    draw.rect(g, m + s * .03, m + s * .075, w + s * .02, h, r, "rgba(15,8,35,.3)");
+    draw.rect(g, m + s * .045, m + s * .035, w, h, r, "#fff6e3", "rgba(170,140,100,.5)", 1);
+    g.strokeStyle = "rgba(170,140,100,.45)"; g.lineWidth = 1; g.beginPath(); g.moveTo(m + w * .3, m + h + s * .018); g.lineTo(m + w, m + h + s * .018); g.stroke();
+    draw.rr(g, m, m, w, h, r); g.fillStyle = col; g.fill(); g.save(); g.clip();
+    g.fillStyle = shade(col, -.2); g.fillRect(m, m, w * .17, h);
+    g.fillStyle = wild ? "#fff6c9" : "rgba(255,246,227,.75)"; g.fillRect(m, m + h * .13, w * .17, h * .045); g.fillRect(m, m + h * .82, w * .17, h * .045);
+    g.fillStyle = "rgba(255,255,255,.2)"; g.beginPath(); g.ellipse(m + w * .45, m + h * .08, w * .5, h * .2, -.2, 0, TAU); g.fill();
+    g.fillStyle = "rgba(0,0,40,.07)"; g.fillRect(m, m + h * .86, w, h * .14); g.restore();
+    const cx = m + w * .585, cy = m + h * .5;
+    if (wild) { draw.star(g, cx, cy, w * .3, "#fff6c9", 5, .48); draw.star(g, cx, cy, w * .17, "#ffab1a", 5, .48); }
+    else {
+      draw.rect(g, cx - w * .29, cy - h * .25, w * .58, h * .5, s * .09, "rgba(255,250,240,.92)");
+      draw.text(g, String(tier), cx, cy + s * .015, { size: s * (tier > 9 ? .3 : .36), color: INK, weight: 700 });
+      g.fillStyle = shade(col, -.32); g.fillRect(m + w * .78, m + h - 1, w * .09, s * .1);   // ribbon bookmark
+    }
+  });
+}
+function drawBook(c, kind, tier, x, y, sz) { const sp = bookSprite(kind, tier, cell); c.drawImage(sp, x - sz / 2, y - sz / 2, sz, sz); }
+function drawDust(c, x, y, r, t) {
+  c.fillStyle = "rgba(15,8,35,.25)"; c.beginPath(); c.ellipse(x, y + r * .9, r * .9, r * .2, 0, 0, TAU); c.fill();
+  c.fillStyle = "#cfc6e6"; for (let i = 0; i < 8; i++) { const a = i / 8 * TAU + Math.sin(t * 2 + i) * .08, rr = r * (.38 + (i % 2) * .08); c.beginPath(); c.arc(x + Math.cos(a) * r * .55, y + Math.sin(a) * r * .5, rr, 0, TAU); c.fill(); }
+  c.fillStyle = "#e3dcf5"; c.beginPath(); c.arc(x, y, r * .68, 0, TAU); c.fill();
+  c.fillStyle = INK; const bl = (t * .4 + x * .01) % 1 > .94; for (const d of [-1, 1]) { c.beginPath(); c.ellipse(x + d * r * .26, y - r * .05, r * .1, bl ? r * .02 : r * .14, 0, 0, TAU); c.fill(); }
+  c.fillStyle = "#ff9aa8"; c.globalAlpha = .6; for (const d of [-1, 1]) { c.beginPath(); c.ellipse(x + d * r * .44, y + r * .14, r * .1, r * .06, 0, 0, TAU); c.fill(); } c.globalAlpha = 1;
+}
+function drawTile(c, t, x, y, t0) {
+  const k = t.show || t, sc = (t.born < 1 ? ease.outBack(t.born) : 1) * (1 + ease.pulse(t.pop) * .2), sz = cell * sc;
+  if (k.kind === "dust") drawDust(c, x, y, cell * .36 * sc, t0);
+  else { if (k.kind === "wild") draw.glow(c, x, y, cell * .75, "#ffcf4a", .28 + .1 * Math.sin(t0 * 4)); drawBook(c, k.kind, k.tier, x, y, sz); }
+}
+function drawStars(c, x, y, r, n, frac) {
+  for (let i = 0; i < 3; i++) { const on = i < n, sc = on && i === n - 1 && n > 1 ? .7 + .3 * frac : 1; draw.star(c, x + (i - 1) * r * 2.3, y, r * 1.25, "rgba(43,35,64,.16)", 5, .5); if (on) draw.star(c, x + (i - 1) * r * 2.3, y, r * sc, "#ffab1a", 5, .5); }
+}
+function drawCard(c, t) {
+  const k = card, st = starsNow(), L = quickLimit(wish), frac = st === 3 ? 1 - wishMoves / (L + 1) : st === 2 ? 1 - (wishMoves - L) / (L + 1) : 1;
+  draw.rect(c, k.x, k.y + 4, k.w, k.h, 18 * S, "rgba(10,6,30,.3)"); draw.rect(c, k.x, k.y, k.w, k.h, 18 * S, "#fff6e3");
+  const bs = (k.v ? Math.min(k.w * .62, k.h * .34) : k.h * .84) * (.8 + .2 * ease.outBack(clamp(bubble, 0, 1)));
+  if (k.v) {
+    const cx = k.x + k.w / 2; draw.text(c, "OLLI WANTS", cx, k.y + k.h * .1, { size: 12 * S, color: "#8a6f9e", weight: 700 });
+    drawBook(c, "book", wish, cx, k.y + k.h * .34, bs);
+    draw.text(c, "Volume " + wish, cx, k.y + k.h * .6, { size: 21 * S, color: INK, weight: 700, maxWidth: k.w - 12 });
+    drawStars(c, cx, k.y + k.h * .74, 9 * S, st, frac); draw.text(c, "quick-read bonus", cx, k.y + k.h * .84, { size: 10.5 * S, color: "#8a6f9e", maxWidth: k.w - 10 });
+  } else {
+    const bxc = k.x + k.h * .52; drawBook(c, "book", wish, bxc, k.y + k.h * .5, bs);
+    draw.text(c, "OLLI WANTS", k.x + k.h * 1.02, k.y + k.h * .3, { size: 12 * S, color: "#8a6f9e", weight: 700, align: "left" });
+    draw.text(c, "Volume " + wish, k.x + k.h * 1.02, k.y + k.h * .62, { size: 25 * S, color: INK, weight: 700, align: "left" });
+    drawStars(c, k.x + k.w - 52 * S, k.y + k.h * .4, 10 * S, st, frac); draw.text(c, "quick read", k.x + k.w - 52 * S, k.y + k.h * .72, { size: 11 * S, color: "#8a6f9e" });
+  }
+}
+function drawShelf(c) {
+  const k = shelf, sw = 19 * S, sh = 50 * S, lab = (wide ? 38 : 20) * S, per = Math.max(3, Math.floor((k.w - 16 * S) / (sw + 2 * S))), rowH = sh + 16 * S, rows = Math.max(1, Math.floor((k.h - lab) / rowH));
+  draw.text(c, "STORIES READ  " + reads, k.x + 4 * S, k.y + 9 * S, { size: 12 * S, color: "#cfc3ee", weight: 700, align: "left" });
+  if (wide) draw.text(c, "CHAPTER " + chapter, k.x + 4 * S, k.y + 26 * S, { size: 12 * S, color: "#ffcf7a", weight: 700, align: "left" });
+  else draw.text(c, "CHAPTER " + chapter, k.x + k.w - 4 * S, k.y + 9 * S, { size: 12 * S, color: "#ffcf7a", weight: 700, align: "right" });
+  const list = readPile.slice(-per * rows);
+  for (let r = 0; r < rows; r++) {
+    const py = k.y + lab + r * rowH + sh + 2 * S;
+    draw.rect(c, k.x, py, k.w, 9 * S, 4 * S, "#b57a45"); c.fillStyle = "rgba(0,0,0,.2)"; c.fillRect(k.x + 4 * S, py + 6 * S, k.w - 8 * S, 3 * S);
+    for (let i = 0; i < per; i++) {
+      const tier = list[r * per + i]; if (tier == null) break; const x = k.x + 8 * S + i * (sw + 2 * S), newest = r * per + i === list.length - 1, hh = sh * (.82 + ((tier * 7 + i * 3) % 5) * .045) * (newest ? ease.outBack(clamp(1.4 - joyT, 0, 1) * 1) : 1);
+      draw.rect(c, x, py - hh, sw, hh, 3 * S, COL[tier]); c.fillStyle = shade(COL[tier], -.2); c.fillRect(x, py - hh * .86, sw, 2.5 * S); c.fillRect(x, py - hh * .2, sw, 2.5 * S);
+      draw.text(c, String(tier), x + sw / 2, py - hh * .52, { size: 11 * S, color: INK, weight: 700 });
+    }
+  }
+  if (!readPile.length) draw.text(c, "Olli's finished stories go here", k.x + k.w / 2, k.y + lab + sh * .55, { size: 12 * S, color: "rgba(207,195,238,.45)", maxWidth: k.w - 10 });
+}
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // rug
+  draw.rect(c, bx - 2, by + 5, side + 4, side, 24 * S, "rgba(8,4,24,.35)");
+  c.strokeStyle = "#f1c98a"; c.lineWidth = 3 * S; c.lineCap = "round"; for (let i = 0; i < 12; i++) { const y = by + 22 * S + i * (side - 44 * S) / 11; c.beginPath(); c.moveTo(bx - 7 * S, y); c.lineTo(bx + 4, y); c.moveTo(bx + side - 4, y); c.lineTo(bx + side + 7 * S, y); c.stroke(); }
+  draw.rect(c, bx, by, side, side, 22 * S, "#5d3f78"); draw.rect(c, bx + pad * .36, by + pad * .36, side - pad * .72, side - pad * .72, 17 * S, null, "rgba(241,201,138,.55)", 2 * S);
+  for (let r = 0; r < N; r++) for (let q = 0; q < N; q++) { const [x, y] = xy(r, q); draw.rect(c, x - cell / 2, y - cell / 2, cell, cell, cell * .16, (r + q) % 2 ? "rgba(255,255,255,.07)" : "rgba(255,255,255,.1)"); }
+  const full = empties().length <= 2 && !demo; if (full) { c.strokeStyle = `rgba(255,120,130,${.35 + .3 * Math.sin(t * 6)})`; c.lineWidth = 4 * S; draw.rr(c, bx, by, side, side, 22 * S); c.stroke(); }
+  for (const g of ghosts) { const [x, y] = posOf(g); drawTile(c, g, x, y, t); }
+  let wt = null, wd = 1e9; const [ox0, oy0] = xy(olli.r, olli.c);
+  for (const tl of tiles) { if (tl === olli) continue; const [x, y] = posOf(tl); drawTile(c, tl, x, y, t); if (tl.kind === "book" && tl.tier === wish && !tl.show) { const d = Math.hypot(x - ox0, y - oy0); if (d < wd) { wd = d; wt = [x, y]; if (wowT > 0 || Math.sin(t * 3) > .2) { c.strokeStyle = "rgba(255,224,138,.8)"; c.lineWidth = 2.5 * S; draw.rr(c, x - cell * .47, y - cell * .47, cell * .94, cell * .94, cell * .16); c.stroke(); } } } }
+  // Olli
+  const [ox, oy] = posOf(olli), moving = anim && anim.olliMoved, hop = joyT > 1 ? Math.sin((1.4 - joyT) / .4 * Math.PI) * cell * .22 : 0;
+  const look = lookT > 0 && lastDir ? lastDir : wt ? [(wt[0] - ox) / (wd || 1), (wt[1] - oy) / (wd || 1)] : [Math.sin(t * .7) * .3, 0];
+  const mood = over ? "sad" : joyT > 0 ? "joy" : hootT > 0 ? "angry" : wowT > 0 ? "wow" : full ? "scared" : idle > 9 ? "sleepy" : moving ? "focus" : "happy";
+  Pals.draw(c, "olli", ox, oy - cell * .01 - hop, cell * .78, { mood, t, look, squash: olliSq, tilt: moving ? -lastDir[0] * .14 : 0, arms: joyT > 0 ? "cheer" : hootT > 0 ? "up" : "down", talk: hootT > 0 ? 1 : joyT > .9 ? .8 : 0 });
+  if (idle > 9 && !over) for (let i = 0; i < 2; i++) { const ph = (t * .5 + i * .5) % 1; draw.text(c, "z", ox + cell * (.3 + ph * .22), oy - cell * (.3 + ph * .4), { size: (10 + ph * 8) * S, color: `rgba(255,246,227,${1 - ph})`, weight: 700 }); }
+  // thought bubble with the wanted volume
+  if (!over && joyT <= .2) {
+    const sd = olli.c >= N - 1 ? -1 : 1, up = olli.r === 0 ? .2 : -.4, bxx = ox + sd * cell * .4, byy = oy + up * cell, br = cell * .26 * ease.outBack(clamp(bubble, 0, 1));
+    c.fillStyle = "rgba(255,250,240,.96)"; c.beginPath(); c.arc(ox + sd * cell * .2, oy + (up + .2) * cell, cell * .035, 0, TAU); c.fill(); c.beginPath(); c.arc(ox + sd * cell * .27, oy + (up + .13) * cell, cell * .05, 0, TAU); c.fill();
+    draw.circle(c, bxx, byy, br, "rgba(255,250,240,.96)", "rgba(43,35,64,.25)", 1.5); if (br > 4) drawBook(c, "book", wish, bxx, byy, br * 1.9);
+  }
+  drawCard(c, t); drawShelf(c);
+}
+Lab.boot();
+})();
+</script></body></html>

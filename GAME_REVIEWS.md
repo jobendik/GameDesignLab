@@ -5,11 +5,12 @@
 > Scores are 1–10 per `QUALITY_STANDARD.md`; "subjective" judgements come from code reading and scripted play, not human playtests.
 
 
-## Standalone arcade games (`games/`) — 10/65 reviewed
+## Standalone arcade games (`games/`) — 11/65 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
 | [Furniture Forts](games/furniture-forts.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/games/furniture-forts.md) |
+| [Mystic Potion Sort](games/mystic-potion-sort.html) | 5 → **8** | 8 | 8 | 8 | 8 | 8 | 7 | 9 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/games/mystic-potion-sort.md) |
 | [Power Wash Royale](games/power-wash-royale.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 8 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/games/power-wash-royale.md) |
 | [Breach Vector](games/breach-vector.html) | 4 → **7** | 7 | 8 | 7 | 7 | 6 | 7 | 7 | 7 | 8 | 8 | 8 | 7 | [record](docs/reviews/games/breach-vector.md) |
 | [Thimble & the Bramble King](games/little-hero-adventure.html) | 2 → **7** | 7 | 7 | 7 | 7 | 6 | 6 | 7 | 7 | 6 | 7 | 8 | 7 | [record](docs/reviews/games/little-hero-adventure.md) |
@@ -20,17 +21,17 @@
 | [Sprouty's Garden](games/sproutys-garden.html) | 2 → **7** | 7 | 7 | 7 | 8 | 7 | 6 | 8 | 8 | 7 | 8 | 8 | 7 | [record](docs/reviews/games/sproutys-garden.md) |
 | [Star Trail Adventure](games/star-trail-adventure.html) | 4 → **7** | 7 | 6 | 7 | 8 | 6 | 6 | 7 | 7 | 6 | 8 | 8 | 7 | [record](docs/reviews/games/star-trail-adventure.md) |
 
-Averages: overall **7.2** · Fun 7.2 · Depth 7.1 · Feel 7.2 · Look 7.7 · Anim 6.6 · Audio 6.5 · Ctrl 7.3 · Onb 7.5 · Replay 7.0 · Perf 7.9 · Robust 8.0 · Polish 7.2
+Averages: overall **7.3** · Fun 7.3 · Depth 7.2 · Feel 7.3 · Look 7.7 · Anim 6.7 · Audio 6.5 · Ctrl 7.5 · Onb 7.5 · Replay 7.1 · Perf 8.0 · Robust 8.0 · Polish 7.3
 
 **Below 8 — revisit first:** [Breach Vector](games/breach-vector.html) (7), [Thimble & the Bramble King](games/little-hero-adventure.html) (7), [Neon Hagen](games/neon-hagen.html) (7), [Static Bloom](games/neon-strike.html) (7), [Physics Charades — Pose or Splat](games/physics-charades.html) (7), [Puppet Panic — String-Pulling Charades](games/puppet-panic.html) (7), [Sprouty's Garden](games/sproutys-garden.html) (7), [Star Trail Adventure](games/star-trail-adventure.html) (7)
 
-<details><summary>55 not yet reviewed (baseline prototypes)</summary>
+<details><summary>54 not yet reviewed (baseline prototypes)</summary>
 
-`games/arcanum-pinball` · `games/aura-rooms` · `games/bloom-bureau` · `games/bounce-dungeon` · `games/brink-edge-rush` · `games/brink-reactor` · `games/busy-beavers` · `games/chomp-chain-rush` · `games/chroma-frenzy` · `games/cosmic-devourer` · `games/exquisite-corpse` · `games/frequency` · `games/grapple-gliders` · `games/hyper-dash` · `games/kosmisk-slange` · `games/last-war-ultimate` · `games/lumberjack-idle-empire` · `games/lumis-luminescence` · `games/lysarkivet` · `games/maze-munch-rush` · `games/mystic-potion-sort` · `games/neon-ash` · `games/neon-burst` · `games/neon-core-ballstorm` · `games/neon-galaxy` · `games/neon-nexus-omega` · `games/neon-pin-climb` · `games/neon-pinball-rush` · `games/neon-runner-overdrive` · `games/neon-survivor-overdrive` · `games/orbit-drift-3d` · `games/orbit-drift-sling` · `games/painted-wilds` · `games/pinata-pop` · `games/pinball-wizard-3d` · `games/pitch-26` · `games/pocket-football` · `games/pulsar` · `games/ricochet-brawlers` · `games/slithergar` · `games/sonar-abyss` · `games/spire` · `games/star-petal-ballstorm` · `games/svev-miner` · `games/swarm-logic` · `games/the-elevator` · `games/the-global-dig` · `games/the-grid-war` · `games/the-tower` · `games/tiny-detective-cafe` · `games/tiny-tactics-cards` · `games/unicorn-magic-sort` · `games/unscrew-it` · `games/void-drift` · `games/word-forts`
+`games/arcanum-pinball` · `games/aura-rooms` · `games/bloom-bureau` · `games/bounce-dungeon` · `games/brink-edge-rush` · `games/brink-reactor` · `games/busy-beavers` · `games/chomp-chain-rush` · `games/chroma-frenzy` · `games/cosmic-devourer` · `games/exquisite-corpse` · `games/frequency` · `games/grapple-gliders` · `games/hyper-dash` · `games/kosmisk-slange` · `games/last-war-ultimate` · `games/lumberjack-idle-empire` · `games/lumis-luminescence` · `games/lysarkivet` · `games/maze-munch-rush` · `games/neon-ash` · `games/neon-burst` · `games/neon-core-ballstorm` · `games/neon-galaxy` · `games/neon-nexus-omega` · `games/neon-pin-climb` · `games/neon-pinball-rush` · `games/neon-runner-overdrive` · `games/neon-survivor-overdrive` · `games/orbit-drift-3d` · `games/orbit-drift-sling` · `games/painted-wilds` · `games/pinata-pop` · `games/pinball-wizard-3d` · `games/pitch-26` · `games/pocket-football` · `games/pulsar` · `games/ricochet-brawlers` · `games/slithergar` · `games/sonar-abyss` · `games/spire` · `games/star-petal-ballstorm` · `games/svev-miner` · `games/swarm-logic` · `games/the-elevator` · `games/the-global-dig` · `games/the-grid-war` · `games/the-tower` · `games/tiny-detective-cafe` · `games/tiny-tactics-cards` · `games/unicorn-magic-sort` · `games/unscrew-it` · `games/void-drift` · `games/word-forts`
 
 </details>
 
-## Phone Game Lab (`PhoneGameLab/`) — 64/70 reviewed
+## Phone Game Lab (`PhoneGameLab/`) — 68/70 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
@@ -93,7 +94,11 @@ Averages: overall **7.2** · Fun 7.2 · Depth 7.1 · Feel 7.2 · Look 7.7 · Ani
 | [Lantern Tail](PhoneGameLab/games/61-lantern-tail/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 8 | 7 | 9 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/61-lantern-tail.md) |
 | [Ribbon Rodeo](PhoneGameLab/games/62-ribbon-rodeo/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 7 | 8 | 8 | 8 | 8 | [record](docs/reviews/PhoneGameLab/62-ribbon-rodeo.md) |
 | [Big Drip](PhoneGameLab/games/63-big-drip/index.html) | 2 → **8** | 8 | 8 | 7 | 8 | 7 | 7 | 8 | 8 | 8 | 8 | 8 | 8 | [record](docs/reviews/PhoneGameLab/63-big-drip.md) |
+| [Last Slice](PhoneGameLab/games/64-last-slice/index.html) | 2 → **8** | 8 | 8 | 7 | 9 | 7 | 7 | 9 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/64-last-slice.md) |
+| [Pocket Reef](PhoneGameLab/games/65-pocket-reef/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/65-pocket-reef.md) |
 | [Potting Shed](PhoneGameLab/games/66-potting-shed/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 8 | 9 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/66-potting-shed.md) |
+| [Lantern Noodles](PhoneGameLab/games/67-lantern-noodles/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/67-lantern-noodles.md) |
+| [Chute First](PhoneGameLab/games/68-chute-first/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 9 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/68-chute-first.md) |
 | [Misfired](PhoneGameLab/games/05-misfired/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/05-misfired.md) |
 | [Goat Up](PhoneGameLab/games/25-goat-up/index.html) | 2 → **7** | 7 | 6 | 8 | 8 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/25-goat-up.md) |
 | [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 8 | 8 | 8 | 6 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/38-tumblepeg.md) |
@@ -103,17 +108,22 @@ Averages: overall **7.9** · Fun 7.9 · Depth 7.2 · Feel 8.0 · Look 8.3 · Ani
 
 **Below 8 — revisit first:** [Misfired](PhoneGameLab/games/05-misfired/index.html) (7), [Goat Up](PhoneGameLab/games/25-goat-up/index.html) (7), [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) (7), [Postage Stamp](PhoneGameLab/games/41-postage-stamp/index.html) (7)
 
-<details><summary>6 not yet reviewed (baseline prototypes)</summary>
+<details><summary>2 not yet reviewed (baseline prototypes)</summary>
 
-`PhoneGameLab/64-last-slice` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/67-lantern-noodles` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
+`PhoneGameLab/69-punchline` · `PhoneGameLab/70-rhythm-lane`
 
 </details>
 
-## Pocket Pals (`PhoneGameLab2/`) — 0/80 reviewed
+## Pocket Pals (`PhoneGameLab2/`) — 1/80 reviewed
 
+| Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
+|---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
+| [Bedtime Stacks](PhoneGameLab2/games/bedtime-stacks/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab2/bedtime-stacks.md) |
 
-<details><summary>80 not yet reviewed (baseline prototypes)</summary>
+Averages: overall **8.0** · Fun 8.0 · Depth 8.0 · Feel 8.0 · Look 8.0 · Anim 7.0 · Audio 7.0 · Ctrl 9.0 · Onb 8.0 · Replay 7.0 · Perf 9.0 · Robust 8.0 · Polish 8.0
 
-`PhoneGameLab2/2048` · `PhoneGameLab2/balloon-splash` · `PhoneGameLab2/basketball` · `PhoneGameLab2/berry-bounce` · `PhoneGameLab2/brick-blast` · `PhoneGameLab2/brick-breaker` · `PhoneGameLab2/bridge` · `PhoneGameLab2/bubble-shooter` · `PhoneGameLab2/bubble-up` · `PhoneGameLab2/building-block-puzzle` · `PhoneGameLab2/bumper-park` · `PhoneGameLab2/busy-bugs` · `PhoneGameLab2/cake-tower` · `PhoneGameLab2/candy-connect` · `PhoneGameLab2/castle-craft` · `PhoneGameLab2/cats-and-cans` · `PhoneGameLab2/clean-the-ocean` · `PhoneGameLab2/climber-tom` · `PhoneGameLab2/connect` · `PhoneGameLab2/cupid-tom` · `PhoneGameLab2/destroy-aliens` · `PhoneGameLab2/donut-spin` · `PhoneGameLab2/dress-up` · `PhoneGameLab2/face-designer` · `PhoneGameLab2/find-pattern` · `PhoneGameLab2/fishtastic` · `PhoneGameLab2/fishy-frenzy` · `PhoneGameLab2/flappy-tom` · `PhoneGameLab2/football` · `PhoneGameLab2/fruit-boom` · `PhoneGameLab2/go-up` · `PhoneGameLab2/goal` · `PhoneGameLab2/guitar-ace` · `PhoneGameLab2/happy-connect` · `PhoneGameLab2/happy-face` · `PhoneGameLab2/hit-the-road` · `PhoneGameLab2/hole-chase` · `PhoneGameLab2/hungry-fish` · `PhoneGameLab2/ice-cream-shop` · `PhoneGameLab2/ice-smash` · `PhoneGameLab2/jigsaw-puzzles` · `PhoneGameLab2/jump` · `PhoneGameLab2/jungle-shot` · `PhoneGameLab2/make-a-kite` · `PhoneGameLab2/marble-mix-up` · `PhoneGameLab2/maze` · `PhoneGameLab2/memory` · `PhoneGameLab2/monkey-catch` · `PhoneGameLab2/mower` · `PhoneGameLab2/pinata-drop` · `PhoneGameLab2/planet-hop` · `PhoneGameLab2/race-car` · `PhoneGameLab2/rainbows` · `PhoneGameLab2/rocket-fun` · `PhoneGameLab2/rolling-ball` · `PhoneGameLab2/sky-high` · `PhoneGameLab2/sky-race` · `PhoneGameLab2/sky-skater` · `PhoneGameLab2/sleepy-bugs` · `PhoneGameLab2/slice-and-sip` · `PhoneGameLab2/sliding-pets` · `PhoneGameLab2/snack-baskets` · `PhoneGameLab2/snake-trails` · `PhoneGameLab2/snakes-and-ladders` · `PhoneGameLab2/snappy-frog` · `PhoneGameLab2/space-piano` · `PhoneGameLab2/space-trails` · `PhoneGameLab2/splashy` · `PhoneGameLab2/spooky-train` · `PhoneGameLab2/spray-paint` · `PhoneGameLab2/sub-adventure` · `PhoneGameLab2/super-balloons` · `PhoneGameLab2/tap-tap` · `PhoneGameLab2/tiny-puzzles` · `PhoneGameLab2/tom-run` · `PhoneGameLab2/totem-blast` · `PhoneGameLab2/unicorns` · `PhoneGameLab2/water-rush` · `PhoneGameLab2/whack-a-mouse` · `PhoneGameLab2/wire-ball`
+<details><summary>79 not yet reviewed (baseline prototypes)</summary>
+
+`PhoneGameLab2/balloon-splash` · `PhoneGameLab2/basketball` · `PhoneGameLab2/berry-bounce` · `PhoneGameLab2/brick-blast` · `PhoneGameLab2/brick-breaker` · `PhoneGameLab2/bridge` · `PhoneGameLab2/bubble-shooter` · `PhoneGameLab2/bubble-up` · `PhoneGameLab2/building-block-puzzle` · `PhoneGameLab2/bumper-park` · `PhoneGameLab2/busy-bugs` · `PhoneGameLab2/cake-tower` · `PhoneGameLab2/candy-connect` · `PhoneGameLab2/castle-craft` · `PhoneGameLab2/cats-and-cans` · `PhoneGameLab2/clean-the-ocean` · `PhoneGameLab2/climber-tom` · `PhoneGameLab2/connect` · `PhoneGameLab2/cupid-tom` · `PhoneGameLab2/destroy-aliens` · `PhoneGameLab2/donut-spin` · `PhoneGameLab2/dress-up` · `PhoneGameLab2/face-designer` · `PhoneGameLab2/find-pattern` · `PhoneGameLab2/fishtastic` · `PhoneGameLab2/fishy-frenzy` · `PhoneGameLab2/flappy-tom` · `PhoneGameLab2/football` · `PhoneGameLab2/fruit-boom` · `PhoneGameLab2/go-up` · `PhoneGameLab2/goal` · `PhoneGameLab2/guitar-ace` · `PhoneGameLab2/happy-connect` · `PhoneGameLab2/happy-face` · `PhoneGameLab2/hit-the-road` · `PhoneGameLab2/hole-chase` · `PhoneGameLab2/hungry-fish` · `PhoneGameLab2/ice-cream-shop` · `PhoneGameLab2/ice-smash` · `PhoneGameLab2/jigsaw-puzzles` · `PhoneGameLab2/jump` · `PhoneGameLab2/jungle-shot` · `PhoneGameLab2/make-a-kite` · `PhoneGameLab2/marble-mix-up` · `PhoneGameLab2/maze` · `PhoneGameLab2/memory` · `PhoneGameLab2/monkey-catch` · `PhoneGameLab2/mower` · `PhoneGameLab2/pinata-drop` · `PhoneGameLab2/planet-hop` · `PhoneGameLab2/race-car` · `PhoneGameLab2/rainbows` · `PhoneGameLab2/rocket-fun` · `PhoneGameLab2/rolling-ball` · `PhoneGameLab2/sky-high` · `PhoneGameLab2/sky-race` · `PhoneGameLab2/sky-skater` · `PhoneGameLab2/sleepy-bugs` · `PhoneGameLab2/slice-and-sip` · `PhoneGameLab2/sliding-pets` · `PhoneGameLab2/snack-baskets` · `PhoneGameLab2/snake-trails` · `PhoneGameLab2/snakes-and-ladders` · `PhoneGameLab2/snappy-frog` · `PhoneGameLab2/space-piano` · `PhoneGameLab2/space-trails` · `PhoneGameLab2/splashy` · `PhoneGameLab2/spooky-train` · `PhoneGameLab2/spray-paint` · `PhoneGameLab2/sub-adventure` · `PhoneGameLab2/super-balloons` · `PhoneGameLab2/tap-tap` · `PhoneGameLab2/tiny-puzzles` · `PhoneGameLab2/tom-run` · `PhoneGameLab2/totem-blast` · `PhoneGameLab2/unicorns` · `PhoneGameLab2/water-rush` · `PhoneGameLab2/whack-a-mouse` · `PhoneGameLab2/wire-ball`
 
 </details>

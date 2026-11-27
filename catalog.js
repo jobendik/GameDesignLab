@@ -379,7 +379,7 @@ window.GDL_CATALOG = {
    "path": "games/mystic-potion-sort.html",
    "collection": "arcade",
    "title": "Mystic Potion Sort",
-   "desc": "Sort mystic potions in tubes to win.",
+   "desc": "Tip, pour and cork enchanted potions across 60 solver-verified shelves of veiled layers, rune-sealed vials and stubby phials — plus a fresh Daily Brew.",
    "genre": [
     "Puzzle"
    ],
@@ -388,6 +388,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--mystic-potion-sort.jpg"
   },
   {
@@ -998,7 +1000,7 @@ window.GDL_CATALOG = {
    "path": "games/unicorn-magic-sort.html",
    "collection": "arcade",
    "title": "Unicorn Magic Sort",
-   "desc": "Magical unicorn tube-sorting puzzle.",
+   "desc": "Sort charms between jars so twins fuse — dewdrop to blossom to star, all the way to a unicorn — across 40 solvable wishes and an endless Rainbow Rush.",
    "genre": [
     "Puzzle"
    ],
@@ -2293,7 +2295,8 @@ window.GDL_CATALOG = {
    "n": 62,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--62-ribbon-rodeo.jpg"
   },
   {
    "id": "PhoneGameLab/63-big-drip",
@@ -2312,40 +2315,48 @@ window.GDL_CATALOG = {
    "n": 63,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--63-big-drip.jpg"
   },
   {
    "id": "PhoneGameLab/64-last-slice",
    "path": "PhoneGameLab/games/64-last-slice/index.html",
    "collection": "PhoneGameLab",
-   "title": "Tower Defense",
-   "desc": "Tap to place towers (10 gold). They auto-fire at enemies on the path.",
+   "title": "Last Slice",
+   "desc": "Bugs want your pie. Not on your blanket.",
    "genre": [
-    "Minigame"
+    "Strategy & Idle"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 64,
-   "v2": false
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--64-last-slice.jpg"
   },
   {
-   "id": "PhoneGameLab/65-idle-clicker",
-   "path": "PhoneGameLab/games/65-idle-clicker/index.html",
+   "id": "PhoneGameLab/65-pocket-reef",
+   "path": "PhoneGameLab/games/65-pocket-reef/index.html",
    "collection": "PhoneGameLab",
-   "title": "Idle Clicker",
-   "desc": "Tap, buy upgrades, automate income.",
+   "title": "Pocket Reef",
+   "desc": "Tap a clam. Grow a reef. Let it hum.",
    "genre": [
-    ".io & Idle"
+    "Strategy & Idle"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 65,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--65-idle-clicker.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--65-pocket-reef.jpg"
   },
   {
    "id": "PhoneGameLab/66-potting-shed",
@@ -2381,41 +2392,45 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 67,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/68-sort-baskets",
-   "path": "PhoneGameLab/games/68-sort-baskets/index.html",
+   "id": "PhoneGameLab/68-chute-first",
+   "path": "PhoneGameLab/games/68-chute-first/index.html",
    "collection": "PhoneGameLab",
-   "title": "Sort Baskets",
-   "desc": "Fling falling items into the right basket.",
+   "title": "Chute First",
+   "desc": "Sort first. Think faster.",
    "genre": [
-    "Skill & Rhythm"
+    "Reflex & Taps"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 68,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--68-sort-baskets.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/69-piano-tiles",
-   "path": "PhoneGameLab/games/69-piano-tiles/index.html",
+   "id": "PhoneGameLab/69-punchline",
+   "path": "PhoneGameLab/games/69-punchline/index.html",
    "collection": "PhoneGameLab",
-   "title": "Piano Tiles",
-   "desc": "Tap the black tiles — never miss one.",
+   "title": "Punchline",
+   "desc": "Tap the punched holes. Your taps play the tune.",
    "genre": [
     "Skill & Rhythm"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 69,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--69-piano-tiles.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/70-rhythm-lane",
@@ -2433,23 +2448,6 @@ window.GDL_CATALOG = {
    "n": 70,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab--70-rhythm-lane.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/2048",
-   "path": "PhoneGameLab2/games/2048/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "2048",
-   "desc": "Swipe to merge equal tiles up to 2048.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 1,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--2048.jpg"
   },
   {
    "id": "PhoneGameLab2/balloon-splash",
@@ -2484,6 +2482,24 @@ window.GDL_CATALOG = {
    "n": 3,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--basketball.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/bedtime-stacks",
+   "path": "PhoneGameLab2/games/bedtime-stacks/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Bedtime Stacks",
+   "desc": "Slide the books. Bring Olli his bedtime story.",
+   "genre": [
+    "Puzzle"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/berry-bounce",

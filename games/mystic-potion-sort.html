@@ -168,7 +168,7 @@ const REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: red
 const COLORS = [
   { hex: '#ff4f86', name: 'Rose' }, { hex: '#40d9ff', name: 'Aether' }, { hex: '#ffd45e', name: 'Sun' }, { hex: '#62f59b', name: 'Mint' },
   { hex: '#9b75ff', name: 'Rune' }, { hex: '#ff8a3d', name: 'Ember' }, { hex: '#3f7dff', name: 'Moon' }, { hex: '#f36dff', name: 'Charm' },
-  { hex: '#c9f25a', name: 'Lime' }, { hex: '#e33b3b', name: 'Ruby' }, { hex: '#e8ecff', name: 'Frost' }, { hex: '#b0845a', name: 'Amber' }];
+  { hex: '#12908f', name: 'Tide' }, { hex: '#e33b3b', name: 'Ruby' }, { hex: '#e8ecff', name: 'Frost' }, { hex: '#b0845a', name: 'Amber' }];
 const CHAPTERS = ["Apprentice's Shelf", 'The Veiled Cellar', 'The Runebound Vault', 'The Narrow Hours', 'The Deep Stacks', 'The Star Still'];
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -256,7 +256,7 @@ function solveS(A0, maxNodes, wn, wd) {       // f = g·wd + h·wn ; returns [[f
 }
 function analyse(T) {       // null if no route was found; otherwise the shortest route the searches found (par)
   const A = enc(T); let best = solveS(A, 7000, 2, 1); if (!best) return null;
-  for (const [wn, wd, cap] of [[3, 2, 6000], [5, 4, 6000]]) { const r = solveS(A, cap, wn, wd); if (r && r.length < best.length) best = r; }
+  for (const [wn, wd, cap] of [[3, 2, 6000], [5, 4, 8000], [1, 1, 12000]]) { const r = solveS(A, cap, wn, wd); if (r && r.length < best.length) best = r; }
   return best.length;
 }
 
@@ -389,7 +389,7 @@ const chapName = id => id === 'daily' ? new Date().toLocaleDateString(undefined,
 
 function updateHUD() {
   $('hLevel').textContent = lvName(cur); $('hChap').textContent = chapName(cur);
-  $('hMoves').textContent = moves; $('hPar').textContent = 'par ' + level.par; $('hStars').textContent = starStr(rating(moves)); $('hEss').textContent = '✦ ' + save.ess;
+  $('hMoves').textContent = moves; $('hPar').textContent = 'pours · par ' + level.par; $('hStars').textContent = starStr(rating(moves)); $('hEss').textContent = '✦ ' + save.ess;
   $('cUndo').textContent = undoFree > 0 ? undoFree + ' free' : UNDO_COST + ' ✦'; $('bUndo').disabled = !hist.length || won;
   $('cHint').textContent = tutorial ? 'free' : save.hints > 0 ? save.hints + ' free' : HINT_COST + ' ✦'; $('bHint').disabled = won;
   $('cVial').textContent = usedExtra ? 'added' : VIAL_COST + ' ✦'; $('bVial').disabled = usedExtra || won;
@@ -426,7 +426,9 @@ function doPour(a, b) {
   const n0 = tubes[a].c.length, d0 = tubes[b].c.length, m = pour(tubes, a, b); moves++; sel = -1; hint = null;
   if (m.rev >= 0) seen.push([a, m.rev]);
   const sp = REDUCED ? .45 : 1;
-  anims.push({ a, b, v: m.v, k: m.k, n0, d0, dir: L[a].x <= L[b].x ? 1 : -1, ph: 0, u: 0, pb: 0, m, dA: .2 * sp, dB: (.2 + .13 * m.k) * sp, dC: .2 * sp, ended: false });
+  let dir = L[a].x <= L[b].x ? 1 : -1; const reach = L[a].cap * L[a].ch + L[a].w * .6;      // tip from the side that keeps the lifted vial on screen
+  if (dir < 0 && L[b].x + reach > W && L[b].x - reach > 0) dir = 1; else if (dir > 0 && L[b].x - reach < 0 && L[b].x + reach < W) dir = -1;
+  anims.push({ a, b, v: m.v, k: m.k, n0, d0, dir, ph: 0, u: 0, pb: 0, m, dA: .2 * sp, dB: (.2 + .13 * m.k) * sp, dC: .2 * sp, ended: false });
   Snd.play('lift'); vib(8);
   if (isSolved(tubes)) won = true;
   refreshState(); if (!stuck && !won) setMsg(m.k > 1 ? 'Poured ' + m.k + ' measures of ' + COLORS[m.v].name : 'Poured ' + COLORS[m.v].name);
@@ -532,8 +534,8 @@ function resize() {
   cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); layout(); if (paused || !raf) draw();
 }
 function layout() {
-  const n = tubes.length; if (!n || !W) return; const topPad = 36, availH = H - topPad - 6; let best = null;
-  for (let r = 1; r <= 3; r++) { const per = Math.ceil(n / r), slot = (W - 10) / per, w = Math.min(slot * .56, (availH / r - 20) / (CHR * 4 + 1.1), 60); if (!best || w > best.w + 1.5) best = { r, w, slot }; }
+  const n = tubes.length; if (!n || !W) return; const topPad = 36, availH = H - topPad - 6, maxW = clamp(Math.min(W, H) / 7.5, 60, 84); let best = null;
+  for (let r = 1; r <= 3; r++) { const per = Math.ceil(n / r), slot = (W - 10) / per, w = Math.min(slot * .56, (availH / r - 20) / (CHR * 4 + 1.1), maxW); if (!best || w > best.w + 1.5) best = { r, w, slot }; }
   const { r, w } = best, ch = w * CHR, rowH = w * (CHR * 4 + 1.1) + 20, y0 = topPad + (availH - r * rowH) / 2, old = L; L = []; grads.clear();
   let idx = 0; const base = Math.floor(n / r), extra = n % r;
   for (let row = 0; row < r; row++) {
@@ -659,7 +661,7 @@ function drawTube(i) {
       const v = layBuf[j], amt = layBuf[j + 1], yc = yb - amt * l.ch / 2; yb -= amt * l.ch; cell++;
       if (amt < .95) continue;
       if (v > 15) { g.fillStyle = 'rgba(205,184,255,' + (.5 + .2 * Math.sin(clock * 2 + i + cell)) + ')'; g.font = '700 ' + Math.round(l.ch * .6) + 'px Cinzel,serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('?', 0, yc + 1); }
-      else { g.fillStyle = v === 10 || v === 2 || v === 8 ? 'rgba(30,14,60,.42)' : 'rgba(12,5,30,.36)'; glyph(v, 0, yc + (cell === 1 ? -l.ch * .06 : 0), l.ch * .26); }
+      else { g.fillStyle = v === 8 ? 'rgba(255,255,255,.5)' : 'rgba(14,6,34,.4)'; glyph(v, 0, yc + (cell === 1 ? -l.ch * .06 : 0), l.ch * .26); }
     }
   }
   g.lineWidth = Math.max(2, w * .05); g.strokeStyle = t.seal >= 0 ? 'rgba(200,180,255,.5)' : 'rgba(255,255,255,.5)'; tubePath(w, Ht); g.stroke();
@@ -734,7 +736,7 @@ click('bPlay', () => startLevel(Math.max(1, save.cur || save.cleared + 1))); cli
 click('bReplay', () => startLevel(cur)); click('bNext', next); click('bWMap', () => showMap('win'));
 click('bMapClose', closeMap);
 function closeMap() { $('mapOv').classList.remove('show'); if (showMap.from === 'pause') $('pauseOv').classList.add('show'); }
-$('mapGrid').addEventListener('click', e => { const b = e.target.closest('button'); if (!b || b.disabled) return; Snd.init(); Snd.play('ui'); paused = false; startLevel(+b.dataset.n); });
+$('mapGrid').addEventListener('click', e => { const b = e.target.closest('button'); if (!b || b.disabled) return; Snd.init(); Snd.play('ui'); if (paused) setPaused(false); startLevel(+b.dataset.n); });
 for (const s of ['0', '1']) { click('bSnd' + s, () => toggle('snd')); click('bMus' + s, () => toggle('mus')); }
 function moveCursor(dx, dy) {
   kbd = true; const n = L.length; if (!n) return; cursor = clamp(cursor, 0, n - 1);
@@ -755,7 +757,7 @@ window.addEventListener('keydown', e => {
   else if (k === ' ' || k === 'Enter') { kbd = true; tapTube(cursor); }
   else if (k === 'z' || k === 'u' || k === 'Backspace') undo(); else if (k === 'h') useHint(); else if (k === 'r') restart(); else if (k === 'v') addVial();
   else if (k === 'Escape' && sel >= 0) { sel = -1; Snd.play('drop'); } else if (k === 'Escape' || k === 'p') { if (!won) setPaused(true); }
-  else if (k === 'm') { muted = !muted || !(save.snd || save.mus) ? false : true; if (!muted && !save.snd && !save.mus) save.snd = save.mus = true; Snd.apply(); updateHUD(); toast(muted ? 'Muted' : 'Sound on'); }
+  else if (k === 'm') { if (muted || (!save.snd && !save.mus)) { muted = false; if (!save.snd && !save.mus) save.snd = save.mus = true; } else muted = true; Snd.apply(); updateHUD(); toast(muted ? 'Muted' : 'Sound on'); }
   else if (/^[0-9]$/.test(k)) { const i = k === '0' ? 9 : +k - 1; if (i < tubes.length) { kbd = true; tapTube(i); } }
   else return;
   e.preventDefault();
