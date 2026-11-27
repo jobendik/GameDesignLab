@@ -103,35 +103,39 @@ window.LAB_GAMES = [
     "slug": "47-fountain-court",
     "t": "Fountain Court",
     "d": "Turn the tiles. Wake every fountain.",
-    "v2": true
+    "v2": true,
+    "score": 8
    },
    {
     "n": 48,
-    "slug": "48-water-sort",
-    "t": "Water Sort",
-    "d": "Pour colors between tubes until each is one color.",
-    "thumb": "../thumbs/PhoneGameLab--48-water-sort.jpg"
+    "slug": "48-decant",
+    "t": "Decant",
+    "d": "Pour until every bottle holds one flavour.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 49,
-    "slug": "49-ball-sort",
-    "t": "Ball Sort",
-    "d": "Move balls between tubes to sort by color.",
-    "thumb": "../thumbs/PhoneGameLab--49-ball-sort.jpg"
+    "slug": "49-tall-order",
+    "t": "Tall Order",
+    "d": "Stack every peg one colour, widest ring first.",
+    "v2": true
    },
    {
     "n": 50,
     "slug": "50-bolt-hole",
     "t": "Bolt Hole",
     "d": "Unscrew, re-park, let the plates drop.",
-    "v2": true
+    "v2": true,
+    "score": 8
    },
    {
     "n": 51,
-    "slug": "51-15-puzzle",
-    "t": "15 Puzzle",
-    "d": "Slide numbered tiles into order.",
-    "thumb": "../thumbs/PhoneGameLab--51-15-puzzle.jpg"
+    "slug": "51-slidescape",
+    "t": "Slidescape",
+    "d": "Slide the scene back together.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 52,
@@ -148,11 +152,20 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab--53-block-blast.jpg"
    },
    {
+    "n": 54,
+    "slug": "54-hedgeroll",
+    "t": "Hedgeroll",
+    "d": "Curl up, roll till you bump, find the burrow.",
+    "v2": true,
+    "score": 8
+   },
+   {
     "n": 55,
-    "slug": "55-laser-mirror",
-    "t": "Laser Mirror",
-    "d": "Rotate mirrors to hit the target.",
-    "thumb": "../thumbs/PhoneGameLab--55-laser-mirror.jpg"
+    "slug": "55-glasswright",
+    "t": "Glasswright",
+    "d": "Swivel the mirrors. Wake every lantern.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 56,
@@ -570,17 +583,6 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--37-star-jar.jpg"
-   }
-  ]
- },
- {
-  "cat": "Minigame",
-  "items": [
-   {
-    "n": 54,
-    "slug": "54-hedgeroll",
-    "t": "Maze",
-    "d": "Swipe to move to the goal."
    }
   ]
  },

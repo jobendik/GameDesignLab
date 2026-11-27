@@ -1,0 +1,227 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Tall Order</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* TALL ORDER — a wooden ring-stacker toy that somebody put away wrong. Tap a peg to pick up its top ring, tap
+ * another to hop it across. A ring may only land on an empty peg or on a ring at least as wide as itself — colour
+ * does not matter for landing, only for the goal: every peg one colour, widest ring at the bottom.
+ * Identity: painted wooden rings on birch pegs over a sunny play mat; knocks pitched by ring size; bouncy music.
+ * Twists:   size ordering instead of colour matching (so you dig out the wide rings first) and short HOLD pegs that
+ *           take a single ring. Finished pegs are never locked, because sometimes one has to lend a ring.
+ * Levels:   scrambled from the solved toy by a loop-erased random walk of legal moves (every move is reversible, so
+ *           every scramble is solvable); A* gives the move par (exact while the search is small) and the hint.  */
+Lab.init({
+  title: "Tall Order", tagline: "Stack every peg one colour, widest ring first.", category: "Puzzle & Logic",
+  howto: ["Tap a peg to lift its top ring, tap another to drop it", "Rings only land on wider or equal rings", "One colour per peg, biggest at the bottom"],
+  theme: { bg: "#ffe2a6", bg2: "#fff3d2", fg: "#4a2f1b", muted: "#8f6f4f", accent: "#e8503f", accent2: "#19a7a8", light: true },
+  orient: "any", music: { style: "bounce", key: "C", bpm: 96, vol: .32 }, restart: start, formatScore: n => "Toy " + Math.round(n),
+  attract(dt, t) { if (!pegs) { prog = { stars: {} }; load(10); mode = "demo"; } tick(dt); render(t); },
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, PI = Math.PI;
+const COL = ["#e8503f", "#3b82e0", "#3fb563", "#f29a1c", "#8d5fd3", "#19a7a8"];
+const TABLE = [[2, 3, [3, 3, 3], 4], [2, 3, [3, 3, 3], 7], [3, 3, [3, 3, 3, 3], 8], [3, 3, [3, 3, 3, 3], 11], [3, 3, [4, 4, 4, 4], 12], [3, 4, [4, 4, 4, 4, 1], 10], [3, 4, [4, 4, 4, 4], 13], [4, 3, [3, 3, 3, 3, 3], 12],
+  [4, 3, [4, 4, 4, 4, 1], 14], [4, 3, [4, 4, 4, 4, 4], 15], [3, 4, [5, 5, 5, 5], 16], [4, 4, [4, 4, 4, 4, 4], 16], [4, 4, [4, 4, 4, 4, 1, 1], 16], [5, 3, [4, 4, 4, 4, 4, 4], 17], [4, 4, [5, 5, 5, 5, 5], 19], [5, 4, [4, 4, 4, 4, 4, 4], 20]];
+let level, NS, caps, pegs, init, ids, par, prog, moves, hints, hist, mode, sel, hintM, introT, genMs, stuckT, crown;
+let land, rowsN, rh, rw, ui, pressT = {};
+
+/* ------------------------------------------------------------------ solver: ring = colour * 8 + size */
+const sz = r => r & 7, cl = r => r >> 3;
+const settled = s => { let j = 0; while (j < s.length && cl(s[j]) === cl(s[0]) && sz(s[j]) === NS - j) j++; return j; };
+const goal = S => S.every(s => !s.length || settled(s) === NS);
+const hfn = S => { let h = 0; for (const s of S) h += s.length - settled(s); return h; };   // every unsettled ring must move at least once
+const key = S => S.map((s, i) => caps[i] + ":" + s.join(",")).sort().join("|");
+const fits = (S, a, b) => a !== b && S[a].length > 0 && S[b].length < caps[b] && (!S[b].length || sz(S[b][S[b].length - 1]) >= sz(S[a][S[a].length - 1]));
+function options(S) {
+  const out = []; for (let a = 0; a < S.length; a++) { if (!S[a].length) continue; const seenE = {};
+    for (let b = 0; b < S.length; b++) { if (!fits(S, a, b)) continue; if (!S[b].length) { if (seenE[caps[b]] || (S[a].length === 1 && caps[a] === caps[b])) continue; seenE[caps[b]] = 1; } out.push([a, b]); } }
+  return out;
+}
+const apply = (S, m) => { const T = S.map(s => s.slice()); T[m[1]].push(T[m[0]].pop()); return T; };
+function astar(S, budget, w) {   // bucketed A*; w > 1 trades optimality for speed
+  w = w || 1; const best = new Map([[key(S), 0]]), buckets = [], push = (f, n) => (buckets[f] || (buckets[f] = [])).push(n); let nodes = 0;
+  push(Math.ceil(hfn(S) * w), { S, g: 0, p: null, m: null });
+  for (let f = 0; f < buckets.length; f++) { const B = buckets[f]; if (!B) continue;
+    while (B.length) { const n = B.pop(); if (goal(n.S)) { const path = []; for (let x = n; x.p; x = x.p) path.push(x.m); return path.reverse(); }
+      if (best.get(key(n.S)) < n.g) continue; if (++nodes > budget) return null;
+      for (const m of options(n.S)) { const T = apply(n.S, m), k = key(T), g = n.g + 1, old = best.get(k); if (old != null && old <= g) continue; best.set(k, g); push(Math.max(f, Math.ceil(g + hfn(T) * w)), { S: T, g, p: n, m }); } } }
+  return null;
+}
+const route = S => astar(S, 2500) || astar(S, 3500, 2.5);
+
+/* ------------------------------------------------------------------ levels */
+function spec(n) { if (n <= TABLE.length) return TABLE[n - 1]; const s = TABLE[11 + (n % 5)]; return [s[0], s[1], s[2], s[3] + (n % 4)]; }
+function load(n) {
+  const t0 = performance.now(); level = n; const sp = spec(n), k = sp[0]; NS = sp[1]; caps = sp[2]; let S = null;
+  for (let a = 0; a < 6 && !S; a++) {
+    const rnd = Lab.rng(n * 577 + a * 911 + 7); let cur = caps.map((c, i) => i < k ? Array.from({ length: NS }, (_, j) => i * 8 + NS - j) : []), last = -1;
+    const trail = [key(cur)], at = new Map([[trail[0], 0]]);   // loop-erased walk: its length is an upper bound on the distance home
+    for (let step = 1; step <= 420 && !S; step++) {
+      const mv = []; for (let x = 0; x < cur.length; x++) if (x !== last) for (let y = 0; y < cur.length; y++) if (fits(cur, x, y)) mv.push([x, y]);
+      if (!mv.length) { last = -1; continue; } const m = mv[(rnd() * mv.length) | 0]; cur = apply(cur, m); last = m[1];
+      const kk = key(cur), j = at.get(kk); if (j != null) { while (trail.length > j + 1) at.delete(trail.pop()); } else { at.set(kk, trail.length); trail.push(kk); }
+      if (trail.length - 1 >= sp[3] && step % 6 === 0 || step === 420) { if (goal(cur)) continue; const p = astar(cur, 1400);
+        if (p ? (p.length >= sp[3] || (step === 420 && p.length >= (a < 5 ? 3 : 1))) : true) { S = cur; const q = p || astar(cur, 3500, 2.5); par = Math.min(q ? q.length : 99, trail.length - 1); } }
+    }
+  }
+  ids = COL.map((_, i) => i); const rnd = Lab.rng(n * 31 + 1); for (let i = ids.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0, t = ids[i]; ids[i] = ids[j]; ids[j] = t; }
+  init = S; genMs = performance.now() - t0; hints = 0; reset(); introT = 0;
+}
+function reset() {
+  pegs = init.map((s, i) => ({ cap: caps[i], x: 0, y: 0, wig: 0, st: s.map(id => ({ id, x: 0, y: 0, fly: null, sq: 0, wig: 0, peg: i })) }));
+  moves = 0; hist = []; sel = -1; hintM = null; stuckT = 0; mode = "play"; crown = pegs.map((_, i) => done(i) ? 1 : 0); layout();
+  for (const P of pegs) P.st.forEach((r, j) => { r.x = P.x; r.y = P.y - (j + .5) * rh; });
+}
+const stacks = () => pegs.map(P => P.st.map(r => r.id)), done = i => pegs[i].st.length === NS && settled(pegs[i].st.map(r => r.id)) === NS;
+
+/* ------------------------------------------------------------------ layout */
+function layout() {
+  const p = Lab.play, n = pegs.length, U = Lab.clamp(Math.min(Lab.W, Lab.H) / 390, .85, 1.3), maxCap = Math.max.apply(0, caps); land = p.w > p.h * 1.15;
+  let ax, ay, aw, ah;
+  if (land) {
+    const side = Lab.clamp(p.w * .18, 116, 190); ax = p.x + side; aw = p.w - side * 2; ay = p.y + 6; ah = p.h - 12; rowsN = 1;
+    const lx = p.x + side / 2, rx = p.x + p.w - side / 2, my = p.y + p.h / 2, w = Math.min(120, side - 22), h = Math.min(48, (p.h - 50) / 3);
+    ui = { tx: lx, ty: my - 46, iy: my - 20, sy: my + 4, prev: { x: lx - 52, y: my + 28, w: 48, h: 46 }, next: { x: lx + 4, y: my + 28, w: 48, h: 46 }, btn: ["undo", "restart", "hint"].map((id, i) => ({ id, x: rx - w / 2, y: my + (i - 1) * (h + 12) - h / 2, w, h })) };
+  } else {
+    const top = 64 * U, bot = 78 * U; ax = p.x + 8; aw = p.w - 16; ay = p.y + top; ah = p.h - top - bot; rowsN = n > 4 ? 2 : 1;
+    const w = Math.min(118, (p.w - 48) / 3), h = 48, x0 = Lab.W / 2 - (w * 3 + 20) / 2, y = p.y + p.h - bot / 2 - h / 2 - 2;
+    ui = { tx: Lab.W / 2, ty: p.y + 15 * U, iy: p.y + 38 * U, sy: p.y + 57 * U, prev: { x: Lab.W / 2 - 132, y: p.y + 2, w: 48, h: 48 }, next: { x: Lab.W / 2 + 84, y: p.y + 2, w: 48, h: 48 }, btn: ["undo", "restart", "hint"].map((id, i) => ({ id, x: x0 + i * (w + 10), y, w, h })) };
+  }
+  ui.prev.id = "prev"; ui.next.id = "next";
+  const per = Math.ceil(n / rowsN), slot = Math.min(aw / per, 150); let rowH = Math.min(ah / rowsN, 420);
+  rw = Math.min(slot * .88, 128 * U); rh = Math.min(rw * .3, (rowH - 44) / (maxCap + 2.4)); rowH = Math.min(rowH, (maxCap + 2.4) * rh + 70);
+  const y0 = ay + (ah - rowH * rowsN) / 2; ui.mats = [];
+  for (let r = 0; r < rowsN; r++) { const k0 = r * per, cnt = Math.min(per, n - k0), x0 = ax + (aw - cnt * slot) / 2, by = y0 + (r + 1) * rowH - 26;
+    ui.mats.push({ x: x0 - 2, w: cnt * slot + 4, y: by });
+    for (let k = 0; k < cnt; k++) { const P = pegs[k0 + k]; P.x = x0 + (k + .5) * slot; P.y = by; P.slot = slot; P.top = by - rowH + 30; } }
+}
+Lab.onResize(() => { if (pegs) layout(); });
+const hit = (x, y) => [ui.prev, ui.next].concat(ui.btn).find(b => x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 4 && y <= b.y + b.h + 4);
+const pick = (x, y) => pegs.findIndex(P => Math.abs(x - P.x) < P.slot / 2 && y > P.top - 14 && y < P.y + 30);
+const ringW = s => rw * (.44 + .56 * s / NS), hoverY = P => P.y - (P.cap + 1.05) * rh;
+
+/* ------------------------------------------------------------------ actions */
+const knock = (s, v) => Lab.sfx("knock", { pitch: 1.75 - .95 * s / NS, vol: v || .8 });
+function fly(r, d) { r.fly = { x0: r.x, y0: r.y, t: 0, d: d || .28 }; }
+function tapPeg(i) {
+  if (mode !== "play" || i < 0) return; const P = pegs[i]; hintM = null;
+  if (sel < 0) { if (!P.st.length) { P.wig = 1; return Lab.sfx("tick", { pitch: .6, vol: .5 }); } sel = i; Lab.sfx("tick", { pitch: 1.9 - sz(P.st[P.st.length - 1].id) / NS, vol: .9 }); Lab.buzz(6); return; }
+  if (sel === i) { sel = -1; knock(sz(P.st[P.st.length - 1].id), .5); return; }
+  if (!fits(stacks(), sel, i)) { const top = P.st[P.st.length - 1]; if (top) top.wig = 1; else P.wig = 1; Lab.sfx("thud", { vol: .5, pitch: 1.3 }); Lab.buzz(20); if (P.st.length) sel = i; return; }
+  const r = pegs[sel].st.pop(); P.st.push(r); r.peg = i; hist.push([sel, i]); moves++; sel = -1; fly(r); Lab.sfx("swish", { vol: .35, pitch: 1.5 });
+}
+function landed(r) {   // a ring has come to rest: knock, squash the stack, crown a finished peg, then check the toy
+  const i = r.peg, P = pegs[i]; r.sq = 1; for (const o of P.st) if (o !== r) o.sq = Math.max(o.sq, .45); knock(sz(r.id)); Lab.buzz(8);
+  fx.puff(P.x, r.y + rh * .4, { n: 4, color: "#fff4d6", speed: 40, life: .3 });
+  if (mode !== "play") return;
+  if (done(i) && !crown[i]) { crown[i] = .001; Lab.audio.combo(pegs.filter((_, j) => done(j)).length + 1, { vol: .17 }); Lab.sfx("star", { vol: .5 }); fx.burst(P.x, P.y - (NS + .6) * rh, { n: 12, colors: [COL[ids[cl(r.id)]], "#ffd34d", "#fff"], speed: 150, life: .55, size: 3, gravity: 300, shape: "star" }); }
+  if (goal(stacks()) && pegs.every(Q => Q.st.every(o => !o.fly))) win();
+}
+function undo() {
+  if (!hist.length || mode !== "play") return Lab.sfx("tick", { pitch: .5, vol: .5 }); const [a, b] = hist.pop(), r = pegs[b].st.pop(); pegs[a].st.push(r); r.peg = a; moves--; sel = -1; hintM = null; fly(r, .22); Lab.sfx("swish", { pitch: 1.3, vol: .5 });
+}
+function restart() { if (!moves && !hist.length) return Lab.sfx("tick", { pitch: .5, vol: .5 }); const old = {}; for (const P of pegs) for (const r of P.st) old[r.id] = r; reset(); for (const P of pegs) for (const r of P.st) { const o = old[r.id]; r.x = o.x; r.y = o.y; fly(r, .3); } Lab.sfx("slide", { vol: .6 }); }
+function hint() {
+  if (mode !== "play") return; const p = route(stacks());
+  if (!p || !p.length) { Lab.toast("Too tangled to see a way — try undo", 1500, { y: .13 }); return Lab.sfx("warn", { vol: .5 }); }
+  hintM = { a: p[0][0], b: p[0][1], t: 0 }; sel = -1; hints++; Lab.sfx("chime", { pitch: .9 }); if (hints === 1) Lab.toast("Hint used: −1 star", 1100, { y: .13 });
+}
+function go(n) { if (n < 1 || n > prog.max) return Lab.sfx("tick", { pitch: .5, vol: .5 }); prog.lvl = n; Lab.store.set("prog", prog); load(n); Lab.setScore(n); Lab.sfx("flip"); }
+const rating = () => Math.max(1, Math.min(moves <= par ? 3 : moves <= par + 3 ? 2 : 1, 3 - hints));
+function win() {
+  mode = "won"; const st = rating(), lv = level;
+  prog.stars[lv] = Math.max(prog.stars[lv] || 0, st); prog.max = Math.max(prog.max, lv + 1); prog.lvl = lv + 1; Lab.store.set("prog", prog);
+  let k = 0; for (const P of pegs) P.st.forEach((r, j) => Lab.after(.2 + (k++) * .045, () => { r.sq = 1; Lab.audio.combo(j + 2 + (cl(r.id) % 3), { vol: .1 }); }));
+  const total = Object.values(prog.stars).reduce((a, b) => a + b, 0);
+  Lab.after(.75 + k * .045, () => Lab.win({ title: st === 3 ? "Neatly stacked" : "All in order", message: st === 3 ? "Not a single wasted hop." : hints ? "Stacked with a little help." : "Match the move par for the third star.",
+    score: lv, scoreLabel: "Cleared", button: "Next toy", stats: [["Moves", moves + " / par " + par], ["Rating", "★".repeat(st) + "☆".repeat(3 - st)], ["All stars", total]] }));
+}
+function start() {
+  prog = Lab.store.get("prog", null) || { lvl: 1, max: 1, stars: {} };
+  load(prog.lvl); Lab.setScore(level);
+  Lab.input.onDown = [(x, y) => { if (mode !== "play") return; const b = hit(x, y); if (b) { pressT[b.id] = 1; ({ undo, restart, hint, prev: () => go(level - 1), next: () => go(level + 1) })[b.id](); return; } tapPeg(pick(x, y)); }];
+  Lab.input.onKey = [k => { if (mode !== "play") return; const d = "123456".indexOf(k); k = k.toLowerCase(); if (d >= 0 && d < pegs.length) tapPeg(d); else if (k === "z" || k === "backspace") undo(); else if (k === "r") restart(); else if (k === "h") hint(); }];
+  Lab.expose({ get level() { return level; }, get moves() { return moves; }, get par() { return par; }, get hints() { return hints; }, get mode() { return mode; }, get sel() { return sel; }, get sizes() { return NS; }, get genMs() { return genMs; },
+    get busy() { return pegs.some(P => P.st.some(r => r.fly)); }, get pegs() { return pegs.map((P, i) => ({ cap: P.cap, x: P.x, y: P.y - P.cap * rh / 2, done: done(i), st: P.st.map(r => ({ col: cl(r.id), size: sz(r.id) })) })); },
+    get hintMove() { return hintM && [hintM.a, hintM.b]; }, solution() { return route(stacks()); }, fits(a, b) { return fits(stacks(), a, b); }, get progress() { return JSON.parse(JSON.stringify(prog)); },
+    get buttons() { return [ui.prev, ui.next].concat(ui.btn).map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); }, rating, go });
+  if (level === 1) Lab.hint("Tap a peg to lift its ring, then tap where it goes");
+  else if (caps.indexOf(1) >= 0 && !prog.stub) { prog.stub = 1; Lab.store.set("prog", prog); Lab.hint("The short peg holds one ring of any size"); }
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+
+/* ------------------------------------------------------------------ update */
+function tick(dt) {
+  for (let i = 0; i < pegs.length; i++) { const P = pegs[i]; P.wig = Lab.damp(P.wig, 0, 8, dt);
+    if (crown[i] > 0) crown[i] = done(i) ? Math.min(1, crown[i] + dt * 4) : 0;
+    for (let j = 0; j < P.st.length; j++) { const r = P.st[j], lifted = i === sel && j === P.st.length - 1, hx = P.x, hy = lifted ? hoverY(P) : P.y - (j + .5) * rh;
+      r.sq = Lab.damp(r.sq, 0, 9, dt); r.wig = Lab.damp(r.wig, 0, 8, dt);
+      if (r.fly) { const F = r.fly; F.t += dt; const v = Math.min(1, F.t / F.d), ua = Math.min(1, v / .58), ub = Lab.clamp((v - .58) / .42, 0, 1), top = Math.min(F.y0, hoverY(P));
+        r.x = Lab.lerp(F.x0, hx, Lab.ease.inOutQuad(ua)); r.y = ub > 0 ? Lab.lerp(top, hy, ub * ub) : Lab.lerp(F.y0, top, Lab.ease.outQuad(ua)) - Math.sin(ua * PI) * rh * .9;
+        if (v >= 1) { r.fly = null; r.x = hx; r.y = hy; landed(r); } }
+      else { r.x = Lab.damp(r.x, hx, 22, dt); r.y = Lab.damp(r.y, hy, lifted ? 20 : 26, dt); } } }
+  if (hintM) { hintM.t += dt; if (hintM.t > 4) hintM = null; }
+  for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5); introT += dt;
+  if (mode === "play") Lab.music.intensity(.15 + .7 * pegs.filter((_, i) => done(i)).length / Math.max(1, pegs.filter(P => P.cap > 1).length - 1));
+}
+
+/* ------------------------------------------------------------------ draw */
+function bg() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("to-bg:" + W + "x" + H, W, H, (g, w, h) => {
+    draw.vgrad(g, 0, 0, w, h, ["#fff4d4", "#ffe6ad", "#ffd58a"]); const r = Lab.rng(5);
+    for (let i = 0; i < 26; i++) { g.fillStyle = ["rgba(255,255,255,.3)", "rgba(242,154,28,.1)", "rgba(25,167,168,.08)", "rgba(232,80,63,.07)"][i % 4]; g.beginPath(); g.arc(r() * w, r() * h, 18 + r() * 46, 0, TAU); g.fill(); }   // play-mat spots
+  });
+}
+function glyph(c, k, x, y, r) {
+  c.fillStyle = c.strokeStyle = "rgba(255,255,255,.85)"; c.lineWidth = r * .4; c.lineCap = "round";
+  if (k === 0) draw.circle(c, x, y, r * .62, c.fillStyle); else if (k === 1) c.fillRect(x - r * .55, y - r * .55, r * 1.1, r * 1.1); else if (k === 2) draw.poly(c, x, y + r * .1, r * .85, 3, -PI / 2, c.fillStyle);
+  else if (k === 3) draw.star(c, x, y, r * .95, c.fillStyle, 5, .45); else if (k === 4) draw.poly(c, x, y, r * .85, 4, 0, c.fillStyle); else { c.beginPath(); c.moveTo(x - r * .7, y); c.lineTo(x + r * .7, y); c.moveTo(x, y - r * .7); c.lineTo(x, y + r * .7); c.stroke(); }
+}
+function ringSprite(col, size) {
+  const w = Math.max(8, Math.round(ringW(size))), h = Math.max(6, Math.round(rh * .9));
+  return Lab.sprite("to-r" + col + ":" + w + "x" + h, w + 6, h + 8, g => {
+    const c = COL[col]; draw.rect(g, 3, 6, w, h, h / 2, "rgba(90,50,20,.22)"); draw.rect(g, 3, 3, w, h, h / 2, Lab.color.shade(c, -.3));
+    const gr = g.createLinearGradient(0, 3, 0, 3 + h); gr.addColorStop(0, Lab.color.shade(c, .28)); gr.addColorStop(.45, c); gr.addColorStop(1, Lab.color.shade(c, -.18)); g.fillStyle = gr; draw.rr(g, 4.5, 4, w - 3, h - 3.5, h / 2); g.fill();
+    g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = Math.max(2, h * .13); g.lineCap = "round"; g.beginPath(); g.moveTo(3 + h * .5, 3 + h * .26); g.lineTo(3 + w * .42, 3 + h * .26); g.stroke();
+    glyph(g, col, 3 + w / 2, 3 + h / 2, h * .24);
+  });
+}
+function ring(c, r, t, bob) {
+  const sp = ringSprite(ids[cl(r.id)], sz(r.id)), q = Lab.ease.pulse(Math.min(1, r.sq)) * r.sq, sx = 1 + q * .14, sy = 1 - q * .26;
+  c.save(); c.translate(r.x + Math.sin(r.wig * 24) * r.wig * 5, r.y + (bob ? Math.sin(t * 5) * 2.5 : 0) + rh * .45 * (1 - sy)); c.scale(sx, sy); c.drawImage(sp, -sp.w / 2, -sp.h / 2 - 1, sp.w, sp.h); c.restore();
+}
+function button(c, b, label, on) {
+  const p = pressT[b.id] || 0; c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2 + p * 3); c.globalAlpha = on ? 1 : .42;
+  draw.rect(c, -b.w / 2, -b.h / 2 + 5, b.w, b.h, 12, "#a8703a"); draw.rect(c, -b.w / 2, -b.h / 2, b.w, b.h, 12, "#e7b676", "#a8703a", 1.5); draw.rect(c, -b.w / 2 + 4, -b.h / 2 + 3, b.w - 8, 5, 3, "rgba(255,255,255,.35)");
+  draw.text(c, label, 0, label.length < 2 ? -2 : 1, { size: label.length < 2 ? 30 : 13.5, color: "#4a2f1b", weight: 800 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, s = bg(); c.drawImage(s, -40, -40, s.w, s.h);
+  const intro = Lab.ease.outCubic(Lab.clamp(introT / .4, 0, 1)); c.save(); c.globalAlpha = intro; c.translate(0, (1 - intro) * 16);
+  for (const M of ui.mats) { draw.rect(c, M.x, M.y + 7, M.w, 20, 10, "rgba(120,70,20,.25)"); draw.rect(c, M.x, M.y, M.w, 20, 10, "#d9a066", "#a8703a", 1.5); draw.rect(c, M.x + 8, M.y + 3, M.w - 16, 4, 2, "rgba(255,255,255,.3)"); }
+  const live = sel >= 0 ? stacks() : null;
+  for (let i = 0; i < pegs.length; i++) { const P = pegs[i], pw = Math.max(9, rw * .11), ph = (P.cap + .55) * rh, x = P.x + Math.sin(P.wig * 24) * P.wig * 4;
+    draw.rect(c, x - pw / 2, P.y - ph, pw, ph + 4, pw / 2, "#e9c796", "#b98a55", 1.5); draw.rect(c, x - pw / 2 + 2, P.y - ph + 4, pw * .28, ph - 8, 2, "rgba(255,255,255,.45)");
+    if (P.cap === 1) draw.rect(c, x - rw * .3, P.y - 4, rw * .6, 6, 3, "#c98f52");
+    if (live && i !== sel && fits(live, sel, i)) { const y = hoverY(P) + Math.sin(t * 6 + i) * 3, top = pegs[sel].st[pegs[sel].st.length - 1]; draw.poly(c, x, y, 8, 3, PI / 2, COL[ids[cl(top.id)]]); c.strokeStyle = "#fff"; c.lineWidth = 1.5; c.stroke(); } }
+  const air = [];
+  for (let i = 0; i < pegs.length; i++) { const P = pegs[i]; P.st.forEach((r, j) => { if (r.fly || (i === sel && j === P.st.length - 1)) air.push(r); else ring(c, r, t); });
+    if (crown[i] > 0) { const k = Lab.ease.outBack(crown[i]); draw.star(c, P.x, P.y - (P.cap + .95) * rh - Math.sin(t * 3 + i) * 2, rh * .42 * k, "#ffc933", 5, .5); c.strokeStyle = "#b9801a"; c.lineWidth = 1.5; c.stroke(); } }
+  for (const r of air) { draw.shadow(c, r.x, pegs[r.peg].y + 8, ringW(sz(r.id)) * .36, 4, .12); ring(c, r, t, !r.fly); }
+  if (hintM) { const A = pegs[hintM.a], B = pegs[hintM.b], ya = hoverY(A) - rh * .4, yb = hoverY(B) - rh * .4, my = Math.min(ya, yb) - 30, a = .6 + .35 * Math.sin(hintM.t * 7);
+    c.strokeStyle = `rgba(74,47,27,${a})`; c.lineWidth = 4; c.lineCap = "round"; c.setLineDash([2, 10]); c.lineDashOffset = -hintM.t * 40; c.beginPath(); c.moveTo(A.x, ya); c.quadraticCurveTo((A.x + B.x) / 2, my, B.x, yb); c.stroke(); c.setLineDash([]);
+    draw.poly(c, B.x, yb + 4, 9, 3, PI / 2, `rgba(74,47,27,${a})`); }
+  c.restore();
+  if (mode === "demo") return;
+  const bestS = prog.stars[level] || 0;
+  draw.text(c, "TOY " + level, ui.tx, ui.ty, { size: 19, color: "#4a2f1b", weight: 800 });
+  for (let i = 0; i < 3; i++) draw.star(c, ui.tx + (i - 1) * 19, ui.iy, 7.5, i < bestS ? "#f29a1c" : "rgba(74,47,27,.18)", 5, .5);
+  draw.text(c, "moves " + moves + "  ·  par " + par, ui.tx, ui.sy, { size: 12.5, color: moves > par ? "#c2452f" : "#8f6f4f", weight: 700 });
+  button(c, ui.prev, "‹", level > 1); button(c, ui.next, "›", level < prog.max);
+  button(c, ui.btn[0], "UNDO", hist.length > 0); button(c, ui.btn[1], "RESTART", moves > 0); button(c, ui.btn[2], "HINT", mode === "play");
+}
+Lab.boot();
+})();
+</script></body></html>

@@ -1,40 +1,339 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Hedgeroll</title>
 <link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
 </head><body><script>
-Lab.init({title:"Maze", instructions:"Swipe to move to the goal.", restart:start});
-let maze, hero, goal, N=11;
-function start(){
-  maze=genMaze(N,N);
-  hero={r:1,c:1}; goal={r:N-2,c:N-2};
-  Lab.setScore(0);
-  Lab.input.onSwipe=[(dx,dy)=>{
-    const [dr,dc] = Math.abs(dx)>Math.abs(dy)?[0,dx>0?1:-1]:[dy>0?1:-1,0];
-    // move until wall (sliding)
-    while(true){ const nr=hero.r+dr, nc=hero.c+dc; if(nr<0||nr>=N||nc<0||nc>=N||maze[nr][nc]===1) break; hero.r=nr; hero.c=nc;}
-    Lab.beep(500,.03);
-    if(hero.r===goal.r && hero.c===goal.c) Lab.win("Escaped!");
+(function(){ "use strict";
+/* HEDGEROLL — a hedgehog curls up and rolls through a garden hedge maze: once rolling it only stops when it bumps
+ * into something, so the puzzle is finding the bumps that line you up with the burrow.
+ * Identity: sunny top-down topiary garden (lawn checker, leafy hedges, gravel), brown spiky hero, jaunty march.
+ *           The garden moves through morning → noon → golden hour → dusk (fireflies) every three levels.
+ * Levels:   generated forever from the level number. A breadth-first search over (cell, has-acorn) proves every
+ *           garden solvable, picks the burrow so the optimal roll count matches the level's target and gives par.
+ * Depth:    par rolls → stars; sticky moss (stops a roll), acorn + gate, molehill tunnels; undo / restart / hint. */
+Lab.init({
+  title: "Hedgeroll", tagline: "Curl up, roll till you bump, find the burrow.", category: "Puzzle & Logic",
+  howto: ["Swipe to roll — you only stop at a hedge", "Reach the burrow in par for 3 stars", "Moss stops you · acorns open gates"],
+  theme: { bg: "#e2d6ab", bg2: "#efe6c4", fg: "#2c3b22", muted: "#6d7d55", accent: "#e2703a", accent2: "#3f9a4f", light: true },
+  orient: "any", music: { style: "march", key: "C", bpm: 104, vol: .28 }, restart: start, formatScore: n => "Lv " + n, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU;
+const DC = [1, 0, -1, 0], DR = [0, 1, 0, -1];
+const TOD = [
+  { n: "Morning", out: "#efe6c4", out2: "#e2d6ab", speck: "#c4b382", a: "#a9d977", b: "#9dcf6b", tuft: "#7fb555", h: "#34843f", hi: "#6dbb5c", dk: "#1f5c2e", moss: "#4c9a78", moss2: "#3c8a70", fg: "#2c3b22", muted: "#6d7d55", light: true },
+  { n: "High noon", out: "#f6efd4", out2: "#eadfb2", speck: "#cbbb8a", a: "#9ad860", b: "#8ecd55", tuft: "#6fb244", h: "#2c7c3a", hi: "#62b552", dk: "#1b5429", moss: "#47957a", moss2: "#37856f", fg: "#2c3b22", muted: "#6d7d55", light: true },
+  { n: "Golden hour", out: "#f6d9a4", out2: "#eebf84", speck: "#cf9c62", a: "#c6cf66", b: "#b9c35a", tuft: "#97a446", h: "#4a7a34", hi: "#8bb04e", dk: "#2f5425", moss: "#6c9a62", moss2: "#5c8a58", fg: "#4a2f1a", muted: "#8a6a45", light: true },
+  { n: "Dusk", out: "#3b476e", out2: "#2a3355", speck: "#5a6790", a: "#4f8f73", b: "#47856b", tuft: "#3a735c", h: "#1e5446", hi: "#3b8068", dk: "#113830", moss: "#2c6a70", moss2: "#255e66", fg: "#eef2ff", muted: "#aab4d8", light: false },
+];
+let L, prog, pos, hasKey, visKey, moves, hist, queue, anim, mode, hintUsed, hintT, hintDir, winT, face, roll, squash, nudge, blink, gateT, demo, demoT, demoLv = 5, rollSnd, tip, flies;
+let land, flip, cell, gx, gy, bw, bh, ui = { btn: [] }, pressT = {}, onBtn = false;
+
+/* ------------------------------------------------------------------ rules + generator */
+const blocked = (l, i, d) => d === 0 ? l.we[i] : d === 1 ? l.ws[i] : d === 2 ? (i % l.cols === 0 || l.we[i - 1]) : (i < l.cols || l.ws[i - l.cols]);
+/* One roll: returns the cells crossed (negative entry = popped out of a molehill at cell -1-p), where it ends, key state. */
+function slide(l, i, d, k) {
+  const path = []; let tp = false, win = false;
+  for (;;) {
+    if (blocked(l, i, d)) break; const n = i + l.STEP[d]; if (n === l.gate && !k) break;
+    i = n; path.push(i); if (i === l.key) k = 1;
+    if (i === l.exit) { win = true; break; }
+    if (l.moss[i]) break;
+    if (!tp && l.tun && (i === l.tun[0] || i === l.tun[1])) { i = i === l.tun[0] ? l.tun[1] : l.tun[0]; tp = true; path.push(-1 - i); }
+  }
+  return { end: i, k, path, win };
+}
+/* BFS over (cell, key). With an exit set: {par, dir} of an optimal first roll. Without: first-crossing depth of every cell. */
+function scan(l, s, k) {
+  const N = l.N, dist = new Int16Array(2 * N).fill(-1), first = new Int8Array(2 * N).fill(-1), pass = new Int16Array(2 * N).fill(-1), q = [s + k * N]; dist[q[0]] = 0;
+  for (let h = 0; h < q.length; h++) {
+    const st = q[h], i = st % N, kk = st >= N ? 1 : 0, dd = dist[st];
+    for (let d = 0; d < 4; d++) {
+      const r = slide(l, i, d, kk); if (!r.path.length) continue;
+      let k2 = kk; for (const p of r.path) { const c = p < 0 ? -1 - p : p; if (c === l.key) k2 = 1; if (pass[c + k2 * N] < 0) pass[c + k2 * N] = dd + 1; }
+      const f = first[st] < 0 ? d : first[st];
+      if (r.win) return { par: dd + 1, dir: f };
+      const ns = r.end + r.k * N; if (dist[ns] < 0) { dist[ns] = dd + 1; first[ns] = f; q.push(ns); }
+    }
+  }
+  return { pass, par: -1, dir: -1 };
+}
+function spec(n) {
+  const T = [[4, 5], [5, 5], [5, 6], [5, 6], [5, 7], [6, 7], [6, 7], [6, 8], [6, 8], [7, 8], [7, 9]], s = T[Math.min(n, T.length) - 1];
+  return { cols: s[0], rows: s[1], open: n < 3 ? .5 : .2 + (n * 7 % 5) * .06, moss: n < 4 ? 0 : 1 + (n + 1) % 3, key: n >= 7 && n % 3 !== 0, tun: n >= 11 && n % 2 === 1, par: Math.min(12, 2 + Math.round(n * .7)) };
+}
+function build(n, a, relax) {
+  const sp = spec(n), rnd = Lab.rng(n * 9973 + a * 131 + 7), ri = m => (rnd() * m) | 0, cols = sp.cols, rows = sp.rows, N = cols * rows;
+  const l = { n, cols, rows, N, we: new Uint8Array(N).fill(1), ws: new Uint8Array(N).fill(1), moss: new Uint8Array(N), key: -1, gate: -1, tun: null, exit: -1, STEP: [1, cols, -1, -cols] };
+  const seen = new Uint8Array(N), st = [ri(N)]; seen[st[0]] = 1;
+  while (st.length) {                                              // depth-first perfect maze …
+    const i = st[st.length - 1], c = i % cols, r = (i / cols) | 0, o = [];
+    if (c < cols - 1 && !seen[i + 1]) o.push(0); if (r < rows - 1 && !seen[i + cols]) o.push(1); if (c > 0 && !seen[i - 1]) o.push(2); if (r > 0 && !seen[i - cols]) o.push(3);
+    if (!o.length) { st.pop(); continue; }
+    const d = o[ri(o.length)], j = i + l.STEP[d];
+    if (d === 0) l.we[i] = 0; else if (d === 1) l.ws[i] = 0; else if (d === 2) l.we[j] = 0; else l.ws[j] = 0; seen[j] = 1; st.push(j);
+  }
+  for (let i = 0; i < N; i++) { if (i % cols < cols - 1 && l.we[i] && rnd() < sp.open) l.we[i] = 0; if (i < N - cols && l.ws[i] && rnd() < sp.open) l.ws[i] = 0; } // … then knocked open into lawns
+  const used = new Set(), pick = () => { let i; do i = ri(N); while (used.has(i)); used.add(i); return i; };
+  l.start = pick(); for (let m = 0; m < sp.moss; m++) l.moss[pick()] = 1;
+  if (sp.tun && !relax) l.tun = [pick(), pick()];
+  const needKey = sp.key && !relax; if (needKey) { l.key = pick(); l.gate = pick(); }
+  const P = scan(l, l.start, 0).pass; let best = -1, bs = -1e9;
+  for (let e = 0; e < N; e++) {
+    if (used.has(e)) continue; const p0 = P[e], p1 = P[e + N]; if (p0 < 0 && p1 < 0) continue; if (needKey && p0 >= 0) continue;   // burrow must sit behind the gate
+    const par = p0 < 0 ? p1 : p1 < 0 ? p0 : Math.min(p0, p1), s = -Math.abs(par - sp.par) * 10 + rnd();
+    if (s > bs) { bs = s; best = e; l.par = par; }
+  }
+  if (best < 0) return null; l.exit = best; l.score = bs; return l;
+}
+function load(n) {
+  let best = null;
+  for (let a = 0; a < 60; a++) { const l = build(n, a, false); if (l && (!best || l.score > best.score)) { best = l; if (l.score > 0) break; } }
+  for (let a = 0; !best; a++) best = build(n, a, true);
+  L = best; L.tod = TOD[((n - 1) / 3 | 0) % 4];
+  Lab.setTheme({ fg: L.tod.fg, muted: L.tod.muted, bg: L.tod.out2, bg2: L.tod.out, light: L.tod.light });
+  tip = n === 1 ? "Swipe to roll — you only stop at a hedge" : n === 4 ? "Moss is sticky: it stops a roll" : n === 7 ? "Roll over the acorn to open the gate" : n === 11 ? "A molehill pops you out of its twin" : "";
+  reset(); layout();
+}
+function reset() {
+  pos = L.start; hasKey = 0; visKey = 0; moves = 0; hist = []; queue = []; anim = null; mode = "play"; hintUsed = 0; hintT = 0; hintDir = -1; winT = 0;
+  face = 1; roll = 0; squash = 0; nudge = null; blink = 2; gateT = 0;
+  flies = Array.from({ length: 9 }, (_, i) => ({ x: Math.random(), y: Math.random(), p: i * 1.7, v: .3 + Math.random() * .5 }));
+}
+
+/* ------------------------------------------------------------------ layout */
+const X = (c, r) => gx + (flip ? r : c) * cell, Y = (c, r) => gy + (flip ? c : r) * cell;
+const CX = i => X(i % L.cols + .5, ((i / L.cols) | 0) + .5), CY = i => Y(i % L.cols + .5, ((i / L.cols) | 0) + .5);
+const vec = d => flip ? [DR[d], DC[d]] : [DC[d], DR[d]];                 // game direction → screen vector
+function sdir(dx, dy) { const hz = Math.abs(dx) > Math.abs(dy), s = (hz ? dx : dy) > 0; return flip ? (hz ? (s ? 1 : 3) : (s ? 0 : 2)) : (hz ? (s ? 0 : 2) : (s ? 1 : 3)); }
+function layout() {
+  const P = Lab.play; land = P.w > P.h * 1.05; flip = land;
+  const vc = flip ? L.rows : L.cols, vr = flip ? L.cols : L.rows, top = land ? 14 : 66, bot = land ? 14 : 98, side = land ? 158 : 0, aw = P.w - 44 - side, ah = P.h - top - bot;
+  cell = Math.floor(Math.min(aw / vc, ah / vr, 96)); bw = cell * vc; bh = cell * vr; gx = P.x + 22 + (aw - bw) / 2; gy = P.y + top + (ah - bh) / 2;
+  const ids = ["prev", "undo", "restart", "hint", "next"]; ui.btn = [];
+  if (land) {
+    const x0 = P.x + P.w - side + 6, w = 68, h = 46, y0 = P.y + P.h - 3 * (h + 8) - 4;
+    ui.tx = x0 + 72; ui.ty = P.y + 22; ui.tipY = 0;
+    [["undo", 0, 0], ["restart", 1, 0], ["hint", 0, 1, 2], ["prev", 0, 2], ["next", 1, 2]].forEach(b => ui.btn.push({ id: b[0], x: x0 + b[1] * (w + 8), y: y0 + b[2] * (h + 8), w: b[3] ? w * 2 + 8 : w, h }));
+  } else {
+    const w = Math.min(64, (P.w - 28 - 32) / 5), h = 54, x0 = P.x + (P.w - (w * 5 + 32)) / 2, y0 = P.y + P.h - h - 12;
+    ui.tx = P.x + 18; ui.ty = P.y + 22; ui.tipY = y0 - 16;
+    ids.forEach((id, i) => ui.btn.push({ id, x: x0 + i * (w + 8), y: y0, w, h }));
+  }
+  Lab.sprite.clear("bg:");
+}
+Lab.onResize(() => { if (L) layout(); });
+const hit = (x, y) => ui.btn.find(b => x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 4 && y <= b.y + b.h + 4);
+
+/* ------------------------------------------------------------------ play */
+function move(d) {
+  if (mode !== "play") return;
+  if (anim) { if (queue.length < 2) queue.push(d); return; }
+  const r = slide(L, pos, d, hasKey); face = d; hintT = 0;
+  if (!r.path.length) { nudge = { d, t: 0 }; Lab.sfx(pos + L.STEP[d] === L.gate && !blocked(L, pos, d) ? "knock" : "tick", { pitch: .7, vol: .6 }); return; }
+  hist.push({ pos, k: hasKey }); moves++; anim = { r, from: pos, i: 0, u: 0, t: 0, d, len: r.path.length }; pos = r.end; hasKey = r.k;
+  Lab.sfx("whoosh", { pitch: 1.25, vol: .45 }); if (tip && L.n === 1) tip = "";
+}
+function arrive(p) {
+  if (p === L.key && !visKey) { visKey = 1; Lab.sfx("pickup"); Lab.after(.12, () => Lab.sfx("unlock", { vol: .7 })); fx.burst(CX(p), CY(p), { n: 12, colors: ["#e2a24a", "#fff3c4", "#8a5a2c"], speed: 150, life: .5, size: 3 }); fx.ring(CX(L.gate), CY(L.gate), { r0: 4, r1: cell * .7, color: "#ffe9a8", width: 4 }); }
+}
+function hop(a, b) {
+  for (const i of [a, b]) fx.burst(CX(i), CY(i), { n: 10, colors: ["#7a5a44", "#b79cff", "#5a4032"], speed: 120, life: .45, size: 3.5, gravity: 200 });
+  Lab.sfx("boing", { pitch: 1.3, vol: .5 }); Lab.sfx("swish", { pitch: .7, vol: .5 });
+}
+function finish() {
+  const a = anim, v = vec(a.d), x = CX(a.r.end), y = CY(a.r.end); anim = null;
+  if (a.r.win) return win();
+  squash = 1;
+  if (L.moss[a.r.end]) { Lab.sfx("splash", { pitch: 1.5, vol: .35 }); fx.burst(x, y, { n: 8, colors: [L.tod.moss, L.tod.moss2, "#bfe6c8"], speed: 90, life: .4, size: 3, gravity: 240 }); }
+  else {
+    const gate = a.r.end + L.STEP[a.d] === L.gate && !blocked(L, a.r.end, a.d);
+    Lab.sfx(gate ? "knock" : "thud", { pitch: Lab.clamp(1.45 - a.len * .09, .7, 1.4), vol: .55 + Math.min(.4, a.len * .06) }); Lab.buzz(8);
+    if (a.len > 2) Lab.shake(Math.min(5, a.len * .7), .14);
+    fx.burst(x + v[0] * cell * .38, y + v[1] * cell * .38, { n: 5 + Math.min(8, a.len * 2), colors: [L.tod.hi, L.tod.h, L.tod.dk], speed: 70 + a.len * 22, life: .5, size: 3.2, gravity: 260, angle: Math.atan2(-v[1], -v[0]), spread: 2.2, shape: "shard" });
+  }
+  if (queue.length) move(queue.shift());
+}
+const rating = () => Math.max(1, Math.min(moves <= L.par ? 3 : moves <= L.par + 2 ? 2 : 1, 3 - hintUsed));
+function win() {
+  mode = "won"; winT = 0; const st = rating(), lv = L.n, x = CX(L.exit), y = CY(L.exit);
+  Lab.sfx("drop", { pitch: .8 }); fx.ring(x, y, { r0: 6, r1: cell * 1.1, color: "#fff3c4", width: 5 });
+  fx.burst(x, y, { n: 22, colors: [L.tod.hi, "#ffe9a8", "#8a5a3a", "#fff"], speed: 190, life: .7, size: 3.5, gravity: 220 });
+  if (demo) return;
+  prog.stars[lv] = Math.max(prog.stars[lv] || 0, st); prog.max = Math.max(prog.max, lv + 1); prog.lvl = lv + 1; Lab.store.set("prog", prog);
+  for (let i = 0; i < st; i++) Lab.after(.25 + i * .16, () => { Lab.audio.combo(2 + i * 2, { vol: .18 }); fx.burst(x, y - cell * .2, { n: 6, color: "#ffd24a", speed: 140, life: .5, shape: "star", size: 5 }); });
+  const total = Object.values(prog.stars).reduce((a, b) => a + b, 0);
+  Lab.after(1.05, () => Lab.win({ title: st === 3 ? "Snug as a hog" : "Home at last", message: st === 3 ? "Par or better — not a roll wasted." : hintUsed ? "Found with a little help." : "Match par (" + L.par + " rolls) for the third star.",
+    score: lv, scoreLabel: "Garden", button: "Next garden", stats: [["Rolls", moves + " / par " + L.par], ["Rating", "★".repeat(st) + "☆".repeat(3 - st)], ["Stars banked", total]] }));
+}
+function undo() { if (mode !== "play" || anim) return; const h = hist.pop(); if (!h) return Lab.sfx("tick", { pitch: .5, vol: .5 }); pos = h.pos; hasKey = visKey = h.k; moves--; queue = []; hintT = 0; squash = .6; Lab.sfx("flip", { pitch: .8 }); }
+function restart() { if (mode !== "play") return; const hu = hintUsed; reset(); hintUsed = hu; squash = 1; Lab.sfx("swish"); }
+function hint() { if (mode !== "play" || anim) return; const s = scan(L, pos, hasKey); if (s.par < 0) return; hintDir = s.dir; hintT = 3; if (!hintUsed) Lab.toast("Hint used — two stars at most", 1300, { y: .16 }); hintUsed = 1; Lab.sfx("chime", { vol: .6 }); }
+function go(n) { if (n < 1 || n > prog.max || mode !== "play") return Lab.sfx("tick", { pitch: .5, vol: .5 }); prog.lvl = n; Lab.store.set("prog", prog); load(n); Lab.setScore(n); Lab.sfx("flip"); }
+
+function start() {
+  demo = false; prog = Lab.store.get("prog", null) || { lvl: 1, max: 1, stars: {} };
+  load(prog.lvl); Lab.setScore(L.n);
+  rollSnd = Lab.audio.loop({ noise: true, bp: 380, vol: 0 });
+  const acts = { undo, restart, hint, prev: () => go(L.n - 1), next: () => go(L.n + 1) };
+  Lab.input.swipeEarly = true;
+  Lab.input.onDown = [(x, y) => { const b = hit(x, y); onBtn = !!b; if (b) { pressT[b.id] = 1; acts[b.id](); } }];
+  Lab.input.onSwipe = [(dx, dy) => { if (!onBtn) move(sdir(dx, dy)); }];
+  Lab.input.onTap = [(x, y) => { if (onBtn || anim) return; const dx = x - CX(pos), dy = y - CY(pos); if (Math.hypot(dx, dy) > cell * .45 && x > gx - cell && x < gx + bw + cell && y > gy - cell && y < gy + bh + cell) move(sdir(dx, dy)); }];
+  Lab.input.onKey = [k => {
+    const m = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1], d: [1, 0], a: [-1, 0], s: [0, 1], w: [0, -1] }[k.length === 1 ? k.toLowerCase() : k];
+    if (m) return move(sdir(m[0], m[1])); k = k.toLowerCase();
+    if (k === "z" || k === "backspace") undo(); else if (k === "r") restart(); else if (k === "h") hint(); else if (k === "[") go(L.n - 1); else if (k === "]") go(L.n + 1);
   }];
-  Lab.loop(()=>draw());
+  Lab.expose({ get level() { return L.n; }, get cols() { return L.cols; }, get rows() { return L.rows; }, get pos() { return pos; }, get exit() { return L.exit; }, get key() { return L.key; }, get gate() { return L.gate; }, get hasKey() { return hasKey; },
+    get moss() { return Array.from(L.moss); }, get tunnels() { return L.tun ? L.tun.slice() : null; }, get moves() { return moves; }, get par() { return L.par; }, get mode() { return mode; }, get rolling() { return !!anim; }, get hintDir() { return hintT > 0 ? hintDir : -1; },
+    get progress() { return JSON.parse(JSON.stringify(prog)); }, get buttons() { return ui.btn.map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); },
+    next() { return scan(L, pos, hasKey); }, slide(d) { const r = slide(L, pos, d, hasKey); return { end: r.end, len: r.path.length, win: r.win }; }, blocked(i, d) { return !!blocked(L, i, d); },
+    vec, xy(i) { return [CX(i), CY(i)]; }, rating, go, move });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
 }
-function genMaze(rows,cols){
-  const m=Array.from({length:rows},()=>Array(cols).fill(1));
-  function carve(r,c){ m[r][c]=0;
-    const dirs=[[-2,0],[2,0],[0,-2],[0,2]].sort(()=>Math.random()-0.5);
-    for(const [dr,dc] of dirs){ const nr=r+dr, nc=c+dc; if(nr<=0||nr>=rows-1||nc<=0||nc>=cols-1) continue; if(m[nr][nc]===0) continue; m[r+dr/2][c+dc/2]=0; carve(nr,nc);}
+
+function tick(dt) {
+  if (anim) {
+    anim.t += dt; let adv = dt * (8 + Math.min(1, anim.t * 5) * 16); roll += adv * 2.4;
+    while (anim) {
+      if (anim.i >= anim.r.path.length) { finish(); break; }
+      const p = anim.r.path[anim.i];
+      if (p < 0) { hop(anim.from, -1 - p); anim.from = -1 - p; anim.i++; continue; }
+      const rem = 1 - anim.u; if (adv < rem) { anim.u += adv; break; }
+      adv -= rem; anim.u = 0; anim.from = p; anim.i++; arrive(p);
+    }
   }
-  carve(1,1);
-  m[rows-2][cols-2]=0;
-  return m;
+  if (rollSnd) rollSnd.set({ vol: anim ? .1 : 0, cutoff: 300 + (anim ? anim.t * 500 : 0) });
+  squash = Lab.damp(squash, 0, 9, dt); if (nudge) { nudge.t += dt * 5; if (nudge.t >= 1) nudge = null; }
+  if (hintT > 0) hintT -= dt; blink -= dt; if (blink < -.14) blink = Lab.rand(1.5, 5);
+  gateT = Lab.damp(gateT, visKey ? 1 : 0, 8, dt); if (mode === "won") winT += dt;
+  for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5);
+  if (!demo && L) Lab.music.intensity(.3 + .5 * Math.min(1, moves / Math.max(1, L.par)));
 }
-function draw(){
-  const c=Lab.ctx; c.fillStyle="#1c1c2c"; c.fillRect(0,0,Lab.W,Lab.H);
-  const cs=Math.min((Lab.W-20)/N, (Lab.H-220)/N); const off={x:(Lab.W-cs*N)/2, y:140};
-  for(let r=0;r<N;r++) for(let col=0;col<N;col++){
-    c.fillStyle = maze[r][col]===1 ? "#3a4a6a" : "#15182a";
-    c.fillRect(off.x+col*cs, off.y+r*cs, cs, cs);
+function attract(dt, t) {
+  if (!demo) { demo = true; prog = { stars: {}, max: 1 }; load(demoLv); demoT = 1.2; }
+  tick(dt);
+  if (mode === "play" && !anim) { demoT -= dt; if (demoT <= 0) { const s = scan(L, pos, hasKey); if (s.par > 0) move(s.dir); demoT = .75; } }
+  if (mode === "won" && winT > 1.5) { demoLv = demoLv % 12 + 1; load(demoLv); demoT = 1; }
+  render(t);
+}
+
+/* ------------------------------------------------------------------ drawing */
+function bake() {
+  const W = Lab.W, H = Lab.H, T = L.tod;
+  return Lab.sprite("bg:" + L.n + ":" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40); const rnd = Lab.rng(L.n * 31 + 3), m = cell * .14;
+    draw.vgrad(g, -40, -40, W + 80, H + 80, [T.out, T.out2]);
+    g.fillStyle = T.speck; for (let i = 0; i < 320; i++) { g.globalAlpha = .2 + rnd() * .3; g.beginPath(); g.arc(rnd() * W, rnd() * H, .8 + rnd() * 1.7, 0, TAU); g.fill(); } g.globalAlpha = 1;
+    draw.rect(g, gx - m, gy - m + 6, bw + 2 * m, bh + 2 * m, cell * .3, "rgba(0,0,0,.2)");
+    g.save(); draw.rr(g, gx - m, gy - m, bw + 2 * m, bh + 2 * m, cell * .3); g.clip(); g.fillStyle = T.a; g.fillRect(gx - m, gy - m, bw + 2 * m, bh + 2 * m);
+    g.fillStyle = T.b; for (let i = 0; i < L.N; i++) { const c = i % L.cols, r = (i / L.cols) | 0; if ((c + r) & 1) g.fillRect(Math.min(X(c, r), X(c + 1, r + 1)), Math.min(Y(c, r), Y(c + 1, r + 1)), cell, cell); }
+    g.strokeStyle = T.tuft; g.lineWidth = 1.4; g.lineCap = "round";
+    for (let i = 0; i < L.N * 2; i++) { const x = gx + rnd() * bw, y = gy + rnd() * bh; g.beginPath(); g.moveTo(x - 3, y); g.lineTo(x - 4.5, y - 5); g.moveTo(x, y); g.lineTo(x, y - 6.5); g.moveTo(x + 3, y); g.lineTo(x + 4.5, y - 5); g.stroke(); }
+    for (let i = 0; i < L.N; i++) if (L.moss[i]) {                    // moss: fuzzy dark patch with pale spores
+      const x = CX(i), y = CY(i); for (let k = 0; k < 11; k++) { const a = rnd() * TAU, d = rnd() * cell * .2; draw.circle(g, x + Math.cos(a) * d, y + Math.sin(a) * d, cell * (.12 + rnd() * .1), k % 3 ? T.moss : T.moss2); }
+      for (let k = 0; k < 7; k++) { const a = rnd() * TAU, d = rnd() * cell * .26; draw.circle(g, x + Math.cos(a) * d, y + Math.sin(a) * d, cell * .022, "rgba(220,255,235,.75)"); }
+    }
+    g.restore();
+    const S = [[0, 0, L.cols, 0], [L.cols, 0, L.cols, L.rows], [L.cols, L.rows, 0, L.rows], [0, L.rows, 0, 0]];
+    for (let i = 0; i < L.N; i++) { const c = i % L.cols, r = (i / L.cols) | 0; if (c < L.cols - 1 && L.we[i]) S.push([c + 1, r, c + 1, r + 1]); if (r < L.rows - 1 && L.ws[i]) S.push([c, r + 1, c + 1, r + 1]); }
+    const Q = S.map(s => [X(s[0], s[1]), Y(s[0], s[1]), X(s[2], s[3]), Y(s[2], s[3])]);
+    const all = (col, lw, dy) => { g.strokeStyle = col; g.lineWidth = lw; g.lineCap = "round"; g.beginPath(); for (const s of Q) { g.moveTo(s[0], s[1] + dy); g.lineTo(s[2], s[3] + dy); } g.stroke(); };
+    all("rgba(15,40,20,.24)", cell * .27, cell * .075); all(T.dk, cell * .26, 0); all(T.h, cell * .18, -cell * .03);
+    for (const s of Q) {
+      const n = Math.round(Math.hypot(s[2] - s[0], s[3] - s[1]) / cell * 6);
+      for (let k = 0; k < n; k++) { const u = rnd(), f = rnd(); draw.circle(g, s[0] + (s[2] - s[0]) * u + (rnd() - .5) * cell * .13, s[1] + (s[3] - s[1]) * u + (rnd() - .5) * cell * .13 - cell * .03, cell * (.02 + rnd() * .026), f < .06 ? "#fff6f0" : f < .11 ? "#ffb3c7" : T.hi); }
+    }
+  });
+}
+function icon(c, id, x, y, s, col) {
+  c.strokeStyle = col; c.fillStyle = col; c.lineWidth = s * .16; c.lineCap = "round"; c.lineJoin = "round"; c.beginPath();
+  if (id === "prev" || id === "next") { const k = id === "prev" ? -1 : 1; c.moveTo(x - k * s * .22, y - s * .42); c.lineTo(x + k * s * .22, y); c.lineTo(x - k * s * .22, y + s * .42); c.stroke(); }
+  else if (id === "undo") { c.arc(x + s * .05, y + s * .1, s * .36, Math.PI * 1.1, Math.PI * .45); c.stroke(); c.beginPath(); c.moveTo(x - s * .52, y - s * .42); c.lineTo(x - s * .3, y - s * .02); c.lineTo(x - s * .02, y - s * .34); c.closePath(); c.fill(); }
+  else if (id === "restart") { c.arc(x, y, s * .38, -Math.PI * .35, Math.PI * 1.35); c.stroke(); c.beginPath(); c.moveTo(x + s * .08, y - s * .62); c.lineTo(x + s * .5, y - s * .36); c.lineTo(x + s * .06, y - s * .1); c.closePath(); c.fill(); }
+  else draw.text(c, "?", x, y + 1, { size: s * 1.15, color: col, weight: 800 });
+}
+function hog(c, x, y, R, t) {
+  const v = vec(face), ang = Math.atan2(v[1], v[0]), ball = !!anim || mode === "won";
+  c.save(); c.translate(x, y);
+  if (mode === "won") { const k = Math.max(0, 1 - winT * 2.4); c.scale(k, k); }
+  draw.shadow(c, 0, R * .55, R * .95, R * .34, .22);
+  if (ball) {
+    c.rotate(roll);
+    Lab.draw.star(c, 0, 0, R * 1.08, "#5a3a26", 13, .78); draw.circle(c, 0, 0, R * .8, "#7a5236");
+    c.strokeStyle = "#a57a52"; c.lineWidth = R * .09; c.lineCap = "round"; for (let i = 0; i < 6; i++) { const a = i * TAU / 6; c.beginPath(); c.moveTo(Math.cos(a) * R * .28, Math.sin(a) * R * .28); c.lineTo(Math.cos(a) * R * .62, Math.sin(a) * R * .62); c.stroke(); }
+    draw.circle(c, 0, 0, R * .16, "#a57a52");
+  } else {
+    c.rotate(ang); const sq = squash * .22, br = 1 + Math.sin(t * 2.6) * .025;
+    c.scale((1 - sq) * br, (1 + sq) / br);
+    c.translate(R * .22, 0); draw.circle(c, R * .62, 0, R * .52, "#f0d9b0"); c.beginPath(); c.moveTo(R * .78, -R * .38); c.lineTo(R * 1.3, 0); c.lineTo(R * .78, R * .38); c.closePath(); c.fillStyle = "#f0d9b0"; c.fill();   // snout
+    draw.circle(c, R * 1.27, 0, R * .13, "#2a1c16");
+    for (const s of [-1, 1]) { draw.circle(c, R * .2, s * R * .82, R * .17, "#e8c79a"); if (blink > 0) { draw.circle(c, R * .82, s * R * .27, R * .1, "#2a1c16"); draw.circle(c, R * .85, s * R * .3, R * .035, "#fff"); } else draw.line(c, R * .74, s * R * .27, R * .9, s * R * .27, "#2a1c16", 2); }
+    c.save(); c.translate(-R * .3, 0); c.scale(1.05, 1); Lab.draw.star(c, 0, 0, R * .98, "#5a3a26", 14, .8); draw.circle(c, 0, 0, R * .75, "#7a5236"); c.restore();
+    c.strokeStyle = "#a57a52"; c.lineWidth = R * .08; c.lineCap = "round"; for (let i = -2; i <= 2; i++) { c.beginPath(); c.moveTo(-R * .68, i * R * .24); c.lineTo(-R * .08 - Math.abs(i) * R * .1, i * R * .2); c.stroke(); }
   }
-  c.fillStyle="#7c6"; c.fillRect(off.x+goal.c*cs+3, off.y+goal.r*cs+3, cs-6, cs-6);
-  c.beginPath(); c.fillStyle="#fc4"; c.arc(off.x+hero.c*cs+cs/2, off.y+hero.r*cs+cs/2, cs*0.35, 0, Lab.TAU); c.fill();
+  c.restore();
+  if (visKey && mode !== "won") acorn(c, x - R * .1, y - R * 1.25 + Math.sin(t * 4) * 1.5, R * .36);
 }
-start();
+function acorn(c, x, y, s) {
+  c.save(); c.translate(x, y); c.beginPath(); c.ellipse(0, s * .25, s * .72, s * .9, 0, 0, TAU); c.fillStyle = "#d9963c"; c.fill();
+  c.beginPath(); c.ellipse(-s * .22, s * .1, s * .18, s * .4, .3, 0, TAU); c.fillStyle = "rgba(255,240,200,.5)"; c.fill();
+  c.beginPath(); c.ellipse(0, -s * .38, s * .86, s * .5, 0, Math.PI, 0); c.lineTo(s * .86, -s * .25); c.lineTo(-s * .86, -s * .25); c.closePath(); c.fillStyle = "#7a4a26"; c.fill();
+  draw.line(c, 0, -s * .85, s * .15, -s * 1.2, "#7a4a26", s * .22); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, T = L.tod, P = Lab.play, bg = bake(), R = cell * .3; c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // molehills
+  if (L.tun) for (const i of L.tun) { const x = CX(i), y = CY(i); draw.circle(c, x, y + 2, cell * .34, "#6b4a36"); draw.circle(c, x, y, cell * .31, "#8a644a"); draw.circle(c, x, y, cell * .2, "#221612");
+    c.strokeStyle = "rgba(190,165,255,.85)"; c.lineWidth = 2.5; c.lineCap = "round"; for (let k = 0; k < 3; k++) { const a = t * 2.2 + k * TAU / 3; c.beginPath(); c.arc(x, y, cell * .13, a, a + 1.1); c.stroke(); } }
+  // burrow
+  { const x = CX(L.exit), y = CY(L.exit), pu = .5 + .5 * Math.sin(t * 3);
+    c.strokeStyle = `rgba(255,243,196,${.25 + pu * .35})`; c.lineWidth = 3; c.beginPath(); c.arc(x, y, cell * (.4 + pu * .05), 0, TAU); c.stroke();
+    draw.circle(c, x, y + 3, cell * .36, "#6e4428"); draw.circle(c, x, y, cell * .34, "#a06a40"); draw.circle(c, x, y, cell * .27, "#7a4c2c"); c.beginPath(); c.ellipse(x, y + cell * .02, cell * .2, cell * .18, 0, 0, TAU); c.fillStyle = "#1c110b"; c.fill();
+    c.beginPath(); c.ellipse(x - cell * .26, y - cell * .2, cell * .1, cell * .05, -.6, 0, TAU); c.fillStyle = T.hi; c.fill(); c.beginPath(); c.ellipse(x + cell * .27, y - cell * .16, cell * .09, cell * .045, .7, 0, TAU); c.fill(); }
+  // acorn + gate
+  if (L.key >= 0) {
+    if (!visKey) { const x = CX(L.key), y = CY(L.key); draw.shadow(c, x, y + cell * .22, cell * .16, cell * .06, .2); acorn(c, x, y + Math.sin(t * 3) * cell * .04, cell * .2); }
+    const x = CX(L.gate), y = CY(L.gate), s = cell * .4, o = ease.outCubic(gateT);
+    c.save(); c.translate(x, y); c.globalAlpha = 1 - o * .78; c.scale(1 - o * .12, 1 - o * .12);
+    draw.rect(c, -s, -s + 3, s * 2, s * 2, 5, "rgba(0,0,0,.2)"); draw.rect(c, -s, -s, s * 2, s * 2, 5, "#b9814a", "#6e4424", 2.5);
+    for (let k = -1; k <= 1; k++) draw.line(c, k * s * .55, -s + 3, k * s * .55, s - 3, "#8f5f33", 2);
+    draw.line(c, -s + 4, -s + 4, s - 4, s - 4, "#6e4424", 3.5); draw.line(c, s - 4, -s + 4, -s + 4, s - 4, "#6e4424", 3.5);
+    if (o < .5) { draw.circle(c, 0, 0, s * .38, "#f3dcb4", "#6e4424", 2); acorn(c, 0, -1, s * .2); }
+    c.restore(); c.globalAlpha = 1;
+  }
+  // hedgehog
+  let hx = CX(pos), hy = CY(pos);
+  if (anim && anim.i < anim.r.path.length && anim.r.path[anim.i] >= 0) { const a = anim.from, b = anim.r.path[anim.i]; hx = Lab.lerp(CX(a), CX(b), anim.u); hy = Lab.lerp(CY(a), CY(b), anim.u); }
+  else if (anim) { hx = CX(anim.from); hy = CY(anim.from); }
+  if (nudge) { const v = vec(nudge.d), k = ease.pulse(nudge.t) * cell * .12; hx += v[0] * k; hy += v[1] * k; }
+  if (hintT > 0 && mode === "play" && !anim) {
+    const v = vec(hintDir), k = (t * 1.6) % 1, a = Math.atan2(v[1], v[0]);
+    for (let i = 0; i < 3; i++) { const u = (k + i / 3) % 1, d = cell * (.55 + u * .9); c.save(); c.translate(hx + v[0] * d, hy + v[1] * d); c.rotate(a); c.globalAlpha = Math.sin(u * Math.PI) * Math.min(1, hintT); c.beginPath(); c.moveTo(-cell * .12, -cell * .16); c.lineTo(cell * .1, 0); c.lineTo(-cell * .12, cell * .16); c.strokeStyle = "#fff"; c.lineWidth = cell * .11; c.lineCap = "round"; c.lineJoin = "round"; c.stroke(); c.strokeStyle = "#e2703a"; c.lineWidth = cell * .06; c.stroke(); c.restore(); }
+  }
+  hog(c, hx, hy, R, t);
+  if (!T.light) { c.globalCompositeOperation = "lighter"; for (const f of flies) { const x = gx + ((f.x + Math.sin(t * f.v + f.p) * .08 + 1) % 1) * bw, y = gy + ((f.y + Math.cos(t * f.v * .8 + f.p) * .08 + 1) % 1) * bh, a = .35 + .65 * Math.abs(Math.sin(t * 1.7 + f.p)); draw.glow(c, x, y, 12, "#ffe98a", a * .6); draw.circle(c, x, y, 1.6, `rgba(255,245,180,${a})`); } c.globalCompositeOperation = "source-over"; }
+  if (demo) return;
+  // labels + buttons
+  const best = prog.stars[L.n] || 0, sub = T.n + "  ·  " + L.cols + "×" + L.rows, rolls = "Rolls " + moves + " / par " + L.par, over = moves > L.par;
+  if (land) {
+    draw.text(c, "GARDEN " + L.n, ui.tx, ui.ty, { size: 19, color: T.fg, weight: 800 }); draw.text(c, T.n, ui.tx, ui.ty + 21, { size: 12.5, color: T.muted, weight: 600 });
+    draw.text(c, rolls, ui.tx, ui.ty + 48, { size: 15, color: over ? "#d2542c" : T.fg, weight: 700 });
+    for (let i = 0; i < 3; i++) draw.star(c, ui.tx - 22 + i * 22, ui.ty + 74, 8.5, i < best ? "#f2b632" : Lab.color.alpha(T.fg, .2), 5, .5);
+    if (tip) { const w = tip.split(" "), h = Math.ceil(w.length / 2); draw.text(c, w.slice(0, h).join(" "), ui.tx, ui.ty + 100, { size: 11.5, color: T.muted, weight: 600 }); draw.text(c, w.slice(h).join(" "), ui.tx, ui.ty + 115, { size: 11.5, color: T.muted, weight: 600 }); }
+  } else {
+    draw.text(c, "GARDEN " + L.n, ui.tx, ui.ty, { size: 21, color: T.fg, weight: 800, align: "left" }); draw.text(c, sub, ui.tx, ui.ty + 22, { size: 13, color: T.muted, weight: 600, align: "left" });
+    draw.text(c, rolls, P.x + P.w - 18, ui.ty, { size: 16, color: over ? "#d2542c" : T.fg, weight: 700, align: "right" });
+    for (let i = 0; i < 3; i++) draw.star(c, P.x + P.w - 70 + i * 22, ui.ty + 23, 8.5, i < best ? "#f2b632" : Lab.color.alpha(T.fg, .2), 5, .5);
+    if (tip) draw.text(c, tip, P.x + P.w / 2, ui.tipY, { size: 14, color: T.fg, weight: 700 });
+  }
+  for (const b of ui.btn) {
+    const on = b.id === "prev" ? L.n > 1 : b.id === "next" ? L.n < prog.max : b.id === "undo" ? hist.length > 0 : true, p = pressT[b.id] || 0, dy = p * 3;
+    c.globalAlpha = on ? 1 : .4;
+    draw.rect(c, b.x, b.y + 4, b.w, b.h, 14, T.light ? "rgba(90,70,30,.28)" : "rgba(0,0,0,.35)"); draw.rect(c, b.x, b.y + dy, b.w, b.h, 14, T.light ? "#fff8e2" : "#4a5a8a", T.light ? "#c9b98a" : "#6b7bb0", 1.5);
+    icon(c, b.id, b.x + b.w / 2, b.y + b.h / 2 + dy, 22, b.id === "hint" ? "#e2703a" : T.light ? "#4a5a32" : "#eef2ff"); c.globalAlpha = 1;
+  }
+}
+Lab.boot();
+})();
 </script></body></html>

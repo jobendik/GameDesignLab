@@ -1,0 +1,259 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Slidescape</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* SLIDESCAPE — a sliding-tile puzzle whose tiles are pieces of a little paper-cut scene painted in code for each level.
+ * Identity: framed picture on a dusky gallery wall; harbours, night skylines, balloon skies and meadows drawn from the
+ *           level number; soft "chill" music; every tile that clicks home plays the next note of a rising scale.
+ * Hook: tiles follow the finger and a whole row/column slides as ONE move, so reading lines is how you beat par.
+ *       The gap shows a ghost of the missing piece, Peek flashes the finished picture, 123 overlays numbers.
+ * Curve: 3×3 five slides from solved → full shuffles → 3×4, 4×4, 4×5, 5×5 → bolted tiles that never move.
+ *        Every shuffle is a walk of legal moves from the solved picture, so every board is solvable. Progress,
+ *        stars and the board in progress persist. */
+Lab.init({
+  title: "Slidescape", tagline: "Slide the scene back together.", category: "Puzzle & Logic",
+  howto: ["Tap or drag a tile toward the gap", "A whole line of tiles slides as one move", "Fewer slides earn more stars"],
+  theme: { bg: "#262341", bg2: "#4b4070", accent: "#ff8a5c", accent2: "#ffd27a" },
+  orient: "any", music: { style: "chill", key: "Bb", bpm: 84, vol: .34 }, restart: start, attract,
+});
+const { draw, fx, clamp, ease } = Lab, TAU = Lab.TAU;
+const DEFS = [[3, 3, 5, 0], [3, 3, 12, 0], [3, 3, 0, 0], [3, 4, 16, 0], [4, 4, 22, 0], [4, 4, 0, 0], [4, 5, 30, 0], [4, 4, 0, 1], [5, 5, 40, 0], [5, 5, 0, 0]];
+const LOOP = [[4, 4, 0, 1], [3, 4, 0, 0], [4, 5, 0, 1], [5, 5, 0, 0], [4, 4, 0, 2], [5, 5, 0, 2]];
+const def = n => n <= DEFS.length ? DEFS[n - 1] : LOOP[(n - DEFS.length - 1) % LOOP.length];
+const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+let level, maxLv, starMap, C, R, N, cells, pin, gap, par, start0, off, moves, time, undo, done, winT, peekT, nums, drag, nudge, homeN, live = false, autoT = 0;
+let T = 1, land = false, cell = 80, bx = 0, by = 0, btns = [], info = { x: 0, y: 0, w: 300 }, pic = null;
+
+/* ---------- level: seeded random walk of legal single-tile moves from the solved board (never reverses a step) */
+function make(lv) {
+  const [c, r, depth, np] = def(lv), n = c * r;
+  for (let tryN = 0; ; tryN++) {
+    const rnd = Lab.rng(lv * 9973 + 31 + tryN * 577), cs = Array.from({ length: n }, (_, i) => i), pn = new Array(n).fill(false);
+    for (let i = 0; i < np;) { const p = Math.floor(rnd() * (n - 1)); if (pn[p] || p === n - 2 || p === n - 1 - c) continue; pn[p] = true; i++; }
+    let g = n - 1, last = -1, lastD = -1, groups = 0;
+    for (let s = 0, steps = depth || 20 * n; s < steps; s++) {
+      const opts = []; DIRS.forEach(([dc, dr], d) => { const nc = g % c + dc, nr = (g / c | 0) + dr, ni = nr * c + nc; if (nc >= 0 && nc < c && nr >= 0 && nr < r && !pn[ni] && d !== (last ^ 1)) opts.push([d, ni]); });
+      if (!opts.length) { last = -1; continue; }
+      const [d, ni] = opts[Math.floor(rnd() * opts.length)]; cs[g] = cs[ni]; cs[ni] = n - 1; g = ni; if (d !== lastD) groups++; lastD = last = d;
+    }
+    let m = 0; cs.forEach((id, i) => { if (id !== n - 1) m += Math.abs(id % c - i % c) + Math.abs((id / c | 0) - (i / c | 0)); });
+    if (m < Math.min(depth || 99, 8) * .5 && tryN < 20) continue;
+    return { C: c, R: r, N: n, cells: cs, pin: pn, par: Math.min(groups + 2, Math.round(m * 1.5) + 10) };
+  }
+}
+function load(resume) {
+  const L = make(level); C = L.C; R = L.R; N = L.N; pin = L.pin; par = L.par; start0 = L.cells.slice(); cells = L.cells.slice(); moves = 0; time = 0;
+  const sv = resume && Lab.store.get("save", null); if (sv && sv.lv === level && sv.cells && sv.cells.length === N) { cells = sv.cells.slice(); moves = sv.moves | 0; time = +sv.time || 0; }
+  gap = cells.indexOf(N - 1); off = Array.from({ length: N }, () => ({ x: 0, y: 0, pop: 0 })); undo = []; done = false; winT = 0; peekT = 0; drag = null; nudge = null; homeN = countHome();
+  Lab.sprite.clear("pic:"); layout();
+}
+const countHome = () => cells.reduce((a, id, i) => a + (id === i && id !== N - 1 ? 1 : 0), 0);
+const starsNow = () => moves <= par ? 3 : moves <= Math.ceil(par * 1.5) ? 2 : 1;
+const totalStars = () => Object.values(starMap).reduce((a, b) => a + b, 0);
+const save = () => Lab.store.set("save", done ? null : { lv: level, cells, moves, time: Math.round(time) });
+
+/* ---------- moves: every tile between idx and the gap shifts one cell toward the gap (blocked by bolted tiles) */
+function lineTo(idx) {
+  if (idx < 0 || idx === gap || done) return null; const c = idx % C, r = idx / C | 0, gc = gap % C, gr = gap / C | 0; if (c !== gc && r !== gr) return null;
+  const st = c === gc ? (r < gr ? C : -C) : (c < gc ? 1 : -1), list = [];
+  for (let i = idx; i !== gap; i += st) { if (pin[i]) return null; list.push(i); }
+  return { list, st, dx: c === gc ? 0 : Math.sign(gc - c), dy: c === gc ? Math.sign(gr - r) : 0 };
+}
+function slide(idx, o) {
+  o = o || {}; const ln = lineTo(idx); if (!ln) return false; const d = o.d || 0, g0 = gap, wasHome = homeN;
+  for (let j = ln.list.length - 1; j >= 0; j--) { const i = ln.list[j], id = cells[i]; cells[i + ln.st] = id; off[id].x = ln.dx * (d - cell); off[id].y = ln.dy * (d - cell); }
+  cells[idx] = N - 1; gap = idx; homeN = countHome();
+  if (o.quiet) return true;
+  if (o.undo) moves--; else { moves++; undo.push(g0); if (undo.length > 400) undo.shift(); }
+  Lab.sfx("slide", { pitch: 1.25 - ln.list.length * .09, vol: .8 }); Lab.after(.07, () => Lab.sfx("knock", { pitch: 1.7, vol: .35 })); Lab.buzz(5);
+  if (homeN > wasHome) for (const i of ln.list) { const to = i + ln.st, id = cells[to]; if (id === to) { off[id].pop = 1; Lab.after(.1, () => { Lab.audio.combo(Math.round(homeN / (N - 1) * 9), { vol: .16 }); fx.burst(bx + (to % C + .5) * cell, by + ((to / C | 0) + .5) * cell, { n: 7, color: "#ffd27a", speed: 120, life: .5, size: 3, shape: "star" }); }); } }
+  if (homeN === N - 1) win(); else save();
+  return true;
+}
+function undoMove() { if (done || !undo.length) { Lab.sfx("tick", { pitch: .6 }); return; } slide(undo.pop(), { undo: true }); }
+function reset() { Lab.store.set("save", null); Lab.restart(); }
+function win() {
+  done = true; drag = null; const st = starsNow(); if (st > (starMap[level] || 0)) { starMap[level] = st; Lab.store.set("stars", starMap); }
+  maxLv = Math.max(maxLv, level + 1); Lab.store.set("max", maxLv); Lab.store.set("level", level + 1); Lab.store.set("save", null);
+  Lab.setScore("★ " + totalStars()); Lab.bumpScore(); const lv = level, m = moves, tm = time;
+  Lab.after(.35, () => { Lab.sfx("chime"); Lab.flash("#fff7dc", .35, .35); for (let i = 0; i < 4; i++) fx.burst(bx + C * cell * (i % 2), by + R * cell * (i >> 1), { n: 14, colors: ["#ffd27a", "#ff8a5c", "#fff", "#7bdff2"], speed: 300, life: .9, size: 5, gravity: 300, shape: "star" }); });
+  Lab.after(1.5, () => Lab.win({ title: st === 3 ? "Picture perfect!" : "Scene restored", score: lv, scoreLabel: "Level", stats: [["Slides", m + " (par " + par + ")"], ["Time", Lab.fmtTime(tm)], ["Stars", "★".repeat(st) + "☆".repeat(3 - st)]], button: "Next scene" }));
+}
+function go(lv) { if (lv < 1 || lv > maxLv) return; Lab.sfx("tap"); Lab.store.set("level", lv); Lab.restart(); }
+const cellAt = (x, y) => { const c = Math.floor((x - bx) / cell), r = Math.floor((y - by) / cell); return c < 0 || c >= C || r < 0 || r >= R ? -1 : r * C + c; };
+function refuse(idx) { if (idx >= 0 && idx !== gap) { nudge = { id: cells[idx], t: .3 }; Lab.sfx("tick", { pitch: .55, vol: .7 }); } }
+
+function start() {
+  live = true; level = Lab.store.get("level", 1); maxLv = Math.max(level, Lab.store.get("max", 1)); starMap = Lab.store.get("stars", {}); nums = Lab.store.get("nums", false);
+  load(true); Lab.setScore("★ " + totalStars());
+  Lab.input.onDown = [(x, y) => {
+    if (done) return;
+    for (const b of btns) if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { b.t = .16; if (b.label) Lab.sfx("tap"); b.fn(); return; }
+    const idx = cellAt(x, y), ln = lineTo(idx); if (!ln) { refuse(idx); return; }
+    drag = { idx, ln, d: 0, sx: x, sy: y };
+  }];
+  Lab.input.onMove = [(x, y) => { if (drag && Lab.input.down) drag.d = clamp((x - drag.sx) * drag.ln.dx + (y - drag.sy) * drag.ln.dy, 0, cell); }];
+  Lab.input.onUp = [(x, y) => {
+    if (!drag) return; const d = drag.d, tap = Math.hypot(x - drag.sx, y - drag.sy) < 10, ln = drag.ln, idx = drag.idx; drag = null;
+    if (d > cell * .3 || tap) slide(idx, { d }); else for (const i of ln.list) { off[cells[i]].x = ln.dx * d; off[cells[i]].y = ln.dy * d; }
+  }];
+  Lab.input.onKey = [k => {
+    const d = { ArrowLeft: 1, ArrowRight: -1, ArrowUp: C, ArrowDown: -C }[k];   // the tile next to the gap moves in the arrow's direction
+    if (d) { const i = gap + d; if (i >= 0 && i < N && (Math.abs(d) > 1 || (i / C | 0) === (gap / C | 0))) { if (!slide(i)) refuse(i); } }
+    else if (k === "z" || k === "u" || k === "Backspace") undoMove(); else if (k === "r") reset(); else if (k === "n") toggleNums(); else if (k === "v" || k === " ") peek();
+  }];
+  Lab.expose({
+    get level() { return level; }, get moves() { return moves; }, get par() { return par; }, get cells() { return cells.slice(); }, get gap() { return gap; }, get size() { return [C, R]; },
+    get done() { return done; }, get home() { return homeN; }, get pins() { return pin.filter(Boolean).length; }, get stars() { return starsNow(); }, get undo() { return undo.slice(); }, get nums() { return nums; }, get peek() { return peekT > 0; },
+    xy(i) { return [bx + (i % C + .5) * cell, by + ((i / C | 0) + .5) * cell]; }, cell() { return cell; }, button(id) { const b = btns.find(b => b.id === id); return [b.x + b.w / 2, b.y + b.h / 2]; },
+    setLevel(n) { maxLv = Math.max(maxLv, n); Lab.store.set("max", maxLv); Lab.store.set("level", n); Lab.store.set("save", null); Lab.restart(); },
+    solvable(n) { const L = make(n), a = L.cells.filter(v => v !== L.N - 1); let inv = 0; for (let i = 0; i < a.length; i++) for (let j = i + 1; j < a.length; j++) if (a[i] > a[j]) inv++; const row = L.R - (L.cells.indexOf(L.N - 1) / L.C | 0); return [L.C % 2 ? inv % 2 === 0 : (inv + row) % 2 === 1, L.C, L.R, L.par, L.pin.filter(Boolean).length]; },
+  });
+  Lab.loop(frame);
+}
+function toggleNums() { nums = !nums; Lab.store.set("nums", nums); }
+function peek() { if (!done) { peekT = 1.6; Lab.sfx("swish", { vol: .5 }); } }
+function attract(dt, t) {
+  if (!cells) { level = Lab.store.get("level", 1); maxLv = level; starMap = {}; nums = false; load(false); }
+  autoT -= dt; if (autoT < 0) { autoT = .9; const o = []; for (let i = 0; i < N; i++) { const ln = lineTo(i); if (ln && ln.list.length === 1) o.push(i); } if (o.length) slide(Lab.choose(o), { quiet: true }); }
+  step(dt); render(t);
+}
+
+function layout() {
+  const P = Lab.play; land = P.w > P.h * 1.1; T = clamp(Math.min(Lab.W, Lab.H) / 390, .82, 1.3); if (!cells) return; btns = [];
+  const defs = [["peek", "Peek", peek], ["nums", "123", toggleNums], ["undo", "Undo", undoMove], ["reset", "Reset", reset]];
+  if (land) {
+    const side = clamp(P.w * .2, 140, 240); cell = Math.min((P.w - side * 2 - 40) / C, (P.h - 76) / R, 150); bx = P.x + (P.w - C * cell) / 2; by = P.y + (P.h - R * cell) / 2 + 6;
+    info = { x: P.x + (bx - P.x) / 2, y: P.y + P.h / 2 - 66 * T, w: side };
+    const bw = Math.min(side - 40, 140 * T), bh = 42 * T, cx = bx + C * cell + (P.x + P.w - bx - C * cell) / 2;
+    defs.forEach((d, i) => btns.push({ id: d[0], label: d[1], fn: d[2], x: cx - bw / 2, y: P.y + P.h / 2 + (i - 2) * (bh + 9 * T) + 4 * T, w: bw, h: bh, t: 0 }));
+  } else {
+    const top = 104 * T, bot = 70 * T; cell = Math.min((P.w - 52) / C, (P.h - top - bot - 36) / R, 140); bx = P.x + (P.w - C * cell) / 2; by = P.y + top + (P.h - top - bot - R * cell) / 2;
+    info = { x: P.x + P.w / 2, y: P.y + 6 * T, w: P.w - 40 };
+    const bw = Math.min(84 * T, (P.w - 46) / 4), bh = 46 * T, y = Math.min(P.y + P.h - bh - 8 * T, by + R * cell + 40 * T);
+    defs.forEach((d, i) => btns.push({ id: d[0], label: d[1], fn: d[2], x: P.x + P.w / 2 + (i - 1.5) * (bw + 8) - bw / 2, y, w: bw, h: bh, t: 0 }));
+  }
+  const nw = 46 * T; btns.push({ id: "prev", fn: () => go(level - 1), x: info.x - 82 * T - nw / 2, y: info.y - 4 * T, w: nw, h: 40 * T, t: 0 }, { id: "next", fn: () => go(level + 1), x: info.x + 82 * T - nw / 2, y: info.y - 4 * T, w: nw, h: 40 * T, t: 0 });
+  Lab.sprite.clear("bg:"); Lab.sprite.clear("t:"); Lab.sprite.clear("pic:"); pic = null;
+}
+Lab.onResize(layout);
+
+/* ---------- the scenes: flat paper-cut pictures painted from the level number (4 families × random details) */
+function paint(g, w, h, seed) {
+  const r = Lab.rng(seed * 131 + 7), F = (a, b) => a + r() * (b - a), u = w / 100, type = seed % 4;
+  const grad = (y0, y1, cols) => { const gd = g.createLinearGradient(0, y0, 0, y1); cols.forEach((c, i) => gd.addColorStop(i / (cols.length - 1), c)); g.fillStyle = gd; g.fillRect(0, y0, w, y1 - y0 + 1); };
+  const disc = (x, y, rad, col) => { g.fillStyle = col; g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill(); };
+  const cloud = (x, y, s, col) => { g.fillStyle = col; g.beginPath(); g.arc(x - s, y, s * .6, 0, TAU); g.arc(x - s * .2, y - s * .45, s * .8, 0, TAU); g.arc(x + s * .8, y - s * .1, s * .65, 0, TAU); g.rect(x - s, y - s * .1, s * 1.8, s * .7); g.fill(); };
+  const ridge = (y0, amp, f, ph, col) => { const fn = x => y0 + Math.sin(x / w * f + ph) * amp + Math.sin(x / w * f * 2.7 + ph * 1.7) * amp * .3; g.fillStyle = col; g.beginPath(); g.moveTo(0, h); for (let x = 0; x <= w + 4; x += 4) g.lineTo(x, fn(x)); g.lineTo(w, h); g.fill(); return fn; };
+  const tree = (x, y, s, col, pine) => { g.fillStyle = "#6b4a3a"; g.fillRect(x - s * .08, y - s * .5, s * .16, s * .5); g.fillStyle = col; g.beginPath(); if (pine) { g.moveTo(x, y - s * 1.5); g.lineTo(x + s * .42, y - s * .35); g.lineTo(x - s * .42, y - s * .35); } else g.arc(x, y - s * .85, s * .45, 0, TAU); g.fill(); };
+  const birds = n => { g.strokeStyle = "rgba(40,40,70,.7)"; g.lineWidth = u * .5; g.lineCap = "round"; for (let i = 0; i < n; i++) { const x = F(10, 90) * u, y = F(.08, .4) * h, s = F(1.5, 2.6) * u; g.beginPath(); g.moveTo(x - s, y - s * .5); g.quadraticCurveTo(x - s * .4, y - s * .7, x, y); g.quadraticCurveTo(x + s * .4, y - s * .7, x + s, y - s * .5); g.stroke(); } };
+  if (type === 0) {          // meadow
+    const dusk = r() < .4; grad(0, h, dusk ? ["#ff8f6b", "#ffc38a", "#ffe9b8"] : ["#6ec3f0", "#bfe6fa", "#f2fbff"]);
+    const sx = F(18, 82) * u, sy = F(.14, .26) * h; disc(sx, sy, 16 * u, "rgba(255,255,255,.22)"); disc(sx, sy, 12 * u, "rgba(255,255,255,.3)"); disc(sx, sy, 8 * u, dusk ? "#fff1c2" : "#ffe066");
+    for (let i = 0; i < 3; i++) cloud(F(8, 92) * u, F(.1, .38) * h, F(5, 8) * u, "rgba(255,255,255,.92)"); birds(3);
+    ridge(h * .5, h * .05, 5, F(0, 6), dusk ? "#c98aa8" : "#9fc6e6"); const mid = ridge(h * .62, h * .05, 4, F(0, 6), dusk ? "#8f6f9e" : "#7fc58a");
+    for (let i = 0; i < 7; i++) { const x = F(3, 97) * u; tree(x, mid(x) + u, F(7, 11) * u, dusk ? "#5d4a78" : "#3f9a6b", i % 2); }
+    const near = ridge(h * .78, h * .04, 3.2, F(0, 6), dusk ? "#5a4670" : "#58b368"), hx = F(22, 78) * u, hy = near(hx) + 1.5 * u, s = 13 * u;
+    g.strokeStyle = "#f6e3b4"; g.lineWidth = 4 * u; g.lineCap = "round"; g.beginPath(); g.moveTo(hx, hy); g.bezierCurveTo(hx + 20 * u, hy + .08 * h, hx - 25 * u, h * .93, hx + F(-10, 10) * u, h + 4 * u); g.stroke();
+    g.fillStyle = "#fff6e6"; g.fillRect(hx - s / 2, hy - s * .7, s, s * .7); g.fillStyle = "#e2553d"; g.beginPath(); g.moveTo(hx - s * .65, hy - s * .7); g.lineTo(hx, hy - s * 1.25); g.lineTo(hx + s * .65, hy - s * .7); g.fill();
+    g.fillStyle = "#6b4a3a"; g.fillRect(hx - s * .1, hy - s * .38, s * .2, s * .38); g.fillStyle = "#ffd166"; g.fillRect(hx + s * .2, hy - s * .5, s * .18, s * .18); g.fillRect(hx - s * .38, hy - s * .5, s * .18, s * .18);
+    for (let i = 0; i < 26; i++) disc(F(2, 98) * u, F(.84, .99) * h, F(.6, 1.2) * u, ["#ff6f91", "#ffd166", "#fff", "#c77dff"][i % 4]);
+  } else if (type === 1) {   // harbour
+    const hz = h * .56; grad(0, hz, ["#ffb37a", "#ffd9a0", "#fff0c9"]); const sx = F(25, 75) * u; disc(sx, hz - 3 * u, 15 * u, "rgba(255,255,255,.3)"); disc(sx, hz - 3 * u, 10 * u, "#ff7a59");
+    cloud(F(10, 40) * u, h * .16, 7 * u, "rgba(255,255,255,.85)"); cloud(F(60, 90) * u, h * .26, 5 * u, "rgba(255,255,255,.8)"); birds(4);
+    grad(hz, h, ["#2f9aa8", "#1f6f8f", "#174a73"]);
+    g.fillStyle = "rgba(255,200,150,.55)"; for (let i = 0; i < 9; i++) { const y = hz + (i + .5) * (h - hz) / 10, ww = (14 - i) * u * F(.6, 1); g.fillRect(sx - ww / 2 + F(-2, 2) * u, y, ww, u * .9); }
+    g.strokeStyle = "rgba(255,255,255,.5)"; g.lineWidth = u * .6; for (let i = 0; i < 16; i++) { const x = F(2, 98) * u, y = F(hz + 3 * u, h - 2 * u), s = F(2, 4) * u; g.beginPath(); g.arc(x, y, s, Math.PI * 1.15, Math.PI * 1.85); g.stroke(); }
+    const lx = (r() < .5 ? F(10, 22) : F(78, 90)) * u, ly = hz + 5 * u; g.fillStyle = "#3b3550"; g.beginPath(); g.ellipse(lx, ly, 13 * u, 5 * u, 0, Math.PI, 0); g.fill();
+    for (let i = 0; i < 5; i++) { g.fillStyle = i % 2 ? "#e2553d" : "#fff6e6"; const wA = 4.4 * u - i * .35 * u; g.fillRect(lx - wA, ly - 9.5 * u - i * 5.5 * u, wA * 2, 5.6 * u); }
+    g.fillStyle = "#3b3550"; g.fillRect(lx - 3.6 * u, ly - 36.5 * u, 7.2 * u, 5 * u); g.beginPath(); g.moveTo(lx - 4.2 * u, ly - 36.5 * u); g.lineTo(lx, ly - 41 * u); g.lineTo(lx + 4.2 * u, ly - 36.5 * u); g.fill(); disc(lx, ly - 34 * u, 1.8 * u, "#ffe066");
+    for (let i = 0; i < 2; i++) {
+      const x = (lx < 50 * u ? F(40, 85) : F(15, 60)) * u, y = hz + (i ? .34 : .12) * (h - hz) + F(0, 4) * u, s = (i ? 14 : 8) * u, col = ["#ff6f91", "#ffd166", "#7bdff2", "#c77dff"][Math.floor(r() * 4)];
+      g.fillStyle = "#4a2c1d"; g.beginPath(); g.moveTo(x - s * .7, y); g.lineTo(x + s * .7, y); g.lineTo(x + s * .45, y + s * .28); g.lineTo(x - s * .5, y + s * .28); g.fill(); g.fillRect(x - s * .03, y - s * 1.2, s * .06, s * 1.2);
+      g.fillStyle = col; g.beginPath(); g.moveTo(x + s * .08, y - s * 1.15); g.lineTo(x + s * .62, y - s * .1); g.lineTo(x + s * .08, y - s * .1); g.fill(); g.fillStyle = "#fff6e6"; g.beginPath(); g.moveTo(x - s * .08, y - s * .95); g.lineTo(x - s * .5, y - s * .1); g.lineTo(x - s * .08, y - s * .1); g.fill();
+    }
+  } else if (type === 2) {   // night skyline
+    grad(0, h, ["#141a44", "#3a2f7a", "#c2567a", "#ffb07a"]);
+    for (let i = 0; i < 60; i++) disc(F(0, 100) * u, F(0, .6) * h, F(.25, .7) * u, "rgba(255,255,255," + F(.4, 1).toFixed(2) + ")");
+    const mx = F(20, 80) * u, my = F(.14, .28) * h; disc(mx, my, 14 * u, "rgba(255,255,255,.12)"); disc(mx, my, 9.5 * u, "#fdf3c4"); disc(mx - 3 * u, my - 2 * u, 2 * u, "#e9dca0"); disc(mx + 3.5 * u, my + 2.5 * u, 1.4 * u, "#e9dca0"); disc(mx + u, my - 4.5 * u, u, "#e9dca0");
+    for (let layer = 0; layer < 2; layer++) for (let x = -F(0, 4) * u; x < w;) {
+      const bw = F(8, 15) * u, bh = (layer ? F(.2, .46) : F(.3, .58)) * h, y = h - bh; g.fillStyle = layer ? "#1b1640" : "#4a3b86"; g.fillRect(x, y, bw, bh); if (r() < .4) g.fillRect(x + bw * .45, y - 5 * u, u * .8, 5 * u);
+      const n = Math.max(2, Math.floor(bw / (3.2 * u))); for (let wy = y + 2.5 * u; wy < h - 3 * u; wy += 4.2 * u) for (let k = 0; k < n; k++) if (r() < (layer ? .5 : .28)) { g.fillStyle = layer ? (r() < .8 ? "#ffd166" : "#7bdff2") : "#8f7fd0"; g.fillRect(x + (k + .25) * bw / n, wy, bw / n * .5, 2.2 * u); }
+      x += bw + F(0, 1.5) * u;
+    }
+  } else {                   // balloon sky
+    grad(0, h, ["#8fd0f5", "#d7f0ff", "#fff3d6"]);
+    for (let i = 0; i < 4; i++) { const x = (i * 28 + F(-6, 6)) * u, s = F(22, 34) * u, y = h * .88; g.fillStyle = i % 2 ? "#9db7e0" : "#b6c9ea"; g.beginPath(); g.moveTo(x - s * .1, y); g.lineTo(x + s * .5, y - s * .8); g.lineTo(x + s * 1.1, y); g.fill(); g.fillStyle = "#fff"; g.beginPath(); g.moveTo(x + s * .5, y - s * .8); g.lineTo(x + s * .34, y - s * .53); g.lineTo(x + s * .5, y - s * .6); g.lineTo(x + s * .66, y - s * .53); g.fill(); }
+    ridge(h * .88, h * .02, 6, F(0, 6), "#7fc58a"); for (let i = 0; i < 9; i++) tree(F(2, 98) * u, h * .9 + F(0, 4) * u, F(4, 6) * u, "#3f9a6b", i % 2);
+    for (let i = 0; i < 3; i++) cloud(F(5, 95) * u, F(.08, .6) * h, F(4, 7) * u, "rgba(255,255,255,.9)");
+    const pal = [["#ef476f", "#ffd166"], ["#3a86ff", "#fff"], ["#8338ec", "#ff9f1c"], ["#06d6a0", "#fff6e6"]];
+    for (let i = 0; i < 4; i++) {
+      const s = (i ? F(7, 11) : 15) * u, x = (14 + i * 24 + F(-5, 5)) * u, y = F(.16, .6) * h, pc = pal[(i + seed) % 4];
+      g.save(); g.beginPath(); g.arc(x, y, s, Math.PI * .85, Math.PI * .15); g.lineTo(x + s * .28, y + s * 1.25); g.lineTo(x - s * .28, y + s * 1.25); g.closePath(); g.clip();
+      for (let k = 0; k < 6; k++) { g.fillStyle = pc[k % 2]; g.fillRect(x - s + k * s / 3, y - s, s / 3 + 1, s * 2.4); } g.restore();
+      g.strokeStyle = "#5a4636"; g.lineWidth = u * .35; g.beginPath(); g.moveTo(x - s * .28, y + s * 1.25); g.lineTo(x - s * .18, y + s * 1.6); g.moveTo(x + s * .28, y + s * 1.25); g.lineTo(x + s * .18, y + s * 1.6); g.stroke(); g.fillStyle = "#8a5a3c"; g.fillRect(x - s * .2, y + s * 1.6, s * .4, s * .3);
+    }
+    birds(3);
+  }
+  g.strokeStyle = "rgba(255,255,255,.6)"; g.lineWidth = u * .9; g.strokeRect(3 * u, 3 * u, w - 6 * u, h - 6 * u);
+}
+const picture = () => pic || (pic = Lab.sprite("pic:" + level, C * cell, R * cell, (g, w, h) => paint(g, w, h, level)));
+function tileSprite(id) {
+  const p = picture(), k = p._dpr, m = 1.5, s = cell - m * 2;
+  return Lab.sprite("t:" + id, cell, cell, g => {
+    g.save(); draw.rr(g, m, m, s, s, cell * .1); g.clip(); g.drawImage(p, (id % C) * cell * k, (id / C | 0) * cell * k, cell * k, cell * k, 0, 0, cell, cell);
+    g.fillStyle = "rgba(255,255,255,.3)"; g.fillRect(m, m, s, 2.5); g.fillRect(m, m, 2.5, s); g.fillStyle = "rgba(20,10,40,.28)"; g.fillRect(m, cell - m - 3, s, 3); g.fillRect(cell - m - 3, m, 3, s); g.restore();
+    draw.rr(g, m, m, s, s, cell * .1); g.strokeStyle = "rgba(25,18,50,.55)"; g.lineWidth = 1.2; g.stroke();
+  });
+}
+function step(dt) {
+  for (const o of off) { o.x = Lab.damp(o.x, 0, 24, dt); o.y = Lab.damp(o.y, 0, 24, dt); if (o.pop > 0) o.pop = Math.max(0, o.pop - dt * 3); }
+  if (live && !done && moves > 0) time += dt; if (done) winT += dt; if (peekT > 0) peekT -= dt; if (nudge && (nudge.t -= dt) <= 0) nudge = null;
+  for (const b of btns) if (b.t > 0) b.t -= dt;
+}
+function frame(dt, t) { step(dt); render(t); }
+
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, bw = C * cell, bh = R * cell, mat = Math.max(10, cell * .13), fr = 7;
+  const bg = Lab.sprite("bg:" + W + "x" + H + ":" + C + R, W + 80, H + 80, g => {
+    draw.vgrad(g, 0, 0, W + 80, H + 80, ["#4b4070", "#262341"]); draw.glow(g, bx + 40 + bw / 2, by + 40 + bh * .3, Math.max(bw, bh) * 1.25, "#ffcf9a", .2);
+    g.fillStyle = "rgba(255,255,255,.025)"; for (let x = 0; x < W + 80; x += 26) g.fillRect(x, 0, 12, H + 80);
+    const x = bx + 40 - mat - fr, y = by + 40 - mat - fr, w = bw + (mat + fr) * 2, h = bh + (mat + fr) * 2;
+    draw.rect(g, x + 4, y + 12, w, h, 10, "rgba(8,6,24,.4)"); draw.rect(g, x, y, w, h, 9, "#e9c58f"); draw.rect(g, x + 2, y + 2, w - 4, h - 4, 7, null, "#fff0cf", 1.5); draw.rect(g, x + fr, y + fr, w - fr * 2, h - fr * 2, 4, "#fbf6ea");
+    draw.rect(g, bx + 40 - 3, by + 40 - 3, bw + 6, bh + 6, cell * .1 + 2, "#1b1733");
+    g.strokeStyle = "#8a8598"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x + w * .3, y); g.lineTo(x + w / 2, y - 26); g.lineTo(x + w * .7, y); g.stroke(); draw.circle(g, x + w / 2, y - 26, 3.5, "#c9c4d6");
+  });
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+  const p = picture(); c.globalAlpha = .16; c.drawImage(p, bx, by, bw, bh); c.globalAlpha = 1;
+  const inDrag = drag ? drag.ln.list : null;
+  for (let i = 0; i < N; i++) {
+    const id = cells[i]; if (id === N - 1) continue; const o = off[id], s = tileSprite(id);
+    let x = bx + (i % C) * cell + o.x, y = by + (i / C | 0) * cell + o.y;
+    if (inDrag && inDrag.includes(i)) { x += drag.ln.dx * drag.d; y += drag.ln.dy * drag.d; }
+    if (nudge && nudge.id === id) x += Math.sin(nudge.t * 50) * 3.5 * nudge.t / .3;
+    const pop = o.pop > 0 ? 1 + ease.pulse(o.pop) * .07 : 1;
+    if (pop !== 1) { c.save(); c.translate(x + cell / 2, y + cell / 2); c.scale(pop, pop); c.drawImage(s, -cell / 2, -cell / 2, cell, cell); c.restore(); } else c.drawImage(s, x, y, cell, cell);
+    if (pin[i]) { c.fillStyle = "rgba(20,14,44,.28)"; draw.rr(c, x + 1.5, y + 1.5, cell - 3, cell - 3, cell * .1); c.fill(); for (const [u, v] of [[.16, .16], [.84, .16], [.16, .84], [.84, .84]]) draw.circle(c, x + cell * u, y + cell * v, cell * .055, "#d8d4e4", "#4a4466", 1.5); }
+    else if (id === i && !done) draw.circle(c, x + cell - 10, y + 10, 3.2, "#ffd27a", "rgba(60,40,10,.6)", 1);
+    if (nums && !done) { const r = cell * .15; draw.circle(c, x + r + 5, y + r + 5, r, "rgba(27,23,51,.78)"); draw.text(c, id + 1, x + r + 5, y + r + 6, { size: r * 1.25, color: "#fff", weight: 800 }); }
+  }
+  const full = done ? clamp(winT * 1.6, 0, 1) : peekT > 0 ? clamp(Math.min(peekT * 5, (1.6 - peekT) * 6), 0, 1) * .94 : 0;
+  if (full > 0) { c.save(); c.globalAlpha = full; draw.rr(c, bx + 1, by + 1, bw - 2, bh - 2, cell * .1); c.clip(); c.drawImage(p, bx, by, bw, bh); c.restore(); if (done && winT < 1.4) { c.save(); draw.rr(c, bx, by, bw, bh, cell * .1); c.clip(); const sx = bx - bw * .4 + (winT - .3) * bw * 2.2; c.globalAlpha = .35; c.fillStyle = "#fff"; c.beginPath(); c.moveTo(sx, by); c.lineTo(sx + bw * .18, by); c.lineTo(sx - bw * .1, by + bh); c.lineTo(sx - bw * .28, by + bh); c.fill(); c.restore(); } }
+  // info: level nav, stars, slides vs par, time
+  const ix = info.x, iy = info.y, st = moves || done ? starsNow() : 3, got = starMap[level] || 0;
+  draw.text(c, "SCENE " + level, ix, iy + 16 * T, { size: 21 * T, color: "#fff", weight: 800 });
+  for (const b of btns) if (!b.label) { const on = b.id === "prev" ? level > 1 : level < maxLv, d = b.id === "prev" ? -1 : 1, x = b.x + b.w / 2, y = iy + 16 * T, r = 8 * T; c.globalAlpha = on ? (b.t > 0 ? .5 : 1) : .18; c.fillStyle = "#fff"; c.beginPath(); c.moveTo(x + d * r, y); c.lineTo(x - d * r * .7, y - r); c.lineTo(x - d * r * .7, y + r); c.closePath(); c.fill(); c.globalAlpha = 1; }
+  for (let i = 0; i < 3; i++) { const x = ix + (i - 1) * 27 * T, y = iy + 45 * T; draw.star(c, x, y, 10.5 * T, i < st ? "#ffd27a" : "rgba(255,255,255,.16)"); if (i < got) draw.circle(c, x, y + 14.5 * T, 2 * T, "#ff8a5c"); }
+  draw.text(c, moves + (moves === 1 ? " slide" : " slides") + "  ·  par " + par, ix, iy + 73 * T, { size: 14.5 * T, color: moves > par ? "#ffb59a" : "#e9e4ff", weight: 700 });
+  draw.text(c, Lab.fmtTime(time).slice(0, -2) + "  ·  " + C + "×" + R + (pin.some(Boolean) ? "  ·  bolted" : ""), ix, iy + 92 * T, { size: 12 * T, color: "rgba(233,228,255,.62)", weight: 600 });
+  for (const b of btns) if (b.label) {
+    const offB = b.id === "undo" && !undo.length, on = (b.id === "nums" && nums) || (b.id === "peek" && peekT > 0), dn = b.t > 0 ? 2 : 0;
+    c.globalAlpha = offB ? .45 : 1; draw.rect(c, b.x, b.y + 4, b.w, b.h, 14, "#17142c"); draw.rect(c, b.x, b.y + dn, b.w, b.h, 14, on ? "#ffd27a" : "#5a4f86", on ? "#fff0cf" : "#7e72ad", 1.5);
+    draw.text(c, b.label, b.x + b.w / 2, b.y + b.h / 2 + dn + 1, { size: 15.5 * T, color: on ? "#3a2a10" : "#fff", weight: 700 }); c.globalAlpha = 1;
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

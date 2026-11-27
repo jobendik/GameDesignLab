@@ -709,6 +709,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 8,
+   "status": "transformed",
    "thumb": "thumbs/games--power-wash-royale.jpg"
   },
   {
@@ -1978,41 +1980,45 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 47,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/48-water-sort",
-   "path": "PhoneGameLab/games/48-water-sort/index.html",
+   "id": "PhoneGameLab/48-decant",
+   "path": "PhoneGameLab/games/48-decant/index.html",
    "collection": "PhoneGameLab",
-   "title": "Water Sort",
-   "desc": "Pour colors between tubes until each is one color.",
+   "title": "Decant",
+   "desc": "Pour until every bottle holds one flavour.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 48,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--48-water-sort.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/49-ball-sort",
-   "path": "PhoneGameLab/games/49-ball-sort/index.html",
+   "id": "PhoneGameLab/49-tall-order",
+   "path": "PhoneGameLab/games/49-tall-order/index.html",
    "collection": "PhoneGameLab",
-   "title": "Ball Sort",
-   "desc": "Move balls between tubes to sort by color.",
+   "title": "Tall Order",
+   "desc": "Stack every peg one colour, widest ring first.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 49,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--49-ball-sort.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/50-bolt-hole",
@@ -2029,24 +2035,28 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 50,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/51-15-puzzle",
-   "path": "PhoneGameLab/games/51-15-puzzle/index.html",
+   "id": "PhoneGameLab/51-slidescape",
+   "path": "PhoneGameLab/games/51-slidescape/index.html",
    "collection": "PhoneGameLab",
-   "title": "15 Puzzle",
-   "desc": "Slide numbered tiles into order.",
+   "title": "Slidescape",
+   "desc": "Slide the scene back together.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 51,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--51-15-puzzle.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/52-tetris",
@@ -2086,34 +2096,39 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab/54-hedgeroll",
    "path": "PhoneGameLab/games/54-hedgeroll/index.html",
    "collection": "PhoneGameLab",
-   "title": "Maze",
-   "desc": "Swipe to move to the goal.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 54,
-   "v2": false
-  },
-  {
-   "id": "PhoneGameLab/55-laser-mirror",
-   "path": "PhoneGameLab/games/55-laser-mirror/index.html",
-   "collection": "PhoneGameLab",
-   "title": "Laser Mirror",
-   "desc": "Rotate mirrors to hit the target.",
+   "title": "Hedgeroll",
+   "desc": "Curl up, roll till you bump, find the burrow.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
+   ],
+   "n": 54,
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
+  },
+  {
+   "id": "PhoneGameLab/55-glasswright",
+   "path": "PhoneGameLab/games/55-glasswright/index.html",
+   "collection": "PhoneGameLab",
+   "title": "Glasswright",
+   "desc": "Swivel the mirrors. Wake every lantern.",
+   "genre": [
+    "Puzzle & Logic"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
    ],
    "n": 55,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--55-laser-mirror.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/56-lights-out",

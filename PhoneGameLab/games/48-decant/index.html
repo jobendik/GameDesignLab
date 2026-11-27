@@ -1,0 +1,254 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Decant</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* DECANT — a cordial shop's shelf of muddled bottles. Tap a bottle, tap another: it lifts, tips and really pours
+ * (level-surfaced liquid, a falling stream, a glug that rises in pitch as the bottle fills). Sort every flavour
+ * into a bottle of its own, filled to the brim, and the cork pops in.
+ * Identity: lilac shop wall, white shelves, clear glass, jewel-bright cordials, corks and brass.
+ * Twists:   bottles come in SIZES (3/4/5 measures) and each flavour only fills one size exactly; MURKY bottles hide
+ *           what lies under the top flavour until you pour it off.
+ * Levels:   dealt from the level number and proven solvable by a solver before you see them; the same solver gives
+ *           the pour par (exact while the search is small, best-found beyond that) and powers the hint.       */
+Lab.init({
+  title: "Decant", tagline: "Pour until every bottle holds one flavour.", category: "Puzzle & Logic",
+  howto: ["Tap a bottle, then the bottle to pour into", "Only onto the same flavour, or into an empty", "Fill each bottle to the brim with one flavour"],
+  theme: { bg: "#cfc4ee", bg2: "#ece6fb", fg: "#3a2a5c", muted: "#7d6f9c", accent: "#e8425a", accent2: "#3cc9b0", light: true },
+  orient: "any", music: { style: "chill", key: "D", bpm: 86, vol: .36 }, restart: start, formatScore: n => "Shelf " + Math.round(n),
+  attract(dt, t) { if (!bots) { prog = { stars: {} }; load(8); mode = "demo"; } tick(dt); render(t); },
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, PI = Math.PI;
+const COL = ["#e8425a", "#ff9838", "#ffd84a", "#8fd14f", "#33bfa8", "#4a7bea", "#9a5fd0", "#ff8fc0"], MURK = "#6d5f78";
+const TABLE = [[[3, 3], [3], 0], [[4, 4, 4], [4, 4], 0], [[4, 4, 4, 4], [4, 4], 0], [[3, 4, 5], [4, 4], 0], [[4, 4, 4, 4, 4], [4, 4], 0], [[4, 4, 4, 4], [4, 4], 1], [[3, 4, 4, 5, 4], [4, 4], 0], [[4, 4, 4, 4, 4, 4], [4, 4], 0],
+  [[4, 4, 4, 4, 4], [4, 3], .4], [[3, 4, 4, 5, 4], [4, 4], .6], [[4, 4, 4, 4, 4, 4], [4, 4], .6], [[4, 4, 4, 4, 4, 4, 4], [4, 4], 0], [[3, 4, 4, 4, 5, 4], [4, 4], .5], [[4, 4, 4, 4, 4, 4, 4], [4, 4], .6], [[4, 4, 4, 4, 4, 4, 4, 4], [4, 4], 0], [[5, 5, 5, 5, 5, 5], [5, 5], .5]];
+let level, bots, init, caps, par, prog, pours, hints, hist, mode, sel, pour, queued, hintM, introT, genMs, stuckT, hum, glugT;
+let land, rowsN, u, bwid, liftPx, ui, pressT = {};
+
+/* ------------------------------------------------------------------ solver (generator, par and hint share it) */
+const mono = s => s.every(v => v === s[0]);
+const goal = S => S.every((s, i) => !s.length || (s.length === caps[i] && mono(s)));
+const key = S => S.map((s, i) => caps[i] + ":" + s.join("")).sort().join("|");
+function moves(S) {
+  const out = [], n = S.length;
+  for (let a = 0; a < n; a++) { const s = S[a], L = s.length; if (!L || (L === caps[a] && mono(s))) continue;
+    const top = s[L - 1]; let run = 1; while (run < L && s[L - 1 - run] === top) run++; const seenE = {};
+    for (let b = 0; b < n; b++) { if (b === a) continue; const d = S[b], room = caps[b] - d.length; if (!room) continue;
+      if (d.length) { if (d[d.length - 1] === top) out.push([a, b, Math.min(run, room), 0]); }
+      else if (!seenE[caps[b]] && !(run === L && caps[b] === caps[a])) { seenE[caps[b]] = 1; out.push([a, b, Math.min(run, room), 1]); } } }
+  return out.sort((x, y) => x[3] - y[3]);
+}
+const apply = (S, m) => { const T = S.map(s => s.slice()); for (let i = 0; i < m[2]; i++) T[m[1]].push(T[m[0]].pop()); return T; };
+function dfs(S, maxD, budget) {   // depth-limited search with a depth-aware memo → a solution (not always the shortest)
+  const memo = new Map(), path = []; let nodes = 0;
+  const rec = (S, d) => { if (goal(S)) return true; if (d >= maxD || ++nodes > budget) return false; const k = key(S), seen = memo.get(k); if (seen != null && seen <= d) return false; memo.set(k, d);
+    for (const m of moves(S)) { path.push(m); if (rec(apply(S, m), d + 1)) return true; path.pop(); if (nodes > budget) return false; } return false; };
+  return rec(S, 0) ? path.slice() : null;
+}
+function bfs(S, budget) {   // exact fewest pours while the frontier stays small
+  let cur = [S], d = 0, nodes = 0; const seen = new Set([key(S)]);
+  while (cur.length) { const nxt = []; for (const s of cur) { if (goal(s)) return d; for (const m of moves(s)) { const t = apply(s, m), k = key(t); if (!seen.has(k)) { seen.add(k); nxt.push(t); if (++nodes > budget) return -1; } } } cur = nxt; d++; }
+  return -1;
+}
+function best(S, rounds) { let p = dfs(S, 90, 20000); for (let i = 0; p && i < rounds; i++) { const q = dfs(S, p.length - 1, 8000); if (!q) break; p = q; } return p; }
+
+/* ------------------------------------------------------------------ levels */
+function spec(n) { if (n <= TABLE.length) return TABLE[n - 1]; const s = TABLE[11 + (n % 5)]; return [s[0], s[1], .5 + (n % 3) * .15]; }
+function load(n) {
+  const t0 = performance.now(); level = n; const sp = spec(n); let S = null;
+  for (let a = 0; a < 40 && !S; a++) {
+    const rnd = Lab.rng(n * 131 + a * 977 + 3), filled = a < 7 ? sp[0] : sp[0].map(() => 4), pool = [];
+    caps = filled.concat(a < 7 ? sp[1] : [4, 4]); filled.forEach((c, i) => { for (let j = 0; j < c; j++) pool.push(i); });
+    for (let i = pool.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0, t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+    const T = filled.map(c => pool.splice(0, c)).concat(caps.slice(filled.length).map(() => []));
+    if (T.some((s, i) => s.length && s.length === caps[i] && mono(s))) continue;
+    const b = bfs(T, 6000); if (b > 2) { S = T; par = b; } else if (b < 0) { const p = best(T, 4); if (p) { S = T; par = p.length; } }
+    if (S) { const ids = COL.map((_, i) => i); for (let i = ids.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0, t = ids[i]; ids[i] = ids[j]; ids[j] = t; }
+      init = S.map((s, i) => { const hid = rnd() < sp[2]; let run = 1; while (run < s.length && s[s.length - 1 - run] === s[s.length - 1]) run++; return { cap: caps[i], st: s.slice(), seen: s.map((_, j) => !hid || j >= s.length - run) }; }); init.ids = ids; }
+  }
+  genMs = performance.now() - t0; reset(); introT = 0; layout();
+}
+function reset() {
+  bots = init.map(b => ({ cap: b.cap, st: b.st.slice(), seen: b.seen.slice(), x: 0, y: 0, lift: 0, wig: 0, slosh: 0, cork: 0, hop: 0 })); bots.ids = init.ids;
+  pours = 0; hist = []; sel = -1; pour = null; queued = -1; hintM = null; stuckT = 0; mode = "play"; hints = hints || 0;
+}
+const stacks = () => bots.map(b => b.st), done = i => bots[i].st.length === bots[i].cap && mono(bots[i].st);
+function legal(a, b) {
+  const A = bots[a].st, B = bots[b].st, room = bots[b].cap - B.length; if (!A.length || !room || a === b || done(a)) return 0;
+  const top = A[A.length - 1]; if (B.length && B[B.length - 1] !== top) return 0; let run = 1; while (run < A.length && A[A.length - 1 - run] === top) run++; return Math.min(run, room);
+}
+
+/* ------------------------------------------------------------------ layout */
+function layout() {
+  const p = Lab.play, n = bots.length, U = Lab.clamp(Math.min(Lab.W, Lab.H) / 390, .85, 1.3), maxCap = Math.max.apply(0, caps); land = p.w > p.h * 1.15;
+  let ax, ay, aw, ah;
+  if (land) {
+    const side = Lab.clamp(p.w * .18, 116, 190); ax = p.x + side; aw = p.w - side * 2; ay = p.y + 6; ah = p.h - 12; rowsN = 1;
+    const lx = p.x + side / 2, rx = p.x + p.w - side / 2, my = p.y + p.h / 2, w = Math.min(120, side - 22), h = Math.min(48, (p.h - 50) / 3);
+    ui = { tx: lx, ty: my - 46, iy: my - 20, sy: my + 4, prev: { x: lx - 52, y: my + 28, w: 48, h: 46 }, next: { x: lx + 4, y: my + 28, w: 48, h: 46 }, btn: ["undo", "restart", "hint"].map((id, i) => ({ id, x: rx - w / 2, y: my + (i - 1) * (h + 12) - h / 2, w, h })) };
+  } else {
+    const top = 64 * U, bot = 78 * U; ax = p.x + 6; aw = p.w - 12; ay = p.y + top; ah = p.h - top - bot; rowsN = n > 5 ? 2 : 1;
+    const w = Math.min(118, (p.w - 48) / 3), h = 48, x0 = Lab.W / 2 - (w * 3 + 20) / 2, y = p.y + p.h - bot / 2 - h / 2 - 2;
+    ui = { tx: Lab.W / 2, ty: p.y + 15 * U, iy: p.y + 38 * U, sy: p.y + 57 * U, prev: { x: Lab.W / 2 - 132, y: p.y + 2, w: 48, h: 48 }, next: { x: Lab.W / 2 + 84, y: p.y + 2, w: 48, h: 48 }, btn: ["undo", "restart", "hint"].map((id, i) => ({ id, x: x0 + i * (w + 10), y, w, h })) };
+  }
+  ui.prev.id = "prev"; ui.next.id = "next";
+  const per = Math.ceil(n / rowsN), slot = Math.min(aw / per, 104); let rowH = Math.min(ah / rowsN, 400); liftPx = Math.min(22, rowH * .07);
+  bwid = Math.min(slot * .64, 62 * U); u = Math.min(bwid * (land ? .95 : .62), (rowH - liftPx - 34 - bwid * .56) / maxCap); rowH = Math.min(rowH, maxCap * u + bwid * .56 + liftPx + 70);
+  const y0 = ay + (ah - rowH * rowsN) / 2; ui.shelves = [];
+  for (let r = 0; r < rowsN; r++) { const k0 = r * per, cnt = Math.min(per, n - k0), x0 = ax + (aw - cnt * slot) / 2, by = y0 + (r + 1) * rowH - 20;
+    ui.shelves.push({ x: ax + (aw - per * slot) / 2 - 4, w: per * slot + 8, y: by });
+    for (let k = 0; k < cnt; k++) { const B = bots[k0 + k]; B.x = x0 + (k + .5) * slot; B.y = by; B.slot = slot; B.top = by - rowH + 24; } }
+}
+Lab.onResize(() => { if (bots) layout(); });
+const hit = (x, y) => [ui.prev, ui.next].concat(ui.btn).find(b => x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 4 && y <= b.y + b.h + 4);
+const pick = (x, y) => bots.findIndex(B => Math.abs(x - B.x) < B.slot / 2 && y > B.top - 16 && y < B.y + 24);
+
+/* ------------------------------------------------------------------ actions */
+const clink = p => Lab.audio.tone({ f: 1500 * p, dur: .07, vol: .09, type: "sine" });
+function tapBottle(i) {
+  if (mode !== "play" || i < 0) return; if (pour) { queued = i; return; }
+  const B = bots[i]; hintM = null;
+  if (sel < 0 || sel === i) { if (sel === i) { sel = -1; clink(.8); } else if (!B.st.length || done(i)) { B.wig = 1; Lab.sfx("thud", { vol: .4, pitch: 1.4 }); } else { sel = i; clink(1.15); Lab.buzz(6); } return; }
+  const n = legal(sel, i);
+  if (!n) { if (B.st.length && !done(i)) { sel = i; clink(1.15); } else { B.wig = 1; Lab.sfx("thud", { vol: .4, pitch: 1.4 }); } return; }
+  const a = sel, A = bots[a], col = A.st[A.st.length - 1]; hist.push([a, i, n]); pours++;
+  for (let k = 0; k < n; k++) { A.st.pop(); A.seen.pop(); B.st.push(col); B.seen.push(true); }
+  for (let j = A.st.length - 1; j >= 0 && A.st[j] === A.st[A.st.length - 1]; j--) { if (!A.seen[j]) { A.seen[j] = true; A.reveal = 1; } }
+  pour = { a, b: i, n, col, t: 0, T1: .24, T2: .13 * n + .12, T3: .2, dir: Math.sign(B.x - A.x) || 1 }; sel = -1; glugT = 0; Lab.sfx("swish", { vol: .4, pitch: 1.2 });
+}
+function settle() {   // the pour has landed: cork a finished bottle, then check the shelf
+  const b = pour.b, a = pour.a; pour = null; bots[b].slosh = 1; bots[a].slosh = .6;
+  if (bots[a].reveal) { bots[a].reveal = 0; Lab.sfx("bubble", { pitch: .8, vol: .5 }); fx.puff(bots[a].x, bots[a].y - bots[a].st.length * u, { n: 5, color: "#fff" }); }
+  if (done(b)) { const B = bots[b], k = bots.filter((_, i) => done(i)).length; B.cork = .001; B.hop = 1; Lab.sfx("pop", { pitch: 1.1 }); Lab.audio.combo(k + 1, { vol: .16 }); Lab.buzz(12);
+    fx.burst(B.x, B.y - B.cap * u - bwid * .5, { n: 12, colors: [COL[bots.ids[B.st[0]]], "#fff"], speed: 150, life: .55, size: 3, gravity: 300 }); }
+  if (goal(stacks())) return win();
+  if (!moves(stacks()).length) { stuckT = 3; Lab.toast("No pours left — undo or restart", 1500, { y: .13 }); Lab.sfx("warn", { vol: .5 }); }
+  if (queued >= 0) { const q = queued; queued = -1; tapBottle(q); }
+}
+function undo() {
+  if (!hist.length || pour || mode !== "play") return Lab.sfx("tick", { pitch: .5, vol: .5 }); const [a, b, n] = hist.pop(), A = bots[a], B = bots[b]; pours--; sel = -1; hintM = null; B.cork = 0;
+  for (let k = 0; k < n; k++) { A.st.push(B.st.pop()); B.seen.pop(); A.seen.push(true); } A.slosh = B.slosh = 1; Lab.sfx("swish", { pitch: 1.4, vol: .6 });
+}
+function restart() { if (pour || (!pours && !hist.length)) return Lab.sfx("tick", { pitch: .5, vol: .5 }); const h = hints; reset(); hints = h; layout(); for (const B of bots) B.slosh = 1; Lab.sfx("slide", { vol: .6 }); }
+function hint() {
+  if (mode !== "play" || pour) return; const p = best(stacks(), 2);
+  if (!p) { Lab.toast("No way through from here — undo", 1500, { y: .13 }); return Lab.sfx("warn", { vol: .5 }); }
+  hintM = { a: p[0][0], b: p[0][1], t: 0 }; sel = -1; hints++; bots[hintM.a].hop = 1; Lab.sfx("chime", { pitch: .9 }); if (hints === 1) Lab.toast("Hint used: −1 star", 1100, { y: .13 });
+}
+function go(n) { if (n < 1 || n > prog.max || pour) return Lab.sfx("tick", { pitch: .5, vol: .5 }); prog.lvl = n; Lab.store.set("prog", prog); hints = 0; load(n); Lab.setScore(n); Lab.sfx("flip"); }
+const rating = () => Math.max(1, Math.min(pours <= par ? 3 : pours <= par + 3 ? 2 : 1, 3 - hints));
+function win() {
+  mode = "won"; const st = rating(), lv = level;
+  prog.stars[lv] = Math.max(prog.stars[lv] || 0, st); prog.max = Math.max(prog.max, lv + 1); prog.lvl = lv + 1; Lab.store.set("prog", prog);
+  bots.forEach((B, k) => Lab.after(.25 + k * .07, () => { B.hop = 1; if (B.st.length) { Lab.audio.combo(k + 2, { vol: .13 }); fx.burst(B.x, B.y - B.cap * u, { n: 6, colors: [COL[bots.ids[B.st[0]]], "#fff"], speed: 120, life: .5, size: 3, gravity: 260 }); } }));
+  const total = Object.values(prog.stars).reduce((a, b) => a + b, 0);
+  Lab.after(1 + bots.length * .07, () => Lab.win({ title: st === 3 ? "Perfectly poured" : "Shelf sorted", message: st === 3 ? "Not one pour more than it needed." : hints ? "Sorted with a little help." : "Match the pour par for the third star.",
+    score: lv, scoreLabel: "Cleared", button: "Next shelf", stats: [["Pours", pours + " / par " + par], ["Rating", "★".repeat(st) + "☆".repeat(3 - st)], ["All stars", total]] }));
+}
+function start() {
+  prog = Lab.store.get("prog", null) || { lvl: 1, max: 1, stars: {} }; hints = 0;
+  load(prog.lvl); Lab.setScore(level); hum = Lab.audio.loop({ noise: true, bp: 2200, q: .7, vol: 0 });
+  Lab.input.onDown = [(x, y) => { if (mode !== "play") return; const b = hit(x, y); if (b) { pressT[b.id] = 1; ({ undo, restart, hint, prev: () => go(level - 1), next: () => go(level + 1) })[b.id](); return; } tapBottle(pick(x, y)); }];
+  Lab.input.onKey = [k => { if (mode !== "play") return; const d = "1234567890".indexOf(k); k = k.toLowerCase(); if (d >= 0 && d < bots.length) tapBottle(d); else if (k === "z" || k === "backspace") undo(); else if (k === "r") restart(); else if (k === "h") hint(); }];
+  Lab.expose({ get level() { return level; }, get pours() { return pours; }, get par() { return par; }, get hints() { return hints; }, get mode() { return mode; }, get sel() { return sel; }, get busy() { return !!pour; }, get genMs() { return genMs; },
+    get bottles() { return bots.map((b, i) => ({ cap: b.cap, st: b.st.slice(), seen: b.seen.slice(), done: done(i), x: b.x, y: b.y - b.cap * u / 2 })); }, get hintMove() { return hintM && [hintM.a, hintM.b]; },
+    solution() { const p = best(stacks(), 2); return p && p.map(m => m.slice(0, 3)); }, legal, get progress() { return JSON.parse(JSON.stringify(prog)); },
+    get buttons() { return [ui.prev, ui.next].concat(ui.btn).map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); }, rating, go });
+  if (level === 1) Lab.hint("Tap a bottle, then tap where to pour it");
+  else if (new Set(caps).size > 1 && !prog.size) { prog.size = 1; Lab.store.set("prog", prog); Lab.hint("Bottles come in sizes — fill each to the brim"); }
+  else if (init.some(b => b.seen.some(v => !v)) && !prog.murk) { prog.murk = 1; Lab.store.set("prog", prog); Lab.hint("Murky bottles hide what's underneath"); }
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+
+/* ------------------------------------------------------------------ update */
+function tick(dt) {
+  if (pour) {
+    const P = pour, t0 = P.t; P.t += dt; const p = Lab.clamp((P.t - P.T1) / P.T2, 0, 1);
+    if (p > 0 && p < 1) { glugT -= dt; const B = bots[P.b], f = (B.st.length - P.n + P.n * p) / B.cap;
+      if (glugT <= 0) { glugT = .085; Lab.audio.tone({ f: 260 + 520 * f + Lab.rand(-15, 15), f2: 320 + 560 * f, dur: .07, vol: .1, type: "sine" }); if (Math.random() < .5) fx.burst(B.x, B.y - (B.st.length - P.n + P.n * p) * u, { n: 1, color: COL[bots.ids[P.col]], speed: 50, life: .3, size: 2, gravity: 200, angle: -PI / 2, spread: 1.4 }); }
+      if (hum) hum.set({ vol: .05, f: 1500 + 1500 * f }); } else if (hum) hum.set({ vol: 0 });
+    if (t0 < P.T1 + P.T2 && P.t >= P.T1 + P.T2) { bots[P.b].slosh = 1; Lab.sfx("drop", { pitch: 1.5, vol: .3 }); }
+    if (P.t >= P.T1 + P.T2 + P.T3) settle();
+  } else if (hum) hum.set({ vol: 0 });
+  for (let i = 0; i < bots.length; i++) { const B = bots[i]; B.lift = Lab.damp(B.lift, i === sel ? 1 : 0, 18, dt); B.wig = Lab.damp(B.wig, 0, 8, dt); B.slosh = Lab.damp(B.slosh, 0, 3.5, dt); B.hop = Lab.damp(B.hop, 0, 7, dt); if (B.cork > 0) B.cork = Math.min(1, B.cork + dt * 4); }
+  if (hintM) { hintM.t += dt; if (hintM.t > 4) hintM = null; }
+  for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5); introT += dt; stuckT = Math.max(0, stuckT - dt);
+  if (mode === "play") Lab.music.intensity(.15 + .7 * bots.filter((_, i) => done(i)).length / Math.max(1, bots.filter(b => b.st.length).length));
+}
+
+/* ------------------------------------------------------------------ draw */
+function bg() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("dc-bg:" + W + "x" + H, W, H, (g, w, h) => {
+    draw.vgrad(g, 0, 0, w, h, ["#efe9fc", "#d9cff3", "#bfb2e6"]);
+    g.fillStyle = "rgba(255,255,255,.16)"; for (let x = -h; x < w; x += 150) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 60, 0); g.lineTo(x + 60 + h * .5, h); g.lineTo(x + h * .5, h); g.fill(); }   // window light
+    g.fillStyle = "rgba(120,100,180,.07)"; for (let y = 30; y < h; y += 46) for (let x = (y / 46 & 1) * 23; x < w; x += 46) { g.beginPath(); g.arc(x, y, 3, 0, TAU); g.fill(); }   // wallpaper dots
+  });
+}
+function glyph(c, k, x, y, r) {
+  c.fillStyle = c.strokeStyle = "rgba(255,255,255,.6)"; c.lineWidth = r * .36; c.lineCap = "round";
+  if (k === 0) draw.circle(c, x, y, r * .6, c.fillStyle); else if (k === 1) draw.poly(c, x, y + r * .1, r * .8, 3, -PI / 2, c.fillStyle); else if (k === 2) c.fillRect(x - r * .55, y - r * .55, r * 1.1, r * 1.1);
+  else if (k === 3) draw.poly(c, x, y, r * .8, 4, 0, c.fillStyle); else if (k === 4) { c.beginPath(); c.moveTo(x - r * .7, y); c.lineTo(x + r * .7, y); c.moveTo(x, y - r * .7); c.lineTo(x, y + r * .7); c.stroke(); }
+  else if (k === 5) draw.star(c, x, y, r * .9, c.fillStyle, 5, .45); else if (k === 6) { c.beginPath(); c.arc(x, y, r * .55, 0, TAU); c.stroke(); } else draw.heart(c, x, y, r * .6, c.fillStyle);
+}
+function glass(c, w, H) {   // bottle outline, origin at the bottom centre
+  const r = w * .2, sh = w * .3, nh = w * .26, nw = w * .27; c.beginPath(); c.moveTo(-nw, -H - sh - nh); c.lineTo(-nw, -H - sh); c.quadraticCurveTo(-w / 2, -H - sh * .7, -w / 2, -H); c.lineTo(-w / 2, -r); c.quadraticCurveTo(-w / 2, 0, -w / 2 + r, 0);
+  c.lineTo(w / 2 - r, 0); c.quadraticCurveTo(w / 2, 0, w / 2, -r); c.lineTo(w / 2, -H); c.quadraticCurveTo(w / 2, -H - sh * .7, nw, -H - sh); c.lineTo(nw, -H - sh - nh); c.closePath();
+}
+function bottle(c, i, t) {
+  const B = bots[i], w = bwid, H = B.cap * u, Ht = H + w * .56, P = pour; let x = B.x + Math.sin(B.wig * 24) * B.wig * 4, y = B.y - B.lift * liftPx - Math.sin(B.hop * PI) * 9, ang = 0;
+  const lay = B.st.map((v, j) => ({ v, n: 1, hid: !B.seen[j] }));
+  if (P && P.b === i) { const p = Lab.clamp((P.t - P.T1) / P.T2, 0, 1); lay.length -= P.n; lay.push({ v: P.col, n: P.n * p }); }
+  if (P && P.a === i) {   // lifted, carried over the target's mouth and tipped; the mouth stays put while the angle grows
+    const e = Lab.ease.inOutQuad(P.t < P.T1 ? P.t / P.T1 : P.t > P.T1 + P.T2 ? 1 - (P.t - P.T1 - P.T2) / P.T3 : 1), p = Lab.clamp((P.t - P.T1) / P.T2, 0, 1), T = bots[P.b];
+    lay.push({ v: P.col, n: P.n * (1 - p) }); const left = lay.reduce((s, l) => s + l.n, 0) / B.cap;
+    ang = P.dir * e * Lab.lerp(.95, 1.5, 1 - left); const mx = T.x - P.dir * w * .12, my = T.y - T.cap * u - w * .56 - 12;
+    x = Lab.lerp(x, mx - Ht * Math.sin(ang), e); y = Lab.lerp(y, my + Ht * Math.cos(ang), e);
+    if (p > 0 && p < 1) { const sy = T.y - (T.st.length - P.n + P.n * p) * u, k = Math.min(1, p * 8), lw = Math.max(3, u * .2) * Math.min(1, (1 - p) * 6 + .3), col = COL[bots.ids[P.col]];
+      c.lineCap = "round"; c.beginPath(); c.moveTo(mx, my); c.quadraticCurveTo(T.x, my, T.x, my + 12); c.lineTo(T.x, Lab.lerp(my + 12, sy, k)); c.strokeStyle = col; c.lineWidth = lw; c.stroke(); c.strokeStyle = "rgba(255,255,255,.45)"; c.lineWidth = lw * .3; c.stroke(); }
+  }
+  if (!ang) draw.shadow(c, B.x, B.y + 2, w * .5 * (1 - B.lift * .25), 4, .16);
+  c.save(); c.translate(x, y); c.rotate(ang);
+  c.save(); glass(c, w, H); c.clip(); c.rotate(-ang);   // liquid: world-level bands inside the tilted glass
+  const cs = Math.cos(ang), sn = Math.sin(ang); let lo = -1e9, hi = 1e9; for (const [px, py] of [[-w / 2, 0], [w / 2, 0], [-w / 2, -H], [w / 2, -H]]) { const v = px * sn + py * cs; lo = Math.max(lo, v); hi = Math.min(hi, v); }
+  const per = (lo - hi) / B.cap, R = Ht + w; let yy = lo;
+  for (let j = 0; j < lay.length; j++) { const L = lay[j], h = L.n * per, col = L.hid ? MURK : COL[bots.ids[L.v]], topL = j === lay.length - 1, sl = topL ? B.slosh * Math.sin(t * 13 + i) * u * .16 * R / (w / 2) : 0;
+    c.fillStyle = col; c.beginPath(); c.moveTo(-R, yy + 1); c.lineTo(-R, yy - h - sl); c.lineTo(R, yy - h + sl); c.lineTo(R, yy + 1); c.fill();
+    if (topL && h > 1) { c.fillStyle = "rgba(255,255,255,.3)"; c.beginPath(); c.moveTo(-R, yy - h - sl); c.lineTo(R, yy - h + sl); c.lineTo(R, yy - h + sl + 2.5); c.lineTo(-R, yy - h - sl + 2.5); c.fill(); }
+    else if (h > 1) { c.fillStyle = "rgba(0,0,0,.1)"; c.fillRect(-R, yy - h, R * 2, 1.5); }
+    if (!ang) for (let k = 0; k + .95 <= L.n; k++) { const gy = yy - (k + .5) * per; if (L.hid) draw.text(c, "?", 0, gy + 1, { size: u * .52, color: "rgba(255,255,255,.7)", weight: 800 }); else glyph(c, bots.ids[L.v], 0, gy, u * .2); }
+    yy -= h; }
+  c.restore();
+  glass(c, w, H); c.fillStyle = "rgba(255,255,255,.14)"; c.fill(); c.strokeStyle = "rgba(70,50,120,.4)"; c.lineWidth = 4.5; c.stroke(); c.strokeStyle = i === sel ? "#fff" : "rgba(255,255,255,.92)"; c.lineWidth = 2.2; c.stroke();
+  c.strokeStyle = "rgba(255,255,255,.5)"; c.lineWidth = Math.max(2, w * .07); c.lineCap = "round"; c.beginPath(); c.moveTo(-w * .32, -H * .9); c.lineTo(-w * .32, -H * .18 - 4); c.stroke();
+  draw.rect(c, -w * .33, -Ht - 3, w * .66, 6, 3, "rgba(255,255,255,.95)", "rgba(70,50,120,.4)", 1.2);
+  if (B.cork > 0) { const k = Lab.ease.outBounce(B.cork); draw.rect(c, -w * .22, -Ht - 3 - w * .26 - (1 - k) * 40, w * .44, w * .4, 4, "#c98f52", "#8a5a2a", 1.5); }
+  c.restore();
+}
+function button(c, b, label, on) {
+  const p = pressT[b.id] || 0; c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2 + p * 2); c.globalAlpha = on ? 1 : .4;
+  draw.rect(c, -b.w / 2, -b.h / 2 + 4, b.w, b.h, 24, "rgba(70,50,120,.35)"); draw.rect(c, -b.w / 2, -b.h / 2, b.w, b.h, 24, "#5b3f9c", "#fff", 2);
+  draw.text(c, label, 0, label.length < 2 ? -2 : 1, { size: label.length < 2 ? 30 : 13.5, color: "#fff", weight: 800 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, s = bg(); c.drawImage(s, -40, -40, s.w, s.h);
+  const intro = Lab.ease.outCubic(Lab.clamp(introT / .4, 0, 1)); c.save(); c.globalAlpha = intro; c.translate(0, (1 - intro) * 16);
+  for (const S of ui.shelves) { draw.rect(c, S.x, S.y + 6, S.w, 16, 5, "rgba(70,50,120,.22)"); draw.rect(c, S.x, S.y, S.w, 14, 5, "#fff", "#cdbfe9", 1.5); draw.rect(c, S.x + 14, S.y + 14, 10, 12, 2, "#d9b35a"); draw.rect(c, S.x + S.w - 24, S.y + 14, 10, 12, 2, "#d9b35a"); }
+  for (let i = 0; i < bots.length; i++) if (!pour || pour.a !== i) bottle(c, i, t);
+  if (pour) bottle(c, pour.a, t);
+  if (hintM) { const A = bots[hintM.a], B = bots[hintM.b], ya = A.y - A.cap * u - bwid * .9, yb = B.y - B.cap * u - bwid * .9, my = Math.min(ya, yb) - 34, a = .55 + .35 * Math.sin(hintM.t * 7);
+    c.strokeStyle = `rgba(91,63,156,${a})`; c.lineWidth = 4; c.lineCap = "round"; c.setLineDash([2, 10]); c.lineDashOffset = -hintM.t * 40; c.beginPath(); c.moveTo(A.x, ya); c.quadraticCurveTo((A.x + B.x) / 2, my, B.x, yb); c.stroke(); c.setLineDash([]);
+    draw.poly(c, B.x, yb + 4, 9, 3, PI / 2, `rgba(91,63,156,${a})`); }
+  c.restore();
+  if (mode === "demo") return;
+  const bestS = prog.stars[level] || 0;
+  draw.text(c, "SHELF " + level, ui.tx, ui.ty, { size: 19, color: "#3a2a5c", weight: 800 });
+  for (let i = 0; i < 3; i++) draw.star(c, ui.tx + (i - 1) * 19, ui.iy, 7.5, i < bestS ? "#f2a93b" : "rgba(58,42,92,.2)", 5, .5);
+  draw.text(c, "pours " + pours + "  ·  par " + par, ui.tx, ui.sy, { size: 12.5, color: pours > par ? "#c2452f" : "#6a5a8c", weight: 700 });
+  button(c, ui.prev, "‹", level > 1); button(c, ui.next, "›", level < prog.max);
+  button(c, ui.btn[0], "UNDO", hist.length > 0 && !(stuckT > 0 && Math.sin(t * 14) > 0)); button(c, ui.btn[1], "RESTART", pours > 0); button(c, ui.btn[2], "HINT", mode === "play");
+}
+Lab.boot();
+})();
+</script></body></html>

@@ -5,11 +5,12 @@
 > Scores are 1–10 per `QUALITY_STANDARD.md`; "subjective" judgements come from code reading and scripted play, not human playtests.
 
 
-## Standalone arcade games (`games/`) — 7/65 reviewed
+## Standalone arcade games (`games/`) — 8/65 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
 | [Furniture Forts](games/furniture-forts.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/games/furniture-forts.md) |
+| [Power Wash Royale](games/power-wash-royale.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 8 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/games/power-wash-royale.md) |
 | [Breach Vector](games/breach-vector.html) | 4 → **7** | 7 | 8 | 7 | 7 | 6 | 7 | 7 | 7 | 8 | 8 | 8 | 7 | [record](docs/reviews/games/breach-vector.md) |
 | [Thimble & the Bramble King](games/little-hero-adventure.html) | 2 → **7** | 7 | 7 | 7 | 7 | 6 | 6 | 7 | 7 | 6 | 7 | 8 | 7 | [record](docs/reviews/games/little-hero-adventure.md) |
 | [Neon Hagen](games/neon-hagen.html) | 1 → **7** | 7 | 7 | 7 | 8 | 7 | 6 | 7 | 8 | 6 | 8 | 8 | 7 | [record](docs/reviews/games/neon-hagen.md) |
@@ -17,17 +18,17 @@
 | [Sprouty's Garden](games/sproutys-garden.html) | 2 → **7** | 7 | 7 | 7 | 8 | 7 | 6 | 8 | 8 | 7 | 8 | 8 | 7 | [record](docs/reviews/games/sproutys-garden.md) |
 | [Star Trail Adventure](games/star-trail-adventure.html) | 4 → **7** | 7 | 6 | 7 | 8 | 6 | 6 | 7 | 7 | 6 | 8 | 8 | 7 | [record](docs/reviews/games/star-trail-adventure.md) |
 
-Averages: overall **7.1** · Fun 7.1 · Depth 7.1 · Feel 7.1 · Look 7.6 · Anim 6.4 · Audio 6.4 · Ctrl 7.3 · Onb 7.4 · Replay 6.9 · Perf 7.7 · Robust 8.0 · Polish 7.1
+Averages: overall **7.3** · Fun 7.3 · Depth 7.1 · Feel 7.3 · Look 7.6 · Anim 6.5 · Audio 6.6 · Ctrl 7.4 · Onb 7.5 · Replay 7.0 · Perf 7.9 · Robust 8.0 · Polish 7.3
 
 **Below 8 — revisit first:** [Breach Vector](games/breach-vector.html) (7), [Thimble & the Bramble King](games/little-hero-adventure.html) (7), [Neon Hagen](games/neon-hagen.html) (7), [Static Bloom](games/neon-strike.html) (7), [Sprouty's Garden](games/sproutys-garden.html) (7), [Star Trail Adventure](games/star-trail-adventure.html) (7)
 
-<details><summary>58 not yet reviewed (baseline prototypes)</summary>
+<details><summary>57 not yet reviewed (baseline prototypes)</summary>
 
-`games/arcanum-pinball` · `games/aura-rooms` · `games/bloom-bureau` · `games/bounce-dungeon` · `games/brink-edge-rush` · `games/brink-reactor` · `games/busy-beavers` · `games/chomp-chain-rush` · `games/chroma-frenzy` · `games/cosmic-devourer` · `games/exquisite-corpse` · `games/frequency` · `games/grapple-gliders` · `games/hyper-dash` · `games/kosmisk-slange` · `games/last-war-ultimate` · `games/lumberjack-idle-empire` · `games/lumis-luminescence` · `games/lysarkivet` · `games/maze-munch-rush` · `games/mystic-potion-sort` · `games/neon-ash` · `games/neon-burst` · `games/neon-core-ballstorm` · `games/neon-galaxy` · `games/neon-nexus-omega` · `games/neon-pin-climb` · `games/neon-pinball-rush` · `games/neon-runner-overdrive` · `games/neon-survivor-overdrive` · `games/orbit-drift-3d` · `games/orbit-drift-sling` · `games/painted-wilds` · `games/physics-charades` · `games/pinata-pop` · `games/pinball-wizard-3d` · `games/pitch-26` · `games/pocket-football` · `games/power-wash-royale` · `games/pulsar` · `games/puppet-panic` · `games/ricochet-brawlers` · `games/slithergar` · `games/sonar-abyss` · `games/spire` · `games/star-petal-ballstorm` · `games/svev-miner` · `games/swarm-logic` · `games/the-elevator` · `games/the-global-dig` · `games/the-grid-war` · `games/the-tower` · `games/tiny-detective-cafe` · `games/tiny-tactics-cards` · `games/unicorn-magic-sort` · `games/unscrew-it` · `games/void-drift` · `games/word-forts`
+`games/arcanum-pinball` · `games/aura-rooms` · `games/bloom-bureau` · `games/bounce-dungeon` · `games/brink-edge-rush` · `games/brink-reactor` · `games/busy-beavers` · `games/chomp-chain-rush` · `games/chroma-frenzy` · `games/cosmic-devourer` · `games/exquisite-corpse` · `games/frequency` · `games/grapple-gliders` · `games/hyper-dash` · `games/kosmisk-slange` · `games/last-war-ultimate` · `games/lumberjack-idle-empire` · `games/lumis-luminescence` · `games/lysarkivet` · `games/maze-munch-rush` · `games/mystic-potion-sort` · `games/neon-ash` · `games/neon-burst` · `games/neon-core-ballstorm` · `games/neon-galaxy` · `games/neon-nexus-omega` · `games/neon-pin-climb` · `games/neon-pinball-rush` · `games/neon-runner-overdrive` · `games/neon-survivor-overdrive` · `games/orbit-drift-3d` · `games/orbit-drift-sling` · `games/painted-wilds` · `games/physics-charades` · `games/pinata-pop` · `games/pinball-wizard-3d` · `games/pitch-26` · `games/pocket-football` · `games/pulsar` · `games/puppet-panic` · `games/ricochet-brawlers` · `games/slithergar` · `games/sonar-abyss` · `games/spire` · `games/star-petal-ballstorm` · `games/svev-miner` · `games/swarm-logic` · `games/the-elevator` · `games/the-global-dig` · `games/the-grid-war` · `games/the-tower` · `games/tiny-detective-cafe` · `games/tiny-tactics-cards` · `games/unicorn-magic-sort` · `games/unscrew-it` · `games/void-drift` · `games/word-forts`
 
 </details>
 
-## Phone Game Lab (`PhoneGameLab/`) — 46/70 reviewed
+## Phone Game Lab (`PhoneGameLab/`) — 52/70 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
@@ -73,18 +74,24 @@ Averages: overall **7.1** · Fun 7.1 · Depth 7.1 · Feel 7.1 · Look 7.6 · Ani
 | [Haberdash](PhoneGameLab/games/44-haberdash/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/44-haberdash.md) |
 | [Shoo!](PhoneGameLab/games/45-shoo/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/45-shoo.md) |
 | [Live Wires](PhoneGameLab/games/46-live-wires/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/46-live-wires.md) |
+| [Fountain Court](PhoneGameLab/games/47-fountain-court/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 8 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/47-fountain-court.md) |
+| [Decant](PhoneGameLab/games/48-decant/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 8 | 8 | 8 | 7 | 8 | 8 | 8 | [record](docs/reviews/PhoneGameLab/48-decant.md) |
+| [Bolt Hole](PhoneGameLab/games/50-bolt-hole/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/50-bolt-hole.md) |
+| [Slidescape](PhoneGameLab/games/51-slidescape/index.html) | 2 → **8** | 7 | 7 | 8 | 8 | 8 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/51-slidescape.md) |
+| [Hedgeroll](PhoneGameLab/games/54-hedgeroll/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/54-hedgeroll.md) |
+| [Glasswright](PhoneGameLab/games/55-glasswright/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/55-glasswright.md) |
 | [Misfired](PhoneGameLab/games/05-misfired/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/05-misfired.md) |
 | [Goat Up](PhoneGameLab/games/25-goat-up/index.html) | 2 → **7** | 7 | 6 | 8 | 8 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/25-goat-up.md) |
 | [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 8 | 8 | 8 | 6 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/38-tumblepeg.md) |
 | [Postage Stamp](PhoneGameLab/games/41-postage-stamp/index.html) | 2 → **7** | 7 | 7 | 7 | 8 | 6 | 7 | 7 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/41-postage-stamp.md) |
 
-Averages: overall **7.9** · Fun 7.9 · Depth 7.2 · Feel 8.0 · Look 8.3 · Anim 7.5 · Audio 7.2 · Ctrl 8.2 · Onb 7.9 · Replay 7.2 · Perf 8.8 · Robust 8.0 · Polish 7.9
+Averages: overall **7.9** · Fun 7.9 · Depth 7.2 · Feel 8.0 · Look 8.3 · Anim 7.6 · Audio 7.2 · Ctrl 8.2 · Onb 7.9 · Replay 7.2 · Perf 8.8 · Robust 8.0 · Polish 7.9
 
 **Below 8 — revisit first:** [Misfired](PhoneGameLab/games/05-misfired/index.html) (7), [Goat Up](PhoneGameLab/games/25-goat-up/index.html) (7), [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) (7), [Postage Stamp](PhoneGameLab/games/41-postage-stamp/index.html) (7)
 
-<details><summary>24 not yet reviewed (baseline prototypes)</summary>
+<details><summary>18 not yet reviewed (baseline prototypes)</summary>
 
-`PhoneGameLab/47-fountain-court` · `PhoneGameLab/48-water-sort` · `PhoneGameLab/49-ball-sort` · `PhoneGameLab/50-bolt-hole` · `PhoneGameLab/51-15-puzzle` · `PhoneGameLab/52-tetris` · `PhoneGameLab/53-block-blast` · `PhoneGameLab/54-hedgeroll` · `PhoneGameLab/55-laser-mirror` · `PhoneGameLab/56-lights-out` · `PhoneGameLab/57-minesweeper` · `PhoneGameLab/58-word-search` · `PhoneGameLab/59-nonogram` · `PhoneGameLab/60-sudoku` · `PhoneGameLab/61-snake` · `PhoneGameLab/62-slither` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
+`PhoneGameLab/49-tall-order` · `PhoneGameLab/52-tetris` · `PhoneGameLab/53-block-blast` · `PhoneGameLab/56-lights-out` · `PhoneGameLab/57-minesweeper` · `PhoneGameLab/58-word-search` · `PhoneGameLab/59-nonogram` · `PhoneGameLab/60-sudoku` · `PhoneGameLab/61-snake` · `PhoneGameLab/62-slither` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
 
 </details>
 

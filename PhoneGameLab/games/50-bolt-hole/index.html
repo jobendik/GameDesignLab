@@ -14,7 +14,7 @@
  *        more layers. Undo is free, a hint costs the third star. Progress and stars persist. */
 Lab.init({
   title: "Bolt Hole", tagline: "Unscrew, re-park, let the plates drop.", category: "Puzzle & Logic",
-  howto: ["Tap a screw, then tap a free hole to park it", "A plate drops when its last screw comes out", "Clear the board before the turns run out"],
+  howto: ["Tap a screw, then a hole to park it", "A plate with no screws left drops off", "Clear the board before the turns run out"],
   theme: { bg: "#ddd6c4", bg2: "#f4efe2", fg: "#2d3142", muted: "#7d8194", accent: "#ef6f4a", accent2: "#1fa6a0", light: true },
   orient: "any", music: { style: "funk", key: "C", bpm: 92, vol: .28 }, restart: start, attract,
 });
@@ -32,27 +32,34 @@ const cache = {};
 let L, level, maxLv, starMap, plates = [], screws = [], occ = [], held, from, fell, moves, undo, done, hint, hintsUsed, cursor, dragArm, dragging, nopeT = 0, nopeP = -1, live = false, wobT = 0;
 let T = 1, land = false, sp = 80, bx = 0, by = 0, gc = 4, gr = 5, hr = 12, sr = 16, pw = 50, btns = [], info = { x: 0, y: 0, w: 300 };
 
-/* ---------- solver: BFS over (screw kinds per hole, fallen plates). A turn = lift one screw (free plates drop at once)
- * and park it in any open, matching, empty hole — its own hole only counts if something dropped. */
-function solve(lv, kinds, fallen0, cap) {
-  const n = lv.n, P = lv.plates, full = (1 << P.length) - 1, seen = [];
-  const mark = (f, k) => { const s = seen[f] || (seen[f] = new Set()); if (s.has(k)) return false; s.add(k); return true; };
+/* ---------- solver: A* over (screw kind per hole, fallen plates). A turn = lift one screw (freed plates drop at once)
+ * and park it in any open, matching, empty hole — its own hole only counts if something dropped. Heuristic: every screw
+ * still sitting in a hole of a remaining plate must be lifted at least once (admissible and consistent → optimal). */
+function solve(lv, kinds, fallen0, cap, fast) {
+  const n = lv.n, P = lv.plates, full = (1 << P.length) - 1, seen = [], buckets = [];
+  const K = [], O = [], F = [], G = [], par = [], MP = [], MQ = [];
+  const push = (k, o, f, g, from, p, q) => {
+    const s = seen[f] || (seen[f] = new Map()), old = s.get(k); if (old !== undefined && old <= g) return; s.set(k, g);
+    let hm = 0, h = 0; for (let j = 0; j < P.length; j++) if (!(f >> j & 1)) hm |= P[j].hole; for (hm &= o; hm; hm &= hm - 1) h++;
+    (buckets[g + h] || (buckets[g + h] = [])).push(K.length); K.push(k); O.push(o); F.push(f); G.push(g); par.push(from); MP.push(p); MQ.push(q);
+  };
   let k0 = 0, o0 = 0; for (let p = 0; p < n; p++) if (kinds[p]) { k0 += kinds[p] * P4[p]; o0 |= 1 << p; }
-  const K = [k0], O = [o0], F = [fallen0], par = [-1], MP = [0], MQ = [0]; mark(fallen0, k0);
-  for (let i = 0; i < K.length; i++) {
-    const key = K[i], oc = O[i], f = F[i];
+  push(k0, o0, fallen0, 0, -1, 0, 0);
+  for (let fv = 0; fv < buckets.length;) {
+    const bk = buckets[fv]; if (!bk || !bk.length) { fv++; continue; }
+    const i = bk.pop(), key = K[i], oc = O[i], f = F[i], g = G[i]; if (seen[f].get(key) < g) continue;
     if (f === full) { const out = []; for (let j = i; par[j] >= 0; j = par[j]) out.unshift([MP[j], MQ[j]]); return out; }
     if (K.length > cap) return null;
-    let solid = 0; for (let j = 0; j < P.length; j++) if (!(f >> j & 1)) solid |= P[j].solid;
+    let solid = 0, holes = 0; for (let j = 0; j < P.length; j++) if (!(f >> j & 1)) { solid |= P[j].solid; holes |= P[j].hole; }
     for (let p = 0; p < n; p++) {
-      if (!(oc >> p & 1) || (solid >> p & 1)) continue;
-      const k = Math.floor(key / P4[p]) % 4, o1 = oc & ~(1 << p); let f1 = f, s1 = 0;
-      for (let j = 0; j < P.length; j++) if (!(f >> j & 1)) { if (!(P[j].hole & o1)) f1 |= 1 << j; else s1 |= P[j].solid; }
+      if (!(oc >> p & 1) || (solid >> p & 1) || (fast && !(holes >> p & 1))) continue;   // fast: screws that pin nothing stay parked
+      const k = Math.floor(key / P4[p]) % 4, o1 = oc & ~(1 << p); let f1 = f, s1 = 0, h1 = 0, bare = 0;
+      for (let j = 0; j < P.length; j++) if (!(f >> j & 1)) { if (!(P[j].hole & o1)) f1 |= 1 << j; else { s1 |= P[j].solid; h1 |= P[j].hole; } }
       const free = lv.board & ~o1 & ~s1;
       for (let q = 0; q < n; q++) {
         if (!(free >> q & 1) || (q === p && f1 === f) || (lv.sock[q] && lv.sock[q] !== k)) continue;
-        const k1 = key + k * (P4[q] - P4[p]); if (!mark(f1, k1)) continue;
-        K.push(k1); O.push(o1 | 1 << q); F.push(f1); par.push(i); MP.push(p); MQ.push(q);
+        if (fast && !(h1 >> q & 1)) { if (bare >> lv.sock[q] & 1) continue; bare |= 1 << lv.sock[q]; }   // fast: bare holes of one socket type are interchangeable
+        push(key + k * (P4[q] - P4[p]), o1 | 1 << q, f1, g + 1, i, p, q);
       }
     }
   }
@@ -81,7 +88,7 @@ function gen(lv) {
         const elig = mix(pts.filter(p => holeOK[p])); if (!elig.length) continue;
         const holes = elig.slice(0, pts.length <= 2 ? 2 : ri(2, 3)); let hole = 0, solid = 0, pinned = false;
         for (const p of pts) if (holes.includes(p)) hole |= 1 << p; else solid |= 1 << p;
-        for (const p of holes) { if (scr >> p & 1) pinned = true; else if (rnd() < .7) { scr |= 1 << p; pinned = true; } }
+        for (const p of holes) { if (scr >> p & 1) pinned = true; else if (rnd() < .8) { scr |= 1 << p; pinned = true; } }
         if (!pinned) scr |= 1 << holes[0];
         for (const p of pts) { cover[p]++; if (!(hole >> p & 1)) holeOK[p] = false; }
         holesAll |= hole; pls.push({ pts, hole, solid, l: sh.l, fill: sh.fill }); ok = true;
@@ -96,16 +103,15 @@ function gen(lv) {
     for (let p = 0; p < n; p++) { if (scr >> p & 1) kind[p] = kinds > 1 ? ri(1, kinds) : 1; if (kinds > 1 && (board >> p & 1) && !(holesAll >> p & 1) && rnd() < .55) sock[p] = ri(1, kinds); }
     return { C, R, n, plates: pls, board, kind, sock };
   }
-  for (let att = 0; att < 36; att++) {
-    if (att === 24 && !best) np = Math.max(1, np - 1);
+  for (let att = 0; att < 60; att++) {
+    if (att % 15 === 14 && !best) np = Math.max(1, np - 1);
     const c = build(); if (!c) continue;
-    const sol = solve(c, c.kind, 0, 7000); if (!sol) continue;
-    const par = sol.length, sc = par <= hi ? par : hi - (par - hi) * 1.5;
-    if (!best || sc > best.sc) { c.sc = sc; c.par = par; best = c; }
-    if (par === hi) break;
+    const sol = solve(c, c.kind, 0, 5000, true); if (!sol) continue;
+    const par = sol.length, ns = c.kind.filter(k => k).length, sc = (par <= hi ? par : hi - (par - hi) * 1.5) + Math.min(3, par - ns) * 1.2;   // prefer levels that need a re-park
+    if (!best || sc > best.sc) { c.sc = sc; c.par = par; c.extra = par - ns; best = c; }
   }
   if (!best) { const kind = new Array(n).fill(0), sock = new Array(n).fill(0); kind[0] = kind[1] = 1; best = { C, R, n, plates: [{ pts: [0, 1], hole: 3, solid: 0, l: [[0, 1]] }], board: 3 | 1 << n - 1 | 1 << n - 2, kind, sock, par: 2 }; }
-  best.budget = best.par + Math.max(2, Math.ceil(best.par * .5));
+  best.budget = best.par + Math.max(2, Math.ceil(best.par * (lv < 6 ? .5 : .34)));
   const cols = mix(PCOL.slice()); best.plates.forEach((p, i) => { p.col = cols[i % cols.length]; });
   return cache[lv] = best;
 }
@@ -185,10 +191,11 @@ function undoMove() {
   if (!undo.length) { Lab.sfx("tick", { pitch: .6 }); return; }
   restore(undo.pop()); Lab.sfx("flip");
 }
+const hintSol = () => solve(L, kindsNow(), goneMask(), 20000, true) || solve(L, kindsNow(), goneMask(), 40000);
 function doHint() {
   if (done) return;
   if (held) { if (fell) { Lab.toast("Park the screw first", 900, { y: .16 }); return; } cancelHold(); }
-  const sol = solve(L, kindsNow(), goneMask(), 40000); if (!sol || !sol.length) return;
+  const sol = hintSol(); if (!sol || !sol.length) return;
   hint = { p: sol[0][0], q: sol[0][1], t: 5 }; if (!hintsUsed) Lab.toast("Hint used: 2 stars max", 1100, { y: .16 }); hintsUsed++; Lab.sfx("chime", { vol: .6 });
 }
 function win(st) {
@@ -231,10 +238,10 @@ function start() {
   }];
   Lab.expose({
     get level() { return level; }, get moves() { return moves; }, get par() { return L.par; }, get budget() { return L.budget; }, get plates() { return left(); },
-    get held() { return held ? from : -1; }, get solution() { return solve(L, kindsNow(), goneMask(), 40000); }, get screws() { return screws.map(s => s.p); }, get stars() { return starsNow(); },
+    get held() { return held ? from : -1; }, get solution() { return hintSol(); }, get screws() { return screws.map(s => s.p); }, get stars() { return starsNow(); },
     get done() { return done; }, get undoDepth() { return undo.length; }, get kinds() { return L.kind.filter(k => k).length ? Math.max(...L.kind) : 0; }, get grid() { return [L.C, L.R]; },
     xy(p) { return [ptx(p), pty(p)]; }, targets() { const o = []; for (let q = 0; q < L.n; q++) if (canPlace(q)) o.push(q); return o; }, button(id) { const b = btns.find(b => b.id === id); return [b.x + b.w / 2, b.y + b.h / 2]; },
-    setLevel(n) { maxLv = Math.max(maxLv, n); Lab.store.set("max", maxLv); Lab.store.set("level", n); Lab.restart(); }, parOf(n) { const g = gen(n); return [g.par, g.plates.length, solve(g, g.kind, 0, 40000).length]; },
+    setLevel(n) { maxLv = Math.max(maxLv, n); Lab.store.set("max", maxLv); Lab.store.set("level", n); Lab.restart(); }, parOf(n) { const g = gen(n), full = solve(g, g.kind, 0, 60000); return [g.par, g.plates.length, full ? full.length : -1, g.kind.filter(k => k).length]; },
   });
   Lab.loop(frame);
 }
@@ -245,7 +252,7 @@ function layout() {
   gc = land ? L.R : L.C; gr = land ? L.C : L.R; btns = [];
   const defs = [["undo", "Undo", undoMove], ["restart", "Restart", () => Lab.restart()], ["hint", "Hint", doHint]];
   if (land) {
-    const side = clamp(P.w * .21, 150, 250); sp = Math.min((P.w - side * 2 - 24) / gc, (P.h - 28) / gr, 124); bx = P.x + (P.w - gc * sp) / 2; by = P.y + (P.h - gr * sp) / 2;
+    const side = clamp(P.w * .21, 150, 250); sp = Math.min((P.w - side * 2 - 24) / gc, (P.h - 44) / gr, 124); bx = P.x + (P.w - gc * sp) / 2; by = P.y + (P.h - gr * sp) / 2 - 4;
     info = { x: P.x + (bx - P.x) / 2, y: P.y + P.h / 2 - 78 * T, w: Math.min(bx - P.x - 26, 190 * T) };
     const bw = Math.min(side - 36, 150 * T), bh = 46 * T, cx = bx + gc * sp + (P.x + P.w - bx - gc * sp) / 2;
     defs.forEach((d, i) => btns.push({ id: d[0], label: d[1], fn: d[2], x: cx - bw / 2, y: P.y + P.h / 2 + (i - 1.5) * (bh + 10 * T) + 5 * T, w: bw, h: bh, t: 0 }));

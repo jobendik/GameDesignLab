@@ -1,0 +1,315 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Glasswright</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* GLASSWRIGHT — swivel mirrors on a night-time workbench so every beam of lamplight wakes a lantern of its own colour.
+ * Identity: a glassmaker's bench after dark — plum felt, brass fittings, silvered glass, additive beams that really glow
+ *           and blend where they overlap; dreamy music that fills in as lanterns wake.
+ * Mirrors:  four positions (— \ | /), tap = 45° clockwise or drag the bar round. Edge-on a mirror lets light slip past.
+ * Levels:   generated forever from the level number. The generator *walks* each beam from its lamp, laying mirrors,
+ *           splitters, tinted panes and rings as it goes, then scrambles the swivels and proves the stored solution by
+ *           tracing it — so every bench is solvable. Later: two colours, split glass, tinted panes, ring pairs and
+ *           lanterns that need two colours blended.
+ * Depth:    par = mirrors that start wrong; touch no more than that for three stars. Undo / restart / hint.         */
+Lab.init({
+  title: "Glasswright", tagline: "Swivel the mirrors. Wake every lantern.", category: "Puzzle & Logic",
+  howto: ["Tap a mirror to turn it, or drag it round", "Send each beam to a lantern of its colour", "Touch as few mirrors as par for 3 stars"],
+  theme: { bg: "#0f0d1c", bg2: "#231d3a", accent: "#ffcf6b", accent2: "#62ecff" },
+  orient: "any", music: { style: "dream", key: "F", vol: .4 }, restart: start, formatScore: n => "Lv " + n, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, Q = Math.PI / 4;
+const DC = [1, 0, -1, 0], DR = [0, 1, 0, -1];
+const BEAM = [null, "#ff5d6c", "#56e889", "#ffe066", "#5c9dff", "#ff7ae6", "#62ecff", "#fff2cf"];   // index = R1|G2|B4
+const RING = ["#c59bff", "#ffb37a", "#8affc1"];
+let L, prog, segs, recv, moves, hist, last, grab, cursor, kbd, hintI, hintT, hintUsed, mode, winT, demo, demoT, demoLv = 11, tip, lit;
+let land, flip, cell, gx, gy, bw, bh, ui = { btn: [] }, pressT = {};
+
+/* ------------------------------------------------------------------ light */
+function trace(l, useSol) {
+  const { cols, rows, G } = l, segs = [], st = [], recv = new Uint8Array(l.N), seen = new Uint8Array(l.N * 32);
+  for (let i = 0; i < l.N; i++) { const p = G[i]; if (p && p.t === "E") st.push([i, p.dir, p.col]); }
+  for (let guard = 0; st.length && guard < 300; guard++) {
+    let [i, d, col] = st.pop(), from = i;
+    for (;;) {
+      const c = i % cols + DC[d], r = ((i / cols) | 0) + DR[d];
+      if (c < 0 || c >= cols || r < 0 || r >= rows) { segs.push({ a: from, b: i, d, col, ext: .5 }); break; }
+      i = r * cols + c; const k = i * 32 + d * 8 + col; if (seen[k]) { segs.push({ a: from, b: i, d, col, ext: 0 }); break; } seen[k] = 1;
+      const p = G[i]; if (!p) continue;
+      if (p.t === "W" || p.t === "E") { segs.push({ a: from, b: i, d, col, ext: -.42, hit: 1 }); break; }
+      if (p.t === "T") { recv[i] |= col; segs.push({ a: from, b: i, d, col, ext: -.2 }); break; }
+      if (p.t === "F") { segs.push({ a: from, b: i, d, col, ext: 0 }); col &= p.col; if (!col) break; from = i; continue; }
+      if (p.t === "P") { segs.push({ a: from, b: i, d, col, ext: 0 }); i = p.other; from = i; continue; }
+      const o = useSol && p.sol != null ? p.sol : p.o;
+      if (!(o & 1)) { if ((o >> 1) === (d & 1) || p.t === "S") continue; segs.push({ a: from, b: i, d, col, ext: -.07, hit: 1 }); break; }   // edge-on passes, flat-on stops
+      segs.push({ a: from, b: i, d, col, ext: 0 }); if (p.t === "S") st.push([i, d, col]);
+      from = i; d = o === 1 ? d ^ 1 : 3 - d;
+    }
+  }
+  return { segs, recv };
+}
+const solved = (l, recv) => l.G.every((p, i) => !p || p.t !== "T" || recv[i] === p.need);
+
+/* ------------------------------------------------------------------ generator */
+function spec(n) {
+  const sz = n <= 3 ? [5, 6] : n <= 8 ? [5, 7] : n <= 14 ? [6, 8] : [6, 9], v = n % 3, P = [[1, 4, 2], [2, 1, 4], [4, 2, 1]][v]; let B;
+  if (n <= 5) B = [{ col: 7, m: n < 2 ? 1 : n < 4 ? 2 : 3 }];
+  else if (n <= 9) B = [{ col: 1, m: 2 + (n & 1) }, { col: 4, m: 2 + (n >> 1 & 1) }];
+  else if (n <= 13) B = [{ col: 7, m: 2, split: 1, m2: 1 + (n & 1) }].concat(n >= 12 ? [{ col: P[0], m: 2 }] : []);
+  else if (n <= 17) B = [{ col: 7, m: 2, split: 1, m2: 1 + (n & 1), f: P[0], f2: P[1] }].concat(n >= 16 ? [{ col: P[2], m: 2 }] : []);
+  else if (n <= 21) B = [{ col: 7, m: 3, portal: 1, f: n & 1 ? P[0] : 0 }, { col: P[1], m: 2, split: n >= 20 ? 1 : 0, m2: 1 }];
+  else B = [{ col: P[0], m: 2 }, { col: P[1], m: 2, join: 0 }, v === 0 ? { col: 7, m: 2, split: 1, m2: 1, f: P[2] } : v === 1 ? { col: P[2], m: 3, portal: 1 } : { col: 7, m: 3, f: P[2] }];
+  return { sz, B, pass: n < 4 ? 0 : n < 9 ? 1 : n < 16 ? 2 : 3, decoy: n < 3 ? 0 : n < 6 ? 1 : 1 + (n >> 1) % 3, walls: n < 3 ? 0 : 1 + n % 3 };
+}
+function build(n, a, B) {
+  const sp = spec(n), rnd = Lab.rng(n * 7919 + a * 613 + 11), ri = m => (rnd() * m) | 0, cols = sp.sz[0], rows = sp.sz[1], N = cols * rows;
+  const G = new Array(N).fill(null), axis = new Uint8Array(N), T = [];
+  const step = (i, d) => { const c = i % cols + DC[d], r = ((i / cols) | 0) + DR[d]; return c >= 0 && c < cols && r >= 0 && r < rows ? r * cols + c : -1; };
+  const mark = (cells, d) => { for (const x of cells) axis[x] |= (d & 1) ? 2 : 1; };
+  const runFrom = (i, d) => { const run = []; run.hit = -1; for (let j = step(i, d); j >= 0; j = step(j, d)) { if (G[j]) { run.hit = j; break; } run.push(j); } return run; };
+  const sight = (x, nd, t) => { for (let j = step(x, nd); j >= 0; j = step(j, nd)) { if (j === t) return true; if (G[j]) return false; } return false; };
+  /* lay one beam: from cell i heading d, with m turns left; returns its lantern cell or -1 */
+  function walk(i, d, col, m, o) {
+    const ex = []; if (o.f) ex.push(["F", o.f]); if (o.portal) ex.push(["P"]);
+    for (let g = 0; g < 14; g++) {
+      const run = runFrom(i, d), ok = run.filter(x => !axis[x]);
+      if (o.join != null && m === 0) { if (run.hit !== o.join) return -1; mark(run, d); G[o.join].need |= col; return o.join; }
+      if (ex.length && ok.length >= 3 && !(o.split && !o.did)) {
+        const e = ex.shift(), x = ok[ri(ok.length - 2)]; mark(run.slice(0, run.indexOf(x)), d);
+        if (e[0] === "F") { G[x] = { t: "F", col: e[1] }; col &= e[1]; i = x; if (!col) return -1; }
+        else {
+          const cand = []; for (let y = 0; y < N; y++) if (!G[y] && !axis[y] && y !== x) { const y1 = step(y, d); if (y1 >= 0 && !G[y1] && step(y1, d) >= 0) cand.push(y); }
+          if (!cand.length) return -1; const y = cand[ri(cand.length)]; G[x] = { t: "P", other: y, id: o.pid }; G[y] = { t: "P", other: x, id: o.pid }; i = y;
+        }
+        continue;
+      }
+      if (m === 0) { if (ex.length || !ok.length) return -1; const x = ok[ok.length - 1 - ri(Math.ceil(ok.length / 2))]; mark(run.slice(0, run.indexOf(x)), d); G[x] = { t: "T", need: col }; return x; }
+      const cand = [];
+      for (const x of ok) for (const nd of [d ^ 1, 3 - d]) { const y = step(x, nd); if (y < 0) continue; if (o.join != null && m === 1) { if (sight(x, nd, o.join)) cand.push([x, nd]); } else if (!G[y]) cand.push([x, nd]); }
+      if (!cand.length) return -1;
+      const [x, nd] = cand[ri(cand.length)], split = o.split && !o.did; mark(run.slice(0, run.indexOf(x)), d);
+      G[x] = { t: split ? "S" : "M", sol: nd === (d ^ 1) ? 1 : 3 };
+      if (split) { o.did = 1; if (walk(x, d, col, o.m2 || 1, { f: o.f2, pid: 2 }) < 0) return -1; }
+      i = x; d = nd; m--;
+    }
+    return -1;
+  }
+  for (let bi = 0; bi < B.length; bi++) {
+    const b = B[bi], cand = [];
+    for (let i = 0; i < N; i++) if (!G[i] && !axis[i]) for (let d = 0; d < 4; d++) if (step(i, (d + 2) % 4) < 0 && runFrom(i, d).length >= 2) cand.push([i, d]);
+    if (!cand.length) return null; const [i, d] = cand[ri(cand.length)]; G[i] = { t: "E", dir: d, col: b.col };
+    const t = walk(i, d, b.col, b.m, Object.assign({}, b, { join: b.join != null ? T[b.join] : null, pid: bi })); if (t < 0) return null; T.push(t);
+  }
+  const free = () => { const f = []; for (let i = 0; i < N; i++) if (!G[i] && !axis[i]) f.push(i); return f; };
+  for (let k = 0; k < sp.pass; k++) { const f = []; for (let i = 0; i < N; i++) if (!G[i] && (axis[i] === 1 || axis[i] === 2)) f.push(i); if (f.length) { const x = f[ri(f.length)]; G[x] = { t: "M", sol: axis[x] === 1 ? 0 : 2 }; } }
+  for (let k = 0; k < sp.decoy; k++) { const f = free(); if (f.length) G[f[ri(f.length)]] = { t: "M", sol: null, o: ri(4) }; }
+  for (let k = 0; k < sp.walls; k++) { const f = free(); if (f.length) G[f[ri(f.length)]] = { t: "W" }; }
+  let par = 0; for (const p of G) if (p && p.sol != null) { p.o = rnd() < .85 ? (p.sol + 1 + ri(3)) % 4 : p.sol; if (p.o !== p.sol) par++; }
+  const l = { n, cols, rows, N, G, par };
+  if (!par || !solved(l, trace(l, true).recv) || solved(l, trace(l, false).recv)) return null;
+  for (const p of G) if (p && p.o != null) { p.o0 = p.o; p.ang = p.vt = p.o; p.pop = 0; }
+  return l;
+}
+function load(n) {
+  let l = null; const sp = spec(n);
+  for (let a = 0; a < 400 && !l; a++) l = build(n, a, sp.B);
+  for (let a = 0; !l; a++) l = build(n, a, sp.B.slice(0, 1).map(b => ({ col: b.col, m: 3 })));
+  L = l; L.rot = []; L.tg = []; L.G.forEach((p, i) => { if (p && p.o != null) L.rot.push(i); if (p && p.t === "T") { L.tg.push(i); p.lit = false; p.pop = 0; } });
+  tip = { 1: "Tap a mirror to turn it — or drag it round", 4: "Edge-on, a mirror lets light slip past", 6: "Each lantern wants its own colour", 10: "Split glass sends light both ways", 14: "A tinted pane keeps one colour", 18: "Light entering a ring leaves by its twin", 22: "Two colours on one lantern blend" }[n] || "";
+  moves = 0; hist = []; last = -1; grab = null; cursor = 0; hintI = -1; hintT = 0; hintUsed = 0; mode = "play"; winT = 0; lit = 0;
+  layout(); retrace(true);
+}
+
+/* ------------------------------------------------------------------ layout */
+const X = (c, r) => gx + (flip ? r : c) * cell, Y = (c, r) => gy + (flip ? c : r) * cell;
+const CX = i => X(i % L.cols + .5, ((i / L.cols) | 0) + .5), CY = i => Y(i % L.cols + .5, ((i / L.cols) | 0) + .5);
+const vec = d => flip ? [DR[d], DC[d]] : [DC[d], DR[d]];
+function cellAt(x, y) { const u = Math.floor((x - gx) / cell), v = Math.floor((y - gy) / cell), c = flip ? v : u, r = flip ? u : v; return c >= 0 && c < L.cols && r >= 0 && r < L.rows ? r * L.cols + c : -1; }
+function layout() {
+  const P = Lab.play; land = P.w > P.h * 1.05; flip = land;
+  const vc = flip ? L.rows : L.cols, vr = flip ? L.cols : L.rows, top = land ? 12 : 64, bot = land ? 12 : 98, side = land ? 158 : 0, aw = P.w - 36 - side, ah = P.h - top - bot;
+  cell = Math.floor(Math.min(aw / vc, ah / vr, 92)); bw = cell * vc; bh = cell * vr; gx = P.x + 18 + (aw - bw) / 2; gy = P.y + top + (ah - bh) / 2; ui.btn = [];
+  if (land) {
+    const x0 = P.x + P.w - side + 6, w = 68, h = 46, y0 = P.y + P.h - 3 * (h + 8) - 4; ui.tx = x0 + 72; ui.ty = P.y + 22;
+    [["undo", 0, 0], ["restart", 1, 0], ["hint", 0, 1, 2], ["prev", 0, 2], ["next", 1, 2]].forEach(b => ui.btn.push({ id: b[0], x: x0 + b[1] * (w + 8), y: y0 + b[2] * (h + 8), w: b[3] ? w * 2 + 8 : w, h }));
+  } else {
+    const w = Math.min(64, (P.w - 28 - 32) / 5), h = 54, x0 = P.x + (P.w - (w * 5 + 32)) / 2, y0 = P.y + P.h - h - 12; ui.tx = P.x + 18; ui.ty = P.y + 22; ui.tipY = y0 - 16;
+    ["prev", "undo", "restart", "hint", "next"].forEach((id, i) => ui.btn.push({ id, x: x0 + i * (w + 8), y: y0, w, h }));
+  }
+  Lab.sprite.clear("bg:");
+}
+Lab.onResize(() => { if (L) layout(); });
+const hit = (x, y) => ui.btn.find(b => x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 4 && y <= b.y + b.h + 4);
+
+/* ------------------------------------------------------------------ play */
+function retrace(quiet) {
+  const r = trace(L, false); segs = r.segs; recv = r.recv; lit = 0;
+  L.tg.forEach((i, k) => {
+    const p = L.G[i], on = recv[i] === p.need; if (on) lit++;
+    if (on && !p.lit && !quiet) { p.pop = 1; Lab.audio.combo(1 + k * 2, { vol: .2 }); fx.burst(CX(i), CY(i), { n: 12, color: BEAM[p.need], speed: 150, life: .55, size: 3, glow: 8 }); fx.ring(CX(i), CY(i), { r0: cell * .2, r1: cell * .7, color: BEAM[p.need], width: 3 }); }
+    else if (!on && p.lit && !quiet) Lab.sfx("tick", { pitch: .55, vol: .5 });
+    p.lit = on;
+  });
+  if (!demo) Lab.music.intensity(.2 + .8 * lit / Math.max(1, L.tg.length));
+}
+function setO(i, o, vt) {
+  const p = L.G[i]; if (vt != null) p.vt = vt; if (p.o === o) return;
+  if (last !== i) { hist.push({ i, o: p.o }); moves++; last = i; }
+  p.o = o; Lab.sfx("click", { pitch: .85 + o * .12, vol: .7 }); Lab.buzz(6); hintT = 0; retrace(); if (tip && L.n === 1) tip = "";
+}
+function turn(i) { const p = L.G[i]; p.pop = 1; setO(i, (p.o + 1) % 4, Math.round(p.vt) + 1); }
+function check() { if (mode === "play" && !grab && lit === L.tg.length) win(); }
+const rating = () => Math.max(1, Math.min(moves <= L.par ? 3 : moves <= L.par + 2 ? 2 : 1, 3 - hintUsed));
+function win() {
+  mode = "won"; winT = 0; Lab.sfx("chime"); if (demo) return;
+  const st = rating(), lv = L.n;
+  prog.stars[lv] = Math.max(prog.stars[lv] || 0, st); prog.max = Math.max(prog.max, lv + 1); prog.lvl = lv + 1; Lab.store.set("prog", prog);
+  L.tg.forEach((i, k) => Lab.after(.15 + k * .14, () => { L.G[i].pop = 1; Lab.audio.combo(3 + k * 2, { vol: .16 }); fx.burst(CX(i), CY(i), { n: 14, colors: [BEAM[L.G[i].need], "#fff"], speed: 190, life: .7, size: 3, shape: "spark", glow: 8 }); }));
+  const total = Object.values(prog.stars).reduce((a, b) => a + b, 0);
+  Lab.after(1.1 + L.tg.length * .14, () => Lab.win({ title: st === 3 ? "Flawless glasswork" : "Lanterns lit", message: st === 3 ? "Not one mirror touched in vain." : hintUsed ? "Lit with a little help." : "Touch only " + L.par + " mirror" + (L.par > 1 ? "s" : "") + " for the third star.",
+    score: lv, scoreLabel: "Bench", button: "Next bench", stats: [["Mirrors touched", moves + " / par " + L.par], ["Rating", "★".repeat(st) + "☆".repeat(3 - st)], ["Stars banked", total]] }));
+}
+function undo() { if (mode !== "play") return; const h = hist.pop(); if (!h) return Lab.sfx("tick", { pitch: .5, vol: .5 }); const p = L.G[h.i]; p.o = h.o; p.vt = Math.round(p.ang) + ((h.o - Math.round(p.ang)) % 4 + 6) % 4 - 2; p.pop = .6; moves--; last = -1; Lab.sfx("flip", { pitch: .8 }); retrace(); }
+function restart() { if (mode !== "play") return; for (const i of L.rot) { const p = L.G[i]; p.o = p.o0; p.vt = Math.round(p.ang) + ((p.o0 - Math.round(p.ang)) % 4 + 6) % 4 - 2; } moves = 0; hist = []; last = -1; Lab.sfx("swish"); retrace(true); }
+function hint() {
+  if (mode !== "play") return; const w = L.rot.filter(i => L.G[i].sol != null && L.G[i].o !== L.G[i].sol); if (!w.length) return;
+  hintI = w[0]; hintT = 4; if (!hintUsed) Lab.toast("Hint used — two stars at most", 1300, { y: .16 }); hintUsed = 1; Lab.sfx("chime", { vol: .6 });
+}
+function go(n) { if (n < 1 || n > prog.max || mode !== "play") return Lab.sfx("tick", { pitch: .5, vol: .5 }); prog.lvl = n; Lab.store.set("prog", prog); load(n); Lab.setScore(n); Lab.sfx("flip"); }
+
+function start() {
+  demo = false; kbd = false; prog = Lab.store.get("prog", null) || { lvl: 1, max: 1, stars: {} };
+  load(prog.lvl); Lab.setScore(L.n);
+  const acts = { undo, restart, hint, prev: () => go(L.n - 1), next: () => go(L.n + 1) };
+  Lab.input.onDown = [(x, y) => {
+    const b = hit(x, y); if (b) { pressT[b.id] = 1; acts[b.id](); return; }
+    const i = cellAt(x, y); if (mode !== "play" || i < 0 || !L.G[i] || L.G[i].o == null) return;
+    grab = { i, x, y, drag: false }; cursor = L.rot.indexOf(i); kbd = false;
+  }];
+  Lab.input.onMove = [(x, y) => {
+    if (!grab) return; if (!grab.drag && Math.hypot(x - grab.x, y - grab.y) > 12) grab.drag = true;
+    const dx = x - CX(grab.i), dy = y - CY(grab.i), p = L.G[grab.i]; if (!grab.drag || Math.hypot(dx, dy) < cell * .28) return;
+    let u = Math.atan2(dy, dx) / Q; if (flip) u = 2 - u; u += 4 * Math.round((p.ang - u) / 4);
+    setO(grab.i, ((Math.round(u) % 4) + 4) % 4, u);
+  }];
+  Lab.input.onUp = [() => { if (!grab) return; const g = grab, p = L.G[g.i]; grab = null; if (!g.drag) turn(g.i); else p.vt = Math.round(p.vt); check(); }];
+  Lab.input.onKey = [k => {
+    if (mode !== "play") return; const n = L.rot.length;
+    if (k === "ArrowRight" || k === "ArrowDown" || k === "Tab") { cursor = (cursor + 1) % n; kbd = true; Lab.sfx("tick", { vol: .4 }); }
+    else if (k === "ArrowLeft" || k === "ArrowUp") { cursor = (cursor + n - 1) % n; kbd = true; Lab.sfx("tick", { vol: .4 }); }
+    else if (k === " " || k === "Enter") { kbd = true; turn(L.rot[cursor]); check(); }
+    else { k = k.toLowerCase(); if (k === "z" || k === "backspace") undo(); else if (k === "r") restart(); else if (k === "h") hint(); else if (k === "[") go(L.n - 1); else if (k === "]") go(L.n + 1); }
+  }];
+  Lab.expose({ get level() { return L.n; }, get cols() { return L.cols; }, get rows() { return L.rows; }, get moves() { return moves; }, get par() { return L.par; }, get mode() { return mode; }, get lit() { return lit; },
+    get lanterns() { return L.tg.map(i => ({ i, need: L.G[i].need, got: recv[i], lit: L.G[i].lit })); }, get mirrors() { return L.rot.map(i => ({ i, o: L.G[i].o, sol: L.G[i].sol, t: L.G[i].t })); },
+    get pieces() { return L.G.map(p => p ? p.t : "."); }, get beams() { return segs.length; }, get hint() { return hintT > 0 ? hintI : -1; }, get cursor() { return cursor; }, get flip() { return flip; }, get cell() { return cell; },
+    get progress() { return JSON.parse(JSON.stringify(prog)); }, get buttons() { return ui.btn.map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); },
+    xy(i) { return [CX(i), CY(i)]; }, rating, go });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+function tick(dt) {
+  for (const i of L.rot) { const p = L.G[i]; p.ang = Lab.damp(p.ang, p.vt, 24, dt); p.pop = Math.max(0, p.pop - dt * 4); }
+  for (const i of L.tg) { const p = L.G[i]; p.pop = Math.max(0, p.pop - dt * 2.5); }
+  if (hintT > 0) hintT -= dt; if (mode === "won") winT += dt;
+  for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5);
+}
+function attract(dt, t) {
+  if (!demo) { demo = true; prog = { stars: {}, max: 1 }; load(demoLv); demoT = 1.2; }
+  tick(dt);
+  if (mode === "play") { demoT -= dt; if (demoT <= 0) { const w = L.rot.filter(i => L.G[i].sol != null && L.G[i].o !== L.G[i].sol); if (w.length) turn(w[0]); check(); demoT = .55; } }
+  if (mode === "won" && winT > 1.8) { demoLv = demoLv % 24 + 3; load(demoLv); demoT = 1; }
+  render(t);
+}
+
+/* ------------------------------------------------------------------ drawing */
+function bake() {
+  const W = Lab.W, H = Lab.H;
+  return Lab.sprite("bg:" + L.cols + "x" + L.rows + ":" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40); const rnd = Lab.rng(5), m = cell * .16;
+    draw.vgrad(g, -40, -40, W + 80, H + 80, ["#2a2145", "#191530", "#0f0d1c"]);
+    g.strokeStyle = "rgba(255,255,255,.035)"; g.lineWidth = 1; for (let i = 0; i < 500; i++) { const x = rnd() * W, y = rnd() * H; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 3, y + 2); g.stroke(); }   // felt nap
+    draw.rect(g, gx - m, gy - m + 7, bw + 2 * m, bh + 2 * m, cell * .22, "rgba(0,0,0,.4)");
+    draw.rect(g, gx - m, gy - m, bw + 2 * m, bh + 2 * m, cell * .22, "#8a6a3a"); draw.rect(g, gx - m + 3, gy - m + 3, bw + 2 * m - 6, bh + 2 * m - 6, cell * .19, "#1b1830", "#c79a52", 1.2);
+    for (let i = 0; i < L.N; i++) { const c = i % L.cols, r = (i / L.cols) | 0; if ((c + r) & 1) { g.fillStyle = "rgba(255,255,255,.028)"; g.fillRect(Math.min(X(c, r), X(c + 1, r + 1)), Math.min(Y(c, r), Y(c + 1, r + 1)), cell, cell); } }
+    for (let r = 0; r <= L.rows; r++) for (let c = 0; c <= L.cols; c++) draw.circle(g, X(c, r), Y(c, r), 1.6, "rgba(199,154,82,.45)");
+  });
+}
+const glowSp = col => Lab.sprite("gl:" + col, 64, 64, g => { const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32), [R, G2, B] = Lab.color.parse(col); gr.addColorStop(0, `rgba(${R},${G2},${B},.9)`); gr.addColorStop(.35, `rgba(${R},${G2},${B},.3)`); gr.addColorStop(1, `rgba(${R},${G2},${B},0)`); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); });
+function glow(c, x, y, r, col, a) { const s = glowSp(col); c.globalAlpha = a; c.drawImage(s, x - r, y - r, r * 2, r * 2); c.globalAlpha = 1; }
+function pips(c, x, y, r, mask) { for (let k = 0; k < 3; k++) { const a = [-2.62, -.52, 1.57][k], on = mask >> k & 1; draw.circle(c, x + Math.cos(a) * r, y + Math.sin(a) * r, cell * .04, on ? BEAM[1 << k] : "#2b2745", on ? "rgba(0,0,0,.5)" : null, 1); } }
+function icon(c, id, x, y, s, col) {
+  c.strokeStyle = col; c.fillStyle = col; c.lineWidth = s * .16; c.lineCap = "round"; c.lineJoin = "round"; c.beginPath();
+  if (id === "prev" || id === "next") { const k = id === "prev" ? -1 : 1; c.moveTo(x - k * s * .22, y - s * .42); c.lineTo(x + k * s * .22, y); c.lineTo(x - k * s * .22, y + s * .42); c.stroke(); }
+  else if (id === "undo") { c.arc(x + s * .05, y + s * .1, s * .36, Math.PI * 1.1, Math.PI * .45); c.stroke(); c.beginPath(); c.moveTo(x - s * .52, y - s * .42); c.lineTo(x - s * .3, y - s * .02); c.lineTo(x - s * .02, y - s * .34); c.closePath(); c.fill(); }
+  else if (id === "restart") { c.arc(x, y, s * .38, -Math.PI * .35, Math.PI * 1.35); c.stroke(); c.beginPath(); c.moveTo(x + s * .08, y - s * .62); c.lineTo(x + s * .5, y - s * .36); c.lineTo(x + s * .06, y - s * .1); c.closePath(); c.fill(); }
+  else draw.text(c, "?", x, y + 1, { size: s * 1.15, color: col, weight: 800 });
+}
+function under(c, p, i, t) {                                                    // pieces that sit beneath the light
+  const x = CX(i), y = CY(i), s = cell;
+  if (p.t === "W") { draw.rect(c, x - s * .4, y - s * .4 + 3, s * .8, s * .8, s * .12, "rgba(0,0,0,.35)"); draw.rect(c, x - s * .4, y - s * .4, s * .8, s * .8, s * .12, "#4a4368", "#6a6190", 1.5); draw.rect(c, x - s * .3, y - s * .3, s * .6, s * .6, s * .08, "#3a3456"); for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) draw.circle(c, x + a * s * .3, y + b * s * .3, s * .035, "#8f85b8"); }
+  else if (p.t === "F") { const col = BEAM[p.col]; draw.rect(c, x - s * .34, y - s * .34, s * .68, s * .68, s * .1, Lab.color.alpha(col, .3), Lab.color.alpha(col, .95), 2.5); draw.line(c, x - s * .2, y + s * .08, x + s * .08, y - s * .2, "rgba(255,255,255,.4)", 2); draw.line(c, x - s * .05, y + s * .18, x + s * .18, y - s * .05, "rgba(255,255,255,.22)", 2); pips(c, x, y, s * .24, p.col); }
+  else if (p.t === "P") { const col = RING[p.id % 3]; draw.circle(c, x, y, s * .33, "rgba(0,0,0,.45)", col, s * .07); c.strokeStyle = "#fff"; c.lineWidth = 2; c.lineCap = "round"; for (let k = 0; k < 3; k++) { const a = t * 1.8 + k * TAU / 3 + p.id; c.beginPath(); c.arc(x, y, s * .2, a, a + 1.2); c.stroke(); } }
+  else if (p.t === "E") {
+    const v = vec(p.dir), a = Math.atan2(v[1], v[0]); c.save(); c.translate(x, y); c.rotate(a);
+    draw.rect(c, -s * .36, -s * .3 + 3, s * .62, s * .6, s * .14, "rgba(0,0,0,.35)"); draw.rect(c, s * .12, -s * .15, s * .3, s * .3, s * .05, "#8a6a3a", "#5a4424", 1.5);
+    draw.rect(c, -s * .36, -s * .3, s * .62, s * .6, s * .14, "#c79a52", "#6e5228", 2); draw.rect(c, -s * .28, -s * .22, s * .3, s * .12, s * .05, "rgba(255,255,255,.3)");
+    c.restore(); draw.circle(c, x, y, s * .15, BEAM[p.col], "#5a4424", 2); pips(c, x, y, s * .23, p.col);
+  }
+}
+function mirror(c, p, i, t) {
+  const x = CX(i), y = CY(i), s = cell, k = 1 + ease.pulse(p.pop) * .12, held = grab && grab.i === i;
+  draw.circle(c, x, y + 2, s * .2, "rgba(0,0,0,.35)"); draw.circle(c, x, y, s * .19, "#6e5228", "#c79a52", 2);
+  c.save(); c.translate(x, y); c.rotate((flip ? 2 - p.ang : p.ang) * Q); c.scale(k, k);
+  const w = s * .86, h = s * .13;
+  draw.rect(c, -w / 2, -h / 2 + 2.5, w, h, h / 2, "rgba(0,0,0,.35)");
+  if (p.t === "S") { draw.rect(c, -w / 2, -h / 2, w, h, h / 2, "rgba(150,235,255,.38)", "#d8f6ff", 1.6); c.setLineDash([s * .07, s * .06]); draw.line(c, -w / 2 + 5, 0, w / 2 - 5, 0, "rgba(255,255,255,.8)", 1.5); c.setLineDash([]); c.rotate(Q); draw.rect(c, -s * .09, -s * .09, s * .18, s * .18, 2, "#bdf3ff", "#fff", 1.5); }
+  else { draw.rect(c, -w / 2, -h / 2, w, h, h / 2, p.sol == null ? "#aab3c9" : "#c9d6e8", held ? "#fff" : "#f4f8ff", 1.6); draw.line(c, -w / 2 + 5, -h * .16, w / 2 - 5, -h * .16, "rgba(255,255,255,.85)", 1.6); draw.circle(c, 0, 0, s * .055, "#c79a52", "#6e5228", 1.2); }
+  c.restore();
+}
+function lantern(c, p, i, t) {
+  const x = CX(i), y = CY(i), s = cell, col = BEAM[p.need], k = 1 + ease.pulse(p.pop) * .2, got = recv[i];
+  if (p.lit) { c.globalCompositeOperation = "lighter"; glow(c, x, y, s * (.85 + Math.sin(t * 3 + i) * .06), col, .75); c.globalCompositeOperation = "source-over";
+    c.strokeStyle = Lab.color.alpha(col, .5); c.lineWidth = 2; c.lineCap = "round"; for (let j = 0; j < 8; j++) { const a = t * .6 + j * TAU / 8; c.beginPath(); c.moveTo(x + Math.cos(a) * s * .4, y + Math.sin(a) * s * .4); c.lineTo(x + Math.cos(a) * s * .5, y + Math.sin(a) * s * .5); c.stroke(); } }
+  draw.circle(c, x, y + 3, s * .33 * k, "rgba(0,0,0,.35)"); draw.circle(c, x, y, s * .33 * k, "#6e5228", "#c79a52", 2.5);
+  draw.circle(c, x, y, s * .25 * k, p.lit ? col : Lab.color.mix(col, "#14122a", .78), Lab.color.alpha(col, p.lit ? 1 : .7), 2);
+  if (p.lit) draw.circle(c, x - s * .07, y - s * .08, s * .09, "rgba(255,255,255,.75)");
+  else if (got) { draw.circle(c, x, y, s * .1, Lab.color.alpha(BEAM[got], .55 + .3 * Math.sin(t * 9))); draw.line(c, x - s * .07, y - s * .07, x + s * .07, y + s * .07, "#14122a", 2); draw.line(c, x + s * .07, y - s * .07, x - s * .07, y + s * .07, "#14122a", 2); }
+  pips(c, x, y, s * .41, p.need);
+}
+function render(t) {
+  const c = Lab.ctx, P = Lab.play, bg = bake(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  L.G.forEach((p, i) => { if (p && p.o == null && p.t !== "T") under(c, p, i, t); });
+  // light: three additive strokes per segment + travelling pulses + flares where it lands
+  c.globalCompositeOperation = "lighter"; c.lineCap = "round";
+  const pts = segs.map(s => { const v = vec(s.d); return [CX(s.a), CY(s.a), CX(s.b) + v[0] * s.ext * cell, CY(s.b) + v[1] * s.ext * cell]; });
+  for (const [lw, al] of [[.34, .09], [.15, .26], [.05, .95]]) segs.forEach((s, k) => { const q = pts[k]; c.globalAlpha = al * (lw < .1 ? 1 : .9 + .1 * Math.sin(t * 5 + k)); c.strokeStyle = lw < .1 ? Lab.color.mix(BEAM[s.col], "#ffffff", .45) : BEAM[s.col]; c.lineWidth = cell * lw; c.beginPath(); c.moveTo(q[0], q[1]); c.lineTo(q[2], q[3]); c.stroke(); });
+  c.globalAlpha = .5; c.strokeStyle = "#fff"; c.lineWidth = cell * .06; c.setLineDash([cell * .1, cell * .62]); c.lineDashOffset = -t * cell * 2.4; c.beginPath(); for (const q of pts) { c.moveTo(q[0], q[1]); c.lineTo(q[2], q[3]); } c.stroke(); c.setLineDash([]); c.globalAlpha = 1;
+  segs.forEach((s, k) => { const q = pts[k]; glow(c, q[2], q[3], cell * (s.hit ? .34 : .24), BEAM[s.col], s.hit ? .8 : .5); });
+  c.globalCompositeOperation = "source-over";
+  for (const i of L.rot) mirror(c, L.G[i], i, t);
+  for (const i of L.tg) lantern(c, L.G[i], i, t);
+  if (hintT > 0 && hintI >= 0 && mode === "play") { const p = L.G[hintI], x = CX(hintI), y = CY(hintI), u = .5 + .5 * Math.sin(t * 7); c.save(); c.translate(x, y); c.globalAlpha = Math.min(1, hintT) * (.5 + u * .5); draw.circle(c, 0, 0, cell * (.46 + u * .04), null, "#ffcf6b", 3); c.rotate((flip ? 2 - p.sol : p.sol) * Q); c.setLineDash([5, 5]); draw.line(c, -cell * .42, 0, cell * .42, 0, "#ffcf6b", 3); c.setLineDash([]); c.restore(); c.globalAlpha = 1; }
+  if (kbd && mode === "play") { const i = L.rot[cursor]; c.setLineDash([6, 5]); c.lineDashOffset = -t * 14; draw.circle(c, CX(i), CY(i), cell * .47, null, "#fff", 2); c.setLineDash([]); }
+  if (demo) return;
+  const best = prog.stars[L.n] || 0, turns = "Mirrors " + moves + " / par " + L.par, over = moves > L.par, lan = lit + " / " + L.tg.length + " lit";
+  if (land) {
+    draw.text(c, "BENCH " + L.n, ui.tx, ui.ty, { size: 19, color: "#f4ecd8", weight: 800 }); draw.text(c, lan, ui.tx, ui.ty + 21, { size: 12.5, color: "#a79fc9", weight: 600 });
+    draw.text(c, turns, ui.tx, ui.ty + 46, { size: 14, color: over ? "#ff8f7a" : "#f4ecd8", weight: 700 });
+    for (let i = 0; i < 3; i++) draw.star(c, ui.tx - 22 + i * 22, ui.ty + 71, 8.5, i < best ? "#ffcf6b" : "rgba(255,255,255,.16)", 5, .5);
+    if (tip) { const w = tip.split(" "), h = Math.ceil(w.length / 2); draw.text(c, w.slice(0, h).join(" "), ui.tx, ui.ty + 96, { size: 11.5, color: "#c9c1e6", weight: 600 }); draw.text(c, w.slice(h).join(" "), ui.tx, ui.ty + 111, { size: 11.5, color: "#c9c1e6", weight: 600 }); }
+  } else {
+    draw.text(c, "BENCH " + L.n, ui.tx, ui.ty, { size: 21, color: "#f4ecd8", weight: 800, align: "left" }); draw.text(c, lan, ui.tx, ui.ty + 22, { size: 13, color: "#a79fc9", weight: 600, align: "left" });
+    draw.text(c, turns, P.x + P.w - 18, ui.ty, { size: 15.5, color: over ? "#ff8f7a" : "#f4ecd8", weight: 700, align: "right" });
+    for (let i = 0; i < 3; i++) draw.star(c, P.x + P.w - 70 + i * 22, ui.ty + 23, 8.5, i < best ? "#ffcf6b" : "rgba(255,255,255,.16)", 5, .5);
+    if (tip) draw.text(c, tip, P.x + P.w / 2, ui.tipY, { size: 14, color: "#f4ecd8", weight: 700 });
+  }
+  for (const b of ui.btn) {
+    const on = b.id === "prev" ? L.n > 1 : b.id === "next" ? L.n < prog.max : b.id === "undo" ? hist.length > 0 : true, dy = (pressT[b.id] || 0) * 3;
+    c.globalAlpha = on ? 1 : .4; draw.rect(c, b.x, b.y + 4, b.w, b.h, 14, "rgba(0,0,0,.4)"); draw.rect(c, b.x, b.y + dy, b.w, b.h, 14, "#2f2950", "#8a6a3a", 1.5);
+    icon(c, b.id, b.x + b.w / 2, b.y + b.h / 2 + dy, 22, b.id === "hint" ? "#ffcf6b" : "#f4ecd8"); c.globalAlpha = 1;
+  }
+}
+Lab.boot();
+})();
+</script></body></html>
