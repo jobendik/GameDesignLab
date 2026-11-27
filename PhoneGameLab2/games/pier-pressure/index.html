@@ -13,7 +13,7 @@
  *               lines up outward shoves), Olli (picks on whoever is nearest the edge), Bolt (computes… then charges).
  *               Rounds: more/smarter rivals, a faster-sinking deck, pinball bumpers, rolling waves that push everyone.
  * Identity: sunny teal bay, round wooden ride with painted rings, candy cars, pals bobbing in swim rings once dunked. */
-let demo = false;
+let demo = false, auto = false;
 Lab.init({
   title: "Pier Pressure", tagline: "Bumper cars on a sinking pier. Bonk your pals into the bay.", category: "Arcade", kicker: "Pocket Pals",
   howto: ["Drag anywhere to steer Pip's bumper car", "Tap to dash — ram pals off the deck", "The deck keeps sinking. Stay dry!"],
@@ -29,19 +29,19 @@ let P, cx, cy, U, cars, me, floats, posts, R, ringI, ringT, sink, round, hearts,
 function layout() { P = Lab.play; const r = Math.min(P.w * .47, P.h * (P.w > P.h ? .46 : .37)); U = r / RW; cx = P.x + P.w / 2; cy = P.y + P.h * (P.w > P.h ? .5 : .47); Lab.sprite.clear("pp"); }
 Lab.onResize(() => { if (cars) layout(); });
 function snd(n, o) { if (!demo) Lab.sfx(n, o); }
-const SX = x => cx + x * U, SY = y => cy + y * U;
-function mkCar(id, ang, player) { const s = SPEC[id]; return { id, x: Math.cos(ang) * RW * .6, y: Math.sin(ang) * RW * .6, vx: 0, vy: 0, a: ang + Math.PI, m: s.m, pow: s.pow, alive: true, player: !!player, skid: 0, dashCd: 1, dashT: 0, bump: 0, dizzy: 0, joy: 0, fall: 0, lastBy: null, lastT: -9, inv: 0, skill: clamp(.3 + round * .12, 0, 1), ai: { t: rand(.3, 1), st: "think", dx: 0, dy: 0, seed: rand(0, 9) } }; }
+const tY = () => P.w > P.h ? .3 : .125, SX = x => cx + x * U, SY = y => cy + y * U;
+function mkCar(id, ang, player) { const s = SPEC[id]; return { id, x: Math.cos(ang) * RW * .6, y: Math.sin(ang) * RW * .6, vx: 0, vy: 0, a: ang + Math.PI, m: s.m, pow: s.pow, alive: true, player: !!player, skid: 0, dashCd: 1, dashT: 0, bump: 0, dizzy: 0, joy: 0, fall: 0, lastBy: null, lastT: -9, inv: 0, skill: clamp(.18 + round * .13, 0, 1), ai: { t: rand(.3, 1), st: "think", dx: 0, dy: 0, seed: rand(0, 9) } }; }
 function setup(n) {
   round = n; const ids = n <= ROSTER.length ? ROSTER[n - 1] : Lab.shuffle(["nori", "momo", "olli", "bolt", "bun"]).slice(0, 4);
   me = mkCar("pip", Math.PI / 2, true); cars = [me]; ids.forEach((id, i) => cars.push(mkCar(id, Math.PI / 2 + (i + 1) * TAU / (ids.length + 1))));
   posts = []; const np = n === 3 ? 1 : n >= 5 ? (n % 2 ? 3 : 1) : 0;
   if (np === 1) posts.push({ x: 0, y: 0, r: 15, hit: 0 }); else for (let i = 0; i < np; i++) posts.push({ x: Math.cos(i * TAU / 3 - .5) * RW * .36, y: Math.sin(i * TAU / 3 - .5) * RW * .36, r: 13, hit: 0 });
   floats = []; R = RW; ringI = 0; ringT = Math.max(6, 11.5 - n); sink = null; wave = null; waveT = n >= 4 ? 6 : 1e9; phase = "intro"; phaseT = 1.7; respawnT = 0; warned = false;
-  if (!demo) { Lab.banner("ROUND " + n, { color: "#ffd23f", ms: 1300, y: .2 }); if (n === 3) Lab.toast("Mind the bumper!", 1600, { y: .28 }); if (n === 4) Lab.toast("Waves incoming!", 1600, { y: .28 }); snd("whistle", { vol: .5 }); }
+  if (!demo) { Lab.banner("ROUND " + n, { color: "#ffd23f", ms: 1300, y: .2 }); if (n === 3) Lab.toast("Mind the bumper!", 1600, { y: tY() }); if (n === 4) Lab.toast("Waves incoming!", 1600, { y: tY() }); snd("whistle", { vol: .5 }); }
 }
 function reset() { floats = []; hearts = 3; kos = 0; combo = 0; comboT = 0; bestCombo = 0; score = 0; over = false; clock = 0; hold = false; bonks = 0; setup(1); }
 function start() {
-  demo = false; layout(); reset(); Lab.setScore(0);
+  demo = false; auto = false; layout(); reset(); Lab.setScore(0);
   engine = Lab.audio.loop({ type: "sawtooth", f: 70, lp: 420, vol: 0 });
   Lab.input.onDown = [() => { if (Lab.input.pointers.length > 1) dash(me); }];
   Lab.input.onTap = [() => dash(me)];
@@ -52,7 +52,7 @@ function start() {
     get geo() { return { cx, cy, U }; }, get bonks() { return bonks; }, get ringI() { return ringI; }, get posts() { return posts.length; },
     cars() { return cars.map(c => ({ id: c.id, x: c.x, y: c.y, vx: c.vx, vy: c.vy, a: c.a, alive: c.alive && !c.fall, player: c.player, dashCd: c.dashCd })); },
     put(id, o) { const c = cars.find(q => q.id === id); Object.assign(c, { vx: 0, vy: 0, skid: 0, dashT: 0 }, o); }, hold(v) { hold = v; }, go() { phase = "play"; phaseT = 0; }, shrink() { ringT = .3; }, dash() { dash(me); },
-    waveNow(a) { wave = { ang: a, t: -.2 }; }, setRound(n) { setup(n); },
+    auto(v) { auto = v; me.skill = 1; }, waveNow(a) { wave = { ang: a, t: -.2 }; }, setRound(n) { setup(n); },
   });
   Lab.loop(frame);
 }
@@ -84,20 +84,20 @@ function think(c, dt) {
   };
   const kind = c.player ? "nori" : c.id;
   if (kind === "nori") { const T = others.find(o => o.player) || near; if (T) ram(T, .35); }
-  else if (kind === "olli") { let T = null, best = R * .5; for (const o of others) { const l = Math.hypot(o.x, o.y); if (l > best) { best = l; T = o; } } if (T) ram(T, .6); else { const q = to(Math.cos(clock * .8 + ai.seed) * R * .3, Math.sin(clock * .8 + ai.seed) * R * .3); ix = q[0] * .7; iy = q[1] * .7; } }
-  else if (kind === "momo") { if (near && nd < CR * 5.5) ram(near, 9); else if (d > CR * 1.6) { ix = -c.x / d * .6; iy = -c.y / d * .6; } }
+  else if (kind === "olli") { let T = null, best = R * .5; for (const o of others) { const l = Math.hypot(o.x, o.y) * (o.player ? 1.15 : 1); if (l > best) { best = l; T = o; } } if (T) ram(T, .6); else { const q = to(Math.cos(clock * .8 + ai.seed) * R * .3, Math.sin(clock * .8 + ai.seed) * R * .3); ix = q[0] * .7; iy = q[1] * .7; } }
+  else if (kind === "momo") { if (near && nd < CR * (3.5 + 2.5 * c.skill)) ram(near, 9); else if (d > CR * 1.6) { ix = -c.x / d * .6; iy = -c.y / d * .6; } }
   else if (kind === "bun") {
     let fx2 = -c.x / R * 1.3 * (d / R), fy = -c.y / R * 1.3 * (d / R), prey = null;
     for (const o of others) { const l = Math.hypot(o.x - c.x, o.y - c.y); if (l < CR * 7) { fx2 += (c.x - o.x) / l * (CR * 7 - l) / (CR * 3); fy += (c.y - o.y) / l * (CR * 7 - l) / (CR * 3); } if (l < CR * 4.5 && Math.hypot(o.x, o.y) > R - CR * 1.7 && Math.hypot(o.x, o.y) > d) prey = o; }
     if (prey) ram(prey, 9); else { const l = Math.hypot(fx2, fy); if (l > .15) { ix = fx2 / l; iy = fy / l; } if (near && nd < CR * 2.9 && d < R * .6) wantDash = true; }
   } else if (kind === "bolt") {
     if (ai.st === "charge") { ix = ai.dx; iy = ai.dy; if (ai.t <= 0) { ai.st = "think"; ai.t = rand(.5, .9) * (1.5 - c.skill * .5); } else if (ad(c.a, Math.atan2(iy, ix)) ** 2 < .05) wantDash = true; }
-    else if (ai.t <= 0 && others.length) { const T = Lab.choose(others), q = to(T.x + T.vx * .3, T.y + T.vy * .3); ai.dx = q[0]; ai.dy = q[1]; ai.st = "charge"; ai.t = rand(.8, 1.2); }
+    else if (ai.t <= 0 && others.length) { const T = me.alive && !me.fall && Math.random() < .45 ? me : Lab.choose(others), q = to(T.x + T.vx * .3, T.y + T.vy * .3); ai.dx = q[0]; ai.dy = q[1]; ai.st = "charge"; ai.t = rand(.8, 1.2); }
   }
   ix += Math.sin(clock * 1.7 + ai.seed) * .3 * (1 - c.skill); iy += Math.cos(clock * 1.3 + ai.seed * 2) * .3 * (1 - c.skill);
   const px = c.x + c.vx * .38, py = c.y + c.vy * .38, lim = R - CR * (1.1 + sp.fear * .5), far = Math.max(Math.hypot(px, py), d);
   if (far > lim) { const w = clamp((far - lim) / (CR * 1.5), 0, 1) * (kind === "bolt" && ai.st === "charge" ? .45 : 1) * Math.min(1.3, .6 + sp.fear * .5); ix = lerp(ix, -c.x / d, Math.min(1, w)); iy = lerp(iy, -c.y / d, Math.min(1, w)); if (w > .5) wantDash = false; }
-  const k = .72 + .28 * c.skill; if (wantDash && c.dashCd <= 0 && Math.random() < c.skill * 7 * dt) dash(c);
+  const k = .72 + .28 * c.skill, reach = kind === "bolt" ? 70 : 125; if (wantDash && c.dashCd <= 0 && Math.hypot(c.x + Math.cos(c.a) * reach, c.y + Math.sin(c.a) * reach) < R - CR * .5 && Math.random() < c.skill * 7 * dt) dash(c);
   return [ix * k, iy * k];
 }
 function dunk(c) {
@@ -106,7 +106,7 @@ function dunk(c) {
   if (c.player) {
     hearts--; combo = 0; if (demo) { hearts = 3; respawnT = 1.4; return; } Lab.shake(10, .35); Lab.buzz(50); snd("hurt"); engine.set({ vol: 0 });
     if (hearts <= 0) { over = true; Lab.music.intensity(0); Lab.after(1.3, () => Lab.gameover({ title: "Splash!", message: "Pip went for a swim in round " + round + ".", score, stats: [["Round", round], ["Knock-outs", kos], ["Best combo", "×" + Math.max(1, bestCombo)]] })); }
-    else { respawnT = 1.5; Lab.toast(hearts === 1 ? "Last life!" : "Splash! " + hearts + " lives left", 1200, { y: .28 }); }
+    else { respawnT = 1.5; Lab.toast(hearts === 1 ? "Last life!" : "Splash! " + hearts + " lives left", 1200, { y: tY() }); }
   } else if (c.lastBy === me && clock - c.lastT < 4 && me.alive) {
     kos++; combo = comboT > 0 ? combo + 1 : 1; comboT = 4; bestCombo = Math.max(bestCombo, combo); const pts = 100 * combo; score += pts; me.joy = 1.4;
     if (!demo) { fx.text(sx, sy - 24 * U, (combo > 1 ? "COMBO ×" + combo + "  " : "") + "+" + pts, { color: "#ffd23f", size: 22 * U + 4 }); Lab.audio.combo(2 + combo * 2); snd("coin"); Lab.bumpScore(); Lab.hitstop(.07); }
@@ -132,8 +132,8 @@ function step(dt) {
     if (c.fall) { c.fall += dt / .45; c.x += c.vx * dt; c.y += c.vy * dt; c.a += dt * 4; if (c.fall >= 2) dunk(c); continue; }
     let ix = 0, iy = 0;
     if (phase === "play") {
-      if (c.player && !demo) { ix = Lab.input.axisX(); iy = Lab.input.axisY(); const I = Lab.input; if (I.down) { const dx = I.x - I.startX, dy = I.y - I.startY, l = Math.hypot(dx, dy); if (l > 7) { const k = Math.min(1, l / 44) / l; ix = dx * k; iy = dy * k; } } }
-      else if (!hold) { const q = think(c, dt); ix = q[0]; iy = q[1]; }
+      if (c.player && !demo && !auto) { ix = Lab.input.axisX(); iy = Lab.input.axisY(); const I = Lab.input; if (I.down) { const dx = I.x - I.startX, dy = I.y - I.startY, l = Math.hypot(dx, dy); if (l > 7) { const k = Math.min(1, l / 44) / l; ix = dx * k; iy = dy * k; } } }
+      else if (!hold || c.player) { const q = think(c, dt); ix = q[0]; iy = q[1]; }
     }
     drive(c, ix, iy, dt);
     if (wave && wave.t > 0) { c.vx += Math.cos(wave.ang) * 170 * dt; c.vy += Math.sin(wave.ang) * 170 * dt; }
