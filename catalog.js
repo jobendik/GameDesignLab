@@ -732,12 +732,15 @@ window.GDL_CATALOG = {
    "id": "games/puppet-panic",
    "path": "games/puppet-panic.html",
    "collection": "arcade",
-   "title": "Puppet Panic — Physics Charades",
-   "desc": "Ragdoll character playground.",
+   "title": "Puppet Panic — String-Pulling Charades",
+   "desc": "Pull the strings of a floppy wooden marionette and act out the secret word before a heckling audience runs out of patience — solo show or pass-and-play party.",
    "genre": [
-    "Physics"
+    "Party",
+    "Physics",
+    "Arcade"
    ],
    "controls": [
+    "touch",
     "mouse",
     "keyboard"
    ],
@@ -2042,7 +2045,8 @@ window.GDL_CATALOG = {
    "n": 50,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--50-bolt-hole.jpg"
   },
   {
    "id": "PhoneGameLab/51-slidescape",
@@ -2061,7 +2065,8 @@ window.GDL_CATALOG = {
    "n": 51,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--51-slidescape.jpg"
   },
   {
    "id": "PhoneGameLab/52-tideglass",
@@ -2080,24 +2085,28 @@ window.GDL_CATALOG = {
    "n": 52,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--52-tideglass.jpg"
   },
   {
-   "id": "PhoneGameLab/53-block-blast",
-   "path": "PhoneGameLab/games/53-block-blast/index.html",
+   "id": "PhoneGameLab/53-plot-twist",
+   "path": "PhoneGameLab/games/53-plot-twist/index.html",
    "collection": "PhoneGameLab",
-   "title": "Block Blast",
-   "desc": "Place blocks to clear full rows/cols.",
+   "title": "Plot Twist",
+   "desc": "Plant every plot to make it bloom.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 53,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--53-block-blast.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--53-plot-twist.jpg"
   },
   {
    "id": "PhoneGameLab/54-hedgeroll",
@@ -2142,7 +2151,7 @@ window.GDL_CATALOG = {
    "path": "PhoneGameLab/games/56-shuteye-street/index.html",
    "collection": "PhoneGameLab",
    "title": "Shuteye Street",
-   "desc": "Bedtime on the block. Every knock flips the neighbours.",
+   "desc": "Bedtime on the block. Knock the lights out.",
    "genre": [
     "Puzzle & Logic"
    ],
@@ -2152,41 +2161,42 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 56,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/57-minesweeper",
-   "path": "PhoneGameLab/games/57-minesweeper/index.html",
+   "id": "PhoneGameLab/57-soundings",
+   "path": "PhoneGameLab/games/57-soundings/index.html",
    "collection": "PhoneGameLab",
-   "title": "Minesweeper",
-   "desc": "Use number hints to find safe cells.",
+   "title": "Soundings",
+   "desc": "Chart the bay. Buoy every reef.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 57,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--57-minesweeper.jpg"
+   "v2": true
   },
   {
-   "id": "PhoneGameLab/58-word-search",
-   "path": "PhoneGameLab/games/58-word-search/index.html",
+   "id": "PhoneGameLab/58-alphabroth",
+   "path": "PhoneGameLab/games/58-alphabroth/index.html",
    "collection": "PhoneGameLab",
    "title": "Word Search",
-   "desc": "Drag through the grid to find hidden words.",
+   "desc": "Drag across letters to find hidden words.",
    "genre": [
-    "Puzzle & Logic"
+    "Minigame"
    ],
    "controls": [
     "touch",
     "mouse"
    ],
    "n": 58,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--58-word-search.jpg"
+   "v2": false
   },
   {
    "id": "PhoneGameLab/59-nonogram",

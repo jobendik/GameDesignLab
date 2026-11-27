@@ -1,0 +1,287 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Soundings</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* SOUNDINGS — chart an unknown bay. Sound a square and the lead-line tells you how many reefs touch it; mark every
+ * reef with a buoy, uncover all the open water, never run aground.
+ * Identity: a hand-inked nautical chart — parchment, hatched "uncharted" tiles that peel away to watercolour sea
+ *           (pale = deep, blue = shallows by a reef), ink numerals, red-and-white buoys, foam-ringed rocks.
+ * Touch:    tap = sound, hold = buoy (or flip the Sound/Buoy switch so taps drop buoys and holds sound). Tapping a
+ *           number whose buoys are all placed sounds the rest around it; if its hidden squares must all be reefs it
+ *           buoys them for you.
+ * Fairness: the chart is drawn at the first tap, which always opens clear water, and a constraint solver (single
+ *           squares, subset pairs, reef count) re-rolls it until the whole chart can be finished without a guess.
+ * Ladder:   Cove 6×7 → Bay 7×9 → Strait 8×11 → Open Sea 8×13; each cleared size unlocks the next, best time per size.
+ * Spyglass: shows one square the clues already settle — for +15 s on the clock.                                */
+const SIZES = [{ n: "Cove", c: 6, r: 7, m: 7 }, { n: "Bay", c: 7, r: 9, m: 12 }, { n: "Strait", c: 8, r: 11, m: 18 }, { n: "Open Sea", c: 8, r: 13, m: 24 }];
+const fmtS = t => { t = Math.floor(t); return (t / 60 | 0) + ":" + (t % 60 < 10 ? "0" : "") + t % 60; };
+Lab.init({
+  title: "Soundings", tagline: "Chart the bay. Buoy every reef.", category: "Puzzle & Logic",
+  howto: ["Tap to sound a square, hold to drop a buoy", "A number counts the reefs touching it", "Uncover all open water — fastest chart wins"],
+  theme: { bg: "#e6d7b0", bg2: "#f3e9cf", fg: "#1f3550", muted: "#7a6a4a", accent: "#d8442f", accent2: "#2f7f93", light: true },
+  orient: "any", music: { style: "puzzle", key: "G", bpm: 92, vol: .3 }, restart: start, attract,
+  lowerIsBetter: true, formatScore: v => SIZES[3 - Math.floor(v / 1e5)].n + " " + Lab.fmtTime((v % 1e5) / 10),
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, HOLD = .34, INK = "#1f3550";
+const NUMC = [null, "#2460a8", "#27804f", "#c0392b", "#5b3a8c", "#8a4b1f", "#0f766e", "#333", "#666"];
+let size, cols, rows, N, M, NB, mine, num, rev, flag, rt, ft, generated, noGuess, mode, time, taps, flagMode, press, hintI, hintKind, hintT, hitI, endT, left, flags, cursor, kbd, tip, sea, demo, demoT, st;
+let land, flip, cell, gx, gy, bw, bh, ui = { btn: [] }, pressT = {};
+
+/* ------------------------------------------------------------------ board + logic */
+function setup(sz) {
+  size = sz; ({ c: cols, r: rows, m: M } = SIZES[sz]); N = cols * rows; NB = [];
+  for (let i = 0; i < N; i++) { const c = i % cols, r = (i / cols) | 0, o = []; for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) if ((dr || dc) && c + dc >= 0 && c + dc < cols && r + dr >= 0 && r + dr < rows) o.push((r + dr) * cols + c + dc); NB.push(o); }
+  mine = new Uint8Array(N); num = new Int8Array(N); rev = new Uint8Array(N); flag = new Uint8Array(N); rt = new Float32Array(N); ft = new Float32Array(N);
+  generated = false; noGuess = false; mode = "play"; time = 0; taps = 0; press = null; hintI = -1; hintT = 0; hitI = -1; endT = 0; left = N - M; flags = 0; cursor = (N / 2) | 0;
+  layout();
+}
+function count() { for (let i = 0; i < N; i++) { let n = 0; for (const j of NB[i]) n += mine[j]; num[i] = n; } }
+/* What the visible numbers prove. reveal=true (generator): keep opening proven-safe squares and report how many are left. */
+function logic(vis, reveal) {
+  const K = new Uint8Array(N); let prog = true;
+  const open = i => { const q = [i]; while (q.length) { const j = q.pop(); if (vis[j]) continue; vis[j] = 1; K[j] = 1; if (!num[j]) for (const n of NB[j]) if (!vis[n]) q.push(n); } };
+  const safe = j => { if (K[j] || vis[j]) return; prog = true; if (reveal) open(j); else K[j] = 1; }, reef = j => { if (K[j]) return; K[j] = 2; prog = true; };
+  while (prog) {
+    prog = false; const C = [];
+    for (let i = 0; i < N; i++) { if (!vis[i] || !num[i]) continue; let m = num[i]; const u = []; for (const n of NB[i]) { if (vis[n] || K[n] === 1) continue; if (K[n] === 2) m--; else u.push(n); } if (u.length) C.push({ u, m }); }
+    for (const c of C) { if (c.m === 0) c.u.forEach(safe); else if (c.m === c.u.length) c.u.forEach(reef); }
+    if (prog) continue;
+    for (const a of C) for (const b of C) {                           // a ⊂ b  →  the rest of b holds b.m − a.m reefs
+      if (a === b || a.u.length >= b.u.length || !a.u.every(x => b.u.indexOf(x) >= 0)) continue;
+      const d = b.m - a.m, rest = b.u.filter(x => a.u.indexOf(x) < 0); if (d === 0) rest.forEach(safe); else if (d === rest.length) rest.forEach(reef);
+    }
+    if (prog) continue;
+    let unk = 0, mk = 0; for (let i = 0; i < N; i++) { if (K[i] === 2) mk++; else if (!vis[i] && !K[i]) unk++; }
+    if (unk && mk === M) { for (let i = 0; i < N; i++) if (!vis[i] && !K[i]) safe(i); } else if (unk && unk === M - mk) { for (let i = 0; i < N; i++) if (!vis[i] && !K[i]) reef(i); }
+  }
+  let rem = 0; for (let i = 0; i < N; i++) if (!vis[i] && !mine[i]) rem++;
+  return { K, rem };
+}
+function generate(first) {
+  const ban = new Uint8Array(N); ban[first] = 1; for (const j of NB[first]) ban[j] = 1;
+  const pool = []; for (let i = 0; i < N; i++) if (!ban[i]) pool.push(i);
+  let best = null, bestRem = 1e9; const t0 = performance.now();
+  for (let a = 0; a < 800; a++) {
+    mine.fill(0); for (let k = 0; k < M; k++) { const j = k + ((Math.random() * (pool.length - k)) | 0), t = pool[k]; pool[k] = pool[j]; pool[j] = t; mine[pool[k]] = 1; }
+    count(); const vis = new Uint8Array(N), q = [first]; while (q.length) { const j = q.pop(); if (vis[j]) continue; vis[j] = 1; if (!num[j]) for (const n of NB[j]) q.push(n); }
+    const r = logic(vis, true); if (r.rem < bestRem) { bestRem = r.rem; best = mine.slice(); }
+    if (!r.rem || performance.now() - t0 > 60) break;
+  }
+  mine = best; count(); generated = true; noGuess = bestRem === 0;
+}
+function reveal(i, quiet) {
+  if (mode !== "play" || rev[i] || flag[i]) return 0;
+  if (!generated) generate(i);
+  if (mine[i]) { lose(i); return 0; }
+  const q = [[i, 0]]; let n = 0, far = 0; const seen = new Uint8Array(N); seen[i] = 1;
+  while (q.length) { const [j, d] = q.shift(); if (flag[j]) continue; rev[j] = 1; rt[j] = -d * .045; n++; far = Math.max(far, d); if (!num[j]) for (const k of NB[j]) if (!seen[k] && !rev[k]) { seen[k] = 1; q.push([k, d + 1]); } }
+  left -= n;
+  if (!quiet) {
+    if (n > 4) { Lab.sfx("splash", { vol: .4, pitch: 1.3 }); for (let k = 0; k < Math.min(6, far); k++) Lab.audio.tone({ f: 520 + k * 70, dur: .07, vol: .05, type: "sine", delay: k * .05 }); }
+    else Lab.sfx("bubble", { pitch: 1.35 - num[i] * .1, vol: .7 });
+    fx.burst(CX(i), CY(i), { n: 5 + Math.min(8, n), colors: ["#bfe6ea", "#fff", "#7fc6d4"], speed: 90, life: .4, size: 2.5 });
+  }
+  if (left === 0) win();
+  return n;
+}
+function toggleFlag(i) {
+  if (mode !== "play" || rev[i]) return; flag[i] ^= 1; flags += flag[i] ? 1 : -1; ft[i] = 1;
+  Lab.sfx(flag[i] ? "drop" : "flip", { pitch: flag[i] ? 1.2 : .8, vol: .7 }); Lab.buzz(12);
+  if (flag[i]) fx.ring(CX(i), CY(i), { r0: cell * .15, r1: cell * .6, color: "#d8442f", width: 3, life: .35 });
+}
+function chord(i) {
+  if (mode !== "play" || !rev[i] || !num[i]) return;
+  const hid = NB[i].filter(j => !rev[j]), fl = hid.filter(j => flag[j]).length;
+  if (fl === num[i] && hid.length > fl) { Lab.sfx("swish", { vol: .5 }); let n = 0; for (const j of hid) if (!flag[j] && mode === "play") n += reveal(j, true); if (n) Lab.sfx("bubble", { pitch: 1.2 }); }
+  else if (hid.length === num[i] && fl < hid.length) { for (const j of hid) if (!flag[j]) toggleFlag(j); }
+  else { for (const j of hid) if (!flag[j]) ft[j] = .6; Lab.sfx("tick", { pitch: .7, vol: .5 }); }
+}
+function primary(i) { taps++; hintT = 0; if (rev[i]) chord(i); else if (flagMode) toggleFlag(i); else reveal(i); if (tip === 1 && generated) tip = 2; }
+function secondary(i) { hintT = 0; if (rev[i]) return; taps++; if (flagMode) reveal(i); else toggleFlag(i); if (tip === 2) tip = 0; }
+function lose(i) {
+  mode = "lost"; hitI = i; endT = 0; const pct = Math.round(100 * (N - M - left) / (N - M)), ok = flag.reduce((a, f, j) => a + (f && mine[j] ? 1 : 0), 0);
+  let k = 0; for (let j = 0; j < N; j++) if (mine[j] && !flag[j]) rt[j] = -(k++) * .05 - .15; rt[i] = 0;
+  Lab.sfx("crunch"); Lab.sfx("splash", { pitch: .7 }); Lab.shake(12, .45); Lab.buzz(60); Lab.flash("#d8442f", .25, .3);
+  fx.burst(CX(i), CY(i), { n: 26, colors: ["#fff", "#bfe6ea", "#8a5a3a", "#5a5148"], speed: 240, life: .8, size: 4, gravity: 300 });
+  Lab.after(1.25, () => Lab.gameover({ title: "Run aground", message: "A reef at " + String.fromCharCode(65 + i % cols) + (((i / cols) | 0) + 1) + ". " + (pct > 80 ? "So close to a finished chart." : "The first sounding is always safe."), stats: [["Charted", pct + "%"], ["Time", fmtS(time)], ["Buoys right", ok + " / " + flags]] }));
+}
+function win() {
+  mode = "won"; endT = 0; const t = Math.round(time * 10) / 10, old = st.best[size], pb = old == null || t < old;
+  for (let j = 0; j < N; j++) if (mine[j] && !flag[j]) { flag[j] = 1; ft[j] = 1 + (j % cols + ((j / cols) | 0)) * .08; } flags = M;
+  if (demo) return;
+  if (pb) st.best[size] = t; const unlocked = size < 3 && st.unl <= size; if (unlocked) st.unl = size + 1; st.wins = (st.wins || 0) + 1; Lab.store.set("st", st);
+  Lab.submitScore((3 - size) * 1e5 + Math.round(t * 10), { lower: true });
+  [0, 2, 4, 7].forEach((k, q) => Lab.audio.combo(k, { vol: .18, delay: q * .12 })); if (unlocked) Lab.after(.5, () => Lab.banner(SIZES[size + 1].n.toUpperCase() + " UNLOCKED", { color: "#d8442f", ms: 1500, y: .3 }));
+  Lab.after(1.5, () => Lab.win({ title: SIZES[size].n + " charted", message: Lab.fmtTime(t) + (pb ? old == null ? " — your first chart of the " + SIZES[size].n + "." : " — a new best, " + (old - t).toFixed(1) + " s quicker." : " — best is " + Lab.fmtTime(old) + "."),
+    button: "New chart", stats: [["Time", Lab.fmtTime(t)], ["Best · " + SIZES[size].n, Lab.fmtTime(st.best[size])], ["Taps", taps]] }));
+}
+function spy() {
+  if (mode !== "play") return; if (!generated) return Lab.toast("Sound any square to begin", 1100, { y: .2 });
+  const K = logic(rev.slice(), false).K; let i = -1, kind = 1;
+  for (let j = 0; j < N && i < 0; j++) if (K[j] === 1 && !rev[j]) i = j;
+  if (i < 0) for (let j = 0; j < N && i < 0; j++) if (K[j] === 2 && !flag[j]) { i = j; kind = 2; }
+  if (i < 0) for (let j = 0; j < N && i < 0; j++) if (!rev[j] && !mine[j]) i = j;                    // only reachable on a chart the generator could not make guess-free
+  if (i < 0) return; hintI = i; hintKind = kind; hintT = 6; time += 15; Lab.sfx("chime", { vol: .6 }); fx.text(CX(i), CY(i) - cell * .6, "+15 s", { color: "#d8442f", size: 17 });
+}
+function pick(sz) { if (sz > st.unl) { Lab.sfx("error", { vol: .5 }); return Lab.toast("Chart the " + SIZES[sz - 1].n + " first", 1100, { y: .2 }); } if (sz === size && !generated) return; st.sz = sz; Lab.store.set("st", st); Lab.sfx("flip"); setup(sz); Lab.setScore("0:00"); }
+function fresh() { Lab.sfx("swish"); setup(size); Lab.setScore("0:00"); }
+
+/* ------------------------------------------------------------------ layout */
+const X = (c, r) => gx + (flip ? r : c) * cell, Y = (c, r) => gy + (flip ? c : r) * cell;
+const CX = i => X(i % cols + .5, ((i / cols) | 0) + .5), CY = i => Y(i % cols + .5, ((i / cols) | 0) + .5);
+function cellAt(x, y) { const u = Math.floor((x - gx) / cell), v = Math.floor((y - gy) / cell), c = flip ? v : u, r = flip ? u : v; return c >= 0 && c < cols && r >= 0 && r < rows ? r * cols + c : -1; }
+function layout() {
+  const P = Lab.play; land = P.w > P.h * 1.05; flip = land; const vc = flip ? rows : cols, vr = flip ? cols : rows, side = land ? 184 : 0; ui.btn = [];
+  const ax = P.x + 22, ay = P.y + (land ? 20 : 92), aw = P.w - side - 34, ah = P.h - (land ? 30 : 92 + 86);
+  cell = Math.floor(Math.min(aw / vc, ah / vr, 64)); bw = cell * vc; bh = cell * vr; gx = ax + (aw - bw) / 2; gy = ay + (ah - bh) / 2;
+  if (land) {
+    const x0 = P.x + P.w - side + 4, w = (side - 18) / 2; ui.sx = x0; ui.sw = side - 12; ui.sy = P.y + 98;
+    SIZES.forEach((s, k) => ui.btn.push({ id: "size" + k, x: x0 + (k & 1) * (w + 6), y: P.y + 6 + (k >> 1) * 40, w, h: 34 }));
+    ui.btn.push({ id: "sound", x: x0, y: P.y + P.h - 110, w, h: 48 }, { id: "buoy", x: x0 + w + 6, y: P.y + P.h - 110, w, h: 48 }, { id: "new", x: x0, y: P.y + P.h - 54, w, h: 46 }, { id: "spy", x: x0 + w + 6, y: P.y + P.h - 54, w, h: 46 });
+  } else {
+    const w = (P.w - 24 - 18) / 4, y0 = P.y + P.h - 66, tw = Math.min(104, (P.w - 24 - 2 * 58 - 20) / 2), tx = P.x + P.w / 2 - tw; ui.sx = P.x + 14; ui.sw = P.w - 28; ui.sy = P.y + 66; ui.tipY = y0 - 13;
+    SIZES.forEach((s, k) => ui.btn.push({ id: "size" + k, x: P.x + 12 + k * (w + 6), y: P.y + 6, w, h: 40 }));
+    ui.btn.push({ id: "new", x: P.x + 12, y: y0, w: 58, h: 54 }, { id: "sound", x: tx, y: y0, w: tw, h: 54 }, { id: "buoy", x: tx + tw, y: y0, w: tw, h: 54 }, { id: "spy", x: P.x + P.w - 70, y: y0, w: 58, h: 54 });
+  }
+  Lab.sprite.clear("bg:"); Lab.sprite.clear("t:");
+}
+Lab.onResize(() => { if (NB) layout(); });
+const hit = (x, y) => ui.btn.find(b => x >= b.x - 2 && x <= b.x + b.w + 2 && y >= b.y - 3 && y <= b.y + b.h + 3);
+
+function start() {
+  demo = false; kbd = false; st = Lab.store.get("st", null) || { sz: 0, unl: 0, best: {}, wins: 0, runs: 0 };
+  flagMode = false; tip = st.runs < 2 ? 1 : 0; st.runs++; Lab.store.set("st", st);
+  setup(Math.min(st.sz, st.unl)); Lab.setScore("0:00");
+  sea = Lab.audio.loop({ noise: true, lp: 420, vol: 0 });
+  const act = id => { pressT[id] = 1; if (id.startsWith("size")) pick(+id.slice(4)); else if (id === "new") fresh(); else if (id === "spy") spy(); else { flagMode = id === "buoy"; Lab.sfx("tick", { pitch: flagMode ? .9 : 1.3 }); } };
+  Lab.input.onDown = [(x, y) => { const b = hit(x, y); press = null; if (b) return act(b.id); if (mode !== "play") return; const i = cellAt(x, y); if (i >= 0) { press = { i, x, y, t: 0, fired: false }; kbd = false; } }];
+  Lab.input.onMove = [(x, y) => { if (press && Math.hypot(x - press.x, y - press.y) > 14) press = null; }];
+  Lab.input.onUp = [() => { const p = press; press = null; if (p && !p.fired) primary(p.i); }];
+  Lab.input.onKey = [k => {
+    const d = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1] }[k];
+    if (d) { const g = flip ? [d[1], d[0]] : d; cursor = Lab.clamp(((cursor / cols) | 0) + g[1], 0, rows - 1) * cols + Lab.clamp(cursor % cols + g[0], 0, cols - 1); kbd = true; return; }
+    if (k === " " || k === "Enter") { kbd = true; return rev[cursor] ? chord(cursor) : reveal(cursor); } k = k.toLowerCase();
+    if (k === "f" || k === "b") { kbd = true; toggleFlag(cursor); } else if (k === "t") act(flagMode ? "sound" : "buoy"); else if (k === "h") spy(); else if (k === "n" || k === "r") fresh(); else if (k >= "1" && k <= "4") pick(+k - 1);
+  }];
+  Lab.expose({ get size() { return size; }, get cols() { return cols; }, get rows() { return rows; }, get reefs() { return M; }, get generated() { return generated; }, get noGuess() { return noGuess; }, get mode() { return mode; }, get time() { return time; },
+    get mines() { return Array.from(mine); }, get nums() { return Array.from(num); }, get rev() { return Array.from(rev); }, get flags() { return Array.from(flag); }, get left() { return left; }, get flagMode() { return flagMode; }, get hint() { return hintT > 0 ? { i: hintI, kind: hintKind } : null; },
+    get store() { return JSON.parse(JSON.stringify(st)); }, get buttons() { return ui.btn.map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); }, nb(i) { return NB[i].slice(); }, xy(i) { return [CX(i), CY(i)]; },
+    proven() { const K = logic(rev.slice(), false).K; return Array.from(K); } });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+function tick(dt) {
+  if (mode === "play" && generated) { time += dt; if (!demo) Lab.setScore(fmtS(time)); } else if (mode !== "play") endT += dt;
+  if (press && !press.fired && mode === "play") { press.t += dt; if (press.t >= HOLD) { press.fired = true; Lab.buzz(18); secondary(press.i); } }
+  for (let i = 0; i < N; i++) { if (rt[i] < 1 && (rev[i] || mode === "lost")) rt[i] = Math.min(1, rt[i] + dt * 5); if (ft[i] > 0) ft[i] = Math.max(0, ft[i] - dt * 4); }
+  if (hintT > 0) hintT -= dt; for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5);
+  if (!demo) { Lab.music.intensity(.25 + .6 * (1 - left / (N - M))); if (sea) sea.set({ vol: .035 + .02 * Math.sin(time * .9 + endT) }); }
+}
+function attract(dt, t) {
+  if (!demo) { demo = true; st = { best: {}, unl: 3 }; flagMode = false; tip = 0; setup(1); reveal(cursor, true); demoT = 1; }
+  tick(dt); demoT -= dt;
+  if (mode === "play" && demoT <= 0) { const K = logic(rev.slice(), false).K; let i = K.findIndex((v, j) => v === 2 && !flag[j]); if (i >= 0) { flag[i] = 1; flags++; ft[i] = 1; } else { i = K.findIndex((v, j) => v === 1 && !rev[j]); if (i >= 0) reveal(i, true); else setup(1), reveal(cursor, true); } demoT = .32; }
+  if (mode !== "play" && endT > 2.2) { setup(1); reveal(cursor, true); demoT = .8; }
+  render(t);
+}
+
+/* ------------------------------------------------------------------ drawing */
+function bake() {
+  const W = Lab.W, H = Lab.H;
+  return Lab.sprite("bg:" + size + ":" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40); const rnd = Lab.rng(11);
+    draw.vgrad(g, -40, -40, W + 80, H + 80, ["#f3e9cf", "#e6d7b0"]);
+    for (let i = 0; i < 26; i++) { g.fillStyle = `rgba(150,110,50,${.015 + rnd() * .025})`; g.beginPath(); g.arc(rnd() * W, rnd() * H, 20 + rnd() * 90, 0, TAU); g.fill(); }
+    g.strokeStyle = "rgba(120,90,40,.1)"; g.lineWidth = 1; for (let i = 0; i < 260; i++) { const x = rnd() * W, y = rnd() * H, a = rnd() * TAU; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * 7, y + Math.sin(a) * 7); g.stroke(); }
+    const cx = gx + bw / 2, cy = gy + bh / 2, R = Math.max(bw, bh) * .8; g.strokeStyle = "rgba(31,53,80,.07)";                       // rhumb lines from the chart's centre
+    for (let k = 0; k < 16; k++) { const a = k * TAU / 16; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * R * 2, cy + Math.sin(a) * R * 2); g.stroke(); }
+    const m = 9; draw.rect(g, gx - m, gy - m + 4, bw + 2 * m, bh + 2 * m, 5, "rgba(80,50,10,.16)"); draw.rect(g, gx - m, gy - m, bw + 2 * m, bh + 2 * m, 5, "#dff0ec", INK, 2); draw.rect(g, gx - 3, gy - 3, bw + 6, bh + 6, 2, null, "rgba(31,53,80,.55)", 1);
+    const vc = flip ? rows : cols, vr = flip ? cols : rows, fs = Math.min(10, cell * .2);
+    for (let c = 0; c < vc; c++) draw.text(g, flip ? String(c + 1) : String.fromCharCode(65 + c), gx + (c + .5) * cell, gy - m - 7, { size: fs, color: "rgba(31,53,80,.6)", weight: 700 });
+    for (let r = 0; r < vr; r++) draw.text(g, flip ? String.fromCharCode(65 + r) : String(r + 1), gx - m - 7, gy + (r + .5) * cell, { size: fs, color: "rgba(31,53,80,.6)", weight: 700 });
+  });
+}
+function tile(kind) {                                                  // 0 uncharted, 1 deep water, 2 shallows
+  return Lab.sprite("t:" + kind + ":" + cell, cell, cell, g => {
+    const rnd = Lab.rng(kind * 7 + 3);
+    if (kind === 0) {
+      draw.rect(g, 1.5, 2.5, cell - 3, cell - 3, cell * .16, "rgba(90,60,20,.3)"); draw.rect(g, 1.5, 1, cell - 3, cell - 3.5, cell * .16, "#f8efd6", "#c9b382", 1.2);
+      g.save(); draw.rr(g, 3, 2.5, cell - 6, cell - 6.5, cell * .13); g.clip(); g.strokeStyle = "rgba(31,53,80,.13)"; g.lineWidth = 1; for (let k = -cell; k < cell; k += 6) { g.beginPath(); g.moveTo(k, cell); g.lineTo(k + cell, 0); g.stroke(); } g.restore();
+      g.fillStyle = "rgba(255,255,255,.5)"; g.fillRect(cell * .2, 3, cell * .6, 1.5);
+    } else {
+      g.fillStyle = kind === 1 ? "#e3f2ee" : "#a9d8de"; g.fillRect(0, 0, cell, cell); g.strokeStyle = kind === 1 ? "rgba(47,127,147,.22)" : "rgba(255,255,255,.4)"; g.lineWidth = 1.2; g.lineCap = "round";
+      for (let k = 0; k < (kind === 1 ? 2 : 0); k++) { const x = cell * (.2 + rnd() * .45), y = cell * (.25 + rnd() * .55); g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + 4, y - 3.5, x + 8, y); g.quadraticCurveTo(x + 12, y + 3.5, x + 16, y); g.stroke(); }
+      g.strokeStyle = "rgba(31,53,80,.09)"; g.lineWidth = 1; g.strokeRect(.5, .5, cell - 1, cell - 1);
+    }
+  });
+}
+function buoy(c, x, y, s, t, wrong) {
+  c.save(); c.translate(x, y); c.rotate(Math.sin(t * 2.2 + x) * .09);
+  c.beginPath(); c.ellipse(0, s * .34, s * .42, s * .13, 0, 0, TAU); c.fillStyle = "rgba(47,127,147,.35)"; c.fill();
+  c.beginPath(); c.moveTo(-s * .26, s * .32); c.lineTo(-s * .15, -s * .18); c.lineTo(s * .15, -s * .18); c.lineTo(s * .26, s * .32); c.closePath(); c.fillStyle = "#d8442f"; c.fill(); c.strokeStyle = INK; c.lineWidth = 1.5; c.stroke();
+  c.fillStyle = "#fff"; c.fillRect(-s * .2, s * .02, s * .4, s * .12); draw.line(c, 0, -s * .18, 0, -s * .5, INK, 2);
+  c.beginPath(); c.moveTo(0, -s * .52); c.lineTo(s * .26, -s * .42); c.lineTo(0, -s * .3); c.closePath(); c.fillStyle = "#d8442f"; c.fill();
+  if (wrong) { draw.line(c, -s * .36, -s * .36, s * .36, s * .36, INK, 3); draw.line(c, s * .36, -s * .36, -s * .36, s * .36, INK, 3); }
+  c.restore();
+}
+function reefAt(c, x, y, s, t, hitHere) {
+  c.fillStyle = hitHere ? "#f2b0a2" : "#a9d8de"; c.fillRect(x - s / 2, y - s / 2, s, s);
+  c.strokeStyle = "rgba(255,255,255,.85)"; c.lineWidth = 2; c.lineCap = "round"; for (let k = 0; k < 4; k++) { const a = k * TAU / 4 + Math.sin(t * 1.5 + x) * .2; c.beginPath(); c.arc(x, y + s * .05, s * .36, a, a + .9); c.stroke(); }
+  c.fillStyle = "#4f463e"; c.beginPath(); c.moveTo(x - s * .3, y + s * .2); c.lineTo(x - s * .16, y - s * .2); c.lineTo(x - s * .02, y + s * .02); c.lineTo(x + s * .1, y - s * .28); c.lineTo(x + s * .3, y + s * .2); c.closePath(); c.fill();
+  c.fillStyle = "#7a6e62"; c.beginPath(); c.moveTo(x + s * .1, y - s * .28); c.lineTo(x + s * .17, y - s * .02); c.lineTo(x + s * .04, y + s * .05); c.closePath(); c.fill();
+  if (hitHere) { c.save(); c.translate(x + s * .05, y - s * .12); c.rotate(-.5 + Math.sin(t * 3) * .05); c.fillStyle = "#8a5a3a"; c.beginPath(); c.moveTo(-s * .28, 0); c.lineTo(s * .28, 0); c.lineTo(s * .18, s * .13); c.lineTo(-s * .18, s * .13); c.closePath(); c.fill(); c.fillStyle = "#fff"; c.beginPath(); c.moveTo(0, -s * .03); c.lineTo(0, -s * .38); c.lineTo(s * .2, -s * .03); c.closePath(); c.fill(); c.restore(); }
+}
+function glyph(c, id, x, y, s, col) {
+  c.strokeStyle = col; c.fillStyle = col; c.lineWidth = s * .14; c.lineCap = "round"; c.lineJoin = "round";
+  if (id === "new") { c.beginPath(); c.arc(x, y, s * .38, -Math.PI * .35, Math.PI * 1.35); c.stroke(); c.beginPath(); c.moveTo(x + s * .08, y - s * .62); c.lineTo(x + s * .5, y - s * .36); c.lineTo(x + s * .06, y - s * .1); c.closePath(); c.fill(); }
+  else if (id === "spy") { c.save(); c.translate(x, y); c.rotate(-.5); draw.rect(c, -s * .55, -s * .13, s * .5, s * .26, 2, col); draw.rect(c, -s * .08, -s * .19, s * .42, s * .38, 2, col); draw.rect(c, s * .3, -s * .26, s * .3, s * .52, 3, col); c.restore(); }
+  else if (id === "sound") { draw.line(c, x, y - s * .55, x, y + s * .05, col, s * .1); c.beginPath(); c.moveTo(x - s * .2, y + s * .05); c.lineTo(x + s * .2, y + s * .05); c.lineTo(x + s * .12, y + s * .5); c.lineTo(x - s * .12, y + s * .5); c.closePath(); c.fill(); }
+}
+function render(t) {
+  const c = Lab.ctx, P = Lab.play, bg = bake(), t0 = tile(0), t1 = tile(1), t2 = tile(2); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  const fs = cell * .56, lost = mode === "lost";
+  for (let i = 0; i < N; i++) {
+    const x = CX(i), y = CY(i), e = Lab.clamp(rt[i], 0, 1), shown = rev[i] || (lost && mine[i] && !flag[i] && rt[i] > 0);
+    if (shown) {
+      if (mine[i]) reefAt(c, x, y, cell, t, i === hitI);
+      else { c.drawImage(num[i] ? t2 : t1, x - cell / 2, y - cell / 2, cell, cell); if (num[i]) { const k = e < 1 ? .6 + ease.outBack(e) * .4 : 1; draw.text(c, String(num[i]), x, y + 1, { size: fs * k, color: NUMC[num[i]], weight: 800 }); } }
+    }
+    if (!shown || e < 1) {
+      const k = shown ? 1 - ease.outCubic(e) : 1, pr = press && press.i === i ? .93 : 1, wob = ft[i] > 0 && !flag[i] && !shown ? Math.sin(ft[i] * 30) * 2 * ft[i] : 0;
+      if (k > .02) { c.globalAlpha = k; const sz = cell * (.55 + .45 * k) * pr; c.drawImage(t0, x - sz / 2 + wob, y - sz / 2 - (shown ? (1 - k) * cell * .25 : 0), sz, sz); c.globalAlpha = 1; }
+      if (flag[i] && !shown) { const f = Lab.clamp(ft[i], 0, 1); buoy(c, x, y - ease.pulse(f) * cell * .12, cell * (.82 + ease.pulse(f) * .2), t, lost && !mine[i]); }
+    }
+  }
+  if (press && !press.fired && press.t > .08 && mode === "play" && !rev[press.i]) { const u = Math.min(1, (press.t - .08) / (HOLD - .08)); c.strokeStyle = flagMode ? "#2f7f93" : "#d8442f"; c.lineWidth = 4; c.lineCap = "round"; c.beginPath(); c.arc(CX(press.i), CY(press.i), cell * .42, -Math.PI / 2, -Math.PI / 2 + TAU * u); c.stroke(); }
+  if (hintT > 0 && hintI >= 0 && mode === "play") { const u = .5 + .5 * Math.sin(t * 7), col = hintKind === 2 ? "#d8442f" : "#1f9d6b"; c.globalAlpha = Math.min(1, hintT); draw.rect(c, CX(hintI) - cell / 2 + 2, CY(hintI) - cell / 2 + 2, cell - 4, cell - 4, cell * .16, Lab.color.alpha(col, .18 + u * .2), col, 3); draw.text(c, hintKind === 2 ? "reef" : "clear", CX(hintI), CY(hintI), { size: Math.min(13, cell * .27), color: col, weight: 800 }); c.globalAlpha = 1; }
+  if (kbd && mode === "play") { c.setLineDash([6, 4]); c.lineDashOffset = -t * 14; draw.rect(c, CX(cursor) - cell / 2 + 1, CY(cursor) - cell / 2 + 1, cell - 2, cell - 2, cell * .16, null, INK, 2.5); c.setLineDash([]); }
+  if (mode === "won") { const u = endT * .45; if (u < 1.2) { const x = gx - 20 + (bw + 40) * u, y = gy + bh * .5 + Math.sin(u * 9) * 6; c.save(); c.translate(x, y); c.rotate(Math.sin(t * 5) * .08); const s = Math.min(34, cell * .7); c.fillStyle = "#8a5a3a"; c.beginPath(); c.moveTo(-s * .5, 0); c.lineTo(s * .5, 0); c.lineTo(s * .34, s * .24); c.lineTo(-s * .34, s * .24); c.closePath(); c.fill(); c.strokeStyle = INK; c.lineWidth = 1.5; c.stroke(); c.fillStyle = "#fff"; c.beginPath(); c.moveTo(0, -s * .06); c.lineTo(0, -s * .7); c.lineTo(s * .38, -s * .06); c.closePath(); c.fill(); c.stroke(); c.fillStyle = "#d8442f"; c.beginPath(); c.moveTo(-s * .05, -s * .08); c.lineTo(-s * .05, -s * .5); c.lineTo(-s * .3, -s * .08); c.closePath(); c.fill(); c.restore(); } }
+  if (demo) return;
+  // chips, status, switch
+  for (const b of ui.btn) {
+    const dy = (pressT[b.id] || 0) * 2.5, k = b.id.startsWith("size") ? +b.id.slice(4) : -1;
+    if (k >= 0) {
+      const cur = k === size, locked = k > st.unl, best = st.best[k]; c.globalAlpha = locked ? .5 : 1;
+      draw.rect(c, b.x, b.y + 3, b.w, b.h, 9, "rgba(90,60,20,.22)"); draw.rect(c, b.x, b.y + dy, b.w, b.h, 9, cur ? INK : "#fbf4df", cur ? INK : "#c9b382", 1.5);
+      draw.text(c, SIZES[k].n, b.x + b.w / 2, b.y + dy + b.h * .34, { size: Math.min(13.5, b.w * .16), color: cur ? "#fbf4df" : INK, weight: 800 });
+      draw.text(c, locked ? "locked" : best != null ? Lab.fmtTime(best) : SIZES[k].c + "×" + SIZES[k].r, b.x + b.w / 2, b.y + dy + b.h * .72, { size: 10.5, color: cur ? "#bcd3e6" : "#8a7a58", weight: 700 }); c.globalAlpha = 1;
+    } else {
+      const on = (b.id === "sound" && !flagMode) || (b.id === "buoy" && flagMode), seg = b.id === "sound" || b.id === "buoy";
+      draw.rect(c, b.x, b.y + 4, b.w, b.h, 13, "rgba(90,60,20,.25)"); draw.rect(c, b.x + (seg ? 1 : 0), b.y + dy, b.w - (seg ? 2 : 0), b.h, 13, on ? INK : "#fbf4df", on ? INK : "#c9b382", 1.5);
+      const col = on ? "#fbf4df" : INK, cx = b.x + b.w / 2, cy = b.y + b.h / 2 + dy;
+      if (b.id === "buoy") { buoy(c, cx - (b.w > 80 ? 24 : 0), cy - (b.w > 80 ? 0 : 7), 26, 0); draw.text(c, "Buoy", cx + (b.w > 80 ? 14 : 0), cy + (b.w > 80 ? 1 : 15), { size: b.w > 80 ? 15 : 11, color: col, weight: 800 }); }
+      else if (b.id === "sound") { glyph(c, "sound", cx - (b.w > 80 ? 28 : 0), cy - (b.w > 80 ? 0 : 7), 20, col); draw.text(c, "Sound", cx + (b.w > 80 ? 12 : 0), cy + (b.w > 80 ? 1 : 15), { size: b.w > 80 ? 15 : 11, color: col, weight: 800 }); }
+      else glyph(c, b.id, cx, cy, 22, b.id === "spy" ? "#d8442f" : INK);
+    }
+  }
+  const bst = st.best[size], l1 = "Reefs left  " + (M - flags), l2 = bst != null ? "Best  " + Lab.fmtTime(bst) : SIZES[size].c + "×" + SIZES[size].r + " · " + M + " reefs";
+  if (land) { draw.text(c, l1, ui.sx + ui.sw / 2, ui.sy, { size: 15, color: INK, weight: 800 }); draw.text(c, l2, ui.sx + ui.sw / 2, ui.sy + 21, { size: 12, color: "#7a6a4a", weight: 700 }); draw.text(c, "Spyglass  +15 s", ui.sx + ui.sw / 2, ui.sy + 42, { size: 11, color: "#a8553c", weight: 700 }); }
+  else {
+    buoy(c, ui.sx + 10, ui.sy - 1, 20, 0); draw.text(c, l1, ui.sx + 26, ui.sy, { size: 15, color: INK, weight: 800, align: "left" }); draw.text(c, l2, ui.sx + ui.sw, ui.sy, { size: 13, color: "#7a6a4a", weight: 700, align: "right" });
+    const msg = tip === 1 ? "Tap to sound  ·  hold to drop a buoy" : tip === 2 ? "A number counts the reefs touching it" : ""; if (msg && mode === "play") draw.text(c, msg, P.x + P.w / 2, ui.tipY, { size: 13.5, color: INK, weight: 700 });
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

@@ -131,7 +131,8 @@ window.LAB_GAMES = [
     "t": "Bolt Hole",
     "d": "Unscrew, re-park, let the plates drop.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--50-bolt-hole.jpg"
    },
    {
     "n": 51,
@@ -139,14 +140,17 @@ window.LAB_GAMES = [
     "t": "Slidescape",
     "d": "Slide the scene back together.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--51-slidescape.jpg"
    },
    {
     "n": 53,
-    "slug": "53-block-blast",
-    "t": "Block Blast",
-    "d": "Place blocks to clear full rows/cols.",
-    "thumb": "../thumbs/PhoneGameLab--53-block-blast.jpg"
+    "slug": "53-plot-twist",
+    "t": "Plot Twist",
+    "d": "Plant every plot to make it bloom.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--53-plot-twist.jpg"
    },
    {
     "n": 54,
@@ -168,22 +172,16 @@ window.LAB_GAMES = [
     "n": 56,
     "slug": "56-shuteye-street",
     "t": "Shuteye Street",
-    "d": "Bedtime on the block. Every knock flips the neighbours.",
-    "v2": true
+    "d": "Bedtime on the block. Knock the lights out.",
+    "v2": true,
+    "score": 8
    },
    {
     "n": 57,
-    "slug": "57-minesweeper",
-    "t": "Minesweeper",
-    "d": "Use number hints to find safe cells.",
-    "thumb": "../thumbs/PhoneGameLab--57-minesweeper.jpg"
-   },
-   {
-    "n": 58,
-    "slug": "58-word-search",
-    "t": "Word Search",
-    "d": "Drag through the grid to find hidden words.",
-    "thumb": "../thumbs/PhoneGameLab--58-word-search.jpg"
+    "slug": "57-soundings",
+    "t": "Soundings",
+    "d": "Chart the bay. Buoy every reef.",
+    "v2": true
    },
    {
     "n": 59,
@@ -345,7 +343,8 @@ window.LAB_GAMES = [
     "t": "Tideglass",
     "d": "Stack sea glass, then call the tide.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--52-tideglass.jpg"
    }
   ]
  },
@@ -588,6 +587,17 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--37-star-jar.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Minigame",
+  "items": [
+   {
+    "n": 58,
+    "slug": "58-alphabroth",
+    "t": "Word Search",
+    "d": "Drag across letters to find hidden words."
    }
   ]
  },

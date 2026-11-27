@@ -1,0 +1,234 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Plot Twist</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PLOT TWIST — a calm drag-and-place gardening puzzle. The 8×8 bed is hedged into irregular plots; drag flower tiles
+ * from the tray and when a whole plot is planted it blooms and clears. No rows, no columns: the map is the puzzle.
+ * Twists: tap a tray piece to rotate it — but every rotation costs a twist token, and tokens are earned by blooming
+ *         (one per three plots). Blooming on consecutive placements builds a streak multiplier; blooming several plots
+ *         with one piece multiplies again.
+ * Seasons: every 8 blooms the season turns, the gardener re-digs the hedges into bigger plots (plots that happen to be
+ *          full already bloom as a bonus), the palette changes and bigger pieces enter the bag.
+ * Fair: a fresh tray always contains a piece that fits; pieces that fit nowhere are dimmed; the run ends only when
+ *       nothing fits and no twist could help.
+ * Identity: top-down garden — mown lawn, timber bed, soil plots, round flower tiles, soft "puzzle" music, petal bursts. */
+Lab.init({
+  title: "Plot Twist", tagline: "Plant every plot to make it bloom.", category: "Puzzle & Logic",
+  howto: ["Drag flower tiles onto the garden bed", "Fill a hedged plot and it blooms away", "Tap a piece to twist it (costs a token)"],
+  theme: { bg: "#93cf6a", bg2: "#c4e79a", fg: "#23401f", muted: "#567a4a", accent: "#ff6f91", accent2: "#ffc23d", light: true },
+  orient: "any", music: { style: "puzzle", key: "G", bpm: 96, vol: .3 }, restart: start, attract,
+});
+const { draw, fx, clamp, ease } = Lab, TAU = Lab.TAU, shade = Lab.color.shade, G = 8, N = 64;
+const SHAPES = [[[0, 0]], [[0, 0], [1, 0]], [[0, 0], [1, 0], [2, 0]], [[0, 0], [1, 0], [0, 1]], [[0, 0], [1, 0], [2, 0], [3, 0]], [[0, 0], [1, 0], [0, 1], [1, 1]], [[0, 0], [1, 0], [2, 0], [1, 1]],
+  [[0, 0], [1, 0], [1, 1], [2, 1]], [[0, 0], [0, 1], [0, 2], [1, 2]], [[0, 0], [1, 1]], [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]], [[0, 0], [0, 1], [0, 2], [1, 2], [2, 2]],
+  [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1]], [[1, 0], [0, 1], [1, 1], [2, 1], [1, 2]], [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]]];
+const WEIGHT = [2, 3, 4, 4, 3, 4, 4, 3, 3, 1, 1, 1, 1, .5, 0];
+const FLOWER = ["#ff7fb0", "#ff6b4a", "#ffd23f", "#ffffff", "#a77bf3", "#5aa9f0"];
+const SEASONS = [
+  { n: "SPRING", lawn: ["#c4e79a", "#93cf6a"], soil: ["#a07c58", "#8a6746", "#b18c66", "#7c5c3e", "#96704c"], hedge: "#3d7a35", wood: "#d2a56b", ink: "#23401f" },
+  { n: "SUMMER", lawn: ["#eee08a", "#cfc655"], soil: ["#b08a5a", "#977245", "#c29b68", "#86653c", "#a67f50"], hedge: "#5d8226", wood: "#d9ad6b", ink: "#3f3a12" },
+  { n: "AUTUMN", lawn: ["#f2c27e", "#dc9450"], soil: ["#9a6a4a", "#83573a", "#ab7a55", "#754c33", "#8f6142"], hedge: "#8a4526", wood: "#c98f5a", ink: "#4a2413" },
+  { n: "WINTER", lawn: ["#eef4fa", "#c6d8e8"], soil: ["#8a8f9f", "#747a8c", "#9a9fae", "#666c7e", "#80869a"], hedge: "#4f6a8c", wood: "#b9c2cf", ink: "#243449" }];
+let grid, plotId, plots, plotVer, tray, drag, score, streak, bestStreak, twists, twistMeter, blooms, bloomsAll, season, alive, anims, oldBoard, digT, sel, cur, pulse, nopeT, noteT = 0, live = false, demoT = 0;
+let T = 1, land = false, cell = 40, bx = 0, by = 0, slots = [], ts = 20, info = {};
+const SE = () => SEASONS[season % 4], need = () => 8 + 2 * Math.floor(season / 4), plotSize = () => Math.min(10, 5 + (season % 4) + Math.floor(season / 4));
+
+/* ---------- plots: seeds spread over the bed, the smallest plot grows first, slivers are merged into a neighbour */
+const nb = c => { const o = [], x = c % G, y = c >> 3; if (x > 0) o.push(c - 1); if (x < G - 1) o.push(c + 1); if (y > 0) o.push(c - G); if (y < G - 1) o.push(c + G); return o; };
+function genPlots(size) {
+  const k = Math.round(N / size), id = new Array(N).fill(-1), seeds = [];
+  for (let i = 0; i < k; i++) { let best = -1, bd = -1; for (let t = 0; t < 12; t++) { const c = Lab.randInt(0, N - 1); if (id[c] >= 0) continue; let d = 99; for (const s of seeds) d = Math.min(d, Math.abs(s % G - c % G) + Math.abs((s >> 3) - (c >> 3))); if (d > bd) { bd = d; best = c; } } if (best >= 0) { id[best] = seeds.length; seeds.push(best); } }
+  let cells = seeds.map(s => [s]);
+  for (let left = N - seeds.length; left > 0;) {
+    const order = cells.map((c, i) => i).sort((a, b) => cells[a].length - cells[b].length + Lab.rand(-.6, .6)); let grew = false;
+    for (const i of order) { const fr = []; for (const c of cells[i]) for (const n of nb(c)) if (id[n] < 0) fr.push(n); if (!fr.length) continue; const n = Lab.choose(fr); id[n] = i; cells[i].push(n); left--; grew = true; break; }
+    if (!grew) break;
+  }
+  for (let i = 0; i < cells.length; i++) if (cells[i].length && cells[i].length < 3) { const near = new Set(); for (const c of cells[i]) for (const n of nb(c)) if (id[n] !== i) near.add(id[n]); const to = [...near].sort((a, b) => cells[a].length - cells[b].length)[0]; if (to == null) continue; for (const c of cells[i]) { id[c] = to; cells[to].push(c); } cells[i] = []; }
+  cells = cells.filter(c => c.length); cells.forEach((cs, i) => cs.forEach(c => { id[c] = i; }));
+  const tint = []; cells.forEach((cs, i) => { const used = new Set(); for (const c of cs) for (const n of nb(c)) if (id[n] < i) used.add(tint[id[n]]); let t = 0; while (used.has(t) && t < 4) t++; tint.push(t); });
+  return { id, list: cells.map((cs, i) => ({ cells: cs, tint: tint[i], cx: cs.reduce((a, c) => a + c % G, 0) / cs.length + .5, cy: cs.reduce((a, c) => a + (c >> 3), 0) / cs.length + .5 })) };
+}
+function setPlots() { const p = genPlots(plotSize()); plotId = p.id; plots = p.list; plotVer++; }
+
+/* ---------- pieces */
+const norm = cs => { const mx = Math.min(...cs.map(c => c[0])), my = Math.min(...cs.map(c => c[1])); return cs.map(([x, y]) => [x - mx, y - my]).sort((a, b) => a[1] - b[1] || a[0] - b[0]); };
+const rot = cs => norm(cs.map(([x, y]) => [-y, x])), keyOf = cs => cs.map(c => c.join()).join(";");
+function mkPiece(si, col) {
+  let cs = norm(SHAPES[si]); if (Lab.chance(.5)) cs = norm(cs.map(([x, y]) => [-x, y])); for (let i = Lab.randInt(0, 3); i > 0; i--) cs = rot(cs);
+  return setCells({ si, col: col == null ? Lab.randInt(0, FLOWER.length - 1) : col, rx: 0, ry: 0, s: 0, spin: 0, pop: 1, fits: true, twistFits: false }, cs);
+}
+function setCells(p, cs) { p.cells = cs; p.w = Math.max(...cs.map(c => c[0])) + 1; p.h = Math.max(...cs.map(c => c[1])) + 1; return p; }
+const canPlace = (cs, gx, gy) => cs.every(([x, y]) => { const X = gx + x, Y = gy + y; return X >= 0 && X < G && Y >= 0 && Y < G && !grid[Y * G + X]; });
+function fitsAny(cs) { const w = Math.max(...cs.map(c => c[0])), h = Math.max(...cs.map(c => c[1])); for (let y = 0; y < G - h; y++) for (let x = 0; x < G - w; x++) if (canPlace(cs, x, y)) return [x, y]; return null; }
+function pickShape() { const w = WEIGHT.map((v, i) => v + (i >= 10 ? Math.min(3, season * .5) : 0) + (i === 14 ? Math.min(1.5, season * .3) : 0)); let r = Lab.rand(0, w.reduce((a, b) => a + b, 0)); for (let i = 0; i < w.length; i++) if ((r -= w[i]) < 0) return i; return 0; }
+function deal() {
+  for (let i = 0; i < 3; i++) tray[i] = mkPiece(pickShape());
+  for (let t = 0; t < 40 && !tray.some(p => fitsAny(p.cells)); t++) tray[Lab.randInt(0, 2)] = mkPiece(t < 25 ? pickShape() : Lab.randInt(0, 3));   // a fresh tray always has a piece that fits
+  if (live) Lab.sfx("swish", { pitch: 1.3, vol: .4 });
+}
+function refresh() {
+  let any = false;
+  for (const p of tray) { if (!p) continue; p.fits = !!fitsAny(p.cells); p.twistFits = false; if (!p.fits && twists > 0) { let cs = p.cells; for (let i = 0; i < 3 && !p.twistFits; i++) { cs = rot(cs); p.twistFits = !!fitsAny(cs); } } any = any || p.fits || p.twistFits; }
+  if (!any && alive && tray.some(p => p)) end();
+}
+function bloomCheck(bonus) {
+  const done = plots.filter(pl => pl.cells.every(c => grid[c])); if (!done.length) return 0;
+  let cellsN = 0; done.forEach((pl, k) => { cellsN += pl.cells.length; pl.cells.forEach((c, j) => { anims.push({ c, col: grid[c] - 1, t: -j * .025 - k * .08 }); grid[c] = 0; }); });
+  streak++; bestStreak = Math.max(bestStreak, streak); const sm = Math.min(4, 1 + (streak - 1) * .5), gain = Math.round(cellsN * 10 * done.length * sm * (bonus ? 1.5 : 1));
+  score += gain; blooms += done.length; bloomsAll += done.length; twistMeter += done.length; while (twistMeter >= 3) { twistMeter -= 3; if (twists < 5) { twists++; pulse.twist = 1; } }
+  if (live) {
+    Lab.setScore(score); Lab.bumpScore(); Lab.audio.combo(streak + done.length - 1, { vol: .2 }); Lab.sfx("pop", { pitch: 1.1 }); Lab.buzz(14); if (done.length > 1 || streak > 2) Lab.shake(3 + done.length, .2);
+    done.forEach((pl, k) => { const x = bx + pl.cx * cell, y = by + pl.cy * cell; fx.burst(x, y, { n: 12 + pl.cells.length, colors: FLOWER, speed: 190, life: .8, size: 5, gravity: 160, drag: 2 }); fx.ring(x, y, { r0: cell * .4, r1: cell * 1.8, color: "#fff", life: .4, width: 4 });
+      if (!k) fx.text(x, y - 6, "+" + gain, { color: "#fff", size: (22 + Math.min(10, done.length * 3 + streak)) * T, outline: "rgba(30,70,30,.75)" }); });
+    const tag = bonus ? "RE-DIG BONUS ×1.5" : done.length > 1 ? done.length + " PLOTS ×" + done.length : ""; if (tag) fx.text(bx + done[0].cx * cell, by + done[0].cy * cell + 24 * T, tag, { color: "#ffe9a8", size: 16 * T, outline: "rgba(30,70,30,.75)", life: 1.2 });
+  }
+  if (grid.every(v => !v)) { score += 150; if (live) { Lab.setScore(score); fx.text(bx + G * cell / 2, by + G * cell / 2, "CLEAR GARDEN +150", { color: "#fff", size: 20 * T, outline: "rgba(30,70,30,.75)", life: 1.3 }); } }
+  return done.length;
+}
+function place(i, gx, gy) {
+  const p = tray[i]; if (!p || !alive || !canPlace(p.cells, gx, gy)) return false;
+  for (const [x, y] of p.cells) { grid[(gy + y) * G + gx + x] = p.col + 1; anims.push({ c: (gy + y) * G + gx + x, plant: true, t: 0 }); }
+  tray[i] = null; score += p.cells.length; if (live) { Lab.setScore(score); Lab.sfx("thud", { pitch: 1.7 - p.cells.length * .07, vol: .6 }); Lab.buzz(6); }
+  if (!bloomCheck(false)) streak = 0;
+  if (blooms >= need()) turnSeason();
+  if (tray.every(q => !q)) deal();
+  refresh(); return true;
+}
+function turnSeason() {
+  blooms = 0; oldBoard = boardSprite(); digT = 1; season++; setPlots();
+  if (live) { Lab.banner(SE().n + (season >= 4 ? " · YEAR " + (1 + (season >> 2)) : ""), { color: SE().hedge, ms: 1300, y: .3 }); Lab.sfx("levelup"); noteT = 4; Lab.sprite.clear("bg:"); Lab.music.intensity(clamp(.3 + season * .12, 0, 1)); }
+  bloomCheck(true);
+}
+function twist(i) {
+  const p = tray[i]; if (!p || !alive) return false; const cs = rot(p.cells);
+  if (keyOf(cs) === keyOf(p.cells)) { p.pop = .6; return false; }
+  if (twists <= 0) { nopeT = .35; pulse.twist = -1; if (live) Lab.sfx("tick", { pitch: .55 }); return false; }
+  twists--; setCells(p, cs); p.spin = 1; if (live) { Lab.sfx("flip", { pitch: 1.2 }); Lab.buzz(8); } refresh(); return true;
+}
+function end() {
+  alive = false; drag = null;
+  Lab.after(.5, () => Lab.gameover({ title: "No room to plant", score, stats: [["Plots bloomed", bloomsAll], ["Season", SE().n[0] + SE().n.slice(1).toLowerCase() + (season >= 4 ? " · year " + (1 + (season >> 2)) : "")], ["Best streak", bestStreak]] }));
+}
+function reset() {
+  grid = new Array(N).fill(0); tray = [null, null, null]; drag = null; score = 0; streak = 0; bestStreak = 0; twists = 3; twistMeter = 0; blooms = 0; bloomsAll = 0; season = 0; alive = true; anims = []; oldBoard = null; digT = 0; sel = -1; cur = [3, 3]; pulse = { twist: 0 }; nopeT = 0; noteT = 0; plotVer = plotVer || 0;
+  setPlots(); layout(); deal(); refresh();
+}
+const slotAt = (x, y) => slots.findIndex((s, i) => tray[i] && Math.abs(x - s.x) < s.r && Math.abs(y - s.y) < s.r);
+function dragPos(d) { const p = tray[d.i], lift = d.touch ? 58 * T + p.h * cell * .5 : 0, cx = d.x, cy = d.y - lift; d.gx = Math.round((cx - p.w * cell / 2 - bx) / cell); d.gy = Math.round((cy - p.h * cell / 2 - by) / cell); d.cx = cx; d.cy = cy; d.ok = canPlace(p.cells, d.gx, d.gy); }
+
+function start() {
+  live = true; reset(); Lab.setScore(0); Lab.music.intensity(.3);
+  Lab.input.onDown = [(x, y) => { if (!alive) return; const i = slotAt(x, y); if (i < 0) return; sel = -1; drag = { i, x, y, sx: x, sy: y, t0: performance.now(), moved: false, touch: Lab.input.pointerType === "touch", s: 0 }; dragPos(drag); Lab.sfx("tap", { pitch: 1.2, vol: .5 }); }];
+  Lab.input.onMove = [(x, y) => { if (!drag || !Lab.input.down) return; drag.x = x; drag.y = y; if (Math.hypot(x - drag.sx, y - drag.sy) > 10) drag.moved = true; const was = drag.gx + "," + drag.gy + drag.ok; dragPos(drag); if (drag.ok && was !== drag.gx + "," + drag.gy + drag.ok) Lab.sfx("tick", { pitch: 1.6, vol: .25 }); }];
+  Lab.input.onUp = [(x, y) => {
+    if (!drag) return; const d = drag, p = tray[d.i]; drag = null; if (!p) return;
+    if (!d.moved && performance.now() - d.t0 < 350) { twist(d.i); return; }
+    dragPos(d); if (d.ok) place(d.i, d.gx, d.gy); else { p.rx = d.cx - slots[d.i].x; p.ry = d.cy - slots[d.i].y; p.s = d.s; if (d.moved) Lab.sfx("swish", { vol: .35 }); }
+  }];
+  Lab.input.onKey = [k => {
+    if (!alive) return; const key = k.toLowerCase();
+    if ("123".includes(key) && key) { const i = +key - 1; if (tray[i]) { sel = sel === i ? -1 : i; Lab.sfx("tap"); } }
+    else if (sel < 0 && (k.startsWith("Arrow") || k === " " || k === "Enter")) { sel = tray.findIndex(p => p); }
+    else if (k.startsWith("Arrow") && tray[sel]) { const p = tray[sel]; cur[0] = clamp(cur[0] + (k === "ArrowRight") - (k === "ArrowLeft"), 0, G - p.w); cur[1] = clamp(cur[1] + (k === "ArrowDown") - (k === "ArrowUp"), 0, G - p.h); }
+    else if ((key === "r" || key === "t") && tray[sel]) twist(sel);
+    else if ((k === " " || k === "Enter") && tray[sel]) { const p = tray[sel]; cur[0] = Math.min(cur[0], G - p.w); cur[1] = Math.min(cur[1], G - p.h); if (place(sel, cur[0], cur[1])) sel = tray.findIndex(q => q); else { nopeT = .3; Lab.sfx("tick", { pitch: .55 }); } }
+  }];
+  Lab.expose({
+    get grid() { return grid.slice(); }, get plotId() { return plotId.slice(); }, get plots() { return plots.map(p => p.cells.slice()); }, get tray() { return tray.map(p => p && { cells: p.cells.map(c => c.slice()), w: p.w, h: p.h, fits: p.fits, si: p.si }); },
+    get score() { return score; }, get twists() { return twists; }, get streak() { return streak; }, get season() { return season; }, get blooms() { return bloomsAll; }, get alive() { return alive; }, get need() { return need(); }, get cellPx() { return cell; },
+    slotXY(i) { return [slots[i].x, slots[i].y]; }, cellXY(x, y) { return [bx + (x + .5) * cell, by + (y + .5) * cell]; }, fit(i) { return tray[i] ? fitsAny(tray[i].cells) : null; },
+    dropXY(i, gx, gy, touch) { const p = tray[i]; return [bx + (gx + p.w / 2) * cell, by + (gy + p.h / 2) * cell + (touch ? 58 * T + p.h * cell * .5 : 0)]; },
+    setGrid(a) { grid = a.slice(); refresh(); }, setTray(i, si) { tray[i] = setCells(mkPiece(si, i), norm(SHAPES[si])); refresh(); }, setTwists(n) { twists = n; refresh(); }, setBlooms(n) { blooms = n; }, place, twist,
+  });
+  Lab.loop(frame);
+}
+function attract(dt, t) {
+  if (!grid) { reset(); for (const pl of plots) if (Lab.chance(.55)) for (const c of pl.cells) if (Lab.chance(.75)) grid[c] = 1 + Lab.randInt(0, 5); }
+  demoT -= dt; if (demoT < 0) { demoT = 1.2; const e = []; grid.forEach((v, i) => { if (!v) e.push(i); }); if (e.length > 14) { const c = Lab.choose(e); grid[c] = 1 + Lab.randInt(0, 5); anims.push({ c, plant: true, t: 0 }); bloomCheck(false); } else { grid.fill(0); } }
+  step(dt); render(t);
+}
+function layout() {
+  const P = Lab.play; land = P.w > P.h * 1.1; T = clamp(Math.min(Lab.W, Lab.H) / 390, .82, 1.3); slots = [];
+  if (land) {
+    const side = clamp(P.w * .21, 150, 240); cell = Math.floor(Math.min((P.h - 40) / G, (P.w - side * 2 - 30) / G, 86)); bx = Math.round(P.x + (P.w - G * cell) / 2); by = Math.round(P.y + (P.h - G * cell) / 2);
+    const sx = bx + G * cell + (P.x + P.w - bx - G * cell) / 2, r = Math.min(side * .42, P.h / 6 - 5); for (let i = 0; i < 3; i++) slots.push({ x: sx, y: P.y + P.h * (i + .5) / 3, r });
+    info = { x: P.x + (bx - P.x) / 2, y: P.y + P.h / 2 - 70 * T, col: true };
+  } else {
+    const top = 66 * T, trayH = clamp(P.h * .21, 118, 176); cell = Math.floor(Math.min((P.w - 26) / G, (P.h - top - trayH - 34) / G)); bx = Math.round(P.x + (P.w - G * cell) / 2); by = Math.round(P.y + top + (P.h - top - trayH - 24 - G * cell) / 2);
+    const ty = by + G * cell + 22 + (P.y + P.h - by - G * cell - 22) / 2 - 4, r = Math.min(P.w / 6 - 5, trayH / 2); for (let i = 0; i < 3; i++) slots.push({ x: P.x + P.w * (i + .5) / 3, y: ty, r });
+    info = { x: P.x + P.w / 2, y: by - 58 * T, w: G * cell };
+  }
+  ts = Math.min(cell * .62, slots[0].r * 2 / 5.3); Lab.sprite.clear("bg:"); Lab.sprite.clear("bd:");
+}
+Lab.onResize(() => { if (grid) layout(); });
+
+/* ---------- art */
+function tileSprite(col) {
+  return Lab.sprite("fl:" + col + ":" + cell, cell, cell, g => {
+    const s = cell - 3, c = cell / 2, f = FLOWER[col], gd = g.createLinearGradient(0, 0, 0, cell); gd.addColorStop(0, "#7cc862"); gd.addColorStop(1, "#4f9f45");
+    draw.rect(g, 1.5, 1.5, s, s, cell * .24, gd, "#2f6e2d", 1.4); draw.rect(g, 4, 3.5, s - 5, s * .4, cell * .18, "rgba(255,255,255,.14)");
+    for (let i = 0; i < 5; i++) { const a = i * TAU / 5 - TAU / 4; draw.circle(g, c + Math.cos(a) * cell * .2, c + Math.sin(a) * cell * .2, cell * .145, f, shade(f, -.28), 1); }
+    draw.circle(g, c, c, cell * .12, col === 2 ? "#e2622b" : "#ffd23f", "rgba(90,50,10,.5)", 1);
+  });
+}
+function boardSprite() {
+  const se = SE(), w = G * cell, pad = 14;
+  return Lab.sprite("bd:" + plotVer + ":" + cell, w + pad * 2, w + pad * 2 + 6, g => {
+    draw.rect(g, 0, 6, w + pad * 2, w + pad * 2, 16, "rgba(40,40,10,.22)"); draw.rect(g, 0, 0, w + pad * 2, w + pad * 2, 16, se.wood, shade(se.wood, -.3), 2); draw.rect(g, 4, 4, w + pad * 2 - 8, w + pad * 2 - 8, 13, null, shade(se.wood, .22), 1.5);
+    g.save(); g.translate(pad, pad); draw.rr(g, -2, -2, w + 4, w + 4, 6); g.clip(); const r = Lab.rng(plotVer * 31 + 5);
+    for (let c = 0; c < N; c++) { const x = (c % G) * cell, y = (c >> 3) * cell, col = se.soil[plots[plotId[c]].tint]; g.fillStyle = col; g.fillRect(x - .5, y - .5, cell + 1, cell + 1); g.fillStyle = shade(col, -.16); for (let k = 0; k < 3; k++) g.fillRect(x + 4 + r() * (cell - 10), y + 4 + r() * (cell - 10), 2.4, 2.4); draw.circle(g, x + cell / 2, y + cell / 2, cell * .09, shade(col, -.12)); }
+    g.lineCap = "round"; for (const [lw, col] of [[7, shade(se.hedge, -.3)], [4, se.hedge]]) { g.strokeStyle = col; g.lineWidth = lw; g.beginPath(); for (let c = 0; c < N; c++) { const x = (c % G) * cell, y = (c >> 3) * cell; if (c % G < G - 1 && plotId[c] !== plotId[c + 1]) { g.moveTo(x + cell, y); g.lineTo(x + cell, y + cell); } if (c < N - G && plotId[c] !== plotId[c + G]) { g.moveTo(x, y + cell); g.lineTo(x + cell, y + cell); } } g.stroke(); }
+    g.restore(); draw.rect(g, pad - 2, pad - 2, w + 4, w + 4, 6, null, shade(se.hedge, -.3), 3);
+  });
+}
+const tsOf = (p, s) => Math.min(cell * .72, (s.r * 2 - 14) / Math.max(p.w, p.h, 3.3));
+function drawPiece(c, p, cx, cy, s, alpha, ang) {
+  c.save(); c.translate(cx, cy); if (ang) c.rotate(ang); c.globalAlpha = alpha; const sp = tileSprite(p.col);
+  for (const [x, y] of p.cells) c.drawImage(sp, (x - p.w / 2) * s, (y - p.h / 2) * s, s, s); c.restore();
+}
+function twistIcon(c, x, y, r, col) { c.strokeStyle = col; c.lineWidth = r * .32; c.lineCap = "round"; c.beginPath(); c.arc(x, y, r, -.3, TAU * .72); c.stroke(); c.fillStyle = col; c.beginPath(); const a = -.3, ex = x + Math.cos(a) * r, ey = y + Math.sin(a) * r; c.moveTo(ex + r * .62, ey - r * .1); c.lineTo(ex - r * .5, ey - r * .1); c.lineTo(ex + r * .1, ey - r * .82); c.fill(); }
+function step(dt) {
+  for (let i = anims.length - 1; i >= 0; i--) { const a = anims[i]; a.t += dt; if (a.t > (a.plant ? .22 : .5)) anims.splice(i, 1); }
+  for (const p of tray) if (p) { p.rx = Lab.damp(p.rx, 0, 16, dt); p.ry = Lab.damp(p.ry, 0, 16, dt); p.s = Lab.damp(p.s, 0, 14, dt); p.spin = Lab.damp(p.spin, 0, 14, dt); p.pop = Lab.damp(p.pop, 0, 9, dt); }
+  if (drag) drag.s = Lab.damp(drag.s, 1, 22, dt); if (digT > 0) digT = Math.max(0, digT - dt * 1.5); if (nopeT > 0) nopeT -= dt; if (noteT > 0) noteT -= dt; pulse.twist = Lab.damp(pulse.twist, 0, 5, dt);
+}
+function frame(dt, t) { step(dt); render(t); }
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, se = SE(), w = G * cell, pu = .5 + .5 * Math.sin(t * 6);
+  const bg = Lab.sprite("bg:" + season % 4 + ":" + W + "x" + H, W + 80, H + 80, g => { draw.vgrad(g, 0, 0, W + 80, H + 80, se.lawn); g.fillStyle = "rgba(255,255,255,.09)"; for (let x = -H; x < W + 80; x += 56) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 28, 0); g.lineTo(x + 28 + H * .25, H + 80); g.lineTo(x + H * .25, H + 80); g.fill(); } const r = Lab.rng(3 + season); for (let i = 0; i < 46; i++) { const x = r() * (W + 80), y = r() * (H + 80); draw.circle(g, x, y, 2.2, season % 4 === 3 ? "#fff" : FLOWER[i % 6]); draw.circle(g, x, y, .9, "rgba(0,0,0,.25)"); } });
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+  const bd = boardSprite(); c.drawImage(bd, bx - 14, by - 14, bd.w, bd.h); if (digT > 0 && oldBoard) { c.globalAlpha = ease.inOutQuad(digT); c.drawImage(oldBoard, bx - 14, by - 14, oldBoard.w, oldBoard.h); c.globalAlpha = 1; }
+  // live piece (drag or keyboard) → preview + plots it would complete
+  let pv = null; if (drag && tray[drag.i] && drag.ok && drag.moved) pv = { p: tray[drag.i], gx: drag.gx, gy: drag.gy }; else if (sel >= 0 && tray[sel] && !drag) pv = { p: tray[sel], gx: Math.min(cur[0], G - tray[sel].w), gy: Math.min(cur[1], G - tray[sel].h), key: true };
+  if (pv) { const ok = canPlace(pv.p.cells, pv.gx, pv.gy), set = new Set(pv.p.cells.map(([x, y]) => (pv.gy + y) * G + pv.gx + x));
+    if (ok) for (const pl of plots) if (pl.cells.every(q => grid[q] || set.has(q))) { c.fillStyle = "rgba(255,255,255," + (.3 + pu * .3) + ")"; for (const q of pl.cells) c.fillRect(bx + (q % G) * cell + 2, by + (q >> 3) * cell + 2, cell - 4, cell - 4); }
+    for (const [x, y] of pv.p.cells) { const X = bx + (pv.gx + x) * cell, Y = by + (pv.gy + y) * cell; if (ok) { c.globalAlpha = .55; c.drawImage(tileSprite(pv.p.col), X, Y, cell, cell); c.globalAlpha = 1; } draw.rect(c, X + 2, Y + 2, cell - 4, cell - 4, cell * .22, null, ok ? "#fff" : "#e2432f", pv.key ? 3 : 2); } }
+  for (let q = 0; q < N; q++) if (grid[q]) { const x = bx + (q % G) * cell, y = by + (q >> 3) * cell, a = anims.find(a => a.plant && a.c === q); if (a) { const k = .7 + .3 * ease.outBack(clamp(a.t / .22, 0, 1)); c.drawImage(tileSprite(grid[q] - 1), x + cell * (1 - k) / 2, y + cell * (1 - k) / 2, cell * k, cell * k); } else c.drawImage(tileSprite(grid[q] - 1), x, y, cell, cell); }
+  for (const a of anims) if (!a.plant && a.t >= 0) { const u = a.t / .5, k = 1 + ease.outCubic(u) * .55, x = bx + (a.c % G + .5) * cell, y = by + ((a.c >> 3) + .5) * cell; c.save(); c.translate(x, y); c.rotate(u * 1.2); c.globalAlpha = 1 - u * u; c.drawImage(tileSprite(a.col), -cell * k / 2, -cell * k / 2, cell * k, cell * k); c.restore(); }
+  // tray
+  slots.forEach((s, i) => {
+    draw.rect(c, s.x - s.r, s.y - s.r + 4, s.r * 2, s.r * 2, 18, "rgba(30,50,10,.16)"); draw.rect(c, s.x - s.r, s.y - s.r, s.r * 2, s.r * 2, 18, sel === i ? "rgba(255,255,255,.62)" : "rgba(255,255,255,.34)", sel === i ? "#fff" : "rgba(255,255,255,.6)", sel === i ? 3 : 1.5);
+    const p = tray[i]; if (!p || (drag && drag.i === i)) return; const t0 = tsOf(p, s), sc = t0 + (cell - t0) * p.s, jig = !p.fits && nopeT > 0 ? Math.sin(nopeT * 55) * 3 : 0;
+    drawPiece(c, p, s.x + p.rx + jig, s.y + p.ry, sc * (1 + p.pop * .12), p.fits ? 1 : .38, -p.spin * Math.PI / 2);
+    if (!p.fits && p.twistFits) twistIcon(c, s.x + s.r - 15 * T, s.y - s.r + 15 * T, 7 * T * (1 + pu * .15), "#fff");
+  });
+  if (drag && tray[drag.i]) { const p = tray[drag.i], t0 = tsOf(p, slots[drag.i]), sc = t0 + (cell - t0) * drag.s; draw.shadow(c, drag.cx + 6, drag.cy + p.h * sc / 2 + 10, p.w * sc * .45, 7, .18); drawPiece(c, p, drag.cx, drag.cy, sc, drag.ok || !drag.moved ? 1 : .8, 0); }
+  // info: season + bloom pips, streak, twist tokens
+  const n = need(), ix = info.x, iy = info.y, ink = se.ink, tw = pulse.twist;
+  if (info.col) {
+    draw.text(c, se.n, ix, iy, { size: 20 * T, color: ink, weight: 800 }); for (let i = 0; i < n; i++) draw.circle(c, ix + (i - (n - 1) / 2) * 13 * T, iy + 24 * T, 4.4 * T, i < blooms ? "#ff6f91" : "rgba(255,255,255,.55)", i < blooms ? "#b83a5c" : "rgba(0,0,0,.18)", 1.2);
+    draw.text(c, noteT > 0 ? "plots re-dug!" : streak > 1 ? "streak ×" + Math.min(4, 1 + (streak - 1) * .5) : "blooms " + bloomsAll, ix, iy + 52 * T, { size: 14 * T, color: ink, weight: 700 });
+    for (let i = 0; i < 5; i++) { c.globalAlpha = i < twists ? 1 : .2; twistIcon(c, ix + (i - 2) * 24 * T + (tw < 0 ? Math.sin(t * 50) * 3 * -tw : 0), iy + 90 * T, 7.5 * T * (i === twists - 1 && tw > 0 ? 1 + tw * .5 : 1), ink); } c.globalAlpha = 1; draw.text(c, "TWISTS", ix, iy + 114 * T, { size: 10.5 * T, color: ink, weight: 800 });
+  } else {
+    const lx = ix - info.w / 2, rx = ix + info.w / 2;
+    draw.text(c, se.n, lx, iy + 12 * T, { size: 19 * T, color: ink, weight: 800, align: "left" }); for (let i = 0; i < n; i++) draw.circle(c, lx + 5 * T + i * 13 * T, iy + 35 * T, 4.4 * T, i < blooms ? "#ff6f91" : "rgba(255,255,255,.55)", i < blooms ? "#b83a5c" : "rgba(0,0,0,.18)", 1.2);
+    if (streak > 1 || noteT > 0) draw.text(c, noteT > 0 ? "plots re-dug!" : "streak ×" + Math.min(4, 1 + (streak - 1) * .5), ix + 10 * T, iy + 12 * T, { size: 14 * T, color: ink, weight: 800 });
+    for (let i = 0; i < 5; i++) { c.globalAlpha = i < twists ? 1 : .2; twistIcon(c, rx - 10 * T - (4 - i) * 22 * T + (tw < 0 ? Math.sin(t * 50) * 3 * -tw : 0), iy + 13 * T, 7 * T * (i === twists - 1 && tw > 0 ? 1 + tw * .5 : 1), ink); } c.globalAlpha = 1; draw.text(c, "TWISTS", rx, iy + 35 * T, { size: 10 * T, color: ink, weight: 800, align: "right" });
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

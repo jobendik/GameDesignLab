@@ -45,6 +45,10 @@ Lab.boot();                           // splash → start().  (v1 games called s
   `Lab.toast(text, ms, {y})`; `Lab.banner("LEVEL 3", {color, ms, y})` (`y` = fraction of stage height, to keep them off your focal point).
 
 - `Lab.setTheme({fg,accent,…,light})` retints the HUD at runtime (the HUD score is DOM text: keep it readable when your sky changes).
+- Testing tip: the win/game-over card appears 0.35–0.6 s after `Lab.gameover` and ignores Enter/tap for a further ~0.4 s
+  (accidental-restart guard) — wait ~1.5 s before pressing Enter in tests.
+- Level puzzles: `Lab.win({button:"Next level"})` + `Lab.store` for progress; draw your own level arrows on the canvas.
+- Sub-rect blits from a `Lab.sprite` canvas: multiply logical coordinates by `sprite._dpr`.
 - Testing tip: scores that tick continuously are racy across separate reads — read game score and HUD state in one `page.evaluate`.
 
 ## Layout

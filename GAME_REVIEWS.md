@@ -28,7 +28,7 @@ Averages: overall **7.3** · Fun 7.3 · Depth 7.1 · Feel 7.3 · Look 7.6 · Ani
 
 </details>
 
-## Phone Game Lab (`PhoneGameLab/`) — 54/70 reviewed
+## Phone Game Lab (`PhoneGameLab/`) — 56/70 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
@@ -80,8 +80,10 @@ Averages: overall **7.3** · Fun 7.3 · Depth 7.1 · Feel 7.3 · Look 7.6 · Ani
 | [Bolt Hole](PhoneGameLab/games/50-bolt-hole/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 8 | 7 | 8 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/50-bolt-hole.md) |
 | [Slidescape](PhoneGameLab/games/51-slidescape/index.html) | 2 → **8** | 7 | 7 | 8 | 8 | 8 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/51-slidescape.md) |
 | [Tideglass](PhoneGameLab/games/52-tideglass/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 8 | 7 | 8 | 7 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/52-tideglass.md) |
+| [Plot Twist](PhoneGameLab/games/53-plot-twist/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/53-plot-twist.md) |
 | [Hedgeroll](PhoneGameLab/games/54-hedgeroll/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/54-hedgeroll.md) |
 | [Glasswright](PhoneGameLab/games/55-glasswright/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/55-glasswright.md) |
+| [Shuteye Street](PhoneGameLab/games/56-shuteye-street/index.html) | 2 → **8** | 7 | 7 | 8 | 9 | 7 | 8 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/56-shuteye-street.md) |
 | [Misfired](PhoneGameLab/games/05-misfired/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/05-misfired.md) |
 | [Goat Up](PhoneGameLab/games/25-goat-up/index.html) | 2 → **7** | 7 | 6 | 8 | 8 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/25-goat-up.md) |
 | [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 8 | 8 | 8 | 6 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/38-tumblepeg.md) |
@@ -91,9 +93,9 @@ Averages: overall **7.9** · Fun 7.9 · Depth 7.2 · Feel 8.0 · Look 8.3 · Ani
 
 **Below 8 — revisit first:** [Misfired](PhoneGameLab/games/05-misfired/index.html) (7), [Goat Up](PhoneGameLab/games/25-goat-up/index.html) (7), [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) (7), [Postage Stamp](PhoneGameLab/games/41-postage-stamp/index.html) (7)
 
-<details><summary>16 not yet reviewed (baseline prototypes)</summary>
+<details><summary>14 not yet reviewed (baseline prototypes)</summary>
 
-`PhoneGameLab/53-block-blast` · `PhoneGameLab/56-shuteye-street` · `PhoneGameLab/57-minesweeper` · `PhoneGameLab/58-word-search` · `PhoneGameLab/59-nonogram` · `PhoneGameLab/60-sudoku` · `PhoneGameLab/61-snake` · `PhoneGameLab/62-slither` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
+`PhoneGameLab/57-soundings` · `PhoneGameLab/58-alphabroth` · `PhoneGameLab/59-nonogram` · `PhoneGameLab/60-sudoku` · `PhoneGameLab/61-snake` · `PhoneGameLab/62-slither` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
 
 </details>
 
