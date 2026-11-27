@@ -31,7 +31,7 @@ const KINDS = {   // skill = how far ahead it looks / how rarely it flies blind;
 };
 const OFFS = [0, .45, -.45, .9, -.9, 1.5, -1.5, 2.3, -2.3];
 let S, kites, me, bows, cam, T, R, score, kills, lassoBest, lassoN, maxLen, streak, streakT, lassos, lassoCd, stick, boost2, mouseAim, mouseBoost, touchMode,
-  wind, demo = false, clouds, over, wallT, natural, lbT, board = [];
+  wind, demo = false, clouds, over, wallT, natural, lbT, lastWords = '', burnt = 0, keyTurn = false, board = [];
 
 /* ------------------------------------------------------------------ setup */
 function layout() { S = clamp(Math.sqrt(Lab.W * Lab.H) / 600, .85, 1.7); }
@@ -56,7 +56,7 @@ function start() {
   wind = Lab.audio.loop({ noise: true, bp: 500, vol: 0 });
   Lab.expose({
     get me() { return me; }, get kites() { return kites; }, get bows() { return bows; }, get score() { return score; }, get time() { return T; }, get R() { return R; },
-    get kills() { return kills; }, get lassos() { return lassoN; }, get over() { return over; }, ROUND, START, GAP,
+    get kills() { return kills; }, get lassos() { return lassoN; }, get over() { return over; }, get burnt() { return burnt; }, get lastWords() { return lastWords; }, ROUND, START, GAP,
     setTime(v) { T = v; }, grow(n) { me.len += n; }, aim(a) { me.want = a; me.ang = a; mouseAim = null; },
     step(n) { for (let i = 0; i < n && !over; i++) update(1 / 60); },
     addBow(x, y, v) { return addBow(x, y, v || 1, 0, true); },
@@ -68,8 +68,8 @@ function start() {
 }
 function reset() {
   layout(); T = 0; R = R0; score = 0; kills = 0; lassoBest = 0; lassoN = 0; streak = 0; streakT = 0; lassos = []; lassoCd = 0; stick = null; boost2 = null;
-  mouseAim = null; mouseBoost = false; touchMode = false; over = false; wallT = 0; natural = 0; lbT = 0; bows = []; kites = []; me = null;
-  if (!demo) { me = mkKite(0, 0, -Math.PI / 2, START, null, 0); me.safe = 2.5; me.name = "You"; kites.push(me); }
+  mouseAim = null; mouseBoost = false; touchMode = false; over = false; burnt = 0; wallT = 0; natural = 0; lbT = 0; bows = []; kites = []; me = null;
+  if (!demo) { me = mkKite(0, 0, -Math.PI / 2, START, null, 0); me.safe = 3.5; me.name = "You"; kites.push(me); }
   for (let i = 0; i < 8; i++) { const k = mkKite(0, 0, 0, 12, KINDS.grazer, i + 1); k.name = NAMES[i]; place(k); kites.push(k); }
   maxLen = START;
   for (let i = 0; i < 330; i++) scatterBow();
@@ -79,14 +79,14 @@ function reset() {
 }
 function mkKite(x, y, ang, len, kind, ci) {
   const k = { x, y, ang, want: ang, len, pts: [], acc: 0, sp: BASE, boost: false, burn: 0, alive: true, dead: 0, safe: 1.5, kind, ci, col: COLS[ci][0], col2: COLS[ci][1], w: 5,
-    think: Math.random() * .3, mood: "graze", prey: null, lockT: 0, tb: null, tbT: 0, look: 0, bb: { x0: 0, y0: 0, x1: 0, y1: 0 }, name: "", dumb: false, flap: Math.random() * TAU };
+    think: Math.random() * .3, mood: "graze", prey: null, lockT: 0, tb: null, tbT: 0, look: 0, side: Math.random() < .5 ? 1 : -1, bb: { x0: 0, y0: 0, x1: 0, y1: 0 }, name: "", dumb: false, flap: Math.random() * TAU };
   for (let j = 1; j <= len; j++) k.pts.push({ x: x - Math.cos(ang) * GAP * j, y: y - Math.sin(ang) * GAP * j });
   return k;
 }
 /* (re)spawn a bot somewhere calm; later in the round newcomers are longer and more likely to be predators */
 function place(k) {
   const heat = clamp(T / ROUND, 0, 1); let x = 0, y = 0;
-  for (let i = 0; i < 12; i++) { const a = Lab.rand(0, TAU), r = Lab.rand(300, R - 140); x = Math.cos(a) * r; y = Math.sin(a) * r; if (!me || Lab.dist(x, y, me.x, me.y) > 420) break; }
+  for (let i = 0; i < 12; i++) { const a = Lab.rand(0, TAU), r = Lab.rand(300, R - 140); x = Math.cos(a) * r; y = Math.sin(a) * r; if (!me || Lab.dist(x, y, me.x, me.y) > (T < 1 ? 620 : 440)) break; }
   const ang = Math.atan2(-y, -x) + Lab.rand(-1, 1), len = Lab.randInt(12, Math.round(22 + heat * 60));
   const kind = Lab.chance(.22 + heat * .5) ? (Lab.chance(.62) ? KINDS.hunter : KINDS.dare) : (Lab.chance(.6) ? KINDS.grazer : KINDS.scav);
   Object.assign(k, mkKite(x, y, ang, len, kind, k.ci), { name: k.name });
@@ -102,7 +102,8 @@ function update(dt) {
   R = lerp(R0, R1, clamp((T - 25) / (ROUND - 40), 0, 1));
   if (me && me.alive) {
     const ax = Lab.input.axisX(), K = Lab.input.keys;
-    if (ax) { me.want = me.ang + ax * 1.3; mouseAim = null; }
+    if (ax) { me.want = me.ang + ax * 1.3; mouseAim = null; keyTurn = true; }
+    else if (keyTurn) { keyTurn = false; me.want = me.ang; }
     else if (stick && stick.on) me.want = stick.ang;
     else if (mouseAim && !touchMode) { const h = w2s(me.x, me.y), dx = mouseAim.x - h.x, dy = mouseAim.y - h.y; if (dx * dx + dy * dy > 144) me.want = Math.atan2(dy, dx); }
     me.boost = !!((stick && stick.far) || boost2 != null || mouseBoost || K[" "] || K.Shift || K.ArrowUp || K.w || K.W);
@@ -132,7 +133,7 @@ function update(dt) {
 }
 function kill0(b) { if (!b.dead) { b.dead = true; if (!b.drop) natural--; } }
 function eat(k, b, mult) {
-  kill0(b); k.len = Math.min(420, k.len + b.v);
+  kill0(b); k.len = Math.min(400, k.len + (k === me ? b.v : b.v * .6));
   if (k !== me) return;
   score += b.v * mult; Lab.setScore(score); streak = Math.min(streak + 1, 14); streakT = .7;
   Lab.audio.combo(streak, { vol: .11 }); fx.burst(b.x, b.y, { n: 3, color: COLS[b.ci][0], speed: 70, life: .3, size: 2.5, gravity: 0 });
@@ -149,7 +150,7 @@ function move(k, dt) {
   }
   k.acc += k.sp * dt;
   while (k.acc >= GAP) { k.acc -= GAP; k.pts.unshift({ x: k.x - ca * k.acc, y: k.y - sa * k.acc }); }
-  if (boosting) { k.burn += dt * 4.5; while (k.burn >= 1 && k.len > 12) { k.burn--; k.len--; const tl = k.pts[k.pts.length - 1]; if (tl) addBow(tl.x, tl.y, 1, k.ci, true); } }
+  if (boosting) { k.burn += dt * 6; while (k.burn >= 1 && k.len > 12) { k.burn--; k.len--; if (k === me) burnt++; const tl = k.pts[k.pts.length - 1]; if (tl) addBow(tl.x, tl.y, 1, k.ci, true); } }
   while (k.pts.length > k.len) k.pts.pop();
   k.w = 5 + Math.min(5, k.len / 50);
   bbox(k);
@@ -179,10 +180,10 @@ function think(k, heat) {
     if (k.tb) { tx = k.tb.x; ty = k.tb.y; if (k.tb.v > 1 && P.boosty > .4) { k.mood = "scav"; boost = Lab.dist(k.x, k.y, tx, ty) > 150 && Lab.chance(P.boosty); } }
   }
   let da = Math.atan2(ty - k.y, tx - k.x) + (Math.random() - .5) * P.wob;
-  if (Math.random() >= (1 - P.skill) * .6) {
+  if (Math.random() >= (1 - P.skill) * .4) {
     const F = (46 + k.sp * .3) * (.55 + P.skill * .6), m = k.w + 9; let pick = null;
-    for (const a of OFFS) { const ca = Math.cos(da + a), sa = Math.sin(da + a); if (free(k, k.x + ca * F * .5, k.y + sa * F * .5, m) && free(k, k.x + ca * F, k.y + sa * F, m)) { pick = a; break; } }
-    if (pick === null) { pick = Lab.chance(.5) ? 2.7 : -2.7; k.mood = "panic"; }
+    for (const a of OFFS) { const ca = Math.cos(da + a), sa = Math.sin(da + a); if (free(k, k.x + ca * F * .25, k.y + sa * F * .25, m) && free(k, k.x + ca * F * .5, k.y + sa * F * .5, m) && free(k, k.x + ca * F * .75, k.y + sa * F * .75, m) && free(k, k.x + ca * F, k.y + sa * F, m)) { pick = a; break; } }
+    if (pick === null) { pick = k.side * 2.7; k.mood = "panic"; }
     else if (Math.abs(pick) > .8) k.mood = "dodge";
     if (pick) boost = false;
     da += pick;
@@ -201,7 +202,7 @@ function free(k, x, y, m) {
 }
 function collide() {
   for (const k of kites) {
-    if (!k.alive || k.safe > 0 || k.dumb) continue;
+    if (!k.alive || k.safe > 0) continue;
     for (const o of kites) {
       if (o === k || !o.alive) continue; const b = o.bb, q = k.w + o.w;
       if (k.x < b.x0 - q || k.x > b.x1 + q || k.y < b.y0 - q || k.y > b.y1 + q) continue;
@@ -214,13 +215,13 @@ function collide() {
 }
 function snip(k, by, how) {
   if (!k.alive) return; k.alive = false; k.dead = 3;
-  for (let j = 0; j < k.pts.length; j += 2) addBow(k.pts[j].x + Lab.rand(-8, 8), k.pts[j].y + Lab.rand(-8, 8), 2, k.ci, true);
+  for (let j = 0; j < k.pts.length; j += 3) addBow(k.pts[j].x + Lab.rand(-8, 8), k.pts[j].y + Lab.rand(-8, 8), 2, k.ci, true);
   if (demo) return;
   if (k === me) { const s = w2s(k.x, k.y); fx.clear(); fx.burst(s.x, s.y, { n: 34, colors: [k.col, k.col2, "#fff"], speed: 330, life: .9, size: 5, shape: "shard", gravity: 260 }); fx.ring(s.x, s.y, { r1: 90, color: k.col, width: 6 });
-    Lab.shake(14, .45); Lab.buzz(60); Lab.sfx("crunch"); finish("Tangled!", "You flew into " + by.name + "'s ribbon.", false); return; }
+    Lab.shake(14, .45); Lab.buzz(60); Lab.sfx("crunch"); lastWords = by.name + " " + by.len + " d" + Math.round(Lab.dist(k.x, k.y, by.x, by.y)); finish("Tangled!", "You flew into " + by.name + "'s ribbon.", false); return; }
   fx.burst(k.x, k.y, { n: 16, colors: [k.col, k.col2], speed: 200, life: .6, size: 4, shape: "shard", gravity: 0 }); fx.ring(k.x, k.y, { r1: 60, color: k.col, width: 4 });
   if (by === me) {
-    kills++; const g = (20 + k.len) * (how === "lasso" ? 2 : 1); score += g; Lab.setScore(score); Lab.bumpScore();
+    kills++; const g = (20 + Math.floor(k.len)) * (how === "lasso" ? 2 : 1); score += g; Lab.setScore(score); Lab.bumpScore();
     fx.text(k.x, k.y - 34, (how === "lasso" ? "LASSO! +" : "SNIP! +") + g, { color: "#fff", size: 24, outline: "rgba(31,53,80,.7)", life: 1.2 });
     Lab.sfx("snap"); Lab.sfx("chime", { pitch: how === "lasso" ? 1.35 : 1.1 }); Lab.hitstop(.06); Lab.shake(7, .22); Lab.buzz(22);
   } else if (me && Lab.dist(k.x, k.y, me.x, me.y) < 520) Lab.sfx("snap", { vol: .35, pitch: .8 });
@@ -378,7 +379,7 @@ function hud(c, t, heat) {
   rows.forEach((k, i) => {
     const y = py + 20 + i * rh, pos = k === me ? mine + 1 : i + 1, col = k === me ? "#ff2f55" : INK;
     draw.circle(c, lx + 13, y, 4.5, k.col); draw.text(c, pos + ". " + k.name, lx + 22, y + .5, { size: 11.5, color: col, align: "left", weight: k === me ? 800 : 600 });
-    draw.text(c, String(k.len), lx + lw - 9, y + .5, { size: 11.5, color: col, align: "right" });
+    draw.text(c, String(Math.floor(k.len)), lx + lw - 9, y + .5, { size: 11.5, color: col, align: "right" });
   });
   // minimap
   const mr = clamp(Math.min(W, Lab.H) * .1, 34, 52), mx = right - mr, my = Lab.H - Lab.safe.bottom - mr - 34, k0 = mr / R0;

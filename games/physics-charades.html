@@ -67,7 +67,6 @@ kbd { display: inline-block; min-width: 20px; padding: 0 5px; border-radius: 6px
   <canvas id="cv" tabindex="0" aria-label="Game"></canvas>
   <div id="top">
     <div class="pill" id="hScore"><b>0</b><small id="hBest">BEST 0</small></div>
-    <div class="pill" id="hStreak" style="display:none"><small>STREAK</small><b>0</b></div>
     <div class="sp"></div>
     <div class="pill" id="hLives" aria-label="lives"><i></i><i></i><i></i></div>
     <button class="ib" id="bMute" aria-label="Sound"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path id="mOn" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/><path id="mOff" d="M17 9l5 6M22 9l-5 6" style="display:none"/></svg></button>
@@ -164,7 +163,7 @@ function ragdoll(bad) {
 }
 
 /* ---------- game ---------- */
-const G = { mode: 'menu', t: 0, score: 0, best: store.get(KEY, 0) || 0, lives: 3, streak: 0, bestStreak: 0, passed: 0, n: 0, wall: null, gap: 0, ragT: 0, hit: 0, shake: 0, flash: 0, taps: 0, seen: {}, last: '', newBest: false, manual: false, idle: 0, lastResult: null, tickAt: 0 };
+const G = { mode: 'menu', t: 0, score: 0, best: store.get(KEY, 0) || 0, lives: 3, streak: 0, bestStreak: 0, passed: 0, n: 0, wall: null, gap: 0, ragT: 0, hit: 0, shake: 0, flash: 0, taps: 0, seen: {}, last: [], newBest: false, manual: false, idle: 0, lastResult: null, tickAt: 0 };
 let paused = false, muted = Q.get('mute') === '1' || store.get('gdl:mute:physics-charades', false);
 const W = { x0: -214, x1: 214, y0: -336, y1: 34, VPY: -470, S0: .27 }, KP = 1 / W.S0 - 1;
 const scaleAt = p => 1 / (1 + KP * (1 - Math.min(p, 1)));
@@ -176,14 +175,14 @@ function nextPose() {
   do {
     if (free) { const s = [0, 0, 0, 0].map((_, i) => Math.floor(rng() * NST[i])); if (s[2] === 2 && s[3] === 2) s[3] = 0; p = { w: 'FREESTYLE', s, free: true }; const k = POSES.find(q => q.s.join() === s.join()); if (k) p = k; }
     else p = pick(POSES.filter(q => q.t <= maxT && (q.t >= maxT - 1 || rng() < .35)));
-  } while ((p.s.join() === C.st.join() || p.s.join() === G.last) && guard++ < 20);
+  } while ((p.s.join() === C.st.join() || G.last.includes(p.s.join())) && guard++ < 20);
   return p;
 }
 function spawnWall() {
   const p = nextPose(), n = G.n++, known = !p.free && G.seen[p.w];
   const w = { pose: p, s: p.s.slice(), word: p.w, p: 0, T: Math.max(1.9, 5.6 - .115 * n), tarp: !!(known && n >= 8 && rng() < Math.min(.5, .2 + n * .012)), tarpA: 1, fast: false, slamP: -1, out: 0, res: null, sprite: wallSprite(p.s, n) };
-  if (!p.free) G.seen[p.w] = true; G.last = p.s.join(); G.wall = w; G.tickAt = 0;
-  $('wLab').textContent = w.tarp ? 'FROM MEMORY!' : p.free ? 'COPY THE HOLE' : 'STRIKE THE POSE'; $('wName').textContent = w.word; const el = $('word'); el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
+  if (!p.free) G.seen[p.w] = true; G.last = [p.s.join(), G.last[0]]; G.wall = w; G.tickAt = 0;
+  $('wLab').textContent = (w.tarp ? 'FROM MEMORY!' : p.free ? 'COPY THE HOLE' : 'STRIKE THE POSE') + (G.streak >= 2 ? ' · STREAK ' + G.streak : ''); $('wName').textContent = w.word; const el = $('word'); el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
   $('bSlam').classList.remove('dim'); sfx.spawn();
 }
 function slam() { const w = G.wall; if (G.mode !== 'play' || paused || !w || w.res || w.fast || w.p > .86) return; w.fast = true; w.slamP = w.p; $('bSlam').classList.add('dim'); sfx.slam(); }
@@ -203,7 +202,7 @@ function resolve(w) {
     floatText(pick(['SPLAT!', 'OOF!', 'DENIED!', 'WALLOP!']), 0, -250, '#ff3d8b', 40);
   }
 }
-function startGame() { reseed(); Object.assign(G, { mode: 'play', score: 0, lives: 3, streak: 0, bestStreak: 0, passed: 0, n: 0, wall: null, gap: .9, ragT: 0, hit: 0, shake: 0, taps: 0, seen: {}, last: '', newBest: false, lastResult: null }); paused = false; texts.length = 0; parts.length = 0; placeContestant(0); setOv(null); hudMode(); $('wName').textContent = 'GET READY'; $('wLab').textContent = 'HERE IT COMES'; cv.focus(); music.reset(); }
+function startGame() { reseed(); Object.assign(G, { mode: 'play', score: 0, lives: 3, streak: 0, bestStreak: 0, passed: 0, n: 0, wall: null, gap: .9, ragT: 0, hit: 0, shake: 0, taps: 0, seen: {}, last: [], newBest: false, lastResult: null }); paused = false; texts.length = 0; parts.length = 0; placeContestant(0); setOv(null); hudMode(); $('wName').textContent = 'GET READY'; $('wLab').textContent = 'HERE IT COMES'; cv.focus(); music.reset(); }
 function gameOver() {
   G.mode = 'over'; hudMode(); sfx.over(); $('oTitle').textContent = G.passed >= 30 ? 'LEGEND!' : G.passed >= 15 ? 'NICE MOVES!' : 'SPLAT!';
   $('oCopy').textContent = G.passed >= 30 ? 'The wall has filed a complaint.' : G.passed >= 15 ? 'Longest streak: ' + G.bestStreak + ' walls in a row.' : 'The wall wins this time. Best streak: ' + G.bestStreak + '.';
@@ -216,6 +215,7 @@ function step() {
   const dt = 1 / 60; G.t += dt;
   if (G.hit > 0) { G.hit--; return; }   // hit-stop
   if (G.mode !== 'play') { G.idle -= dt; if (G.idle <= 0 && !C.rag) { G.idle = .7; const i = Math.floor(Math.random() * 4); C.st[i] = (C.st[i] + 1) % NST[i]; if (C.st[2] === 2 && C.st[3] === 2) C.st[3] = 0; } }
+  engine.gravity.y = C.rag ? 1 : 0;   // posed limbs are held by their own springs; gravity only takes over once the wall has knocked the contestant limp
   contestantStep(); Engine.update(engine, MS);
   G.shake *= .85; G.flash = Math.max(0, G.flash - dt * 2);
   if (G.mode !== 'play') return;
@@ -390,8 +390,7 @@ window.addEventListener('resize', layout); window.addEventListener('orientationc
 let lastT = 0, acc = 0; const hud = {};
 function setTxt(el, k, v) { if (hud[k] !== v) { hud[k] = v; el.textContent = v; } }
 function updateHud() {
-  setTxt($('hScore').firstChild, 'sc', G.score); setTxt($('hBest'), 'b', 'BEST ' + G.best); setTxt($('hStreak').lastChild, 'st', G.streak);
-  const showSt = G.mode === 'play' && G.streak >= 2; if (hud.ss !== showSt) { hud.ss = showSt; $('hStreak').style.display = showSt ? '' : 'none'; }
+  setTxt($('hScore').firstChild, 'sc', G.score); setTxt($('hBest'), 'b', 'BEST ' + G.best);
   if (hud.lv !== G.lives) { hud.lv = G.lives; const s = $('hLives').children; for (let i = 0; i < 3; i++) s[i].classList.toggle('off', i >= G.lives); }
 }
 function frame(now) {

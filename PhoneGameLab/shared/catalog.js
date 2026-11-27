@@ -202,14 +202,15 @@ window.LAB_GAMES = [
     "slug": "59-purlwise",
     "t": "Purlwise",
     "d": "Read the pattern. Knit the picture.",
-    "v2": true
+    "v2": true,
+    "score": 8
    },
    {
     "n": 60,
-    "slug": "60-sudoku",
-    "t": "Mini Sudoku",
-    "d": "Fill the 4×4 grid — no row/col/box repeats.",
-    "thumb": "../thumbs/PhoneGameLab--60-sudoku.jpg"
+    "slug": "60-petal-count",
+    "t": "Petal Count",
+    "d": "One of each flower in every row, column and bed.",
+    "v2": true
    }
   ]
  },
@@ -365,7 +366,8 @@ window.LAB_GAMES = [
     "slug": "62-ribbon-rodeo",
     "t": "Ribbon Rodeo",
     "d": "Fly a fighter kite. Lasso the whole sky.",
-    "v2": true
+    "v2": true,
+    "score": 8
    }
   ]
  },

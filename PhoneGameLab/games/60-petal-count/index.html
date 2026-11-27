@@ -1,0 +1,202 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Petal Count</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PETAL COUNT — sudoku as a planter of flowers. Every flower's number is its petal count (and its colour, and its
+ * note when planted): one of each in every row, column and bed. A 1·2·3 toggle swaps in plain digits.
+ * Identity: spring lawn, timber planter, dark soil, nine bright flowers drawn from one petal function.
+ * Sizes:    4×4 window box, 6×6 planter, 9×9 garden. Boards are generated: a random solved grid is dug out while a
+ *           singles-only solver can still finish it, so every puzzle has ONE solution and never needs a guess.
+ * Play:     tap a cell then a flower — or tap a flower first to keep planting it. SEEDS are pencil marks (cleared
+ *           from the row/column/bed when you plant). Clashes always show; CHECK (optional) wilts a wrong flower and
+ *           counts a slip. The hint finds the next forced flower and says why. Undo, erase, per-size best times,
+ *           and every bed in progress is saved.                                                              */
+const GEO = { 4: [2, 2], 6: [2, 3], 9: [3, 3] }, KEEP = { 4: 5, 6: 11, 9: 32 };
+const PAL = ["#ff5d73", "#ff9a2e", "#ffe14d", "#9be564", "#3ddbd0", "#5aa9ff", "#b79bff", "#ff8fd0", "#ffffff"], SCALE = [0, 2, 4, 7, 9, 12, 14, 16, 19];
+const WHY = ["the only flower that fits this spot", "its only spot in this row", "its only spot in this column", "its only spot in this bed"];
+const fmtT = s => { s = Math.max(0, Math.floor(s)); return ((s / 60) | 0) + ":" + ("0" + (s % 60)).slice(-2); };
+Lab.init({
+  title: "Petal Count", tagline: "One of each flower in every row, column and bed.", category: "Puzzle & Logic",
+  howto: ["Petals are the number: plant 1 to N", "No repeats in a row, column or bed", "Tap a cell, then a flower (or flower first)"],
+  theme: { bg: "#a9d9a4", bg2: "#e3f4cf", fg: "#24402c", muted: "#5f8566", accent: "#ff6f61", accent2: "#5aa9ff", light: true },
+  orient: "any", music: { style: "puzzle", key: "C", bpm: 88, vol: .32 }, restart: start, lowerIsBetter: true, formatScore: n => fmtT(n) + " (6×6)",
+  attract(dt, t) { if (!g) { prog = { best: {}, wins: 1 }; fresh(6, 12345); mode = "demo"; } tick(dt); render(t); },
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, PI = Math.PI;
+let N, bh, bw, g, sol, given, notes, sel, arm, noteMode, digits, check, hist, time, slips, hints, mode, prog, conf, grow, unitFx, msg, msgT, newT, winT, demoT, saveT, genMs, hintC, shownT;
+let cell, ox, oy, sg, land, ui, pressT = {};
+
+/* ------------------------------------------------------------------ logic */
+const UN = {};
+function units(n) { if (UN[n]) return UN[n]; const [h, w] = GEO[n], U = []; for (let i = 0; i < n; i++) { U.push(Array.from({ length: n }, (_, j) => i * n + j)); } for (let i = 0; i < n; i++) U.push(Array.from({ length: n }, (_, j) => j * n + i));
+  for (let b = 0; b < n; b++) { const r0 = (b / (n / w) | 0) * h, c0 = (b % (n / w)) * w, a = []; for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) a.push((r0 + r) * n + c0 + c); U.push(a); } return UN[n] = U; }
+const boxOf = (i, n) => { const [h, w] = GEO[n]; return ((i / n | 0) / h | 0) * (n / w) + ((i % n) / w | 0); };
+function cands(G, n) { const R = new Int32Array(n), C = new Int32Array(n), B = new Int32Array(n), full = (1 << n) - 1, M = new Int32Array(n * n);
+  for (let i = 0; i < n * n; i++) if (G[i]) { const b = 1 << (G[i] - 1); R[i / n | 0] |= b; C[i % n] |= b; B[boxOf(i, n)] |= b; }
+  for (let i = 0; i < n * n; i++) if (!G[i]) M[i] = full & ~(R[i / n | 0] | C[i % n] | B[boxOf(i, n)]); return M; }
+function nextSingle(G, n) {   // a flower that is forced: the only one left for a cell, or the only cell left for it in a bed / row / column
+  const M = cands(G, n), U = units(n);
+  for (const k of [2, 0, 1]) for (let u = 0; u < n; u++) { const A = U[k * n + u]; for (let v = 0; v < n; v++) { let at = -1, cnt = 0; for (const i of A) { if (G[i] === v + 1) { cnt = 9; break; } if (M[i] >> v & 1) { cnt++; at = i; } } if (cnt === 1) return { i: at, v: v + 1, why: k === 2 ? 3 : k + 1, unit: A }; } }
+  for (let i = 0; i < n * n; i++) if (!G[i] && M[i] && !(M[i] & (M[i] - 1))) return { i, v: 32 - Math.clz32(M[i]), why: 0 };
+  return null;
+}
+function singlesSolve(G, n) { G = G.slice(); for (let s; (s = nextSingle(G, n));) G[s.i] = s.v; return G.every(v => v); }
+function countSolutions(G, n, limit) {   // plain backtracking with most-constrained-cell choice (used by the tests to prove uniqueness, and with rnd to deal a full grid)
+  G = G.slice(); const rnd = typeof limit === "function" ? limit : null; if (rnd) limit = 1;
+  const rec = () => { const M = cands(G, n); let bi = -1, bc = 99; for (let i = 0; i < n * n; i++) if (!G[i]) { let k = 0, t = M[i]; while (t) { t &= t - 1; k++; } if (k < bc) { bc = k; bi = i; if (k < 2) break; } }
+    if (bi < 0) return 1; if (!bc) return 0; const vs = []; for (let v = 0; v < n; v++) if (M[bi] >> v & 1) vs.push(v + 1); if (rnd) for (let i = vs.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0, t = vs[i]; vs[i] = vs[j]; vs[j] = t; }
+    let cnt = 0; for (const v of vs) { G[bi] = v; cnt += rec(); if (rnd && cnt) return 1; if (cnt >= limit) break; } if (!(rnd && cnt)) G[bi] = 0; return cnt; };
+  const c = rec(); return rnd ? G : c;
+}
+function generate(n, seed) {
+  const rnd = Lab.rng(seed), S = countSolutions(new Array(n * n).fill(0), n, rnd), P = S.slice(), order = P.map((_, i) => i); let left = n * n;
+  for (let i = order.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0, t = order[i]; order[i] = order[j]; order[j] = t; }
+  for (const i of order) { if (left <= KEEP[n]) break; const v = P[i]; P[i] = 0; if (singlesSolve(P, n)) left--; else P[i] = v; }
+  return { sol: S, puz: P };
+}
+function fresh(n, seed) {
+  const t0 = performance.now(), Z = generate(n, seed == null ? (Math.random() * 1e9) | 0 : seed); genMs = performance.now() - t0;
+  setup(n, { sol: Z.sol, g: Z.puz.slice(), given: Z.puz.map(v => v ? 1 : 0), notes: new Array(n * n).fill(0), time: 0, slips: 0, hints: 0 });
+}
+function setup(n, S) {
+  N = n; [bh, bw] = GEO[n]; sol = S.sol; g = S.g; given = S.given; notes = S.notes; time = S.time; slips = S.slips; hints = S.hints;
+  sel = -1; arm = 0; noteMode = false; hist = []; grow = new Float32Array(n * n).fill(1); unitFx = []; msg = ""; msgT = 0; newT = 0; winT = 0; demoT = 0; saveT = 0; hintC = null; shownT = -1; mode = "play"; conflicts(); layout();
+}
+function conflicts() { conf = new Uint8Array(N * N); for (const A of units(N)) for (let a = 0; a < N; a++) for (let b = a + 1; b < N; b++) if (g[A[a]] && g[A[a]] === g[A[b]]) conf[A[a]] = conf[A[b]] = 1; }
+const snap = () => { hist.push({ g: g.slice(), notes: notes.slice() }); if (hist.length > 200) hist.shift(); };
+function say(s, sec) { msg = s; msgT = sec || 2.6; }
+function plant(i, v, auto) {
+  if (mode !== "play" || given[i]) return; hintC = null;
+  if (noteMode && !auto) { if (g[i]) return; snap(); notes[i] ^= 1 << (v - 1); Lab.sfx("tick", { pitch: .8 + v * .08, vol: .5 }); return save(); }
+  snap(); const was = g[i]; g[i] = was === v ? 0 : v; notes[i] = 0; conflicts();
+  if (!g[i]) { Lab.sfx("swish", { vol: .4, pitch: 1.4 }); return save(); }
+  grow[i] = 0; for (const A of units(N)) if (A.includes(i)) for (const q of A) notes[q] &= ~(1 << (v - 1));
+  const x = cellX(i % N) + cell / 2, y = cellY(i / N | 0) + cell / 2, wrong = v !== sol[i];
+  Lab.audio.tone({ f: 262 * Math.pow(2, SCALE[v - 1] / 12), dur: .22, vol: .15, type: "triangle" }); Lab.buzz(8);
+  if (conf[i] || (check && wrong)) { if (check && wrong) { slips++; fx.text(x, y - cell * .6, "wilted!", { color: "#d9534f", size: 15 }); } Lab.sfx("error", { vol: .45 }); Lab.shake(3, .12); }
+  else { fx.burst(x, y, { n: 7, colors: [PAL[v - 1], "#fff"], speed: 110, life: .45, size: 3, gravity: 160 });
+    const done = units(N).filter(A => A.includes(i) && A.every(q => g[q]) && new Set(A.map(q => g[q])).size === N && A.every(q => !check || g[q] === sol[q]));
+    done.forEach((A, k) => { unitFx.push({ A, t: -k * .12 }); Lab.after(.08 + k * .12, () => Lab.audio.combo(3 + k * 2 + done.length, { vol: .13 })); }); }
+  if (g.every((q, k) => q === sol[k])) return win(); save();
+}
+function erase() { if (sel < 0 || given[sel] || (!g[sel] && !notes[sel])) return Lab.sfx("tick", { pitch: .5, vol: .5 }); snap(); g[sel] = 0; notes[sel] = 0; conflicts(); Lab.sfx("swish", { vol: .4, pitch: 1.4 }); save(); }
+function undo() { if (!hist.length || mode !== "play") return Lab.sfx("tick", { pitch: .5, vol: .5 }); const h = hist.pop(); g = h.g; notes = h.notes; conflicts(); hintC = null; Lab.sfx("swish", { pitch: 1.2, vol: .6 }); save(); }
+function hint() {
+  if (mode !== "play") return; const w = g.findIndex((v, i) => v && v !== sol[i]);
+  if (w >= 0) { snap(); g[w] = 0; conflicts(); sel = w; arm = 0; hints++; say("That flower was in the wrong spot"); Lab.sfx("error", { vol: .4, pitch: 1.3 }); return save(); }
+  const s = nextSingle(g, N) || { i: g.indexOf(0), v: sol[g.indexOf(0)], why: 0 }; hints++; const nm = noteMode; noteMode = false; arm = 0; sel = s.i; plant(s.i, s.v, true); noteMode = nm;
+  if (mode === "play") { hintC = { A: s.unit || [s.i], t: 0 }; say("Hint: " + WHY[s.why], 3.5); }
+}
+function setSize(n) { if (n === N || mode !== "play") return; save(); prog.size = n; Lab.store.set("prog", prog); Lab.sfx("flip"); open(n); }
+function open(n) { const S = Lab.store.get("bed" + n, null); if (S && S.sol && S.sol.length === n * n && S.g.some((v, i) => v !== S.sol[i])) setup(n, S); else fresh(n); Lab.setScore(fmtT(time)); }
+function newBed() { if (mode !== "play") return; if (hist.length && newT <= 0) { newT = 2.5; say("Tap NEW again to dig this bed up"); return Lab.sfx("tick"); } Lab.sfx("slide", { vol: .6 }); fresh(N); save(); Lab.setScore("0:00"); }
+function save() { if (mode === "play") Lab.store.set("bed" + N, { sol, g, given, notes, time, slips, hints }); }
+function win() {
+  mode = "won"; winT = 0; sel = -1; arm = 0; hintC = null; const t = Math.round(time), n = N, old = prog.best[n], isBest = old == null || t < old;
+  if (isBest) prog.best[n] = t; prog.wins = (prog.wins || 0) + 1; if (n === 4 && prog.best[6] == null) prog.size = 6; Lab.store.set("prog", prog); Lab.store.set("bed" + n, null);
+  for (let i = 0; i < n * n; i++) Lab.after(.1 + ((i / n | 0) + i % n) * .07, () => { grow[i] = .35; if (i % n === 0) Lab.audio.combo(i / n | 0, { vol: .12 }); if (i % 3 === 0) fx.burst(cellX(i % n) + cell / 2, cellY(i / n | 0) + cell / 2, { n: 4, colors: [PAL[g[i] - 1], "#fff"], speed: 130, life: .6, size: 3.5, gravity: 120 }); });
+  const stats = [["Time", fmtT(t)], ["Best " + n + "×" + n, fmtT(prog.best[n])], [check ? "Slips" : "Hints", check ? slips : hints]], title = n === 4 ? "Window box in bloom" : n === 6 ? "Planter in bloom" : "Garden in bloom", message = hints ? "Finished with " + hints + " hint" + (hints > 1 ? "s" : "") + "." : slips ? "Not a guess needed — just " + slips + " wilted." : "Every flower placed by pure logic.";
+  Lab.after(1.5 + n * .1, () => { if (n === 6) Lab.win({ title, message, score: t, lower: true, scoreLabel: "Time", button: "New bed", stats }); else { if (isBest) fx.confetti(); Lab.win({ title, message: (isBest ? "New best for " + n + "×" + n + "! " : "") + message, button: n === 4 && prog.size === 6 ? "Try the 6×6" : "New bed", stats }); } });
+}
+function start() {
+  prog = Lab.store.get("prog", null) || { size: 4, best: {}, wins: 0, check: false, digits: false }; check = !!prog.check; digits = !!prog.digits; open(prog.size || 4);
+  Lab.input.onDown = [(x, y) => { if (mode !== "play") return; const b = ui.all.find(b => x >= b.x - 2 && x <= b.x + b.w + 2 && y >= b.y - 2 && y <= b.y + b.h + 2);
+    if (b) { pressT[b.id] = 1; if (b.v) return tapFlower(b.v); if (b.size) return setSize(b.size);
+      ({ undo, erase, hint, seeds: () => { noteMode = !noteMode; Lab.sfx("click"); say(noteMode ? "Seeds: flowers go in as pencil marks" : "Planting for real again", 1.8); }, digits: () => { digits = !digits; prog.digits = digits; Lab.store.set("prog", prog); Lab.sfx("click"); },
+        check: () => { check = !check; prog.check = check; Lab.store.set("prog", prog); Lab.sfx("click"); say(check ? "Check on: wrong flowers wilt" : "Check off: only clashes show", 2); }, "new": newBed })[b.id](); return; }
+    const i = pick(x, y); if (i < 0) { sel = -1; return; }
+    if (arm) { if (given[i]) { arm = g[i]; Lab.sfx("tick"); } else plant(i, arm); return; }
+    sel = sel === i ? -1 : i; Lab.sfx("tick", { pitch: 1.2, vol: .5 }); }];
+  Lab.input.onKey = [(k, e) => { if (mode !== "play") return; const d = "123456789".indexOf(k), mv = { ArrowUp: -N, ArrowDown: N, ArrowLeft: -1, ArrowRight: 1 }[k]; k = k.toLowerCase();
+    if (mv) { if (sel < 0) sel = Math.max(0, g.indexOf(0)); else { const r = (sel / N | 0) + Math.sign(mv) * (Math.abs(mv) === N), c = sel % N + Math.sign(mv) * (Math.abs(mv) === 1); if (r >= 0 && r < N && c >= 0 && c < N) sel = r * N + c; } arm = 0; }
+    else if (d >= 0 && d < N) tapFlower(d + 1); else if (k === "backspace" || k === "delete" || k === "0") erase(); else if (k === "z") undo(); else if (k === "n") noteMode = !noteMode; else if (k === "h") hint(); }];
+  Lab.expose({ get size() { return N; }, get grid() { return g.join(""); }, get sol() { return sol.join(""); }, get given() { return given.join(""); }, get notes() { return notes.slice(); }, get sel() { return sel; }, get arm() { return arm; }, get mode() { return mode; }, get time() { return time; }, set time(v) { time = v; },
+    get slips() { return slips; }, get hints() { return hints; }, get check() { return check; }, get noteMode() { return noteMode; }, get conflicts() { return Array.from(conf).join(""); }, get genMs() { return genMs; }, get hist() { return hist.length; }, get progress() { return JSON.parse(JSON.stringify(prog)); },
+    cell(i) { return { x: cellX(i % N) + cell / 2, y: cellY(i / N | 0) + cell / 2 }; }, get buttons() { return ui.all.map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })); }, setSize, generate, countSolutions, singlesSolve, fresh });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+function tapFlower(v) { if (sel >= 0 && !given[sel]) return plant(sel, v); arm = arm === v ? 0 : v; sel = -1; Lab.sfx("tick", { pitch: .9 + v * .06 }); if (arm && !prog.armTip) { prog.armTip = 1; Lab.store.set("prog", prog); say("Now tap every cell that gets this flower", 3); } }
+
+/* ------------------------------------------------------------------ layout */
+function layout() {
+  const p = Lab.play, nbx = N / bw, nby = N / bh, mk = (id, x, y, w, h, o) => Object.assign({ id, x, y, w, h }, o); land = p.w > p.h * 1.15; sg = 6; let sq, panel;
+  if (land) { const side = Lab.clamp(p.w * .38, 280, 380); sq = Math.min(p.h - 10, p.w - side - 24, 640); const x0 = p.x + (p.w - side - sq) / 2; ox = x0; oy = p.y + (p.h - sq) / 2; panel = { x: x0 + sq + 18, y: Math.max(p.y + 2, p.y + p.h / 2 - 165), w: side - 18, h: Math.min(p.h - 4, 330) }; }
+  else { sq = Math.min(p.w - 12, p.h - 262, 580); const tot = sq + 256, y0 = p.y + Math.max(2, (p.h - tot) / 2); ox = p.x + (p.w - sq) / 2; oy = y0 + 66; panel = { x: p.x + Math.max(8, (p.w - 440) / 2), y: y0, w: Math.min(p.w - 16, 440), h: tot }; }
+  cell = Math.min((sq - 20 - (nbx - 1) * sg) / N, (sq - 20 - (nby - 1) * sg) / N); const gw = N * cell + (nbx - 1) * sg + 20, gh = N * cell + (nby - 1) * sg + 20; ox += (sq - gw) / 2; oy += (sq - gh) / 2; ui = { gw, gh, panel };
+  const P = panel, tw = Math.min(66, (P.w - 110) / 3), A = [4, 6, 9].map((s, i) => mk("s" + s, P.x + i * (tw + 6), P.y, tw, 38, { size: s })); ui.infoY = P.y + 52; ui.infoX = P.x + P.w / 2; ui.bestX = P.x + P.w;
+  let y = land ? P.y + 70 : oy + (sq - gh) / 2 + gh + 14 - (sq - gh) / 2; const per = land && N > 5 ? Math.ceil(N / 2) : N, fwid = Math.min(land ? 58 : 54, (P.w - (per - 1) * 4) / per), fh = land ? Math.min(52, (P.h - 70 - 108) / (N > 5 ? 2 : 1) - 6) : 54;
+  for (let v = 1; v <= N; v++) { const k = (v - 1) % per, row = (v - 1) / per | 0, cnt = Math.min(per, N - row * per); A.push(mk("f" + v, P.x + (P.w - cnt * fwid - (cnt - 1) * 4) / 2 + k * (fwid + 4), y + row * (fh + 6), fwid, fh, { v })); }
+  y += (land && N > 5 ? 2 : 1) * (fh + 6) + 4; const b4 = (P.w - 18) / 4, b3 = (P.w - 12) / 3, th = land ? 42 : 46;
+  ["undo", "erase", "seeds", "hint"].forEach((id, i) => A.push(mk(id, P.x + i * (b4 + 6), y, b4, th))); y += th + 8; ["digits", "check", "new"].forEach((id, i) => A.push(mk(id, P.x + i * (b3 + 6), y, b3, land ? 38 : 40))); ui.all = A;
+}
+Lab.onResize(() => { if (g) layout(); });
+const cellX = c => ox + 10 + c * cell + (c / bw | 0) * sg, cellY = r => oy + 10 + r * cell + (r / bh | 0) * sg;
+function pick(x, y) { if (x < ox || x > ox + ui.gw || y < oy || y > oy + ui.gh) return -1; let bc = 0, br = 0; for (let k = 1; k < N; k++) { if (Math.abs(x - cellX(k) - cell / 2) < Math.abs(x - cellX(bc) - cell / 2)) bc = k; if (Math.abs(y - cellY(k) - cell / 2) < Math.abs(y - cellY(br) - cell / 2)) br = k; } return br * N + bc; }
+
+/* ------------------------------------------------------------------ update */
+function tick(dt) {
+  if (mode === "play") { time += dt; const s = Math.floor(time); if (s !== shownT) { shownT = s; Lab.setScore(fmtT(time)); } saveT += dt; if (saveT > 5) { saveT = 0; save(); } Lab.music.intensity(.15 + .75 * g.filter(v => v).length / (N * N)); }
+  else if (mode === "won") winT += dt;
+  else if (mode === "demo") { demoT += dt; if (demoT > .4) { demoT = 0; const i = g.indexOf(0); if (i >= 0) { g[i] = sol[i]; grow[i] = 0; } else { winT += .4; if (winT > 2.5) { fresh(6, (Math.random() * 1e6) | 0); mode = "demo"; } } } }
+  for (let i = 0; i < grow.length; i++) if (grow[i] < 1) grow[i] = Math.min(1, grow[i] + dt * 3.6);
+  for (const u of unitFx) u.t += dt; unitFx = unitFx.filter(u => u.t < .7);
+  if (hintC) { hintC.t += dt; if (hintC.t > 3.5) hintC = null; } msgT = Math.max(0, msgT - dt); newT = Math.max(0, newT - dt);
+  for (const k in pressT) pressT[k] = Math.max(0, pressT[k] - dt * 5);
+}
+
+/* ------------------------------------------------------------------ draw */
+function bg() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("pc-bg:" + W + "x" + H, W, H, (q, w, h) => {
+    draw.vgrad(q, 0, 0, w, h, ["#e6f5d0", "#bfe3ae", "#9dd29c"]); q.fillStyle = "rgba(255,255,255,.13)"; for (let x = -h; x < w; x += 120) { q.beginPath(); q.moveTo(x, 0); q.lineTo(x + 60, 0); q.lineTo(x + 60 + h * .35, h); q.lineTo(x + h * .35, h); q.fill(); }
+    const r = Lab.rng(5); q.lineCap = "round"; for (let i = 0; i < 150; i++) { const x = r() * w, y = r() * h, k = r(); if (k < .8) { q.strokeStyle = "rgba(60,130,70,.28)"; q.lineWidth = 1.6; q.beginPath(); q.moveTo(x - 3, y); q.lineTo(x - 4, y - 6); q.moveTo(x, y); q.lineTo(x, y - 8); q.moveTo(x + 3, y); q.lineTo(x + 4.5, y - 6); q.stroke(); } else { q.fillStyle = "rgba(255,255,255,.8)"; for (let a = 0; a < 5; a++) { q.beginPath(); q.arc(x + Math.cos(a * 1.257) * 3, y + Math.sin(a * 1.257) * 3, 1.8, 0, TAU); q.fill(); } q.fillStyle = "#ffd23f"; q.beginPath(); q.arc(x, y, 1.6, 0, TAU); q.fill(); } }
+  });
+}
+function flower(v, s, style) {   // style: 0 fresh, 1 wilted, 2 digit
+  return Lab.sprite("pc-f:" + v + ":" + Math.round(s) + style + (digits ? "d" : ""), s, s, (q, w) => {
+    const col = style === 1 ? Lab.color.mix(PAL[v - 1], "#8f8577", .7) : PAL[v - 1], r = w * .44, m = w / 2, pw = r * Math.min(.34, 1.25 / v + .1), pl = r * (v < 3 ? .5 : .42), pd = r * (v === 1 ? .34 : .56);
+    q.lineWidth = Math.max(1, w * .03); q.strokeStyle = Lab.color.shade(col, -.32);
+    for (let k = 0; k < v; k++) { const a = -PI / 2 + k * TAU / v; q.beginPath(); q.ellipse(m + Math.cos(a) * pd, m + Math.sin(a) * pd, pl, pw, a, 0, TAU); q.fillStyle = col; q.fill(); q.stroke(); q.beginPath(); q.ellipse(m + Math.cos(a) * pd * 1.08, m + Math.sin(a) * pd * 1.08, pl * .5, pw * .42, a, 0, TAU); q.fillStyle = Lab.color.shade(col, .3); q.fill(); }
+    if (digits) { draw.circle(q, m, m, r * .5, "#fffdf2", Lab.color.shade(col, -.4), q.lineWidth); draw.text(q, v, m, m + w * .02, { size: w * .36, color: "#3b2a1e", weight: 800 }); }
+    else draw.circle(q, m, m + (v === 1 ? r * .3 : 0), r * (v === 1 ? .2 : .22), v === 3 || v === 2 ? "#8a4b1e" : "#ffd23f", "rgba(70,40,10,.55)", q.lineWidth);
+  });
+}
+function button(c, b, label, on, active, sz) {
+  const p = pressT[b.id] || 0; c.save(); c.translate(b.x + b.w / 2, b.y + b.h / 2 + p * 2); c.globalAlpha = on ? 1 : .42;
+  draw.rect(c, -b.w / 2, -b.h / 2 + 3.5, b.w, b.h, 13, "rgba(40,70,45,.3)"); draw.rect(c, -b.w / 2, -b.h / 2, b.w, b.h, 13, active ? "#ff6f61" : "#fffdf2", active ? "#fff" : "rgba(36,64,44,.28)", 2);
+  if (label) draw.text(c, label, 0, 1, { size: sz || 12.5, color: active ? "#fff" : "#24402c", weight: 800 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx, s = bg(); c.drawImage(s, -40, -40, s.w, s.h);
+  // planter
+  draw.rect(c, ox - 2, oy + 6, ui.gw + 4, ui.gh, 14, "rgba(40,60,30,.28)"); draw.rect(c, ox, oy, ui.gw, ui.gh, 12, "#c99a66", "#8d6238", 2.5); draw.rect(c, ox + 6, oy + 6, ui.gw - 12, ui.gh - 12, 7, "#a97847");
+  const sr = sel >= 0 ? sel / N | 0 : -1, sc = sel >= 0 ? sel % N : -1, sb = sel >= 0 ? boxOf(sel, N) : -1, hv = arm || (sel >= 0 ? g[sel] : 0), fsz = cell * .9;
+  for (let i = 0; i < N * N; i++) { const r = i / N | 0, q = i % N, x = cellX(q), y = cellY(r), v = g[i], peer = sel >= 0 && (r === sr || q === sc || boxOf(i, N) === sb);
+    draw.rect(c, x + .8, y + .8, cell - 1.6, cell - 1.6, 5, given[i] ? "#3f2b22" : i === sel ? "#8a6449" : peer ? "#6a4a3a" : "#59392c");
+    if (hintC && hintC.A.includes(i)) { c.fillStyle = `rgba(90,169,255,${.22 + .14 * Math.sin(hintC.t * 7)})`; c.fillRect(x + 1, y + 1, cell - 2, cell - 2); }
+    const u = unitFx.find(u => u.t > 0 && u.A.includes(i)); if (u) { c.fillStyle = `rgba(255,255,220,${.5 * (1 - u.t / .7)})`; c.fillRect(x + 1, y + 1, cell - 2, cell - 2); }
+    if (v) { const wrong = !given[i] && ((check && v !== sol[i]) || conf[i]), k = Lab.ease.outBack(grow[i]) * (u ? 1 + Lab.ease.pulse(Lab.clamp(u.t / .5, 0, 1)) * .18 : 1), sp = flower(v, fsz, check && !given[i] && v !== sol[i] ? 1 : 0), z = fsz * k;
+      if (hv === v) draw.circle(c, x + cell / 2, y + cell / 2, cell * .46, "rgba(255,255,255,.2)");
+      c.save(); c.translate(x + cell / 2, y + cell / 2); if (mode === "won") c.rotate(Math.sin(t * 3 + i) * .12); c.drawImage(sp, -z / 2, -z / 2, z, z); c.restore();
+      if (wrong) { c.strokeStyle = "#ff4d4d"; c.lineWidth = 2.5; c.setLineDash([4, 4]); c.lineDashOffset = -t * 14; c.beginPath(); c.arc(x + cell / 2, y + cell / 2, cell * .43, 0, TAU); c.stroke(); c.setLineDash([]); }
+    } else if (notes[i]) { const mc = N === 4 ? 2 : 3, mr = Math.ceil(N / mc), dx = cell / (mc + .6), dy = cell / (mr + .6);
+      for (let n = 0; n < N; n++) if (notes[i] >> n & 1) { const nx = x + cell / 2 + (n % mc - (mc - 1) / 2) * dx, ny = y + cell / 2 + ((n / mc | 0) - (mr - 1) / 2) * dy; if (digits) draw.text(c, n + 1, nx, ny + 1, { size: Math.min(dx, dy) * .8, color: PAL[n], weight: 800 }); else draw.circle(c, nx, ny, Math.min(dx, dy) * .3, PAL[n], hv === n + 1 ? "#fff" : null, 1.5); } }
+    if (i === sel) { c.strokeStyle = "#fff"; c.lineWidth = 3; draw.rr(c, x + 1.5, y + 1.5, cell - 3, cell - 3, 5); c.stroke(); }
+  }
+  if (mode === "demo") return;
+  // size tabs, info line, flowers, tools
+  for (const b of ui.all) {
+    if (b.size) button(c, b, b.size + "×" + b.size, true, b.size === N, 14);
+    else if (b.v) { const left = N - g.filter(v => v === b.v).length, on = left > 0; button(c, b, "", on, arm === b.v); c.globalAlpha = on ? 1 : .35; const z = Math.min(b.w - 6, b.h - 10), sp = flower(b.v, z, 0), p = pressT[b.id] || 0; c.drawImage(sp, b.x + b.w / 2 - z / 2, b.y + b.h / 2 - z / 2 - 2 + p * 2, z, z); c.globalAlpha = 1;
+      if (on) draw.text(c, left, b.x + b.w - 8, b.y + b.h - 8, { size: 10, color: arm === b.v ? "#fff" : "#5f8566", weight: 800 }); }
+    else button(c, b, { undo: "UNDO", erase: "ERASE", seeds: noteMode ? "SEEDS ON" : "SEEDS", hint: "HINT", digits: digits ? "FLOWERS" : "1 · 2 · 3", check: check ? "CHECK ON" : "CHECK OFF", "new": newT > 0 ? "SURE?" : "NEW BED" }[b.id], b.id === "undo" ? hist.length > 0 : b.id === "erase" ? sel >= 0 && !given[sel] && (g[sel] || notes[sel]) > 0 : true, (b.id === "seeds" && noteMode) || (b.id === "check" && check) || (b.id === "new" && newT > 0), b.w < 84 ? 11.5 : 12.5);
+  }
+  const bt = prog.best[N]; draw.text(c, bt != null ? "BEST " + fmtT(bt) : "NO BEST YET", ui.bestX, ui.all[0].y + 19, { size: 12, color: "#3d6a48", weight: 800, align: "right" });
+  const info = msgT > 0 ? msg : !prog.wins && !hist.length ? "Petals are the number. One of each per line and bed." : (check ? "slips " + slips : "hints " + hints) + "  ·  " + g.filter(v => !v).length + " to plant";
+  draw.text(c, info, ui.infoX, ui.infoY, { size: msgT > 0 || !prog.wins ? 12.5 : 12, color: msgT > 0 ? "#c2452f" : "#3d6a48", weight: 800, maxWidth: ui.panel.w });
+}
+Lab.boot();
+})();
+</script></body></html>

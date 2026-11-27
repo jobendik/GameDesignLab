@@ -631,6 +631,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--physics-charades.jpg"
   },
   {
@@ -2229,24 +2231,26 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 59,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/60-sudoku",
-   "path": "PhoneGameLab/games/60-sudoku/index.html",
+   "id": "PhoneGameLab/60-petal-count",
+   "path": "PhoneGameLab/games/60-petal-count/index.html",
    "collection": "PhoneGameLab",
-   "title": "Mini Sudoku",
-   "desc": "Fill the 4×4 grid — no row/col/box repeats.",
+   "title": "Petal Count",
+   "desc": "One of each flower in every row, column and bed.",
    "genre": [
     "Puzzle & Logic"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 60,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--60-sudoku.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/61-snake",
@@ -2280,7 +2284,9 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 62,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab/63-agar",
