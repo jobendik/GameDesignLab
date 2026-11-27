@@ -1,0 +1,373 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Big Drip</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* BIG DRIP — raindrops on a night-bus window. Slide around the pane, swallow smaller drops, be the biggest when the shower ends.
+ * Verbs: slide (bigger = slower), FLING (tap: every big piece of you throws half its water forward; halves rejoin after 6 s).
+ * Hazards that punish size: the WIPER (telegraphed sweep across a marked fan: smears 40 % of any drop into loose beads and
+ * shoves the mist into a ridge worth raiding) and warm VENTS (evaporate a percentage per second — a refuge for the small).
+ * Arc: 2:30 shower, three lives, live ranking, downpour at half-time, podium bonus. Score = water swallowed.
+ * Identity: moody night glass — bokeh city lights, refractive drops with worried / hungry faces, lo-fi rain. */
+Lab.init({
+  title: "Big Drip", tagline: "Be the biggest drop on the glass.", category: "Arcade & Action",
+  howto: ["Drag to slide, tap to fling half of you", "Swallow smaller drops, flee bigger ones", "Dodge the wiper and the warm vents"],
+  theme: { bg: "#0a1222", bg2: "#1b2847", accent: "#7fd6ff", accent2: "#ffb86b" },
+  orient: "any", music: { style: "chill", key: "E", bpm: 84, vol: .42 }, restart: start, attract,
+});
+const { draw, fx, clamp, lerp } = Lab, TAU = Lab.TAU;
+fx.auto = false;
+const WW = 2200, WH = 1500, ROUND = 150, PIV = { x: WW / 2, y: WH + 260 }, BL = 1560, BIN = 330, A0 = Math.PI + .42, A1 = TAU - .42, M0 = 22;
+const VENTS = [{ x: 430, y: 430, r: 150 }, { x: 1770, y: 560, r: 150 }, { x: 1100, y: 1010, r: 130 }];
+const HUES = [192, 28, 350, 268, 140, 48, 312, 218, 88, 8];
+const NAMES = ["", "Dribble", "Plink", "Murk", "Sploosh", "Bead", "Trickle", "Gloop", "Drizzle", "Puddle"];
+const KINDS = [   // fear/sight in world units; err = how badly it misjudges sizes; wary = minds the wiper
+  { id: "timid", fear: 270, sight: 240, err: .05, fling: false, wary: true, react: .16 },
+  { id: "bold", fear: 120, sight: 430, err: .3, fling: true, wary: false, react: .3 },
+  { id: "hunter", fear: 190, sight: 540, err: .1, fling: true, wary: true, react: .18 },
+  { id: "drifter", fear: 170, sight: 210, err: .2, fling: false, wary: false, react: .4 },
+];
+const rad = m => 4.2 * Math.sqrt(m), speedOf = m => 265 / (1 + Math.sqrt(m) / 14);
+let S, owners, me, drops, food, cam, T, score, lives, peak, eaten, wiper, stick, mouseAim, touchMode, rainL, demo = false, over, streak, streakT, respawnT, downpour, smears, flingCd, bestRank;
+
+function layout() { S = clamp(Math.sqrt(Lab.W * Lab.H) / 600, .85, 1.7); Lab.sprite.clear("bokeh"); }
+Lab.onResize(layout);
+function start() {
+  demo = false; reset(); Lab.setScore(0); Lab.hint("Drag to slide · tap to fling");
+  Lab.input.onDown = [(x, y, id) => {
+    if (Lab.input.pointerType === "mouse") { touchMode = false; mouseAim = { x, y }; aimFromMouse(); fling(me); return; }
+    touchMode = true; mouseAim = null;
+    if (!stick) stick = { id, ox: x, oy: y, x, y }; else fling(me);
+  }];
+  Lab.input.onMove = [(x, y, dx, dy, id) => {
+    if (stick && id === stick.id) { stick.x = x; stick.y = y; const vx = x - stick.ox, vy = y - stick.oy, m = Math.hypot(vx, vy); if (m > 6) { me.dx = vx / m; me.dy = vy / m; me.mag = clamp(m / 34, .25, 1); } if (m > 70) { stick.ox = x - vx / m * 70; stick.oy = y - vy / m * 70; } }
+    else if (!touchMode) mouseAim = { x, y };
+  }];
+  Lab.input.onUp = [(x, y, id) => { if (stick && id === stick.id) { stick = null; me.mag = 0; } }];
+  Lab.input.onTap = [() => { if (touchMode) fling(me); }];
+  Lab.input.onKey = [k => { if (k === " " || k === "Enter") fling(me); }];
+  rainL = Lab.audio.loop({ noise: true, bp: 2600, vol: .02 });
+  Lab.expose({
+    get me() { return me; }, get drops() { return drops; }, get food() { return food; }, get score() { return score; }, get lives() { return lives; }, get time() { return T; },
+    get wiper() { return wiper; }, get mass() { return mass(me); }, get over() { return over; }, get owners() { return owners; }, ROUND, VENTS, M0, PIV,
+    setTime(v) { T = v; }, setMass(m) { const p = me.pieces[0]; p.m = m; p.r = rad(m); }, tp(x, y) { for (const p of me.pieces) { p.x = x; p.y = y; } cam.x = x; cam.y = y; },
+    clearBots() { for (const o of owners) if (o !== me) { for (const p of o.pieces) p.dead = true; o.pieces = []; o.respawn = 1e9; } drops = drops.filter(p => !p.dead); },
+    addFood(x, y, m) { return addFood(x, y, m || 1); }, wiperNow() { wiper.state = "idle"; wiper.t = 0; },
+    dummy(x, y, m) { const o = mkOwner(owners.length, null); o.dummy = true; o.name = "Blob"; owners.push(o); addPiece(o, x, y, m); return o; },
+    step(n) { for (let i = 0; i < n && !over; i++) update(1 / 60); }, fling() { fling(me); },
+    steer(dx, dy, mag) { mouseAim = null; const m = Math.hypot(dx, dy) || 1; me.dx = dx / m; me.dy = dy / m; me.mag = mag == null ? 1 : mag; },
+  });
+  Lab.loop(frame);
+}
+function reset() {
+  layout(); T = 0; score = 0; lives = 3; peak = M0; eaten = 0; over = false; streak = 0; streakT = 0; respawnT = 0; downpour = false; smears = 0; flingCd = 0; bestRank = 10;
+  stick = null; mouseAim = null; touchMode = false; owners = []; drops = []; food = []; me = null;
+  wiper = { state: "idle", t: 15, dir: 1, a: A0, from: A0, to: A1, u: 0, id: 0 };
+  if (!demo) { me = mkOwner(0, null); me.name = "You"; owners.push(me); addPiece(me, WW / 2, 330, M0); me.shield = 3; }
+  for (let i = 1; i <= 9; i++) { const o = mkOwner(i, KINDS[(i - 1) % 4]); o.name = NAMES[i]; owners.push(o); spawnBot(o); }
+  for (let i = 0; i < 520; i++) addFood(Lab.rand(30, WW - 30), Lab.rand(30, WH - 30), Lab.chance(.12) ? 2 : 1).age = 1;
+  cam = { x: WW / 2, y: 330, z: S };
+}
+function mkOwner(i, kind) { return { id: i, hi: i % HUES.length, kind, name: "", pieces: [], dx: 0, dy: -1, mag: 0, think: Math.random() * .3, mood: "graze", tgt: null, tf: null, respawn: 0, shield: 0, dummy: false }; }
+function addPiece(o, x, y, m) { const p = { o, x, y, m, r: rad(m), vx: 0, vy: 0, fx: 0, fy: 0, mt: 0, pop: 0, sw: -1, dead: false, ph: Math.random() * TAU }; o.pieces.push(p); drops.push(p); return p; }
+function addFood(x, y, m) { const f = { x: clamp(x, 14, WW - 14), y: clamp(y, 14, WH - 14), m, vx: 0, vy: 0, age: 0, dead: false, ph: Math.random() * TAU }; food.push(f); return f; }
+function spawnBot(o) {
+  const heat = clamp(T / ROUND, 0, 1); let x = 0, y = 0;
+  for (let i = 0; i < 14; i++) { x = Lab.rand(80, WW - 80); y = Lab.rand(80, WH - 80); if (!me || !me.pieces.length || Lab.dist(x, y, me.pieces[0].x, me.pieces[0].y) > (T < 1 ? 520 : 380)) break; }
+  if (T > 1) o.kind = KINDS[Lab.chance(heat * .6) ? Lab.choose([1, 2, 2]) : Lab.randInt(0, 3)];
+  addPiece(o, x, y, T < 1 ? 11 + o.id * 2.4 + Lab.rand(-2, 4) : Lab.rand(14, 30 + heat * 90)); o.shield = 1.5; o.err = o.kind.err;
+}
+const mass = o => { let m = 0; for (const p of o.pieces) m += p.m; return m; };
+const biggest = o => { let b = null; for (const p of o.pieces) if (!b || p.m > b.m) b = p; return b; };
+function inFan(x, y, pad) { const dx = x - PIV.x, dy = y - PIV.y, d = Math.hypot(dx, dy); let a = Math.atan2(dy, dx); if (a < 0) a += TAU; return d > BIN - pad && d < BL + pad && a > A0 - pad / d && a < A1 + pad / d; }
+
+/* ------------------------------------------------------------------ simulation */
+function fling(o) {
+  if (!o || over || !o.pieces.length) return false; let did = false;
+  if (o === me) { if (flingCd > 0) return false; }
+  for (const p of o.pieces.slice()) {
+    if (p.m < 40 || o.pieces.length >= 4) continue;
+    p.m /= 2; p.r = rad(p.m); p.mt = 6; p.pop = 1;
+    const q = addPiece(o, p.x + o.dx * p.r, p.y + o.dy * p.r, p.m); q.fx = o.dx * 660; q.fy = o.dy * 660; q.mt = 6; q.pop = 1; did = true;
+  }
+  if (o === me) { if (did) { flingCd = .35; Lab.sfx("whoosh", { pitch: 1.2 }); Lab.sfx("splash", { vol: .4, pitch: 1.4 }); Lab.buzz(12); } else if (!demo) Lab.sfx("tick", { pitch: .6, vol: .5 }); }
+  return did;
+}
+function update(dt) {
+  if (!demo) T += dt; const heat = clamp(T / ROUND, 0, 1);
+  flingCd -= dt;
+  if (!demo && !downpour && T > ROUND * .5) { downpour = true; Lab.banner("DOWNPOUR", { color: "#bfe9ff", ms: 1300, y: .2 }); Lab.sfx("splash", { pitch: .6 }); }
+  // player intent
+  if (me && me.pieces.length) {
+    const ax = Lab.input.axisX(), ay = Lab.input.axisY();
+    if (ax || ay) { const m = Math.hypot(ax, ay); me.dx = ax / m; me.dy = ay / m; me.mag = 1; me.keys = true; mouseAim = null; }
+    else if (me.keys) { me.keys = false; me.mag = 0; }
+    else if (mouseAim && !touchMode) aimFromMouse();
+  }
+  for (const o of owners) {
+    o.shield -= dt;
+    if (!o.pieces.length) { if (o !== me && !o.dummy) { o.respawn -= dt; if (o.respawn <= 0) spawnBot(o); } continue; }
+    if (o.kind) { o.think -= dt; if (o.think <= 0) { think(o); o.think = o.kind.react * Lab.rand(.7, 1.3); } }
+  }
+  // movement, walls, vents, slow evaporation of the very big
+  for (const p of drops) {
+    const o = p.o, sp = speedOf(p.m) * (o.dummy ? 0 : o.mag);
+    p.vx = Lab.damp(p.vx, o.dx * sp, 6, dt); p.vy = Lab.damp(p.vy, o.dy * sp, 6, dt);
+    const k = Math.exp(-3.2 * dt); p.fx *= k; p.fy *= k;
+    p.x += (p.vx + p.fx) * dt; p.y += (p.vy + p.fy) * dt;
+    p.x = clamp(p.x, p.r * .8, WW - p.r * .8); p.y = clamp(p.y, p.r * .8, WH - p.r * .8);
+    p.mt -= dt; p.pop = Math.max(0, p.pop - dt * 3);
+    if (p.m > 60) p.m -= p.m * .004 * dt;
+    for (const v of VENTS) if (p.m > 12 && Lab.dist(p.x, p.y, v.x, v.y) < v.r) { p.m -= p.m * .11 * dt; if (Math.random() < dt * 5) fx.puff(p.x + Lab.rand(-p.r, p.r), p.y - p.r * .6, { n: 1, speed: 30, gravity: -70, life: .8, size: 5, color: "rgba(255,225,190,.3)" }); }
+    p.r = rad(p.m);
+  }
+  // pieces of one owner: push apart while fresh, drift together and merge later
+  for (const o of owners) {
+    const ps = o.pieces; if (ps.length < 2) continue;
+    for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+      const a = ps[i], b = ps[j]; if (a.dead || b.dead) continue; const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || .01, rr = a.r + b.r;
+      if (a.mt <= 0 && b.mt <= 0) {
+        if (d < Math.max(a.r, b.r)) { const big = a.m >= b.m ? a : b, sm = big === a ? b : a; big.x = (big.x * big.m + sm.x * sm.m) / (big.m + sm.m); big.y = (big.y * big.m + sm.y * sm.m) / (big.m + sm.m); big.m += sm.m; big.r = rad(big.m); big.pop = 1; sm.dead = true; if (o === me) Lab.sfx("bubble", { pitch: .8 }); }
+        else { const pull = 90 * dt / d; a.x += dx * pull; a.y += dy * pull; b.x -= dx * pull; b.y -= dy * pull; }
+      } else if (d < rr) { const ov = (rr - d) * .5 / d; a.x -= dx * ov; a.y -= dy * ov; b.x += dx * ov; b.y += dy * ov; }
+    }
+  }
+  // mist beads
+  for (const f of food) { f.age += dt; if (f.lock > 0) f.lock -= dt; if (f.vx || f.vy) { f.x = clamp(f.x + f.vx * dt, 14, WW - 14); f.y = clamp(f.y + f.vy * dt, 14, WH - 14); const k = Math.exp(-4 * dt); f.vx *= k; f.vy *= k; if (Math.abs(f.vx) + Math.abs(f.vy) < 4) f.vx = f.vy = 0; } }
+  for (const p of drops) {
+    if (p.dead || p.o.dummy) continue; const r2 = (p.r + 3) * (p.r + 3);
+    for (const f of food) { if (f.dead || (f.lock > 0 && f.from === p.o)) continue; const dx = f.x - p.x, dy = f.y - p.y; if (dx * dx + dy * dy < r2) { f.dead = true; gain(p, f.m, f.x, f.y, false); } }
+  }
+  // drops swallow drops: needs 25 % more water and to cover most of the victim
+  for (const a of drops) {
+    if (a.dead) continue;
+    for (const b of drops) {
+      if (b.dead || a === b || a.o === b.o || a.m < b.m * 1.25 || b.o.shield > 0 || a.o.dummy && b.o !== me) continue;
+      const dx = b.x - a.x, dy = b.y - a.y, lim = a.r - b.r * .3; if (dx * dx + dy * dy > lim * lim) continue;
+      b.dead = true; gain(a, b.m, b.x, b.y, true, b);
+    }
+  }
+  if (drops.some(p => p.dead)) { drops = drops.filter(p => !p.dead); for (const o of owners) { const n = o.pieces.length; if (!n) continue; o.pieces = o.pieces.filter(p => !p.dead); if (!o.pieces.length) gone(o); } }
+  if (food.some(f => f.dead)) food = food.filter(f => !f.dead);
+  // rain refills the pane (denser inside the wiper fan — the risky pasture)
+  const want = downpour ? 680 : 520, rate = downpour ? 26 : 14;
+  if (food.length < want && Math.random() < dt * rate) { let x, y; for (let i = 0; i < 3; i++) { x = Lab.rand(30, WW - 30); y = Lab.rand(30, WH - 30); if (inFan(x, y, 0)) break; } const f = addFood(x, y, Lab.chance(.15) ? 2 : 1); fx.ring(f.x, f.y, { r0: 2, r1: 16, color: "rgba(190,230,255,.6)", width: 2, life: .35 }); }
+  stepWiper(dt, heat);
+  if (streakT > 0) { streakT -= dt; if (streakT <= 0) streak = 0; }
+  if (me) {
+    if (!me.pieces.length && lives > 0 && !over) { respawnT -= dt; if (respawnT <= 0) respawnMe(); }
+    if (me.pieces.length) peak = Math.max(peak, mass(me));
+    if (!over && T >= ROUND) finish(true);
+  }
+}
+function aimFromMouse() { const b = centre(me); if (!b) return; const wx = (mouseAim.x - Lab.W / 2) / cam.z + cam.x, wy = (mouseAim.y - Lab.play.y - Lab.play.h / 2) / cam.z + cam.y, dx = wx - b.x, dy = wy - b.y, d = Math.hypot(dx, dy); if (d > 4) { me.dx = dx / d; me.dy = dy / d; } me.mag = clamp(d / 50, 0, 1); }
+function centre(o) { let x = 0, y = 0, m = 0; for (const p of o.pieces) { x += p.x * p.m; y += p.y * p.m; m += p.m; } return m ? { x: x / m, y: y / m, m } : null; }
+function gain(p, m, x, y, wasDrop, victim) {
+  const mine = p.o === me; p.m += mine ? m : m * .7; p.r = rad(p.m); if (wasDrop) p.pop = 1;
+  if (!mine) { if (wasDrop && victim.o === me) { const s = w2s(x, y); p.o.ate = (p.o.ate || 0) + 1; me.killer = p.o.name; } return; }
+  score += Math.round(m); Lab.setScore(score);
+  if (!wasDrop) { streak = Math.min(streak + 1, 12); streakT = .6; Lab.sfx("bubble", { pitch: 1.25 + streak * .06, vol: .3 }); return; }
+  eaten++; Lab.bumpScore(); Lab.sfx("bubble", { pitch: clamp(1.5 - victim.r / 70, .45, 1.5) }); Lab.sfx("pop", { pitch: .8, vol: .6 }); Lab.buzz(14);
+  fx.text(x, y - p.r - 6, "+" + Math.round(m), { color: "#d6f4ff", size: 16 + Math.min(14, m / 12) }); fx.burst(x, y, { n: 8 + Math.min(14, m / 8), colors: ["#bfe9ff", "#fff"], speed: 150, life: .5, size: 3, gravity: 120 });
+  if (m > 40) { Lab.hitstop(.04); Lab.shake(4, .15); }
+}
+function gone(o) {
+  o.tgt = null;
+  if (o !== me) { o.respawn = Lab.rand(2, 4); return; }
+  lives--; Lab.shake(12, .4); Lab.buzz(50); Lab.sfx("hurt"); Lab.flash("#7fd6ff", .25, .35); stick = null; me.mag = 0;
+  if (lives <= 0) finish(false); else { respawnT = 1.3; Lab.toast("Swallowed by " + (me.killer || "a bigger drop") + " — " + lives + (lives === 1 ? " drop left" : " drops left"), 1400, { y: .3 }); }
+}
+function respawnMe() {
+  let bx = WW / 2, by = WH / 2, bd = -1;
+  for (let i = 0; i < 14; i++) { const x = Lab.rand(120, WW - 120), y = Lab.rand(120, WH - 120); let d = 1e9; for (const p of drops) if (p.m > M0) d = Math.min(d, Lab.dist(x, y, p.x, p.y) - p.r); for (const v of VENTS) d = Math.min(d, Lab.dist(x, y, v.x, v.y) - v.r); if (d > bd) { bd = d; bx = x; by = y; } }
+  addPiece(me, bx, by, M0 + Math.min(40, T * .25)).pop = 1; me.shield = 3; cam.x = bx; cam.y = by; Lab.sfx("drop");
+}
+function stepWiper(dt, heat) {
+  const w = wiper;
+  if (w.state === "idle") { w.t -= dt; if (w.t <= 0) { w.state = "warn"; w.t = 2.4; w.beep = 0; } }
+  else if (w.state === "warn") { w.t -= dt; w.beep -= dt; if (w.beep <= 0 && !demo) { w.beep = .6; Lab.sfx("warn", { pitch: .8, vol: .7 }); } if (w.t <= 0) { w.state = "sweep"; w.u = 0; w.id++; w.from = w.dir > 0 ? A0 : A1; w.to = w.dir > 0 ? A1 : A0; if (!demo) Lab.audio.tone({ f: 240, f2: 520, type: "sawtooth", dur: 1.9, vol: .05, lp: 900 }); } }
+  else {
+    const prev = w.a; w.u = Math.min(1, w.u + dt / 2.2); w.a = lerp(w.from, w.to, Lab.ease.inOutQuad(w.u));
+    const lo = Math.min(prev, w.a), hi = Math.max(prev, w.a), sgn = w.dir;
+    for (const p of drops.slice()) {
+      if (p.sw === w.id) continue; const dx = p.x - PIV.x, dy = p.y - PIV.y, d = Math.hypot(dx, dy); let a = Math.atan2(dy, dx); if (a < 0) a += TAU; const pad = (p.r + 10) / d;
+      if (d < BIN - p.r || d > BL + p.r || a < lo - pad || a > hi + pad) continue;
+      p.sw = w.id; const tx = -dy / d * sgn, ty = dx / d * sgn; p.fx += tx * 260; p.fy += ty * 260;
+      if (p.m < 16 || p.o.dummy) continue;
+      const lost = p.m * .4, n = clamp(Math.round(lost / 4), 3, 12); p.m -= lost; p.r = rad(p.m); p.pop = 1;
+      for (let i = 0; i < n; i++) { const f = addFood(p.x + tx * Lab.rand(20, 60) + Lab.rand(-20, 20), p.y + ty * Lab.rand(20, 60) + Lab.rand(-20, 20), Math.max(1, Math.round(lost * .8 / n))); f.vx = tx * Lab.rand(300, 900); f.vy = ty * Lab.rand(300, 900); f.age = 1; f.from = p.o; f.lock = 1.6; }
+      if (p.o === me) { smears++; Lab.shake(10, .35); Lab.sfx("splash"); Lab.buzz(40); fx.text(p.x, p.y - p.r - 10, "SMEARED −40%", { color: "#ffb86b", size: 20 }); }
+    }
+    for (const f of food) { const dx = f.x - PIV.x, dy = f.y - PIV.y, d = Math.hypot(dx, dy); let a = Math.atan2(dy, dx); if (a < 0) a += TAU; if (d < BIN || d > BL || a < lo - .01 || a > hi + .01) continue; const v = Lab.rand(260, 560); f.vx = -dy / d * sgn * v; f.vy = dx / d * sgn * v; }
+    if (w.u >= 1) { w.state = "idle"; w.dir *= -1; w.t = lerp(22, 13, heat) + Lab.rand(-2, 2); }
+  }
+}
+/* bot brain: flee what looks bigger, chase what looks smaller (through each bot's own misjudgement), otherwise graze */
+function think(o) {
+  const p = biggest(o), K = o.kind; let fxv = 0, fyv = 0, flee = false, prey = null, ps = 0;
+  for (const q of drops) {
+    if (q.o === o) continue; const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1, gap = d - q.r - p.r;
+    const seen = q.m * (1 + o.err * Math.sin(o.id * 7.3 + q.o.id * 3.1 + Math.floor(T / 3)));
+    if (seen > p.m * 1.2 && gap < K.fear && q.o.shield <= 0) { const w = 1 / (gap + 30); fxv -= dx / d * w; fyv -= dy / d * w; flee = true; }
+    else if (seen * 1.3 < p.m && q.m > p.m * .07 && gap < K.sight && q.o.shield <= 0 && (q.o !== me || T > 12)) { const sc = q.m / (gap + 80); if (sc > ps) { ps = sc; prey = q; } }
+  }
+  const w = wiper; o.mood = "graze"; o.mag = 1; o.tgt = null;
+  if (K.wary && w.state !== "idle" && p.m > 50 && inFan(p.x, p.y, p.r + 40)) { const tx = p.x < WW / 2 ? 60 : WW - 60, ty = p.y < 420 ? 60 : WH - 60; aim(o, tx - p.x, ty - p.y); o.mood = "flee"; return; }
+  if (flee) { fxv += (WW / 2 - p.x) / WW * .004; fyv += (WH / 2 - p.y) / WH * .004; aim(o, fxv, fyv); o.mood = "flee"; return; }
+  if (prey) {
+    const dx = prey.x + prey.vx * .3 - p.x, dy = prey.y + prey.vy * .3 - p.y, d = Math.hypot(dx, dy); aim(o, dx, dy); o.mood = "hunt"; o.tgt = prey;
+    if (K.fling && p.m > 70 && prey.m * 2.7 < p.m && d < 250 && d > p.r + 30 && o.pieces.length < 2 && Lab.chance(.4)) fling(o);
+  } else {
+    if (!o.tf || o.tf.dead) { o.tf = null; let bd = 1e9; for (const f of food) { const d = (Math.abs(f.x - p.x) + Math.abs(f.y - p.y)) / f.m + (K.wary && wiper.state !== 'idle' && inFan(f.x, f.y, 0) ? 600 : 0); if (d < bd) { bd = d; o.tf = f; } } }
+    if (o.tf) aim(o, o.tf.x - p.x, o.tf.y - p.y); if (K.id === "drifter") o.mag = .7;
+  }
+  if (p.m > 30) for (const v of VENTS) { const dx = p.x - v.x, dy = p.y - v.y, d = Math.hypot(dx, dy); if (d < v.r + p.r + 50) { o.dx += dx / d * 1.2; o.dy += dy / d * 1.2; const m = Math.hypot(o.dx, o.dy) || 1; o.dx /= m; o.dy /= m; } }
+}
+function aim(o, x, y) { const m = Math.hypot(x, y); if (m > 1e-9) { o.dx = x / m; o.dy = y / m; } }
+function ranking() { return owners.filter(o => o.pieces.length && !o.dummy).map(o => ({ o, m: mass(o) })).sort((a, b) => b.m - a.m); }
+function finish(survived) {
+  over = true; fx.clear(); let r = 0, bonus = 0;
+  if (survived) { r = ranking().findIndex(e => e.o === me) + 1 || 10; bonus = [500, 250, 100][r - 1] || 0; score += bonus; Lab.setScore(score); }
+  const stats = [["Biggest", Math.round(peak)], ["Drops swallowed", eaten], ["Smeared", smears + "×"]];
+  if (survived) Lab.gameover({ title: r === 1 ? "The big drip!" : "Rain's over — #" + r, message: bonus ? "Podium bonus +" + bonus : "Finish in the top three for a bonus.", score, stats, win: r === 1, neutral: r !== 1 });
+  else Lab.gameover({ title: "Dried up", message: "Swallowed by " + (me.killer || "a bigger drop") + ".", score, stats });
+}
+
+/* ------------------------------------------------------------------ rendering */
+function w2s(x, y) { return { x: (x - cam.x) * cam.z + Lab.W / 2, y: (y - cam.y) * cam.z + Lab.play.y + Lab.play.h / 2 }; }
+function bokeh() {
+  const W = Lab.W + 80, H = Lab.H + 80;
+  return Lab.sprite("bokeh" + W + "x" + H, W, H, (g) => {
+    draw.vgrad(g, 0, 0, W, H, ["#0a1222", "#16233f", "#2a2140"]); const rnd = Lab.rng(21), cols = ["#ffb86b", "#ff6b6b", "#7fd6ff", "#ffe9a8", "#b48cff", "#ff9a4d"];
+    for (let i = 0; i < 46; i++) { const x = rnd() * W, y = rnd() * H, r = 18 + rnd() * 58, c = cols[(rnd() * cols.length) | 0]; g.globalAlpha = .05 + rnd() * .09; g.fillStyle = c; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); g.globalAlpha *= .9; g.strokeStyle = c; g.lineWidth = 1.5; g.stroke(); }
+    g.globalAlpha = 1;
+  });
+}
+function fogTile() {
+  return Lab.sprite("fog", 256, 256, (g) => { const rnd = Lab.rng(4); for (let i = 0; i < 120; i++) { g.fillStyle = `rgba(200,225,255,${.04 + rnd() * .09})`; g.beginPath(); g.arc(rnd() * 256, rnd() * 256, .8 + rnd() * 2.2, 0, TAU); g.fill(); } g.strokeStyle = "rgba(200,225,255,.05)"; g.lineWidth = 2; for (let i = 0; i < 5; i++) { const x = rnd() * 256, y = rnd() * 200; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 3, y + 30 + rnd() * 30); g.stroke(); } });
+}
+function dropSprite(i) {
+  return Lab.sprite("drop" + i, 160, 160, (g) => {
+    const cx = 80, r = 64, h = HUES[i], me0 = i === 0;
+    let gr = g.createRadialGradient(cx, cx - r * .2, r * .1, cx, cx, r); gr.addColorStop(0, `hsla(${h},60%,${me0 ? 70 : 58}%,${me0 ? .34 : .2})`); gr.addColorStop(.72, `hsla(${h},65%,55%,.4)`); gr.addColorStop(1, `hsla(${h},85%,80%,.85)`);
+    g.fillStyle = gr; g.beginPath(); g.arc(cx, cx, r, 0, TAU); g.fill(); g.save(); g.clip();
+    gr = g.createLinearGradient(0, cx - r, 0, cx + r); gr.addColorStop(0, "rgba(4,8,22,.5)"); gr.addColorStop(.55, "rgba(4,8,22,0)"); g.fillStyle = gr; g.fillRect(0, 0, 160, 160);
+    gr = g.createRadialGradient(cx, cx + r * .62, 2, cx, cx + r * .62, r * .7); gr.addColorStop(0, `hsla(${h},95%,88%,.6)`); gr.addColorStop(1, `hsla(${h},95%,88%,0)`); g.fillStyle = gr; g.fillRect(0, 0, 160, 160); g.restore();
+    g.fillStyle = "rgba(255,255,255,.92)"; g.beginPath(); g.ellipse(cx - r * .4, cx - r * .46, r * .2, r * .11, -.6, 0, TAU); g.fill(); g.beginPath(); g.arc(cx - r * .62, cx - r * .2, r * .05, 0, TAU); g.fill();
+    g.strokeStyle = `hsla(${h},90%,${me0 ? 94 : 86}%,${me0 ? 1 : .75})`; g.lineWidth = me0 ? 4 : 2.5; g.beginPath(); g.arc(cx, cx, r - 2, 0, TAU); g.stroke();
+  });
+}
+function beadSprite() { return Lab.sprite("bead", 20, 20, (g) => { const gr = g.createRadialGradient(10, 12, 1, 10, 10, 8); gr.addColorStop(0, "rgba(220,240,255,.75)"); gr.addColorStop(1, "rgba(150,200,240,.3)"); g.fillStyle = gr; g.beginPath(); g.arc(10, 10, 7.5, 0, TAU); g.fill(); g.strokeStyle = "rgba(225,242,255,.75)"; g.lineWidth = 1.2; g.stroke(); g.fillStyle = "#fff"; g.beginPath(); g.arc(7.5, 7.2, 1.8, 0, TAU); g.fill(); }); }
+function drawDrop(c, p, t, ref) {
+  const o = p.o, sp = dropSprite(o.hi), spd = Math.hypot(p.vx + p.fx, p.vy + p.fy), st = clamp(spd / 2400, 0, .09), wob = Math.sin(t * 3 + p.ph) * .025 + (p.pop > 0 ? Math.sin(p.pop * 9) * .12 * p.pop : 0), k = p.r / 64;
+  c.save(); c.translate(p.x, p.y);
+  if (o.shield > 0 && Math.sin(t * 22) > 0) c.globalAlpha = .5;
+  const va = Math.atan2(p.vy + p.fy, p.vx + p.fx); c.save(); c.rotate(va); c.scale((1 + st + wob) * k, (1 - st - wob) * k); c.rotate(-va); c.drawImage(sp, -80, -80, 160, 160); c.restore();
+  // how it relates to you: dashed spinning ring = it can swallow you, soft ring = you can swallow it
+  if (ref && o !== me) {
+    if (p.m > ref * 1.25) { c.strokeStyle = "rgba(255,120,90,.95)"; c.lineWidth = 3 / cam.z; c.setLineDash([10 / cam.z, 8 / cam.z]); c.lineDashOffset = -t * 30; c.beginPath(); c.arc(0, 0, p.r + 6 / cam.z, 0, TAU); c.stroke(); c.setLineDash([]); }
+    else if (p.m * 1.25 < ref) { c.strokeStyle = "rgba(160,255,214,.7)"; c.lineWidth = 2 / cam.z; c.beginPath(); c.arc(0, 0, p.r + 4 / cam.z, 0, TAU); c.stroke(); }
+  }
+  if (p.r * cam.z > 8) {                           // face: looks where it is going; mood shows intent
+    const e = p.r * .11, lx = o.dx * e * .6, ly = o.dy * e * .6, mood = o === me ? "me" : o.mood, ey = -p.r * .08, wide = mood === "flee" ? 1.5 : 1;
+    for (const s of [-1, 1]) { c.fillStyle = "rgba(255,255,255,.92)"; c.beginPath(); c.arc(s * p.r * .3, ey, e * 1.5 * wide, 0, TAU); c.fill(); c.fillStyle = "#0b1424"; c.beginPath(); c.arc(s * p.r * .3 + lx, ey + ly, e * .85, 0, TAU); c.fill(); }
+    c.strokeStyle = "#0b1424"; c.fillStyle = "#0b1424"; c.lineWidth = Math.max(1.2, p.r * .05); c.lineCap = "round"; c.beginPath();
+    if (mood === "hunt") { c.arc(0, p.r * .34, p.r * .16, 0, TAU); c.fill(); c.beginPath(); for (const s of [-1, 1]) { c.moveTo(s * p.r * .12, ey - e * 2); c.lineTo(s * p.r * .46, ey - e * 3.2); } c.stroke(); }
+    else if (mood === "flee") { c.moveTo(-p.r * .18, p.r * .36); c.quadraticCurveTo(-p.r * .09, p.r * .26, 0, p.r * .36); c.quadraticCurveTo(p.r * .09, p.r * .46, p.r * .18, p.r * .36); c.stroke(); }
+    else { c.arc(0, p.r * .22, p.r * .16, .15 * Math.PI, .85 * Math.PI); c.stroke(); }
+  }
+  c.restore();
+  if (o !== me && !demo && p.r * cam.z > 15 && p === o.pieces[0]) draw.text(c, o.name, p.x, p.y + p.r + 11 / cam.z, { size: 11 / cam.z, color: "rgba(220,238,255,.85)", stroke: "rgba(5,10,25,.6)", strokeW: 3 / cam.z });
+}
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, H = Lab.H, cx = W / 2, cy = Lab.play.y + Lab.play.h / 2, z = cam.z, w = wiper;
+  const bg = bokeh(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  c.save(); c.translate(cx, cy); c.scale(z, z); c.translate(-cam.x, -cam.y);
+  const vx0 = cam.x - cx / z - 20, vx1 = cam.x + (W - cx) / z + 20, vy0 = cam.y - cy / z - 20, vy1 = cam.y + (H - cy) / z + 20;
+  // condensation on the glass + the wiper's fan
+  const fog = fogTile(); for (let x = Math.floor(Math.max(0, vx0) / 256) * 256; x < Math.min(WW, vx1); x += 256) for (let y = Math.floor(Math.max(0, vy0) / 256) * 256; y < Math.min(WH, vy1); y += 256) c.drawImage(fog, x, y, 256, 256);
+  c.save(); c.beginPath(); c.rect(0, 0, WW, WH); c.clip();
+  const hot = w.state !== "idle", pulse = .5 + .5 * Math.sin(t * 10);
+  c.beginPath(); c.arc(PIV.x, PIV.y, BL, A0, A1); c.arc(PIV.x, PIV.y, BIN, A1, A0, true); c.closePath();
+  c.fillStyle = hot ? `rgba(255,150,90,${.07 + pulse * .07})` : "rgba(190,225,255,.035)"; c.fill();
+  c.strokeStyle = hot ? `rgba(255,170,110,${.5 + pulse * .4})` : "rgba(190,225,255,.16)"; c.lineWidth = hot ? 5 : 3; c.setLineDash([18, 16]); c.stroke(); c.setLineDash([]);
+  // vents
+  for (const v of VENTS) { draw.glow(c, v.x, v.y, v.r * 1.25, "#ff9a4d", .3); c.strokeStyle = "rgba(255,190,130,.4)"; c.lineWidth = 3; c.setLineDash([6, 12]); c.lineDashOffset = t * 14; c.beginPath(); c.arc(v.x, v.y, v.r, 0, TAU); c.stroke(); c.setLineDash([]);
+    c.strokeStyle = "rgba(255,220,180,.35)"; c.lineWidth = 4; c.lineCap = "round"; for (let i = -1; i <= 1; i++) { const x = v.x + i * 44, y = v.y + 20 - ((t * 30 + i * 17) % 50); c.beginPath(); c.moveTo(x, y + 26); c.quadraticCurveTo(x + 12, y + 13, x, y); c.quadraticCurveTo(x - 12, y - 13, x, y - 26); c.stroke(); } }
+  // beads
+  const bead = beadSprite();
+  for (const f of food) { if (f.x < vx0 || f.x > vx1 || f.y < vy0 || f.y > vy1) continue; const s = (f.m > 1 ? 7 + Math.min(8, f.m) : 5.5) * Math.min(1, f.age * 4 + .3); c.drawImage(bead, f.x - s, f.y - s, s * 2, s * 2); }
+  // drops, small first so big ones visibly loom over prey
+  const ref = me && me.pieces.length ? biggest(me).m : 0, list = drops.filter(p => p.x + p.r > vx0 && p.x - p.r < vx1 && p.y + p.r > vy0 && p.y - p.r < vy1).sort((a, b) => a.m - b.m);
+  for (const p of list) drawDrop(c, p, t, ref);
+  // wiper blade
+  if (w.state !== "idle") {
+    const a = w.state === "warn" ? (w.dir > 0 ? A0 : A1) + Math.sin(t * 40) * .006 : w.a, ca = Math.cos(a), sa = Math.sin(a);
+    if (w.state === "sweep") { c.fillStyle = "rgba(200,230,255,.07)"; c.beginPath(); c.arc(PIV.x, PIV.y, BL, a, a - w.dir * .22, w.dir > 0); c.arc(PIV.x, PIV.y, BIN, a - w.dir * .22, a, w.dir < 0); c.fill(); }
+    c.lineCap = "round"; c.strokeStyle = "#05080f"; c.lineWidth = 26; c.beginPath(); c.moveTo(PIV.x + ca * BIN, PIV.y + sa * BIN); c.lineTo(PIV.x + ca * BL, PIV.y + sa * BL); c.stroke();
+    c.strokeStyle = "#3a4763"; c.lineWidth = 7; c.beginPath(); c.moveTo(PIV.x + ca * (BIN + 10), PIV.y + sa * (BIN + 10)); c.lineTo(PIV.x + ca * (BL - 10), PIV.y + sa * (BL - 10)); c.stroke();
+  }
+  fx.draw(c);
+  c.restore();
+  // window frame
+  c.fillStyle = "#070b14"; c.beginPath(); c.rect(vx0 - 400, vy0 - 400, vx1 - vx0 + 800, vy1 - vy0 + 800); c.rect(0, 0, WW, WH); c.fill("evenodd");
+  c.strokeStyle = "#2b3550"; c.lineWidth = 10; c.strokeRect(-5, -5, WW + 10, WH + 10);
+  c.restore();
+  draw.vignette(c, .3);
+  if (!demo) hud(c, t, ref);
+}
+function hud(c, t, ref) {
+  const W = Lab.W, H = Lab.H, py = Lab.play.y, left = Lab.play.x + 10, right = Lab.play.x + Lab.play.w - 10, w = wiper;
+  // threats / meals beyond the edge of the screen
+  if (ref) for (const o of owners) {
+    if (o === me || !o.pieces.length) continue; const p = biggest(o), s = w2s(p.x, p.y), R = p.r * cam.z; if (s.x > -R && s.x < W + R && s.y > py - R && s.y < H + R) continue;
+    const threat = p.m > ref * 1.25, meal = p.m * 1.25 < ref && p.m > ref * .2, d = Lab.dist(p.x, p.y, cam.x, cam.y); if (!(threat || meal) || d > 1000) continue;
+    const ex = clamp(s.x, 20, W - 20), ey = clamp(s.y, py + 50, H - 26), a = Math.atan2(s.y - ey, s.x - ex), k = clamp(1.3 - d / 1000, .5, 1);
+    c.save(); c.translate(ex, ey); c.rotate(a); c.globalAlpha = k;
+    if (threat) { c.fillStyle = "#ff7a5c"; c.beginPath(); c.moveTo(13, 0); c.lineTo(-9, -11); c.lineTo(-4, 0); c.lineTo(-9, 11); c.closePath(); c.fill(); c.strokeStyle = "#fff"; c.lineWidth = 1.5; c.stroke(); }
+    else draw.circle(c, 0, 0, 5, "rgba(160,255,214,.85)");
+    c.restore();
+  }
+  const rem = Math.max(0, ROUND - T), urgent = rem < 20 && Math.sin(t * 8) > 0, tw = 78, tx = W / 2 - tw / 2;
+  draw.rect(c, tx, py + 6, tw, 26, 13, urgent ? "#ff7a5c" : "rgba(10,18,34,.72)", "rgba(127,214,255,.35)", 1.5);
+  draw.text(c, Math.floor(rem / 60) + ":" + String(Math.floor(rem % 60)).padStart(2, "0"), W / 2, py + 20, { size: 15, color: "#eaf6ff" });
+  // lives + mass
+  draw.rect(c, left, py + 6, 104, 26, 13, "rgba(10,18,34,.72)", "rgba(127,214,255,.35)", 1.5);
+  for (let i = 0; i < 3; i++) { const x = left + 14 + i * 14; c.globalAlpha = i < lives ? 1 : .22; c.fillStyle = "#7fd6ff"; c.beginPath(); c.moveTo(x, py + 12); c.quadraticCurveTo(x + 7, py + 22, x, py + 26); c.quadraticCurveTo(x - 7, py + 22, x, py + 12); c.fill(); } c.globalAlpha = 1;
+  draw.text(c, String(Math.round(mass(me))), left + 96, py + 20, { size: 14, color: "#eaf6ff", align: "right" });
+  // ranking
+  const rk = ranking(), mine = rk.findIndex(e => e.o === me), rows = rk.slice(0, 3); if (mine > 2) rows.push(rk[mine]);
+  const lw = 112, lx = right - lw; draw.rect(c, lx, py + 6, lw, rows.length * 17 + 10, 12, "rgba(10,18,34,.72)", "rgba(127,214,255,.25)", 1.5);
+  rows.forEach((e, i) => { const y = py + 20 + i * 17, you = e.o === me, col = you ? "#7fd6ff" : "#dbe8f7"; draw.circle(c, lx + 13, y, 4.5, `hsl(${HUES[e.o.hi]},75%,68%)`); draw.text(c, ((you ? mine : i) + 1) + ". " + e.o.name, lx + 22, y + .5, { size: 11.5, color: col, align: "left", weight: you ? 800 : 600 }); draw.text(c, String(Math.round(e.m)), lx + lw - 9, y + .5, { size: 11.5, color: col, align: "right" }); });
+  // wiper countdown
+  if (w.state === "warn") { const u = 1 - w.t / 2.4, bw = Math.min(220, W - 60); const wy = py + (W < 560 ? 84 : 44); draw.rect(c, W / 2 - bw / 2, wy, bw, 30, 15, "rgba(40,16,10,.8)", "#ff9a5c", 2); draw.rect(c, W / 2 - bw / 2 + 4, wy + 4, (bw - 8) * u, 22, 11, "rgba(255,122,92,.55)"); draw.text(c, "WIPER " + (w.dir > 0 ? "→" : "←") + (inFan(cam.x, cam.y, 0) ? "  GET OUT" : "  you're clear"), W / 2, wy + 16, { size: 13, color: "#fff" }); }
+  // fling button + stick
+  const br = 30, bx = right - br - 4, by = H - Lab.safe.bottom - br - 40, can = me.pieces.some(p => p.m >= 40) && me.pieces.length < 4;
+  draw.circle(c, bx, by, br, can ? "rgba(127,214,255,.2)" : "rgba(127,214,255,.06)", can ? "rgba(127,214,255,.9)" : "rgba(127,214,255,.3)", 2.5);
+  draw.circle(c, bx - 7, by + 3, 9, null, can ? "#eaf6ff" : "rgba(234,246,255,.35)", 2.5); draw.circle(c, bx + 10, by - 6, 6, can ? "#eaf6ff" : "rgba(234,246,255,.35)");
+  draw.text(c, can ? "FLING" : "40+", bx, by + br + 10, { size: 10, color: "rgba(234,246,255,.8)" });
+  if (stick) { draw.circle(c, stick.ox, stick.oy, 44, "rgba(127,214,255,.08)", "rgba(127,214,255,.5)", 2.5); const vx = stick.x - stick.ox, vy = stick.y - stick.oy, m = Math.hypot(vx, vy) || 1, q = Math.min(m, 44); draw.circle(c, stick.ox + vx / m * q, stick.oy + vy / m * q, 16, "rgba(234,246,255,.85)"); }
+  if (!me.pieces.length && lives > 0) draw.text(c, "condensing…", W / 2, Lab.play.y + Lab.play.h / 2, { size: 18, color: "#bfe9ff" });
+}
+function follow(o, dt, zmul) {
+  const b = o && centre(o); if (!b) return; let spread = 0; for (const p of o.pieces) spread = Math.max(spread, Lab.dist(p.x, p.y, b.x, b.y) + p.r);
+  cam.x = Lab.damp(cam.x, b.x, 5, dt); cam.y = Lab.damp(cam.y, b.y, 5, dt);
+  cam.z = Lab.damp(cam.z, S * clamp(1.06 - Math.max(rad(b.m), spread * .7) / 330, .4, 1) * (zmul || 1), 1.6, dt);
+}
+function frame(dt, t) {
+  update(dt); if (over) return;
+  follow(me, dt);
+  let danger = 0; if (me.pieces.length) { const b = biggest(me); for (const p of drops) if (p.o !== me && p.m > b.m * 1.25) danger = Math.max(danger, 1 - (Lab.dist(p.x, p.y, b.x, b.y) - p.r) / 320); }
+  rainL.set({ vol: downpour ? .05 : .025, f: downpour ? 3200 : 2600 });
+  Lab.music.intensity(clamp(.2 + T / ROUND * .35 + danger * .35 + (wiper.state !== "idle" ? .2 : 0), 0, 1));
+  render(t);
+}
+function attract(dt, t) {
+  if (!demo || !owners) { demo = true; reset(); wiper.t = 4; }
+  update(dt); let b = null, bm = 0; for (const o of owners) { const m = mass(o); if (m > bm) { bm = m; b = o; } }
+  follow(b, dt * .6, .8); render(t);
+}
+Lab.boot();
+})();
+</script></body></html>

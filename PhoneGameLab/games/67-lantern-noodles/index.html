@@ -1,0 +1,293 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Lantern Noodles</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* LANTERN NOODLES — a night-market noodle cart for hungry little spirits. Read the order bubble, tap the trays to build
+ * the bowl (broth, noodles or rice, toppings — any order), then tap the bowl or the customer to hand it over.
+ * Pressure: every customer has a patience bar; a walk-out costs a lantern (3 = cart closed). Quick service tips more.
+ * Depth:    a combo that grows with every clean serve (+10 % each, broken by binning a bowl or losing a customer), and
+ *           REGULARS: from day 2 one straw-hatted regular comes twice a day — the second time they just say "the
+ *           usual". Remember it for a ×2 payout, or tap the bubble to peek at the cost of their patience.
+ * Days:     each day adds a recipe part (mushroom, red broth, rice, chili, swirl cake), more customers and less
+ *           patience, and ends with a receipt. A spotless day relights one lantern.                                  */
+Lab.init({
+  title: "Lantern Noodles", tagline: "Build bowls fast. Remember your regulars.", category: "Arcade & Action",
+  howto: ["Tap trays to fill the bowl as ordered", "Tap the bowl to serve before patience runs out", "Remember a regular's \"usual\" for double pay"],
+  theme: { bg: "#151a3d", bg2: "#3a2752", accent: "#ff8a3d", accent2: "#ffd166" },
+  orient: "any", music: { style: "funk", key: "G", bpm: 96, vol: .3 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, INK = "#2a1c2e";
+const ING = [{ n: "Gold broth", day: 1, grp: 1 }, { n: "Red broth", day: 3, grp: 1 }, { n: "Noodles", day: 1, grp: 2 }, { n: "Rice", day: 4, grp: 2 },
+  { n: "Egg", day: 1 }, { n: "Scallion", day: 1 }, { n: "Mushroom", day: 2 }, { n: "Chili", day: 5 }, { n: "Swirl cake", day: 6 }];
+const SKIN = ["#8fd3c8", "#f6a6b8", "#b9a4f0", "#ffd27a", "#9fd08a", "#f3ead8"];
+let wide, area, bins, bowlP, trashP, seatW, headR, bub, counterY, day, phase, tallyT, seats, queue, dayCust, spawned, spawnT, bowl, bowlIn, bowlPop, flyer, coins, hearts, combo, bestCombo, served, ds, regOrder, regReturn, trashSq, ended, lanternLit, usualSeen;
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.2; bins = [];
+  if (wide) {
+    const bs = Math.min((P.h - 20) / 3, P.w * .42 / 3, 104), x0 = P.x + P.w - 12 - bs * 3, y0 = P.y + (P.h - bs * 3) / 2;
+    for (let i = 0; i < 9; i++) bins.push({ x: x0 + (i % 3) * bs, y: y0 + Math.floor(i / 3) * bs, w: bs, h: bs });
+    area = { x: P.x + 6, y: P.y + 2, w: x0 - P.x - 18, h: P.h - 6 };
+  } else {
+    const bs = Math.min((P.w - 12) / 5, P.h * .125, 98), y0 = P.y + P.h - bs * 2 - 12;
+    for (let i = 0; i < 4; i++) bins.push({ x: P.x + P.w / 2 + (i - 2) * bs, y: y0, w: bs, h: bs });
+    for (let i = 0; i < 5; i++) bins.push({ x: P.x + P.w / 2 + (i - 2.5) * bs, y: y0 + bs, w: bs, h: bs });
+    area = { x: P.x, y: P.y + 2, w: P.w, h: y0 - P.y - 10 };
+  }
+  seatW = area.w / 3; headR = clamp(Math.min(seatW * .3, area.h * .085), 20, 44);
+  bub = { w: Math.min(seatW - 10, 150), h: clamp(area.h * .2, 60, 100), y: area.y + 28 };
+  const headY = bub.y + bub.h + 12 + headR; counterY = headY + headR * .8;
+  const room = area.y + area.h - counterY, R = Math.min(area.w * .27, room * .37, 124);
+  bowlP = { x: area.x + area.w / 2, y: counterY + room * .46, r: R };
+  trashP = { x: area.x + area.w - Math.max(36, R * .5), y: bowlP.y + R * .3, r: clamp(R * .3, 22, 34) };
+  Lab.sprite.clear("ln:");
+}
+Lab.onResize(() => { if (seats) layout(); });
+const seatX = k => area.x + seatW * (k + .5), headY = () => counterY - headR * .8;
+const unlocked = id => ING[id].day <= day, same = (a, b) => a.length === b.length && a.slice().sort().join() === b.join();
+
+function makeOrder(d, minTop) {
+  const un = id => ING[id].day <= d, tops = Lab.shuffle([4, 5, 6, 7, 8].filter(un));
+  const lo = Math.max(minTop || 0, d >= 6 ? 2 : d >= 2 ? 1 : 0), hi = Math.min(tops.length, d >= 4 ? 3 : d >= 2 ? 2 : 1);
+  return [un(1) && Lab.chance(.45) ? 1 : 0, un(3) && Lab.chance(.4) ? 3 : 2, ...tops.slice(0, Lab.randInt(lo, hi))].sort();
+}
+function startDay(d) {
+  day = d; phase = "serve"; dayCust = Math.min(21, 5 + d * 2); queue = dayCust; spawned = 0; spawnT = .6; seats = [null, null, null]; bowl = []; bowlIn = 0; flyer = null;
+  ds = { served: 0, lost: 0, tips: 0, earned: 0, binned: 0, remembered: 0 }; regOrder = makeOrder(d, 1); regReturn = 4 + Lab.randInt(0, 2);
+  Lab.banner("Day " + d, { color: "#ffd166", ms: 1100, y: .34 }); Lab.sfx("chime", { pitch: .9 });
+  const nu = ING.filter(g => g.day === d && d > 1).map(g => g.n); if (nu.length) Lab.toast("New: " + nu.join(" + "), 1800, { y: .46 });
+}
+function start() {
+  layout(); coins = 0; hearts = 3; combo = 0; bestCombo = 0; served = 0; trashSq = 0; bowlPop = 0; ended = false; usualSeen = false; lanternLit = [1, 1, 1];
+  for (const b of bins) { b.sq = 0; b.wig = 0; }
+  Lab.setScore(0); startDay(1);
+  Lab.input.onDown = [(x, y) => {
+    if (ended) return;
+    if (phase === "tally") { if (tallyT > .8) startDay(day + 1); return; }
+    const bi = bins.findIndex(b => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h); if (bi >= 0) { add(bi); return; }
+    if (Lab.dist(x, y, trashP.x, trashP.y) < trashP.r + 10) { bin(); return; }
+    if (Math.abs(x - bowlP.x) < bowlP.r * 1.08 && y > bowlP.y - bowlP.r * .6 && y < bowlP.y + bowlP.r * .95) { serveBest(); return; }
+    for (const cu of seats) { if (!cu || cu.state !== "wait") continue; const cx = seatX(cu.k), inB = Math.abs(x - cx) < bub.w / 2 + 4 && y > bub.y - 6 && y < bub.y + bub.h + 8;
+      if (inB || Lab.dist(x, y, cx, headY()) < headR + 8) { if (cu.hidden && inB) peek(cu); else if (same(bowl, cu.order)) serve(cu); else { cu.wig = 1; Lab.sfx("tick", { pitch: .7 }); } return; } }
+  }];
+  Lab.input.onKey = [k => { if (ended) return; if (phase === "tally") { if ((k === " " || k === "Enter") && tallyT > .8) startDay(day + 1); return; } if (k >= "1" && k <= "9") add(+k - 1); else if (k === " " || k === "Enter") serveBest(); else if (k === "Backspace" || k === "x" || k === "X") bin(); }];
+  Lab.expose({
+    get coins() { return coins; }, get hearts() { return hearts; }, get day() { return day; }, get phase() { return phase; }, get combo() { return combo; }, get served() { return served; }, get left() { return queue; }, get bowl() { return bowl.slice(); },
+    get bins() { return bins.map((b, i) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2, locked: !unlocked(i) })); }, get bowlPos() { return { x: bowlP.x, y: bowlP.y }; }, get trash() { return { x: trashP.x, y: trashP.y }; },
+    get customers() { return seats.map(c => c && c.state === "wait" ? { k: c.k, order: c.order.slice(), pat: c.pat, patMax: c.patMax, hidden: c.hidden, regular: c.regular, x: seatX(c.k), y: headY(), bx: seatX(c.k), by: bub.y + bub.h / 2 } : null); },
+    setPatience(k, v) { if (seats[k]) seats[k].pat = v; }, spawn(usual) { return spawn(usual); }, finishDay() { queue = 0; for (let k = 0; k < 3; k++) seats[k] = null; }, setDay(d) { startDay(d); },
+  });
+  Lab.loop((dt, t) => { update(dt); render(t); });
+}
+
+/* ---------- customers */
+function spawn(forceUsual) {
+  const maxSeats = day === 1 && spawned < 3 ? 2 : 3, free = [1, 0, 2].filter(k => !seats[k]); if (!free.length || 3 - free.length >= maxSeats) return false;
+  const idx = spawned++, k = idx === 0 ? free[0] : Lab.choose(free); let order, regular = false, hidden = false;
+  if (forceUsual || (day >= 2 && idx === regReturn)) { order = regOrder; regular = hidden = true; }
+  else if (day >= 2 && idx === 1) { order = regOrder; regular = true; if (!usualSeen) { usualSeen = true; Lab.toast("A regular — remember this order!", 2200, { y: .46 }); } }
+  else order = day === 1 && idx === 0 ? [0, 2] : day === 1 && idx === 1 ? [0, 2, 4] : makeOrder(day);
+  const pm = Math.max(11, 25 - day * 1.6) + (order.length - 2) * 2;
+  seats[k] = { k, kind: regular ? 5 : Lab.randInt(0, 4), order, pat: pm, patMax: pm, in: 0, out: 0, state: "wait", regular, hidden, peeked: false, ph: Lab.rand(0, 6), wig: 0, hop: 0 };
+  if (!forceUsual) queue--; Lab.sfx("chime", { pitch: 1.2 + k * .12, vol: .5 }); return true;
+}
+function peek(cu) { cu.hidden = false; cu.peeked = true; cu.pat = Math.max(1.5, cu.pat - cu.patMax * .3); cu.wig = 1; Lab.sfx("flip"); fx.text(seatX(cu.k), bub.y - 4, "peek −30%", { color: "#ff9d9d", size: 14 }); }
+function add(id) {
+  const b = bins[id]; if (!b || phase !== "serve") return false;
+  if (!unlocked(id)) { b.wig = 1; Lab.sfx("error", { vol: .4 }); return false; }
+  if (bowl.includes(id) || (ING[id].grp && bowl.some(j => ING[j].grp === ING[id].grp))) { b.wig = 1; Lab.sfx("tick", { pitch: .6 }); return false; }
+  bowl.push(id); b.sq = 1; bowlPop = 1; Lab.buzz(6);
+  if (id < 2) { Lab.sfx("splash", { pitch: id ? .85 : 1.05, vol: .5 }); } else if (id < 4) Lab.sfx("swish", { pitch: id === 2 ? 1 : .7 }); else Lab.sfx("pop", { pitch: .8 + (id - 4) * .12, vol: .7 });
+  fx.burst(bowlP.x, bowlP.y - bowlP.r * .1, { n: 6, colors: [["#f0b23e", "#d9482f", "#ffe08a", "#fff", "#fff3d0", "#8fd06a", "#a8693d", "#e0452f", "#ffb3c7"][id], "#fff"], speed: 110, life: .35, size: 3, gravity: 500, angle: -1.57, spread: 1.6 });
+  return true;
+}
+function bin() { if (!bowl.length || phase !== "serve") return; bowl = []; combo = 0; ds.binned++; trashSq = 1; bowlIn = 0; Lab.sfx("crunch"); fx.text(trashP.x, trashP.y - trashP.r - 6, "binned", { color: "#ff9d9d", size: 14 }); }
+function serveBest() {
+  const m = seats.filter(c => c && c.state === "wait" && same(bowl, c.order)).sort((a, b) => a.pat - b.pat)[0];
+  if (m) return serve(m); bowlPop = .6; Lab.sfx("tick", { pitch: .7 }); if (bowl.length) Lab.toast("No one ordered that — bin it?", 1100, { y: .5 }); return false;
+}
+function serve(cu) {
+  const frac = clamp(cu.pat / cu.patMax, 0, 1), price = 4 + 2 * cu.order.length, tip = Math.round(price * frac * .8), rem = cu.regular && cu.hidden ? 2 : 1;
+  combo++; bestCombo = Math.max(bestCombo, combo); served++; ds.served++; ds.tips += tip; if (rem > 1) ds.remembered++;
+  const gain = Math.round((price + tip) * (1 + .1 * Math.min(combo - 1, 10)) * rem); coins += gain; ds.earned += gain; Lab.setScore(coins); Lab.bumpScore();
+  const x = seatX(cu.k), y = headY(); cu.state = "happy"; cu.hop = 1; cu.hidden = false;
+  flyer = { items: bowl, x: bowlP.x, y: bowlP.y, s: 1 }; bowl = []; bowlIn = 0;
+  Lab.tween(flyer, { x, y: counterY + bowlP.r * .12, s: .4 }, .22, { ease: "outCubic" }); Lab.after(.55, () => { flyer = null; });
+  fx.text(x, bub.y + bub.h * .5, "+" + gain, { color: "#ffd166", size: 22 + Math.min(10, combo) });
+  if (rem > 1) { Lab.toast("Remembered the usual! ×2", 1500, { y: .46 }); Lab.sfx("star"); } else if (frac > .66) fx.text(x, bub.y + bub.h * .5 + 26, "quick!", { color: "#9ff0c0", size: 14 });
+  fx.burst(x, y - headR, { n: 10 + Math.min(combo, 10), colors: ["#ffd166", "#ff8a3d", "#fff"], speed: 200, life: .55, size: 3.5, gravity: 420, shape: "star" });
+  Lab.sfx("coin", { pitch: .9 + frac * .3 }); Lab.audio.combo(Math.min(combo, 12) - 1, { vol: .16 }); Lab.buzz(12); return true;
+}
+function walkOut(cu) {
+  cu.state = "angry"; hearts--; combo = 0; ds.lost++; lanternLit[hearts] = 0;
+  Lab.sfx("hurt"); Lab.shake(7, .3); Lab.flash("#ff4d4d", .25, .2); Lab.buzz(40); fx.text(seatX(cu.k), bub.y + bub.h / 2, "left hungry", { color: "#ff9d9d", size: 16 });
+  if (hearts <= 0 && !ended) { ended = true; Lab.after(.7, () => Lab.gameover({ title: "Cart closed", message: "The last lantern went out on day " + day + ".", score: coins, stats: [["Days", day], ["Served", served], ["Best combo", "×" + bestCombo]] })); }
+}
+function update(dt) {
+  for (const b of bins) { b.sq = Lab.damp(b.sq, 0, 11, dt); b.wig = Math.max(0, b.wig - dt * 3.5); }
+  trashSq = Lab.damp(trashSq, 0, 9, dt); bowlIn = Math.min(1, bowlIn + dt * 5); bowlPop = Math.max(0, bowlPop - dt * 4);
+  if (phase === "tally") { tallyT += dt; return; }
+  const occ = seats.filter(Boolean).length, gap = Math.max(1.3, 4.4 - day * .4); spawnT -= dt;
+  if (!ended && queue > 0 && (spawnT <= 0 || (occ === 0 && spawnT < gap - .5)) && spawn()) spawnT = Lab.rand(gap * .8, gap * 1.3);
+  let low = 0;
+  for (let k = 0; k < 3; k++) {
+    const cu = seats[k]; if (!cu) continue; cu.in = Math.min(1, cu.in + dt * 3.2); cu.wig = Math.max(0, cu.wig - dt * 3); cu.hop = Math.max(0, cu.hop - dt * 2.2);
+    if (cu.state === "wait") {
+      if (!(day === 1 && served === 0)) cu.pat -= dt; const f = cu.pat / cu.patMax; low = Math.max(low, 1 - f);
+      if (f < .25 && Math.floor(cu.pat * 2) !== Math.floor((cu.pat + dt) * 2)) Lab.sfx("tick", { pitch: 1.4, vol: .5 });
+      if (cu.pat <= 0) walkOut(cu);
+    } else { cu.out += dt * (cu.state === "happy" ? 1.5 : 1.9); if (cu.out >= 1) seats[k] = null; }
+  }
+  Lab.music.intensity(.25 + occ * .12 + low * .4);
+  if (!ended && queue === 0 && seats.every(s => !s)) { phase = "tally"; tallyT = 0; bowl = []; if (ds.lost === 0 && ds.binned === 0 && hearts < 3) { lanternLit[hearts] = 1; hearts++; ds.relit = true; } Lab.sfx("levelup"); }
+}
+
+/* ---------- art */
+function icon(g, id) { // −1..1 box
+  g.lineJoin = g.lineCap = "round"; g.lineWidth = .09; g.strokeStyle = INK;
+  const el = (x, y, rx, ry, f) => { g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, TAU); g.fillStyle = f; g.fill(); g.stroke(); };
+  if (id < 2) {
+    g.beginPath(); g.moveTo(.4, -.1); g.lineTo(.82, -.84); g.lineWidth = .2; g.stroke(); g.lineWidth = .1; g.strokeStyle = "#b98552"; g.stroke(); g.strokeStyle = INK; g.lineWidth = .09;
+    g.beginPath(); g.arc(-.12, .08, .66, 0, Math.PI); g.closePath(); g.fillStyle = "#d8d2c6"; g.fill(); g.stroke(); el(-.12, .08, .66, .25, id ? "#d9482f" : "#f0b23e");
+    if (id) { g.beginPath(); g.moveTo(-.12, -.06); g.quadraticCurveTo(.1, .06, -.04, .2); g.quadraticCurveTo(-.3, .2, -.26, .04); g.quadraticCurveTo(-.16, .1, -.12, -.06); g.fillStyle = "#ffd166"; g.fill(); }
+    else { g.fillStyle = "#fff6d8"; for (const p of [[-.4, .08], [-.12, .14], [.16, .06]]) { g.beginPath(); g.arc(p[0], p[1], .06, 0, TAU); g.fill(); } }
+  } else if (id === 2) { for (let pass = 0; pass < 2; pass++) for (let i = -1; i <= 1; i++) { g.beginPath(); for (let x = -.78; x <= .78; x += .06) g[x === -.78 ? "moveTo" : "lineTo"](x, i * .42 + Math.sin(x * 7 + i) * .15); g.strokeStyle = pass ? "#ffd75e" : INK; g.lineWidth = pass ? .16 : .32; g.stroke(); } }
+  else if (id === 3) { g.beginPath(); g.moveTo(-.78, .4); g.bezierCurveTo(-.7, -.6, .7, -.6, .78, .4); g.closePath(); g.fillStyle = "#fffdf5"; g.fill(); g.stroke(); g.lineWidth = .06; for (const p of [[-.3, .1], [.1, -.1], [.35, .15], [-.05, .2], [-.4, -.1 + .2], [.2, -.3 + .2]]) { g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(p[0] + .12, p[1] - .05); g.strokeStyle = "#c9c2b0"; g.stroke(); } }
+  else if (id === 4) { el(0, 0, .58, .76, "#fffaf0"); el(0, .12, .3, .3, "#ffb02e"); }
+  else if (id === 5) { for (const p of [[-.38, .3], [.38, .3], [0, -.36]]) { g.beginPath(); g.arc(p[0], p[1], .27, 0, TAU); g.lineWidth = .3; g.strokeStyle = INK; g.stroke(); g.lineWidth = .15; g.strokeStyle = "#8fd06a"; g.stroke(); } }
+  else if (id === 6) { draw.rr(g, -.2, -.05, .4, .78, .14); g.fillStyle = "#f1e2c6"; g.fill(); g.lineWidth = .09; g.stroke(); g.beginPath(); g.moveTo(-.8, .02); g.bezierCurveTo(-.76, -.92, .76, -.92, .8, .02); g.closePath(); g.fillStyle = "#a8693d"; g.fill(); g.stroke(); g.fillStyle = "#d8a070"; for (const p of [[-.3, -.36], [.26, -.44], [.04, -.2]]) { g.beginPath(); g.arc(p[0], p[1], .09, 0, TAU); g.fill(); } }
+  else if (id === 7) { g.beginPath(); g.moveTo(-.5, -.52); g.bezierCurveTo(.3, -.6, .8, .1, .62, .74); g.bezierCurveTo(.3, .3, -.2, -.02, -.66, -.2); g.closePath(); g.fillStyle = "#e0452f"; g.fill(); g.stroke(); g.beginPath(); g.moveTo(-.56, -.36); g.lineTo(-.82, -.66); g.lineWidth = .2; g.stroke(); g.lineWidth = .1; g.strokeStyle = "#6fae4f"; g.stroke(); }
+  else { g.beginPath(); for (let i = 0; i <= 48; i++) { const a = i / 48 * TAU, r = .7 + Math.cos(a * 8) * .07; g[i ? "lineTo" : "moveTo"](Math.cos(a) * r, Math.sin(a) * r); } g.closePath(); g.fillStyle = "#fffaf4"; g.fill(); g.stroke(); g.beginPath(); for (let i = 0; i <= 40; i++) { const a = i / 40 * TAU * 1.6, r = .06 + i / 40 * .42; g[i ? "lineTo" : "moveTo"](Math.cos(a) * r, Math.sin(a) * r); } g.strokeStyle = "#ff7fa5"; g.lineWidth = .12; g.stroke(); }
+}
+function iconSprite(id, sz) { sz = Math.round(sz); return Lab.sprite("ln:i" + id + ":" + sz, sz, sz, g => { g.translate(sz / 2, sz / 2); g.scale(sz * .44, sz * .44); icon(g, id); }); }
+function drawIcon(c, id, x, y, sz, a) { const s = iconSprite(id, sz); if (a != null) c.globalAlpha = a; c.drawImage(s, x - s.w / 2, y - s.h / 2, s.w, s.h); c.globalAlpha = 1; }
+const SPOT = [[-.44, -.02], [.44, -.02], [0, .13], [-.2, -.17], [.22, -.17]];
+function drawBowl(c, x, y, R, items, glow) {
+  c.save(); c.translate(x, y); c.lineJoin = "round";
+  draw.shadow(c, 0, R * .78, R * .8, R * .14, .3);
+  if (glow) draw.glow(c, 0, 0, R * 1.5, "#ffd166", .35 + .15 * Math.sin(Lab.now() * 8));
+  c.beginPath(); c.moveTo(-R, 0); c.bezierCurveTo(-R * .9, R * .7, -R * .4, R * .8, -R * .3, R * .8); c.lineTo(R * .3, R * .8); c.bezierCurveTo(R * .4, R * .8, R * .9, R * .7, R, 0); c.closePath(); c.fillStyle = "#2f4b8f"; c.fill(); c.strokeStyle = INK; c.lineWidth = 3; c.stroke();
+  c.strokeStyle = "#e9edf7"; c.lineWidth = Math.max(2, R * .05); c.beginPath(); for (let i = -4; i <= 4; i++) { const px = i * R * .2; c.moveTo(px - R * .06, R * .46); c.lineTo(px, R * .56); c.lineTo(px + R * .06, R * .46); } c.stroke();
+  c.beginPath(); c.ellipse(0, 0, R, R * .42, 0, 0, TAU); c.fillStyle = "#4a67ad"; c.fill(); c.strokeStyle = INK; c.lineWidth = 3; c.stroke();
+  const broth = items.includes(0) ? "#f0b23e" : items.includes(1) ? "#d9482f" : null;
+  c.beginPath(); c.ellipse(0, R * .02, R * .88, R * .34, 0, 0, TAU); c.fillStyle = broth || "#e4e0d6"; c.fill(); c.lineWidth = 2; c.stroke(); c.save(); c.clip();
+  if (broth) { c.fillStyle = "rgba(255,255,255,.18)"; c.beginPath(); c.ellipse(-R * .3, -R * .1, R * .4, R * .1, -.2, 0, TAU); c.fill(); }
+  if (items.includes(2)) { c.lineCap = "round"; for (let pass = 0; pass < 2; pass++) for (let i = -2; i <= 2; i++) { c.beginPath(); for (let px = -R * .7; px <= R * .7; px += R * .05) c[px === -R * .7 ? "moveTo" : "lineTo"](px, i * R * .1 + R * .04 + Math.sin(px / R * 9 + i * 1.7) * R * .05); c.strokeStyle = pass ? "#ffd75e" : INK; c.lineWidth = pass ? R * .05 : R * .085; c.stroke(); } }
+  if (items.includes(3)) { c.beginPath(); c.ellipse(0, R * .08, R * .6, R * .24, 0, 0, TAU); c.fillStyle = "#fffdf5"; c.fill(); c.strokeStyle = INK; c.lineWidth = 2; c.stroke(); }
+  c.restore(); let n = 0; for (const id of items) if (id >= 4) { const p = SPOT[n++ % 5]; drawIcon(c, id, p[0] * R, p[1] * R, R * .42); }
+  c.restore();
+}
+function drawSpirit(c, cu, x, y, r, t) {
+  const col = SKIN[cu.kind], f = cu.pat / cu.patMax, mad = cu.state === "angry" || (cu.state === "wait" && f < .25), glad = cu.state === "happy";
+  const bob = Math.sin(t * 2.2 + cu.ph) * r * .04 - ease.pulse(cu.hop) * r * .5 + (mad ? Math.sin(t * 38) * 1.6 : 0);
+  c.save(); c.translate(x + Math.sin(cu.wig * 20) * cu.wig * 5, y + bob); c.lineJoin = c.lineCap = "round"; c.strokeStyle = INK; c.lineWidth = 3;
+  if (cu.kind === 0) for (const s of [-1, 1]) { c.beginPath(); c.moveTo(s * r * .85, -r * .45); c.lineTo(s * r * .78, -r * 1.2); c.lineTo(s * r * .3, -r * .9); c.closePath(); c.fillStyle = col; c.fill(); c.stroke(); }
+  if (cu.kind === 2) for (const s of [-1, 1]) { c.beginPath(); c.moveTo(s * r * .5, -r * .85); c.quadraticCurveTo(s * r * .7, -r * 1.3, s * r * .35, -r * 1.42); c.lineWidth = 7; c.stroke(); c.lineWidth = 3.5; c.strokeStyle = "#fff3d0"; c.stroke(); c.strokeStyle = INK; c.lineWidth = 3; }
+  c.beginPath(); c.moveTo(-r * 1.25, r * 2); c.bezierCurveTo(-r * 1.25, r * .7, -r * 1.05, r * .2, -r * .98, 0); c.arc(0, 0, r * .98, Math.PI, 0); c.bezierCurveTo(r * 1.05, r * .2, r * 1.25, r * .7, r * 1.25, r * 2); c.closePath();
+  c.fillStyle = mad ? Lab.color.mix(col, "#ff6b6b", .35) : col; c.fill(); c.stroke();
+  c.fillStyle = "rgba(255,255,255,.25)"; c.beginPath(); c.ellipse(-r * .4, -r * .5, r * .3, r * .16, -.5, 0, TAU); c.fill();
+  if (cu.kind === 1) { c.beginPath(); c.moveTo(0, -r); c.quadraticCurveTo(r * .05, -r * 1.3, r * .1, -r * 1.34); c.stroke(); c.beginPath(); c.moveTo(r * .1, -r * 1.34); c.quadraticCurveTo(r * .55, -r * 1.75, r * .75, -r * 1.3); c.quadraticCurveTo(r * .35, -r * 1.12, r * .1, -r * 1.34); c.fillStyle = "#7ac85f"; c.fill(); c.stroke(); }
+  if (cu.kind === 3) { c.beginPath(); c.moveTo(0, -r); c.lineTo(0, -r * 1.35); c.stroke(); draw.glow(c, 0, -r * 1.45, r * .5, "#ffd166", .7); draw.circle(c, 0, -r * 1.45, r * .16, "#ffd166", INK, 2.5); }
+  if (cu.kind === 4) { c.beginPath(); c.ellipse(0, r * .78, r * 1.08, r * .24, 0, 0, TAU); c.fillStyle = "#e0452f"; c.fill(); c.stroke(); }
+  if (cu.kind === 5) { c.beginPath(); c.moveTo(-r * 1.3, -r * .42); c.lineTo(0, -r * 1.36); c.lineTo(r * 1.3, -r * .42); c.quadraticCurveTo(0, -r * .7, -r * 1.3, -r * .42); c.closePath(); c.fillStyle = "#e3c27a"; c.fill(); c.stroke(); c.beginPath(); c.moveTo(-r * .62, -r * .86); c.lineTo(r * .62, -r * .86); c.strokeStyle = "#b9924a"; c.stroke(); c.strokeStyle = INK; }
+  const ey = -r * .05, ex = r * .36; c.fillStyle = INK;
+  if (glad) { c.lineWidth = 3.5; for (const s of [-1, 1]) { c.beginPath(); c.arc(s * ex, ey + r * .06, r * .14, Math.PI * 1.1, Math.PI * 1.9); c.stroke(); } }
+  else for (const s of [-1, 1]) { c.beginPath(); c.ellipse(s * ex, ey, r * .11, r * (mad ? .09 : .15), 0, 0, TAU); c.fill(); if (mad) { c.beginPath(); c.moveTo(s * (ex - r * .2), ey - r * .3); c.lineTo(s * (ex + r * .16), ey - r * .16); c.lineWidth = 3.5; c.stroke(); } }
+  c.lineWidth = 3; c.beginPath(); if (glad) { c.arc(0, ey + r * .26, r * .2, 0, Math.PI); c.closePath(); c.fillStyle = "#7a2f3d"; c.fill(); } else if (mad) c.arc(0, ey + r * .5, r * .17, Math.PI * 1.15, Math.PI * 1.85); else if (f < .55) { c.moveTo(-r * .13, ey + r * .36); c.lineTo(r * .13, ey + r * .36); } else c.arc(0, ey + r * .26, r * .15, .15 * Math.PI, .85 * Math.PI);
+  c.stroke(); c.fillStyle = "rgba(255,110,130,.3)"; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(s * r * .6, ey + r * .25, r * .14, r * .08, 0, 0, TAU); c.fill(); }
+  c.restore();
+}
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80; return Lab.sprite("ln:bg", W, H, g => {
+    g.translate(40, 40); const X0 = -40;
+    draw.vgrad(g, X0, -40, W, H, [[0, "#12163a"], [.3, "#2a2150"], [.52, "#5a2f58"], [1, "#2a1730"]]);
+    const rnd = Lab.rng(5); for (let i = 0; i < 46; i++) { const x = X0 + rnd() * W, y = rnd() * (counterY - 10), r = 3 + rnd() * 16; draw.glow(g, x, y, r * 2.4, ["#ffb347", "#ff6f91", "#ffd166", "#8fd3ff"][i % 4], .1 + rnd() * .14); }
+    for (let i = 0; i < 60; i++) { g.fillStyle = "rgba(255,255,255," + (.2 + rnd() * .5) + ")"; g.fillRect(X0 + rnd() * W, rnd() * counterY, 1.4, 1.4); }
+    const ay = Lab.play.y - 6, sw = 34; for (let x = X0 - 6, i = 0; x < X0 + W; x += sw, i++) { g.fillStyle = i % 2 ? "#7c2b3c" : "#5e2033"; g.fillRect(x, -40, sw, ay + 40); g.beginPath(); g.arc(x + sw / 2, ay, sw / 2, 0, Math.PI); g.fill(); } g.fillStyle = "rgba(0,0,0,.28)"; g.fillRect(X0, ay - 3, W, 3);
+    draw.vgrad(g, X0, counterY, W, Lab.H + 40 - counterY, ["#8a5632", "#5c3620"]);
+    g.strokeStyle = "rgba(40,18,8,.22)"; g.lineWidth = 1.5; for (let i = 0; i < 40; i++) { const y = counterY + 18 + rnd() * (Lab.H - counterY), x = X0 + rnd() * W, l = 50 + rnd() * 180; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + l / 2, y + (rnd() - .5) * 6, x + l, y); g.stroke(); }
+    const b0 = bins[0], b8 = bins[8], pad = 8, px = Math.min(b0.x, bins[4].x) - pad, py = b0.y - pad, pw = (wide ? b8.x + b8.w - b0.x : b8.x + b8.w - bins[4].x) + pad * 2, ph = b8.y + b8.h - b0.y + pad * 2;
+    draw.rect(g, px, py, pw, ph, 16, "#2b1e3a", "#1a1124", 3);
+  });
+}
+function lantern(c, x, y0, y, r, lit, t) {
+  const sw = Math.sin(t * 1.4 + x * .05) * 3; draw.line(c, x, y0, x + sw, y - r, "rgba(20,10,20,.8)", 2);
+  if (lit) draw.glow(c, x + sw, y, r * 3.2, "#ff9a3d", .32 + .05 * Math.sin(t * 5 + x));
+  c.save(); c.translate(x + sw, y); c.beginPath(); c.ellipse(0, 0, r * .86, r, 0, 0, TAU); c.fillStyle = lit ? "#ff7a3d" : "#4a3550"; c.fill(); c.strokeStyle = INK; c.lineWidth = 2.5; c.stroke();
+  c.strokeStyle = lit ? "rgba(255,225,150,.7)" : "rgba(255,255,255,.12)"; c.lineWidth = 1.5; for (const k of [-.45, 0, .45]) { c.beginPath(); c.ellipse(0, 0, Math.abs(k) * r * .86 + .5, r, 0, 0, TAU); c.stroke(); }
+  draw.rect(c, -r * .4, -r - 4, r * .8, 5, 2, INK); draw.rect(c, -r * .4, r - 1, r * .8, 5, 2, INK); c.restore();
+}
+
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(), hy = headY(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // the three lanterns between the seats are the lives
+  for (let k = 0; k < 4; k++) lantern(c, area.x + seatW * k + (k === 0 ? seatW * .07 : k === 3 ? -seatW * .07 : 0), Lab.play.y, hy - headR * (k % 3 ? .1 : 1.1), clamp(headR * .42, 10, 18), 1, t);
+  const ready = seats.filter(cu => cu && cu.state === "wait" && same(bowl, cu.order));
+  for (const cu of seats) {
+    if (!cu) continue; const x = seatX(cu.k), rise = (1 - ease.outBack(clamp(cu.in, 0, 1))) * headR * 2.4 + ease.inQuad(cu.out) * headR * 2.6;
+    c.save(); c.beginPath(); c.rect(x - seatW / 2, 0, seatW, counterY); c.clip(); drawSpirit(c, cu, x, hy + rise, headR, t); c.restore();
+  }
+  // counter front edge hides the spirits' bodies
+  c.fillStyle = "#b9814e"; c.fillRect(-40, counterY, Lab.W + 80, 7); c.fillStyle = "rgba(0,0,0,.22)"; c.fillRect(-40, counterY + 7, Lab.W + 80, 5);
+  for (const cu of seats) {
+    if (!cu || cu.state !== "wait" || cu.in < .6) continue;
+    const x = seatX(cu.k), f = clamp(cu.pat / cu.patMax, 0, 1), ok = ready.includes(cu), pop = ease.outBack(clamp((cu.in - .6) / .4, 0, 1)), bw = bub.w, bh = bub.h;
+    c.save(); c.translate(x + (f < .25 ? Math.sin(t * 40) * 1.5 : 0), bub.y + bh / 2 + (ok ? Math.sin(t * 9) * 2.5 : 0)); c.scale(pop, pop);
+    c.beginPath(); c.moveTo(-9, bh / 2 - 2); c.lineTo(0, bh / 2 + 11); c.lineTo(9, bh / 2 - 2); c.closePath(); c.fillStyle = ok ? "#e9ffd9" : "#fff8ea"; c.fill();
+    draw.rect(c, -bw / 2, -bh / 2, bw, bh, 14, ok ? "#e9ffd9" : "#fff8ea", ok ? "#5fbf5a" : cu.regular ? "#e3a23a" : "rgba(42,28,46,.5)", ok ? 4 : 2.5);
+    if (cu.hidden) { draw.heart(c, 0, -bh * .2, bh * .16, "#ff6f91"); draw.text(c, "the usual!", 0, bh * .1, { size: Math.min(15, bw * .14), color: INK }); draw.text(c, "tap to peek", 0, bh * .3, { size: Math.min(10.5, bw * .1), color: "rgba(42,28,46,.55)", weight: 600 }); }
+    else {
+      const base = cu.order.filter(i => i < 4), tops = cu.order.filter(i => i >= 4), s1 = Math.min(bh * .4, bw * .36), s2 = Math.min(bh * .36, (bw - 8) / 3), y1 = tops.length ? -bh * .2 : -bh * .04, bad = bowl.some(i => !cu.order.includes(i));
+      base.forEach((id, j) => { const ix = (j - (base.length - 1) / 2) * s1 * 1.08; drawIcon(c, id, ix, y1, s1, bad ? .45 : 1); if (!bad && bowl.includes(id)) tick(c, ix + s1 * .32, y1 + s1 * .28, s1 * .2); });
+      tops.forEach((id, j) => { const ix = (j - (tops.length - 1) / 2) * s2 * 1.04, iy = bh * .2; drawIcon(c, id, ix, iy, s2, bad ? .45 : 1); if (!bad && bowl.includes(id)) tick(c, ix + s2 * .32, iy + s2 * .28, s2 * .2); });
+      if (cu.regular) draw.heart(c, bw / 2 - 11, -bh / 2 + 12, 6, "#ff6f91");
+    }
+    draw.rect(c, -bw / 2 + 8, bh / 2 - 9, bw - 16, 5, 2.5, "rgba(42,28,46,.18)"); draw.rect(c, -bw / 2 + 8, bh / 2 - 9, (bw - 16) * f, 5, 2.5, f > .5 ? "#5fbf5a" : f > .25 ? "#f0b23e" : "#e0452f");
+    c.restore();
+  }
+  // bowl, flyer, trash
+  const pop = 1 + ease.pulse(bowlPop) * .07, slide = (1 - ease.outCubic(bowlIn)) * -bowlP.r * 2.6;
+  if (phase === "serve") { c.save(); c.translate(slide, 0); c.globalAlpha = clamp(bowlIn * 2, 0, 1); c.translate(bowlP.x, bowlP.y); c.scale(pop, 2 - pop); drawBowl(c, 0, 0, bowlP.r, bowl, ready.length > 0); c.restore(); }
+  if (ready.length && phase === "serve") draw.text(c, "SERVE!", bowlP.x, bowlP.y - bowlP.r * .62 + Math.sin(t * 9) * 2, { size: clamp(bowlP.r * .2, 13, 20), color: "#ffe9a8", stroke: INK });
+  if (flyer) drawBowl(c, flyer.x, flyer.y, bowlP.r * flyer.s, flyer.items, false);
+  c.save(); c.translate(trashP.x, trashP.y); c.scale(1 + trashSq * .15, 1 - trashSq * .15); const tr = trashP.r; c.globalAlpha = bowl.length ? 1 : .45;
+  c.beginPath(); c.moveTo(-tr * .7, -tr * .5); c.lineTo(tr * .7, -tr * .5); c.lineTo(tr * .52, tr * .8); c.lineTo(-tr * .52, tr * .8); c.closePath(); c.fillStyle = "#8d9aa8"; c.fill(); c.strokeStyle = INK; c.lineWidth = 2.5; c.stroke();
+  draw.rect(c, -tr * .85, -tr * .78, tr * 1.7, tr * .3, 4, "#a9b6c4", INK, 2.5); for (const k of [-.3, 0, .3]) draw.line(c, k * tr, -tr * .28, k * tr * .8, tr * .58, "rgba(42,28,46,.5)", 2); c.restore();
+  for (let k = 0; k < 3; k++) { const lx = area.x + 20 + k * 24, ly = counterY + 27, lit = lanternLit[k]; if (lit) draw.glow(c, lx, ly, 20, "#ff9a3d", .45); c.beginPath(); c.ellipse(lx, ly, 7.5, 9, 0, 0, TAU); c.fillStyle = lit ? "#ff7a3d" : "#3b2a2a"; c.fill(); c.strokeStyle = INK; c.lineWidth = 2; c.stroke(); draw.rect(c, lx - 4, ly - 12, 8, 4, 1.5, INK); draw.rect(c, lx - 4, ly + 8, 8, 4, 1.5, INK); }
+  if (combo >= 2) draw.text(c, "COMBO ×" + combo, area.x + Math.max(52, bowlP.r * .55), bowlP.y + bowlP.r * .3, { size: 13 + Math.min(combo, 8), color: "#ffd166", stroke: INK });
+  draw.text(c, "DAY " + day + " · " + (queue + seats.filter(s => s && s.state === "wait").length) + " to go", area.x + area.w - 10, counterY + 26, { size: 12, color: "rgba(255,235,200,.8)", align: "right" });
+  // ingredient trays
+  const tut = day === 1 && served < 2 && phase === "serve" ? seats.filter(cu => cu && cu.state === "wait").sort((a, b) => a.pat - b.pat)[0] : null, want = tut && !bowl.some(i => !tut.order.includes(i)) ? tut.order.find(i => !bowl.includes(i)) : -1;
+  for (let i = 0; i < 9; i++) {
+    const b = bins[i], lock = !unlocked(i), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    c.save(); c.translate(cx + Math.sin(b.wig * 22) * b.wig * 4, cy); c.scale(1 - b.sq * .08, 1 - b.sq * .12);
+    draw.rect(c, -b.w / 2 + 4, -b.h / 2 + 6, b.w - 8, b.h - 8, 12, "rgba(0,0,0,.3)"); draw.rect(c, -b.w / 2 + 4, -b.h / 2 + 4, b.w - 8, b.h - 8, 12, lock ? "#3a2c4a" : "#f6ecd6", lock ? "#241a30" : "#c9a86a", 2.5);
+    if (lock) { draw.text(c, "DAY", 0, -7, { size: 10.5, color: "rgba(255,255,255,.4)" }); draw.text(c, String(ING[i].day), 0, 9, { size: 17, color: "rgba(255,255,255,.45)" }); }
+    else { drawIcon(c, i, 0, 0, Math.min(b.w, b.h) * .7, bowl.includes(i) ? .35 : 1); if (i === want) { const k = (t * 1.3) % 1; c.globalAlpha = 1 - k; draw.rect(c, -b.w / 2 + 4 - k * 6, -b.h / 2 + 4 - k * 6, b.w - 8 + k * 12, b.h - 8 + k * 12, 14, null, "#ffd166", 4); c.globalAlpha = 1; } }
+    c.restore();
+  }
+  if (tut && want === undefined) { const k = (t * 1.3) % 1; c.globalAlpha = 1 - k; c.beginPath(); c.ellipse(bowlP.x, bowlP.y + bowlP.r * .15, bowlP.r * (1.1 + k * .2), bowlP.r * (.75 + k * .15), 0, 0, TAU); c.strokeStyle = "#ffd166"; c.lineWidth = 4; c.stroke(); c.globalAlpha = 1; }
+  if (phase === "tally") tally(c, t);
+}
+function tick(c, x, y, r) { draw.circle(c, x, y, r, "#5fbf5a", "#fff", 1.5); c.strokeStyle = "#fff"; c.lineWidth = Math.max(1.5, r * .3); c.lineCap = "round"; c.beginPath(); c.moveTo(x - r * .45, y); c.lineTo(x - r * .1, y + r * .38); c.lineTo(x + r * .5, y - r * .35); c.stroke(); }
+function tally(c, t) {
+  const a = ease.outBack(clamp(tallyT * 2.5, 0, 1)), w = Math.min(290, area.w - 24), h = Math.min(300, Lab.play.h - 30), x = area.x + area.w / 2, y = Lab.play.y + Lab.play.h * (wide ? .5 : .42);
+  c.fillStyle = "rgba(10,8,25," + .5 * clamp(tallyT * 3, 0, 1) + ")"; c.fillRect(-40, -40, Lab.W + 80, Lab.H + 80);
+  c.save(); c.translate(x, y); c.scale(a, a); c.rotate(-.02); draw.rect(c, -w / 2 + 4, -h / 2 + 6, w, h, 10, "rgba(0,0,0,.35)"); draw.rect(c, -w / 2, -h / 2, w, h, 10, "#fff8ea", "#c9a86a", 2.5);
+  draw.text(c, "Day " + day + " receipt", 0, -h / 2 + 30, { size: 22, color: INK });
+  const nxt = ING.filter(g => g.day === day + 1).map(g => g.n), rows = [["Served", ds.served + " / " + dayCust], ["Tips", ds.tips], ["Earned today", ds.earned], ["Best combo", "×" + bestCombo]]; if (ds.remembered) rows.push(["Usuals remembered", ds.remembered]);
+  const lh = Math.min(30, (h - 150) / rows.length); rows.forEach((r, i) => { const ry = -h / 2 + 66 + i * lh; draw.text(c, r[0], -w / 2 + 22, ry, { size: 15, color: "#6b5670", align: "left", weight: 600 }); draw.text(c, String(r[1]), w / 2 - 22, ry, { size: 16, color: INK, align: "right" }); c.setLineDash([2, 5]); draw.line(c, -w / 2 + 22, ry + lh / 2, w / 2 - 22, ry + lh / 2, "rgba(42,28,46,.2)", 1.5); c.setLineDash([]); });
+  draw.text(c, ds.relit ? "Spotless day — a lantern relit!" : ds.lost ? ds.lost + " left hungry" : "Nobody left hungry", 0, h / 2 - 72, { size: 13.5, color: ds.lost ? "#c9463d" : "#3f8f4a" });
+  draw.text(c, nxt.length ? "Tomorrow: " + nxt.join(" + ") : "Tomorrow: a bigger, hungrier crowd", 0, h / 2 - 50, { size: 13.5, color: "#b8651f", maxWidth: w - 24 });
+  c.globalAlpha = tallyT > .8 ? .6 + .4 * Math.sin(t * 5) : 0; draw.text(c, "tap to open day " + (day + 1), 0, h / 2 - 22, { size: 15, color: INK }); c.restore();
+}
+function attract(dt, t) {
+  if (!seats) { layout(); day = 4; phase = "serve"; queue = 6; dayCust = 13; served = 9; combo = 4; hearts = 3; lanternLit = [1, 1, 1]; trashSq = 0; bowlIn = 1; bowlPop = 0; flyer = null; bowl = [0, 2, 4]; for (const b of bins) { b.sq = 0; b.wig = 0; }
+    seats = [[1, [0, 2, 4, 5]], [0, [1, 3, 6]], [5, [0, 2, 5, 6]]].map((s, k) => ({ k, kind: s[0], order: s[1], pat: 14 - k * 5, patMax: 18, in: 1, out: 0, state: "wait", regular: k === 2, hidden: false, ph: k * 2, wig: 0, hop: 0 })); }
+  render(t);
+}
+Lab.boot();
+})();
+</script></body></html>

@@ -30,7 +30,7 @@ Averages: overall **7.2** · Fun 7.2 · Depth 7.1 · Feel 7.2 · Look 7.7 · Ani
 
 </details>
 
-## Phone Game Lab (`PhoneGameLab/`) — 60/70 reviewed
+## Phone Game Lab (`PhoneGameLab/`) — 64/70 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
@@ -89,19 +89,23 @@ Averages: overall **7.2** · Fun 7.2 · Depth 7.1 · Feel 7.2 · Look 7.7 · Ani
 | [Soundings](PhoneGameLab/games/57-soundings/index.html) | 2 → **8** | 8 | 7 | 8 | 9 | 7 | 7 | 9 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/57-soundings.md) |
 | [Alphabroth](PhoneGameLab/games/58-alphabroth/index.html) | 2 → **8** | 8 | 6 | 8 | 8 | 7 | 7 | 9 | 8 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/58-alphabroth.md) |
 | [Purlwise](PhoneGameLab/games/59-purlwise/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 8 | 7 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/59-purlwise.md) |
+| [Petal Count](PhoneGameLab/games/60-petal-count/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 8 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/60-petal-count.md) |
+| [Lantern Tail](PhoneGameLab/games/61-lantern-tail/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 8 | 7 | 9 | 8 | 8 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/61-lantern-tail.md) |
 | [Ribbon Rodeo](PhoneGameLab/games/62-ribbon-rodeo/index.html) | 2 → **8** | 8 | 8 | 8 | 8 | 7 | 7 | 8 | 7 | 8 | 8 | 8 | 8 | [record](docs/reviews/PhoneGameLab/62-ribbon-rodeo.md) |
+| [Big Drip](PhoneGameLab/games/63-big-drip/index.html) | 2 → **8** | 8 | 8 | 7 | 8 | 7 | 7 | 8 | 8 | 8 | 8 | 8 | 8 | [record](docs/reviews/PhoneGameLab/63-big-drip.md) |
+| [Potting Shed](PhoneGameLab/games/66-potting-shed/index.html) | 2 → **8** | 8 | 7 | 8 | 8 | 7 | 7 | 8 | 9 | 7 | 9 | 8 | 8 | [record](docs/reviews/PhoneGameLab/66-potting-shed.md) |
 | [Misfired](PhoneGameLab/games/05-misfired/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/05-misfired.md) |
 | [Goat Up](PhoneGameLab/games/25-goat-up/index.html) | 2 → **7** | 7 | 6 | 8 | 8 | 7 | 7 | 8 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/25-goat-up.md) |
 | [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) | 2 → **7** | 7 | 6 | 8 | 7 | 7 | 8 | 8 | 8 | 6 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/38-tumblepeg.md) |
 | [Postage Stamp](PhoneGameLab/games/41-postage-stamp/index.html) | 2 → **7** | 7 | 7 | 7 | 8 | 6 | 7 | 7 | 8 | 7 | 9 | 8 | 7 | [record](docs/reviews/PhoneGameLab/41-postage-stamp.md) |
 
-Averages: overall **7.9** · Fun 7.9 · Depth 7.2 · Feel 8.0 · Look 8.3 · Anim 7.5 · Audio 7.2 · Ctrl 8.2 · Onb 7.9 · Replay 7.2 · Perf 8.8 · Robust 8.0 · Polish 7.9
+Averages: overall **7.9** · Fun 7.9 · Depth 7.2 · Feel 8.0 · Look 8.3 · Anim 7.5 · Audio 7.2 · Ctrl 8.2 · Onb 7.9 · Replay 7.3 · Perf 8.8 · Robust 8.0 · Polish 7.9
 
 **Below 8 — revisit first:** [Misfired](PhoneGameLab/games/05-misfired/index.html) (7), [Goat Up](PhoneGameLab/games/25-goat-up/index.html) (7), [Tumblepeg](PhoneGameLab/games/38-tumblepeg/index.html) (7), [Postage Stamp](PhoneGameLab/games/41-postage-stamp/index.html) (7)
 
-<details><summary>10 not yet reviewed (baseline prototypes)</summary>
+<details><summary>6 not yet reviewed (baseline prototypes)</summary>
 
-`PhoneGameLab/60-petal-count` · `PhoneGameLab/61-snake` · `PhoneGameLab/63-agar` · `PhoneGameLab/64-tower-defense` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/66-merge-idle` · `PhoneGameLab/67-cooking-serve` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
+`PhoneGameLab/64-last-slice` · `PhoneGameLab/65-idle-clicker` · `PhoneGameLab/67-lantern-noodles` · `PhoneGameLab/68-sort-baskets` · `PhoneGameLab/69-piano-tiles` · `PhoneGameLab/70-rhythm-lane`
 
 </details>
 

@@ -2233,7 +2233,8 @@ window.GDL_CATALOG = {
    "n": 59,
    "v2": true,
    "score": 8,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--59-purlwise.jpg"
   },
   {
    "id": "PhoneGameLab/60-petal-count",
@@ -2250,24 +2251,30 @@ window.GDL_CATALOG = {
     "keyboard"
    ],
    "n": 60,
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--60-petal-count.jpg"
   },
   {
-   "id": "PhoneGameLab/61-snake",
-   "path": "PhoneGameLab/games/61-snake/index.html",
+   "id": "PhoneGameLab/61-lantern-tail",
+   "path": "PhoneGameLab/games/61-lantern-tail/index.html",
    "collection": "PhoneGameLab",
-   "title": "Snake",
-   "desc": "Eat fruit — don't bite yourself.",
+   "title": "Lantern Tail",
+   "desc": "String them up. Let go before you tangle.",
    "genre": [
-    ".io & Idle"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 61,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--61-snake.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab--61-lantern-tail.jpg"
   },
   {
    "id": "PhoneGameLab/62-ribbon-rodeo",
@@ -2289,38 +2296,39 @@ window.GDL_CATALOG = {
    "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/63-agar",
-   "path": "PhoneGameLab/games/63-agar/index.html",
+   "id": "PhoneGameLab/63-big-drip",
+   "path": "PhoneGameLab/games/63-big-drip/index.html",
    "collection": "PhoneGameLab",
-   "title": "Agar.io",
-   "desc": "Eat smaller blobs, dodge bigger ones.",
+   "title": "Big Drip",
+   "desc": "Be the biggest drop on the glass.",
    "genre": [
-    ".io & Idle"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 63,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--63-agar.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/64-tower-defense",
-   "path": "PhoneGameLab/games/64-tower-defense/index.html",
+   "id": "PhoneGameLab/64-last-slice",
+   "path": "PhoneGameLab/games/64-last-slice/index.html",
    "collection": "PhoneGameLab",
    "title": "Tower Defense",
-   "desc": "Place turrets to stop the waves.",
+   "desc": "Tap to place towers (10 gold). They auto-fire at enemies on the path.",
    "genre": [
-    ".io & Idle"
+    "Minigame"
    ],
    "controls": [
     "touch",
     "mouse"
    ],
    "n": 64,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--64-tower-defense.jpg"
+   "v2": false
   },
   {
    "id": "PhoneGameLab/65-idle-clicker",
@@ -2340,38 +2348,40 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab--65-idle-clicker.jpg"
   },
   {
-   "id": "PhoneGameLab/66-merge-idle",
-   "path": "PhoneGameLab/games/66-merge-idle/index.html",
+   "id": "PhoneGameLab/66-potting-shed",
+   "path": "PhoneGameLab/games/66-potting-shed/index.html",
    "collection": "PhoneGameLab",
-   "title": "Merge Idle",
-   "desc": "Merge generators for compounding income.",
+   "title": "Potting Shed",
+   "desc": "Merge, grow and fill the day's orders.",
    "genre": [
-    ".io & Idle"
+    "Puzzle & Match"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 66,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--66-merge-idle.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed"
   },
   {
-   "id": "PhoneGameLab/67-cooking-serve",
-   "path": "PhoneGameLab/games/67-cooking-serve/index.html",
+   "id": "PhoneGameLab/67-lantern-noodles",
+   "path": "PhoneGameLab/games/67-lantern-noodles/index.html",
    "collection": "PhoneGameLab",
-   "title": "Cook & Serve",
-   "desc": "Drag the right ingredients to each order.",
+   "title": "Lantern Noodles",
+   "desc": "Build bowls fast. Remember your regulars.",
    "genre": [
-    "Skill & Rhythm"
+    "Arcade & Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
    "n": 67,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab--67-cooking-serve.jpg"
+   "v2": true
   },
   {
    "id": "PhoneGameLab/68-sort-baskets",

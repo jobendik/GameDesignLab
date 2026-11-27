@@ -203,14 +203,17 @@ window.LAB_GAMES = [
     "t": "Purlwise",
     "d": "Read the pattern. Knit the picture.",
     "v2": true,
-    "score": 8
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--59-purlwise.jpg"
    },
    {
     "n": 60,
     "slug": "60-petal-count",
     "t": "Petal Count",
     "d": "One of each flower in every row, column and bed.",
-    "v2": true
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--60-petal-count.jpg"
    }
   ]
  },
@@ -362,12 +365,36 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab--52-tideglass.jpg"
    },
    {
+    "n": 61,
+    "slug": "61-lantern-tail",
+    "t": "Lantern Tail",
+    "d": "String them up. Let go before you tangle.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab--61-lantern-tail.jpg"
+   },
+   {
     "n": 62,
     "slug": "62-ribbon-rodeo",
     "t": "Ribbon Rodeo",
     "d": "Fly a fighter kite. Lasso the whole sky.",
     "v2": true,
     "score": 8
+   },
+   {
+    "n": 63,
+    "slug": "63-big-drip",
+    "t": "Big Drip",
+    "d": "Be the biggest drop on the glass.",
+    "v2": true,
+    "score": 8
+   },
+   {
+    "n": 67,
+    "slug": "67-lantern-noodles",
+    "t": "Lantern Noodles",
+    "d": "Build bowls fast. Remember your regulars.",
+    "v2": true
    }
   ]
  },
@@ -400,6 +427,14 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--45-shoo.jpg"
+   },
+   {
+    "n": 66,
+    "slug": "66-potting-shed",
+    "t": "Potting Shed",
+    "d": "Merge, grow and fill the day's orders.",
+    "v2": true,
+    "score": 8
    }
   ]
  },
@@ -414,13 +449,6 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab--18-one-breath.jpg"
-   },
-   {
-    "n": 67,
-    "slug": "67-cooking-serve",
-    "t": "Cook & Serve",
-    "d": "Drag the right ingredients to each order.",
-    "thumb": "../thumbs/PhoneGameLab--67-cooking-serve.jpg"
    },
    {
     "n": 68,
@@ -614,42 +642,25 @@ window.LAB_GAMES = [
   ]
  },
  {
-  "cat": ".io & Idle",
+  "cat": "Minigame",
   "items": [
    {
-    "n": 61,
-    "slug": "61-snake",
-    "t": "Snake",
-    "d": "Eat fruit — don't bite yourself.",
-    "thumb": "../thumbs/PhoneGameLab--61-snake.jpg"
-   },
-   {
-    "n": 63,
-    "slug": "63-agar",
-    "t": "Agar.io",
-    "d": "Eat smaller blobs, dodge bigger ones.",
-    "thumb": "../thumbs/PhoneGameLab--63-agar.jpg"
-   },
-   {
     "n": 64,
-    "slug": "64-tower-defense",
+    "slug": "64-last-slice",
     "t": "Tower Defense",
-    "d": "Place turrets to stop the waves.",
-    "thumb": "../thumbs/PhoneGameLab--64-tower-defense.jpg"
-   },
+    "d": "Tap to place towers (10 gold). They auto-fire at enemies on the path."
+   }
+  ]
+ },
+ {
+  "cat": ".io & Idle",
+  "items": [
    {
     "n": 65,
     "slug": "65-idle-clicker",
     "t": "Idle Clicker",
     "d": "Tap, buy upgrades, automate income.",
     "thumb": "../thumbs/PhoneGameLab--65-idle-clicker.jpg"
-   },
-   {
-    "n": 66,
-    "slug": "66-merge-idle",
-    "t": "Merge Idle",
-    "d": "Merge generators for compounding income.",
-    "thumb": "../thumbs/PhoneGameLab--66-merge-idle.jpg"
    }
   ]
  }

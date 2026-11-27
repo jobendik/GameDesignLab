@@ -1,0 +1,349 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Potting Shed</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* POTTING SHED — a cosy drag-merge bench. Tap the seed sack / clay tub / beehive to stock the tray, drag two of a kind
+ * together to grow them, and hand finished things to the order tags before the sun goes down.
+ * Chains:   Flora (seed → bouquet), Clay (lump → grand urn), Honey (nectar → golden skep), six tiers each, plus a
+ *           production step: a grown plant dropped onto a plain Pot becomes a Planter (worth far more than its parts).
+ * Day:      one run = one 150 s day. Score = coins earned today. Quick back-to-back orders build a "bustle" multiplier.
+ * Persist:  the tray, the almanac of discovered things, lifetime coins and the shed level (which unlocks the clay tub,
+ *           the beehive, richer sacks and bigger stock) are kept between days through Lab.store.
+ * Identity: sage-green shed wall, wooden bench, paper order tags, hand-drawn items; sleepy "dream" music that fills
+ *           out as dusk approaches; every merge climbs a pentatonic ladder by tier. */
+Lab.init({
+  title: "Potting Shed", tagline: "Merge, grow and fill the day's orders.", category: "Puzzle & Match",
+  howto: ["Tap the sack to stock the tray", "Drag two alike together to grow them", "Drag (or tap) wanted things to an order"],
+  theme: { bg: "#5d8a66", bg2: "#8fb58a", accent: "#e8743b", accent2: "#f2c14e", fg: "#3b2a1a", light: true },
+  orient: "any", music: { style: "dream", key: "F", bpm: 78, vol: .42 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, shade = Lab.color.shade;
+const COLS = 5, ROWS = 6, N = COLS * ROWS, DAY = 150, INK = "#4a3524";
+const CH = [
+  { n: "Flora", c: "#4f9a52", names: ["Seed", "Sprout", "Seedling", "Bud", "Bloom", "Bouquet"] },
+  { n: "Clay", c: "#c2643a", names: ["Clay", "Saucer", "Pot", "Glazed Pot", "Urn", "Grand Urn"] },
+  { n: "Honey", c: "#d9930f", names: ["Nectar", "Comb", "Honeycomb", "Honey Pot", "Honey Jar", "Golden Skep"] },
+  { n: "Planter", c: "#8a6fd0", names: ["Potted Seedling", "Potted Bud", "Potted Bloom", "Potted Bouquet"] },
+];
+const VAL = [1, 3, 8, 20, 48, 110], TOTAL = 22, LEVELS = [0, 60, 200, 520, 1100, 2200];
+const UNLOCK = ["", "", "Clay tub unlocked", "Beehive unlocked", "Richer sacks", "Bigger stock", "Master gardener"];
+const value = (ch, t) => ch === 3 ? Math.round((VAL[t + 2] + VAL[2]) * 1.6) : VAL[t];
+const key = (ch, t) => ch * 10 + t, lvl = life => LEVELS.filter(v => life >= v).length;
+let wide, gc, gr, cs, bx, by, sun, cards, gpos, almY, sv, cells, gens, orders, ghosts, coins, life, level, disc, dayT, streak, streakT, drag, stats, guide, guideT, idleT, dirty, alive, lastTick, binSq, orderN;
+
+/* ---------- layout (portrait: 5×6 tray under three tags; wide: 6×5 tray between tags and tools) */
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15; gc = wide ? ROWS : COLS; gr = wide ? COLS : ROWS;
+  sun = { x: P.x + 14, y: P.y + 5, w: P.w - 28, h: 16 }; cards = []; gpos = [];
+  if (wide) {
+    const lw = clamp(P.w * .2, 140, 210), rw = clamp(P.h * .24, 66, 96);
+    cs = Math.min((P.h - 62) / gr, (P.w - lw - rw - 52) / gc, 84);
+    const bw = cs * gc, bh = cs * gr; bx = P.x + lw + 26 + (P.w - lw - rw - 52 - bw) / 2; by = P.y + 30 + (P.h - 58 - bh) / 2;
+    const oh = Math.min((bh - 38) / 3, 100);
+    for (let k = 0; k < 3; k++) cards.push({ x: bx - lw - 16, y: by + 22 + (bh - 22 - oh * 3 - 16) / 2 + k * (oh + 8), w: lw, h: oh });
+    const r = Math.min(rw / 2 - 5, bh / 8 - 5); for (let k = 0; k < 4; k++) gpos.push({ x: bx + bw + 16 + rw / 2, y: by + bh * (k + .5) / 4, r });
+    almY = by + bh + 15;
+  } else {
+    const oh = clamp(P.h * .125, 74, 98), gh = clamp(P.h * .11, 70, 88);
+    cs = Math.min((P.w - 24) / gc, (P.h - oh - gh - 156) / gr, 84);
+    const bw = cs * gc, bh = cs * gr, pad = Math.max(0, P.h - (oh + bh + gh + 156)) / 4;
+    bx = P.x + (P.w - bw) / 2; by = P.y + 30 + pad + oh + 30;
+    const cw = (bw - 16) / 3; for (let k = 0; k < 3; k++) cards.push({ x: bx + k * (cw + 8), y: by - oh - 30, w: cw, h: oh });
+    const r = Math.min(gh / 2 - 4, bw / 8 - 6); for (let k = 0; k < 4; k++) gpos.push({ x: bx + bw * (k + .5) / 4, y: by + bh + 24 + pad + gh / 2, r });
+    almY = gpos[0].y + gh / 2 + 30 + pad * .8;
+  }
+  Lab.sprite.clear("ps:");
+}
+Lab.onResize(() => { if (cells) { layout(); for (let i = 0; i < N; i++) if (cells[i] && (!drag || drag.it !== cells[i])) { const p = cellXY(i); cells[i].x = p.x; cells[i].y = p.y; } } });
+const CR = i => wide ? [Math.floor(i / COLS), i % COLS] : [i % COLS, Math.floor(i / COLS)];
+function cellXY(i) { const [c, r] = CR(i); return { x: bx + (c + .5) * cs, y: by + (r + .5) * cs }; }
+function cellAt(x, y) { const c = Math.floor((x - bx) / cs), r = Math.floor((y - by) / cs); if (c < 0 || r < 0 || c >= gc || r >= gr) return -1; return wide ? c * COLS + r : r * COLS + c; }
+
+/* ---------- state */
+function mk(ch, t, i, fx0, fy0) { const p = cellXY(i); return { ch, t, x: fx0 == null ? p.x : fx0, y: fy0 == null ? p.y : fy0, pop: 0, wig: 0 }; }
+function load() {
+  layout();
+  const s = Lab.store.get("save", null); sv = s && s.cells && s.cells.length === N ? s : { cells: Array(N).fill(null), life: 0, disc: [0], day: 1, tut: 0 };
+  if (!s) sv.cells[12] = [0, 0];
+  cells = sv.cells.map((c, i) => c ? mk(c[0], c[1], i) : null); life = sv.life; level = lvl(life); disc = new Set(sv.disc);
+  gens = [0, 1, 2].map(ch => ({ ch, cap: 0, charge: 0, rate: [1.5, 1.9, 2.3][ch], need: ch + 1, sq: 0, shake: 0 })); tuneGens(true);
+  orders = [null, null, null]; ghosts = []; coins = 0; dayT = DAY; streak = 0; streakT = 0; drag = null; guide = null; guideT = 0; idleT = 0; dirty = false; alive = true; lastTick = 99; binSq = 0; orderN = 0;
+  stats = { orders: 0, merges: 0, best: null, found: 0 };
+}
+function tuneGens(fill) { for (const g of gens) { g.cap = [6, 5, 4][g.ch] + (level >= 5 ? 2 : 0); if (fill) g.charge = g.cap; } }
+function persist() { sv.cells = cells.map(c => c ? [c.ch, c.t] : null); sv.life = life; sv.disc = [...disc]; Lab.store.set("save", sv); dirty = false; }
+function start() {
+  load(); for (let k = 0; k < 3; k++) newOrder(k, k * .25);
+  Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => {
+    if (!alive || drag) return; idleT = 0;
+    for (let k = 0; k < 3; k++) if (Lab.dist(x, y, gpos[k].x, gpos[k].y) < gpos[k].r + 8) { tapGen(k); return; }
+    const i = cellAt(x, y); if (i >= 0 && cells[i]) { drag = { i, it: cells[i], sx: x, sy: y, moved: false, lift: Lab.input.pointerType === "touch" ? cs * .42 : 0 }; Lab.sfx("tap", { vol: .5, pitch: 1.1 }); }
+  }];
+  Lab.input.onMove = [(x, y) => { if (!drag) return; if (!drag.moved && Lab.dist(x, y, drag.sx, drag.sy) > 10) drag.moved = true; if (drag.moved) { drag.it.x = x; drag.it.y = y - drag.lift; } }];
+  Lab.input.onUp = [(x, y) => {
+    if (!alive) { drag = null; return; } idleT = 0;
+    if (drag) { const d = drag; drag = null; if (d.moved) drop(d, d.it.x, d.it.y); else { const o = wantedBy(d.it); if (o) deliver(o, d.i); else d.it.wig = 1; } return; }
+    const k = cards.findIndex(c => x > c.x && x < c.x + c.w && y > c.y && y < c.y + c.h);
+    if (k >= 0 && orders[k] && !orders[k].out) { let any = false; for (let i = 0; i < N && orders[k] && !orders[k].out; i++) if (cells[i] && needOf(orders[k], cells[i])) { deliver(orders[k], i); any = true; } if (!any) { orders[k].shake = 1; Lab.sfx("tick", { pitch: .7 }); } }
+  }];
+  Lab.input.onKey = [k => { if (k >= "1" && k <= "3") tapGen(+k - 1); }];
+  Lab.expose({
+    get coins() { return coins; }, get life() { return life; }, get level() { return level; }, get timeLeft() { return dayT; }, get merges() { return stats.merges; }, get streak() { return streak; },
+    get cells() { return cells.map((c, i) => c ? { i, ch: c.ch, t: c.t, ...cellXY(i) } : null); }, get count() { return cells.filter(Boolean).length; }, get found() { return disc.size; },
+    get orders() { return orders.map((o, k) => o && !o.out ? { k, needs: o.needs.map(n => ({ ch: n.ch, t: n.t, done: n.done })), reward: o.reward, x: cards[k].x + cards[k].w / 2, y: cards[k].y + cards[k].h / 2 } : null); },
+    get gens() { return gens.map((g, k) => ({ x: gpos[k].x, y: gpos[k].y, charge: Math.floor(g.charge), locked: level < g.need })); }, get bin() { return { x: gpos[3].x, y: gpos[3].y }; },
+    cellXY, give(i, ch, t) { cells[i] = mk(ch, t, i); discover(ch, t, true); dirty = true; }, clear() { cells.fill(null); dirty = true; }, setTime(s) { dayT = s; sv.tut = 3; }, setLife(n) { life = n; checkLevel(); },
+    saved() { return Lab.store.get("save", null); },
+  });
+  Lab.loop((dt, t) => { update(dt); render(t); });
+}
+
+/* ---------- orders */
+function newOrder(k, delay) {
+  const n = orderN++, needs = [], chs = [0]; if (level >= 2) chs.push(1); if (level >= 3) chs.push(2);
+  const maxT = Math.min(5, 1 + Math.ceil(level / 1.5) + (dayT < DAY * .45 ? 1 : 0)), cnt = n > 1 && level >= 2 && Lab.chance(.3 + level * .06) ? 2 : 1;
+  if (sv.tut < 3 && n < 2) needs.push({ ch: 0, t: 1 + n });
+  else for (let j = 0; j < cnt; j++) {
+    let ch, t, tries = 0;
+    do { if (level >= 3 && Lab.chance(.2)) { ch = 3; t = Lab.randInt(0, Math.min(3, level - 3)); } else { ch = Lab.choose(chs); t = 1 + Math.floor(Math.pow(Math.random(), 1.5) * maxT); } }
+    while (++tries < 8 && (needs.some(q => q.ch === ch && q.t === t) || orders.some(o => o && o.needs.length === 1 && cnt === 1 && o.needs[0].ch === ch && o.needs[0].t === t)));
+    needs.push({ ch, t });
+  }
+  for (const q of needs) { q.done = false; q.pulse = 0; }
+  orders[k] = { needs, reward: needs.reduce((a, q) => a + value(q.ch, q.t), 0) * 2 + 3 + (needs.length > 1 ? 4 : 0), in: -(delay || 0) * 3, out: 0, shake: 0 };
+}
+const needOf = (o, it) => o && !o.out && o.needs.find(q => !q.done && q.ch === it.ch && q.t === it.t);
+const wantedBy = it => orders.find(o => needOf(o, it));
+function deliver(o, i) {
+  const it = cells[i], q = needOf(o, it), k = orders.indexOf(o), c = cards[k]; if (!q) return false;
+  cells[i] = null; q.done = true; dirty = true; if (sv.tut < 3) sv.tut = 3;
+  const j = o.needs.indexOf(q), tx = c.x + c.w * (j + .5) / o.needs.length, ty = c.y + c.h * .42, g = { ch: it.ch, t: it.t, x: it.x, y: it.y, s: 1 };
+  ghosts.push(g); Lab.tween(g, { x: tx, y: ty, s: .6 }, .28, { ease: "inOutQuad", onDone() { ghosts.splice(ghosts.indexOf(g), 1); q.pulse = 1; fx.burst(tx, ty, { n: 8, colors: [CH[it.ch].c, "#fff6c9"], speed: 120, life: .4, size: 3 }); } });
+  Lab.sfx("pickup", { pitch: 1 + it.t * .08 });
+  if (o.needs.every(n => n.done)) {
+    const mult = 1 + .25 * Math.min(streak, 8), gain = Math.round(o.reward * mult); streak++; streakT = 14; stats.orders++;
+    o.out = .001; Lab.after(.3, () => {
+      addCoins(gain, c.x + c.w / 2, c.y + c.h * .5, mult > 1 ? "  ×" + mult.toFixed(2).replace(/0$/, "") : "");
+      Lab.sfx("coin", { pitch: 1 + Math.min(streak, 8) * .05 }); Lab.audio.combo(2 + Math.min(streak, 8), { vol: .14 }); Lab.buzz(12);
+      fx.burst(c.x + c.w / 2, c.y + c.h / 2, { n: 16, colors: ["#f2c14e", "#fff6c9", "#e8743b"], speed: 220, life: .6, size: 4, gravity: 300, shape: "star" });
+    });
+    Lab.after(.75, () => { if (alive) newOrder(k); });
+  }
+  return true;
+}
+function addCoins(n, x, y, extra) { coins += n; life += n; Lab.setScore(coins); Lab.bumpScore(); fx.text(x, y, "+" + n + (extra || ""), { color: "#fff3b0", size: 20, outline: "rgba(74,53,36,.8)" }); checkLevel(); dirty = true; }
+function checkLevel() { const nl = lvl(life); if (nl <= level) return; level = nl; tuneGens(false); for (const g of gens) if (g.need === level) { g.charge = g.cap; g.sq = 1; } Lab.banner("Shed level " + level, { color: "#f2c14e", ms: 1500, y: .3 }); Lab.toast(UNLOCK[level], 1900, { y: .42 }); Lab.sfx("levelup"); }
+function discover(ch, t, quiet) {
+  if (disc.has(key(ch, t))) return; disc.add(key(ch, t)); stats.found++; if (quiet) return;
+  const b = value(ch, t); Lab.toast("New: " + CH[ch].names[t] + "  +" + b, 1500, { y: wide ? .5 : .2 }); Lab.sfx("unlock"); addCoins(b, Lab.W / 2, almY - 26);
+}
+
+/* ---------- stocking, merging, dropping */
+function tapGen(k) {
+  const g = gens[k], p = gpos[k]; if (!alive) return false;
+  if (level < g.need) { g.shake = 1; Lab.sfx("error", { vol: .5 }); Lab.toast("Unlocks at shed level " + g.need, 1100, { y: .5 }); return false; }
+  const free = []; for (let i = 0; i < N; i++) if (!cells[i]) free.push(i);
+  if (!free.length) { g.shake = 1; Lab.sfx("error", { vol: .5 }); Lab.toast("Tray is full — merge or compost", 1200, { y: .5 }); return false; }
+  if (g.charge < 1) { g.shake = 1; Lab.sfx("tick", { pitch: .6 }); return false; }
+  g.charge -= 1; g.sq = 1; idleT = 0;
+  const t = Lab.chance(.1 + (level >= 4 ? .2 : 0)) ? 1 : 0, i = free.sort((a, b) => Lab.dist(cellXY(a).x, cellXY(a).y, p.x, p.y) - Lab.dist(cellXY(b).x, cellXY(b).y, p.x, p.y))[Lab.randInt(0, Math.min(3, free.length - 1))];
+  cells[i] = mk(g.ch, t, i, p.x, p.y - p.r * .4); cells[i].pop = 1; discover(g.ch, t); dirty = true;
+  Lab.sfx("pop", { pitch: [1.25, .95, 1.5][g.ch] }); Lab.buzz(6); return true;
+}
+function combine(a, b) { // result of dropping a onto b, or null
+  if (a.ch === b.ch && a.t === b.t && a.ch < 3 && a.t < 5) return [a.ch, a.t + 1];
+  const f = a.ch === 0 ? a : b.ch === 0 ? b : null, p = a.ch === 1 ? a : b.ch === 1 ? b : null;
+  if (f && p && f.t >= 2 && p.t === 2) return [3, f.t - 2];
+  return null;
+}
+function drop(d, x, y) {
+  const it = d.it, i = d.i;
+  for (let k = 0; k < 3; k++) { const c = cards[k]; if (x > c.x - 6 && x < c.x + c.w + 6 && y > c.y - 6 && y < c.y + c.h + 10) { if (orders[k] && deliver(orders[k], i)) return; if (orders[k]) orders[k].shake = 1; Lab.sfx("error", { vol: .4 }); return; } }
+  if (Lab.dist(x, y, gpos[3].x, gpos[3].y) < gpos[3].r + 14) { cells[i] = null; binSq = 1; dirty = true; Lab.sfx("crunch"); fx.burst(gpos[3].x, gpos[3].y, { n: 10, colors: ["#6fbf5f", "#7a5234"], speed: 140, life: .5, gravity: 400 }); if (it.t) addCoins(it.t, gpos[3].x, gpos[3].y - gpos[3].r); return; }
+  const j = cellAt(x, y); if (j < 0 || j === i) { Lab.sfx("slide", { vol: .6 }); return; }
+  const o = cells[j];
+  if (!o) { cells[j] = it; cells[i] = null; Lab.sfx("knock", { pitch: 1.3, vol: .6 }); dirty = true; return; }
+  const m = combine(it, o);
+  if (!m) { cells[j] = it; cells[i] = o; Lab.sfx("slide"); dirty = true; return; }
+  const p = cellXY(j), n = mk(m[0], m[1], j); n.pop = 1; cells[j] = n; cells[i] = null; stats.merges++; dirty = true;
+  const v = value(m[0], m[1]); if (!stats.best || v > value(stats.best[0], stats.best[1])) stats.best = m;
+  fx.burst(p.x, p.y, { n: 8 + m[1] * 3, colors: [CH[m[0]].c, "#fff6c9", "#fff"], speed: 130 + m[1] * 30, life: .5, size: 3 + m[1] * .4, gravity: 200 });
+  fx.ring(p.x, p.y, { r0: cs * .25, r1: cs * (.6 + m[1] * .08), color: CH[m[0]].c, width: 4, life: .35 });
+  Lab.audio.combo(m[0] === 3 ? m[1] + 5 : m[1], { vol: .2 }); Lab.sfx("bubble", { pitch: 1.3 - m[1] * .08, vol: .7 }); Lab.buzz(8 + m[1] * 3);
+  if (m[1] >= 3 || m[0] === 3) { Lab.shake(2 + m[1], .18); }
+  discover(m[0], m[1]);
+}
+function findGuide() { // tutorial + idle hint: wanted thing → its tag, else a mergeable pair, else the sack
+  for (let i = 0; i < N; i++) if (cells[i]) { const o = wantedBy(cells[i]); if (o) { const c = cards[orders.indexOf(o)]; return { a: cellXY(i), b: { x: c.x + c.w / 2, y: c.y + c.h / 2 } }; } }
+  for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) if (cells[i] && cells[j] && combine(cells[i], cells[j])) return { a: cellXY(i), b: cellXY(j) };
+  return cells.some(c => !c) && gens[0].charge >= 1 ? { a: gpos[0], ring: gpos[0].r } : null;
+}
+
+function update(dt) {
+  if (!alive) return;
+  if (sv.tut >= 3) dayT -= dt;
+  if (dayT <= 20 && lastTick > 20) { lastTick = 20; Lab.toast("Dusk — closing soon", 1400, { y: .5 }); Lab.sfx("chime", { pitch: .8 }); }
+  if (dayT <= 5 && Math.ceil(dayT) < lastTick) { lastTick = Math.ceil(dayT); Lab.sfx("tick", { pitch: 1.2 }); }
+  Lab.music.intensity(.2 + (1 - dayT / DAY) * .5 + Math.min(streak, 6) * .05);
+  if (streakT > 0) { streakT -= dt; if (streakT <= 0) streak = 0; }
+  for (const g of gens) { if (level >= g.need && g.charge < g.cap) { const was = Math.floor(g.charge); g.charge = Math.min(g.cap, g.charge + dt / g.rate); if (Math.floor(g.charge) > was && was === 0) Lab.sfx("tick", { pitch: 1.5, vol: .4 }); } g.sq = Lab.damp(g.sq, 0, 10, dt); g.shake = Lab.damp(g.shake, 0, 8, dt); }
+  binSq = Lab.damp(binSq, 0, 9, dt);
+  for (let i = 0; i < N; i++) { const it = cells[i]; if (!it) continue; if (!(drag && drag.it === it && drag.moved)) { const p = cellXY(i); it.x = Lab.damp(it.x, p.x, 18, dt); it.y = Lab.damp(it.y, p.y, 18, dt); } it.pop = Math.max(0, it.pop - dt * 3.4); it.wig = Math.max(0, it.wig - dt * 3); }
+  for (const o of orders) { if (!o) continue; o.in = Math.min(1, o.in + dt * 3.5); if (o.out) o.out = Math.min(1, o.out + dt * 2.2); o.shake = Lab.damp(o.shake, 0, 8, dt); for (const q of o.needs) q.pulse = Math.max(0, q.pulse - dt * 3); }
+  idleT += dt; guideT -= dt;
+  if (guideT <= 0) { guideT = .4; guide = !drag && (sv.tut < 3 || idleT > 7) ? findGuide() : null; }
+  if (dirty && !drag) persist();
+  if (dayT <= 0) endDay();
+}
+function endDay() {
+  alive = false; drag = null; sv.day++; persist();
+  const nxt = LEVELS[level], b = stats.best;
+  Lab.gameover({ neutral: true, title: "Closing time", message: level < 6 ? `Shed level ${level} · next unlock at ${nxt} coins (${life} so far)` : "Shed level 6 · master gardener", score: coins,
+    stats: [["Orders", stats.orders], ["Best make", b ? CH[b[0]].names[b[1]] : "—"], ["Almanac", disc.size + "/" + TOTAL]] });
+}
+
+/* ---------- art: every item is painted in a −1..1 box and baked per size */
+function leaf(g, x, y, a, l) { g.save(); g.translate(x, y); g.rotate(a); g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(l * .5, -l * .5, l, 0); g.quadraticCurveTo(l * .5, l * .5, 0, 0); g.fillStyle = "#74c463"; g.fill(); g.stroke(); g.restore(); }
+function flowerHead(g, x, y, r, col) { g.fillStyle = col; for (let i = 0; i < 5; i++) { const a = i * TAU / 5 - 1.57; g.beginPath(); g.arc(x + Math.cos(a) * r * .55, y + Math.sin(a) * r * .55, r * .46, 0, TAU); g.fill(); g.stroke(); } g.beginPath(); g.arc(x, y, r * .36, 0, TAU); g.fillStyle = "#ffd75e"; g.fill(); g.stroke(); }
+function flora(g, t, bare) {
+  const el = (x, y, rx, ry, f) => { g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, TAU); g.fillStyle = f; g.fill(); g.stroke(); };
+  if (t === 0) { g.save(); g.rotate(-.5); el(0, 0, .36, .52, "#b98552"); g.beginPath(); g.moveTo(0, -.3); g.quadraticCurveTo(.12, 0, 0, .3); g.stroke(); g.restore(); return; }
+  if (t === 5) {
+    g.beginPath(); g.moveTo(-.58, -.1); g.lineTo(.58, -.1); g.lineTo(.08, .88); g.lineTo(-.08, .88); g.closePath(); g.fillStyle = "#f6ecd2"; g.fill(); g.stroke();
+    g.beginPath(); g.moveTo(-.3, .38); g.lineTo(.3, .38); g.lineWidth = .13; g.strokeStyle = "#e8743b"; g.stroke(); g.lineWidth = .07; g.strokeStyle = INK;
+    leaf(g, -.2, -.1, -2.2, .5); leaf(g, .2, -.1, -.9, .5);
+    flowerHead(g, -.36, -.32, .3, "#ff8fb0"); flowerHead(g, .36, -.32, .3, "#b490f0"); flowerHead(g, 0, -.55, .34, "#ffa24d"); return;
+  }
+  const h = [0, .55, 1, 1.12, 1.05][t], base = .7;
+  if (!bare) el(0, base + .04, .52, .17, "#7a5234");
+  g.beginPath(); g.moveTo(0, base); g.quadraticCurveTo(.12, base - h * .5, 0, base - h); g.strokeStyle = "#3f8a45"; g.lineWidth = .11; g.stroke(); g.strokeStyle = INK; g.lineWidth = .07;
+  if (t === 1) { leaf(g, 0, base - h, -.6, .44); leaf(g, 0, base - h, Math.PI + .6, .44); return; }
+  leaf(g, .02, base - .3, -.5, .52); leaf(g, .02, base - .3, Math.PI + .5, .52);
+  if (t === 2) { leaf(g, 0, base - h, -.8, .42); leaf(g, 0, base - h, Math.PI + .8, .42); leaf(g, .04, base - .65, -.35, .36); }
+  if (t === 3) { leaf(g, .04, base - .68, Math.PI + .4, .36); el(0, base - h - .12, .21, .3, "#f08fb0"); g.beginPath(); g.moveTo(-.2, base - h + .06); g.quadraticCurveTo(0, base - h + .22, .2, base - h + .06); g.strokeStyle = "#3f8a45"; g.lineWidth = .1; g.stroke(); g.strokeStyle = INK; g.lineWidth = .07; }
+  if (t === 4) flowerHead(g, 0, base - h - .04, .44, "#ff7fa8");
+}
+function potShape(g, body, rim) { g.beginPath(); g.moveTo(-.52, -.22); g.lineTo(.52, -.22); g.lineTo(.36, .72); g.lineTo(-.36, .72); g.closePath(); g.fillStyle = body; g.fill(); g.stroke(); draw.rr(g, -.64, -.48, 1.28, .28, .08); g.fillStyle = rim; g.fill(); g.stroke(); }
+function urnShape(g, body) { g.beginPath(); g.moveTo(-.27, -.78); g.lineTo(.27, -.78); g.quadraticCurveTo(.2, -.62, .22, -.5); g.bezierCurveTo(.8, -.3, .72, .52, .26, .74); g.lineTo(-.26, .74); g.bezierCurveTo(-.72, .52, -.8, -.3, -.22, -.5); g.quadraticCurveTo(-.2, -.62, -.27, -.78); g.closePath(); g.fillStyle = body; g.fill(); g.stroke(); }
+function clay(g, t) {
+  const TC = "#cf7a4a";
+  if (t === 0) { g.beginPath(); g.moveTo(-.62, .36); g.bezierCurveTo(-.74, -.2, -.3, -.52, 0, -.4); g.bezierCurveTo(.42, -.56, .78, -.1, .62, .36); g.bezierCurveTo(.4, .62, -.4, .62, -.62, .36); g.fillStyle = TC; g.fill(); g.stroke(); g.beginPath(); g.arc(-.15, -.05, .22, 3.4, 4.6); g.strokeStyle = "#f3b48c"; g.stroke(); g.strokeStyle = INK; }
+  else if (t === 1) { g.beginPath(); g.moveTo(-.78, .02); g.lineTo(-.5, .42); g.lineTo(.5, .42); g.lineTo(.78, .02); g.closePath(); g.fillStyle = TC; g.fill(); g.stroke(); g.beginPath(); g.ellipse(0, .02, .78, .2, 0, 0, TAU); g.fillStyle = "#e39a6c"; g.fill(); g.stroke(); }
+  else if (t === 2) potShape(g, TC, "#e39a6c");
+  else if (t === 3) { potShape(g, "#4f9bd0", "#3b7fb5"); g.beginPath(); g.moveTo(-.44, .16); g.quadraticCurveTo(-.22, -.02, 0, .16); g.quadraticCurveTo(.22, .34, .44, .16); g.strokeStyle = "#eaf6ff"; g.lineWidth = .1; g.stroke(); g.strokeStyle = INK; g.lineWidth = .07; }
+  else {
+    const gold = t === 5; g.lineWidth = .09; for (const s of [-1, 1]) { g.beginPath(); g.arc(s * .52, -.2, .22, 0, TAU); g.strokeStyle = gold ? "#b8860b" : INK; g.stroke(); } g.strokeStyle = INK; g.lineWidth = .07;
+    urnShape(g, gold ? "#3f9a94" : "#d98a55"); g.save(); urnShape(g, "rgba(0,0,0,0)"); g.clip(); g.fillStyle = gold ? "#f2c14e" : "#a85a32"; g.fillRect(-1, -.08, 2, .13); g.fillRect(-1, .3, 2, .09); if (gold) { g.fillRect(-1, -.8, 2, .12); for (let i = -2; i <= 2; i++) draw.star(g, i * .26, .16, .08, "#f2c14e", 4, .4); } g.restore(); urnShape(g, "rgba(0,0,0,0)");
+  }
+}
+function hex(g, x, y, r, f) { g.beginPath(); for (let i = 0; i < 6; i++) { const a = i * TAU / 6 + .5236; g[i ? "lineTo" : "moveTo"](x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); g.fillStyle = f; g.fill(); g.stroke(); }
+function honey(g, t) {
+  const HC = "#f4b63a";
+  if (t === 0) { g.beginPath(); g.moveTo(0, -.62); g.bezierCurveTo(.52, 0, .46, .56, 0, .56); g.bezierCurveTo(-.46, .56, -.52, 0, 0, -.62); g.fillStyle = HC; g.fill(); g.stroke(); g.beginPath(); g.arc(-.08, .16, .2, 2.4, 3.6); g.strokeStyle = "#fff1c2"; g.stroke(); g.strokeStyle = INK; }
+  else if (t === 1) { hex(g, -.32, .22, .36, HC); hex(g, .32, .22, .36, "#f9cc62"); hex(g, 0, -.33, .36, "#eaa023"); }
+  else if (t === 2) { hex(g, 0, 0, .28, "#eaa023"); for (let i = 0; i < 6; i++) hex(g, Math.cos(i * TAU / 6) * .5, Math.sin(i * TAU / 6) * .5, .28, i % 2 ? HC : "#f9cc62"); }
+  else if (t === 3) { g.beginPath(); g.ellipse(0, .18, .62, .54, 0, 0, TAU); g.fillStyle = "#e8a13a"; g.fill(); g.stroke(); draw.rr(g, -.46, -.5, .92, .24, .1); g.fillStyle = "#8a5a2b"; g.fill(); g.stroke(); g.beginPath(); g.moveTo(-.3, -.26); g.quadraticCurveTo(-.28, .1, -.14, .02); g.quadraticCurveTo(0, -.1, .1, .2); g.quadraticCurveTo(.2, .3, .3, -.26); g.fillStyle = "#ffd872"; g.fill(); g.stroke(); }
+  else if (t === 4) { draw.rr(g, -.52, -.4, 1.04, 1.16, .2); g.fillStyle = HC; g.fill(); g.stroke(); draw.rr(g, -.58, -.7, 1.16, .34, .08); g.fillStyle = "#d95f4a"; g.fill(); g.stroke(); draw.rr(g, -.34, -.08, .68, .52, .08); g.fillStyle = "#fbf3df"; g.fill(); g.stroke(); g.lineWidth = .05; hex(g, 0, .18, .16, HC); g.lineWidth = .07; }
+  else { for (let i = 0; i < 4; i++) { g.beginPath(); g.ellipse(0, .52 - i * .34, .74 - i * .15, .24, 0, 0, TAU); g.fillStyle = i % 2 ? "#f9d877" : "#f2c14e"; g.fill(); g.stroke(); } g.beginPath(); g.arc(0, .56, .16, Math.PI, 0); g.lineTo(.16, .74); g.lineTo(-.16, .74); g.closePath(); g.fillStyle = INK; g.fill(); draw.star(g, .58, -.52, .2, "#fff6c9", 4, .35); g.stroke(); }
+}
+function paint(g, ch, t) {
+  g.lineJoin = g.lineCap = "round"; g.lineWidth = .07; g.strokeStyle = INK;
+  if (ch === 0) flora(g, t); else if (ch === 1) clay(g, t); else if (ch === 2) honey(g, t);
+  else { g.save(); g.translate(0, .38); g.scale(.66, .66); g.lineWidth = .1; potShape(g, "#cf7a4a", "#e39a6c"); g.restore(); g.save(); g.translate(0, -.36); g.scale(.72, .72); g.lineWidth = .09; flora(g, t + 2, true); g.restore(); }
+}
+function sprite(ch, t, sz, badge) {
+  sz = Math.round(sz); return Lab.sprite("ps:i" + ch + t + ":" + sz + (badge ? "b" : ""), sz, sz, g => {
+    g.translate(sz / 2, sz / 2); g.scale(sz * .43, sz * .43); paint(g, ch, t);
+    if (badge) { g.beginPath(); g.arc(.8, .8, .29, 0, TAU); g.fillStyle = CH[ch].c; g.fill(); g.lineWidth = .06; g.strokeStyle = "#fff"; g.stroke(); g.setTransform(Lab.dpr, 0, 0, Lab.dpr, 0, 0); draw.text(g, ch === 3 ? "★" : String(t + 1), sz / 2 + sz * .344, sz / 2 + sz * .351, { size: sz * .2, color: "#fff" }); }
+  });
+}
+function drawItem(c, ch, t, x, y, sz, sc, rot, alpha, badge) { const s = sprite(ch, t, sz, badge); c.save(); c.translate(x, y); if (rot) c.rotate(rot); if (sc !== 1) c.scale(sc, sc); if (alpha != null) c.globalAlpha = alpha; c.drawImage(s, -s.w / 2, -s.h / 2, s.w, s.h); c.restore(); }
+function genIcon(g, k) { // −1..1 box
+  g.lineJoin = g.lineCap = "round"; g.lineWidth = .08; g.strokeStyle = INK;
+  if (k === 0) { g.beginPath(); g.moveTo(-.34, -.5); g.bezierCurveTo(-.9, .1, -.7, .78, 0, .78); g.bezierCurveTo(.7, .78, .9, .1, .34, -.5); g.closePath(); g.fillStyle = "#d9b77c"; g.fill(); g.stroke(); g.beginPath(); g.moveTo(-.42, -.5); g.lineTo(-.3, -.82); g.lineTo(0, -.66); g.lineTo(.3, -.82); g.lineTo(.42, -.5); g.closePath(); g.fill(); g.stroke(); g.beginPath(); g.moveTo(-.4, -.48); g.lineTo(.4, -.48); g.strokeStyle = "#e8743b"; g.lineWidth = .12; g.stroke(); g.strokeStyle = INK; g.lineWidth = .06; g.save(); g.translate(0, .2); g.scale(.42, .42); g.lineWidth = .16; leaf(g, 0, .3, -.7, .9); leaf(g, 0, .3, Math.PI + .7, .9); g.restore(); }
+  else if (k === 1) { g.beginPath(); g.moveTo(-.7, -.3); g.lineTo(.7, -.3); g.lineTo(.54, .74); g.lineTo(-.54, .74); g.closePath(); g.fillStyle = "#8fa3ad"; g.fill(); g.stroke(); g.beginPath(); g.ellipse(0, -.3, .7, .26, 0, 0, TAU); g.fillStyle = "#cf7a4a"; g.fill(); g.stroke(); g.beginPath(); g.arc(0, -.34, .74, Math.PI * 1.08, Math.PI * 1.92); g.stroke(); g.fillStyle = "#6f838d"; g.fillRect(-.6, .16, 1.2, .1); }
+  else if (k === 2) { g.save(); g.scale(.96, .96); honey(g, 5); g.restore(); }
+  else { draw.rr(g, -.7, -.2, 1.4, .94, .1); g.fillStyle = "#a9794a"; g.fill(); g.stroke(); for (const x of [-.24, .22]) { g.beginPath(); g.moveTo(x, -.2); g.lineTo(x, .74); g.stroke(); } g.beginPath(); g.ellipse(0, -.24, .62, .2, 0, 0, TAU); g.fillStyle = "#5c4127"; g.fill(); g.stroke(); leaf(g, -.1, -.3, -1.2, .56); leaf(g, .1, -.28, -.4, .5); leaf(g, -.14, -.26, -2.3, .46); }
+}
+function bgSprite() {
+  const W = Lab.W + 80, H = Lab.H + 80; return Lab.sprite("ps:bg", W, H, g => {
+    const split = (wide ? by + cs * gr * .52 : by + cs * .5) + 40; draw.vgrad(g, 0, 0, W, split, ["#86b089", "#6f9d77"]);
+    g.strokeStyle = "rgba(40,70,50,.16)"; g.lineWidth = 2; for (let x = 20; x < W; x += 64) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, split); g.stroke(); }
+    const rnd = Lab.rng(11); g.fillStyle = "rgba(255,255,255,.05)"; for (let i = 0; i < 40; i++) g.fillRect(rnd() * W, rnd() * split, 64, 2);
+    draw.vgrad(g, 0, split, W, H - split, ["#c99a63", "#a97a48"]); g.fillStyle = "#8a5f36"; g.fillRect(0, split, W, 7); g.fillStyle = "rgba(255,255,255,.14)"; g.fillRect(0, split + 7, W, 3);
+    g.strokeStyle = "rgba(90,55,25,.2)"; g.lineWidth = 1.5; for (let i = 0; i < 46; i++) { const y = split + 16 + rnd() * (H - split), x = rnd() * W, l = 40 + rnd() * 160; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + l / 2, y + (rnd() - .5) * 6, x + l, y); g.stroke(); }
+  });
+}
+
+function render(t) {
+  const c = Lab.ctx, W = Lab.W, bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  // sun bar: the day crossing the sky
+  const dp = clamp(1 - dayT / DAY, 0, 1), sx = sun.x + 10 + (sun.w - 20) * dp, sy = sun.y + sun.h / 2;
+  draw.rect(c, sun.x, sun.y, sun.w, sun.h, 8, "rgba(40,60,45,.28)");
+  const gr2 = c.createLinearGradient(sun.x, 0, sun.x + sun.w, 0); gr2.addColorStop(0, "#fff3b0"); gr2.addColorStop(.7, "#ffc46b"); gr2.addColorStop(1, "#e8743b");
+  c.save(); draw.rr(c, sun.x + 2, sun.y + 2, Math.max(16, (sun.w - 4) * dp + 8), sun.h - 4, 6); c.fillStyle = gr2; c.fill(); c.restore();
+  const warn = dayT < 20 ? .5 + .5 * Math.sin(t * 9) : 0; draw.glow(c, sx, sy, 22, "#fff3b0", .6); draw.circle(c, sx, sy, 9 + warn * 2, dp > .85 ? "#ff9a4d" : "#ffd75e", INK, 2);
+  draw.text(c, "DAY " + sv.day, sun.x + sun.w - 8, sy + .5, { size: 10.5, color: "rgba(255,255,255,.85)", align: "right" });
+  if (dayT < 30 && sv.tut >= 3) draw.text(c, Math.ceil(dayT) + "s", sx, sy + 20, { size: 13, color: "#fff", stroke: "rgba(74,53,36,.7)" });
+  // order tags
+  for (let k = 0; k < 3; k++) {
+    const o = orders[k], r = cards[k]; draw.rect(c, r.x + 4, r.y + 4, r.w - 8, r.h - 8, 10, "rgba(40,60,45,.16)");
+    if (!o || o.in <= 0) continue;
+    const want = drag && drag.moved && needOf(o, drag.it), a = ease.outBack(clamp(o.in, 0, 1)), out = o.out ? ease.inBack(o.out) : 0;
+    c.save(); c.translate(r.x + r.w / 2 + Math.sin(t * 40) * o.shake * 5, r.y + r.h / 2 - (1 - a) * 50 - out * 70); c.rotate((k - 1) * .015 + Math.sin(t * 1.3 + k) * .008); c.scale(want ? 1.05 : 1, want ? 1.05 : 1); c.globalAlpha = clamp(o.in * 2, 0, 1) * (1 - out);
+    draw.rect(c, -r.w / 2 + 2, -r.h / 2 + 4, r.w, r.h, 10, "rgba(40,50,40,.2)");
+    draw.rect(c, -r.w / 2, -r.h / 2, r.w, r.h, 10, "#fbf3df", want ? "#4f9a52" : "#d7c193", want ? 4 : 2);
+    draw.circle(c, 0, -r.h / 2 + 9, 3.5, "#6f9d77", "#b89f6c", 1.5);
+    const n = o.needs.length, is = Math.min(r.h * .62, (r.w - 10) / n);
+    o.needs.forEach((q, j) => { const ix = -r.w / 2 + r.w * (j + .5) / n, iy = -r.h * .1; drawItem(c, q.ch, q.t, ix, iy, is, 1 + ease.pulse(q.pulse || 0) * .3, 0, q.done ? .35 : 1, true); if (q.done) { c.strokeStyle = "#3f8a45"; c.lineWidth = 5; c.lineCap = "round"; c.beginPath(); c.moveTo(ix - is * .2, iy); c.lineTo(ix - is * .04, iy + is * .17); c.lineTo(ix + is * .24, iy - is * .2); c.stroke(); } });
+    draw.circle(c, -15, r.h / 2 - 14, 7, "#f2c14e", "#b8860b", 1.5); draw.text(c, String(o.reward), -4, r.h / 2 - 13.5, { size: 14, color: "#5a3b1c", align: "left" });
+    c.restore();
+  }
+  if (streak > 0) { const m = 1 + .25 * Math.min(streak, 8), cx = wide ? cards[0].x + cards[0].w / 2 : W / 2, cy = wide ? cards[0].y - 14 : by - 20; draw.text(c, "BUSTLE ×" + m, cx, cy, { size: 12.5, color: "#fff3b0", stroke: "rgba(74,53,36,.75)" }); draw.rect(c, cx - 30, cy + 8, 60 * clamp(streakT / 14, 0, 1), 3, 2, "#fff3b0"); }
+  // tray
+  const bw = cs * gc, bh = cs * gr;
+  draw.rect(c, bx - 8, by - 4, bw + 16, bh + 16, 16, "rgba(50,30,10,.25)"); draw.rect(c, bx - 8, by - 8, bw + 16, bh + 16, 16, "#7d5632", "#5c3d20", 2.5);
+  const hov = drag && drag.moved ? cellAt(drag.it.x, drag.it.y) : -1;
+  for (let i = 0; i < N; i++) {
+    const p = cellXY(i), [cc, rr] = CR(i), it = cells[i]; let f = (cc + rr) % 2 ? "#efe0bd" : "#f6ead0", st = null;
+    if (i === hov && drag.i !== i) { const m = it && combine(drag.it, it); f = m ? "#d5f0c0" : "#fff8e6"; st = m ? "#4f9a52" : "#e0c890"; }
+    draw.rect(c, p.x - cs / 2 + 2.5, p.y - cs / 2 + 2.5, cs - 5, cs - 5, 9, f, st, 3);
+  }
+  for (let i = 0; i < N; i++) {
+    const it = cells[i]; if (!it || (drag && drag.it === it && drag.moved)) continue;
+    const w = wantedBy(it), mate = drag && drag.moved && drag.it !== it && combine(drag.it, it), sc = 1 + ease.pulse(it.pop) * .28 + (mate ? .06 + .04 * Math.sin(t * 10) : 0);
+    if (w) { c.globalAlpha = .55 + .3 * Math.sin(t * 5 + i); draw.circle(c, it.x, it.y, cs * .43, null, "#f2c14e", 3); c.globalAlpha = 1; }
+    drawItem(c, it.ch, it.t, it.x, it.y, cs * .92, sc, Math.sin(it.wig * 18) * it.wig * .25, null, true);
+  }
+  // tools: three generators + compost crate
+  for (let k = 0; k < 4; k++) {
+    const p = gpos[k], g = gens[k], locked = g && level < g.need, sq = k < 3 ? g.sq : binSq, over = k === 3 && drag && drag.moved && Lab.dist(drag.it.x, drag.it.y, p.x, p.y) < p.r + 14;
+    c.save(); c.translate(p.x + (g ? Math.sin(t * 45) * g.shake * 4 : 0), p.y); c.scale(1 + sq * .12 + (over ? .1 : 0), 1 - sq * .14 + (over ? .1 : 0));
+    draw.shadow(c, 0, p.r * .92, p.r * .9, p.r * .2, .22); draw.circle(c, 0, 0, p.r, locked ? "#b9c4b4" : "#f3e2b8", over ? "#e8743b" : "#8a5f36", 3);
+    const s = Lab.sprite("ps:g" + k + ":" + Math.round(p.r), p.r * 2, p.r * 2, q => { q.translate(p.r, p.r); q.scale(p.r * .62, p.r * .62); genIcon(q, k); });
+    c.globalAlpha = locked ? .35 : 1; c.drawImage(s, -p.r, -p.r, s.w, s.h); c.globalAlpha = 1;
+    if (locked) draw.text(c, "LV " + g.need, 0, p.r * .5, { size: 12, color: "#fff", stroke: "rgba(60,70,60,.9)" });
+    else if (g) { const n = g.cap, full = Math.floor(g.charge), fr = g.charge - full; for (let j = 0; j < n; j++) { const a = Math.PI * (.5 - (j - (n - 1) / 2) * .125), px = Math.cos(a) * (p.r + 9), py = Math.sin(a) * (p.r + 9); draw.circle(c, px, py, 4.2, j < full ? CH[g.ch].c : "#8a6a45", "#5c3d20", 1.2); if (j === full && fr > 0) { c.beginPath(); c.moveTo(px, py); c.arc(px, py, 4.2, -1.57, -1.57 + fr * TAU); c.closePath(); c.fillStyle = Lab.color.alpha(CH[g.ch].c, .8); c.fill(); } } }
+    c.restore();
+  }
+  // almanac strip
+  const per = wide ? TOTAL : 11, step = wide ? Math.min(19, (bw + 40) / TOTAL) : Math.min(27, (W - 40) / per), acx = wide ? bx + bw / 2 : W / 2, ax = acx - step * (per - 1) / 2, rows = TOTAL / per; let n = 0;
+  if (almY + (rows - .5) * step < Lab.H - Lab.safe.bottom + 4) {
+    draw.rect(c, ax - step * .5 - 8, almY - step * .5 - 3, step * per + 16, step * rows + 6, 9, "rgba(70,42,16,.3)");
+    for (let ch = 0; ch < 4; ch++) for (let tt = 0; tt < CH[ch].names.length; tt++) { const has = disc.has(key(ch, tt)), x = ax + (n % per) * step, y = almY + Math.floor(n / per) * step; if (has) drawItem(c, ch, tt, x, y, step + 2, 1); else draw.circle(c, x, y, 3.2, "rgba(255,240,210,.35)"); n++; }
+  }
+  for (const g of ghosts) drawItem(c, g.ch, g.t, g.x, g.y, cs * .92, g.s, 0, null, true);
+  if (drag && drag.moved) { const it = drag.it; draw.shadow(c, it.x, it.y + cs * .42, cs * .34, cs * .1, .25); drawItem(c, it.ch, it.t, it.x, it.y, cs * .92, 1.18, Math.sin(t * 6) * .04, null, true); }
+  // guide: a soft finger dot travelling from A to B (tutorial + idle hint)
+  if (guide && alive) {
+    if (guide.ring) { const k = (t * 1.2) % 1; c.globalAlpha = 1 - k; draw.circle(c, guide.a.x, guide.a.y, guide.ring + 4 + k * 16, null, "#fff", 4); c.globalAlpha = 1; }
+    else { const k = ease.inOutQuad(clamp(((t * .7) % 1) * 1.4 - .1, 0, 1)), gx = Lab.lerp(guide.a.x, guide.b.x, k), gy = Lab.lerp(guide.a.y, guide.b.y, k); c.setLineDash([4, 8]); draw.line(c, guide.a.x, guide.a.y, guide.b.x, guide.b.y, "rgba(255,255,255,.75)", 3); c.setLineDash([]); draw.circle(c, gx, gy, 13, "rgba(255,255,255,.85)", "rgba(74,53,36,.7)", 2.5); }
+  }
+}
+function attract(dt, t) { if (!cells) { load(); const demo = [[0, 3], [1, 2], [0, 1], [2, 1], [0, 4], [1, 3], [3, 1], [0, 2], [2, 3], [0, 0], [1, 0]]; demo.forEach((d, i) => { cells[(i * 7 + 3) % N] = mk(d[0], d[1], (i * 7 + 3) % N); disc.add(key(d[0], d[1])); }); orders = [{ needs: [{ ch: 0, t: 4 }], reward: 99, in: 1, out: 0, shake: 0 }, { needs: [{ ch: 3, t: 1 }, { ch: 2, t: 3 }], reward: 180, in: 1, out: 0, shake: 0 }, { needs: [{ ch: 1, t: 3 }], reward: 43, in: 1, out: 0, shake: 0 }]; dayT = DAY * .6; } render(t); }
+Lab.boot();
+})();
+</script></body></html>
