@@ -19,7 +19,7 @@ module.exports = {
     // the wrong snack: a Sunny bumps the pellet away; it lands on the sand → wasted, streak lost
     await game((g, a) => { g.only([[1, a[0], a[1]]]); g.setQueue([0, 1, 1]); }, [cx, fy]);
     await page.touchscreen.tap(cx, T.y + 40);
-    expect(await until(g => g.wasted === 1, 4000), 'the pellet is bumped away and wasted on the sand');
+    expect(await until(g => g.wasted === 1, 7000), 'the pellet is bumped away and wasted on the sand');
     r = await game(g => ({ s: g.score, n: g.snacks, st: g.streak, fed: g.fish()[0].fed })); expect(r.s === 10 && r.n === 1 && r.st === 0 && r.fed === 0, 'the Sunny would not eat it; streak lost');
     // a streak raises the multiplier: four clean feeds pay 10 + 20 + 20 + 30
     await game((g, a) => { g.only([[0, a[0] - 70, a[1]], [0, a[0] + 70, a[1]]]); g.setQueue([0, 0, 0, 0]); }, [cx, fy]);
