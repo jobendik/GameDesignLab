@@ -5,7 +5,7 @@
 > Scores are 1–10 per `QUALITY_STANDARD.md`; "subjective" judgements come from code reading and scripted play, not human playtests.
 
 
-## Standalone arcade games (`games/`) — 28/65 reviewed
+## Standalone arcade games (`games/`) — 29/65 reviewed
 
 | Game | Was → Now | Fun | Depth | Feel | Look | Anim | Audio | Ctrl | Onb | Replay | Perf | Robust | Polish | Review |
 |---|---|--|--|--|--|--|--|--|--|--|--|--|--|---|
@@ -35,16 +35,17 @@
 | ["Spire: The Climbing Table"](games/pinball-wizard-3d.html) | 3 → **7** | 7 | 7 | 7 | 7 | 7 | 6 | 7 | 6 | 7 | 6 | 8 | 7 | [record](docs/reviews/games/pinball-wizard-3d.md) |
 | [Puppet Panic — String-Pulling Charades](games/puppet-panic.html) | 3 → **7** | 7 | 7 | 7 | 8 | 7 | 6 | 7 | 7 | 7 | 8 | 8 | 7 | [record](docs/reviews/games/puppet-panic.md) |
 | [Slurpentine](games/slithergar.html) | 2 → **7** | 7 | 7 | 7 | 8 | 7 | 7 | 7 | 7 | 7 | 8 | 8 | 7 | [record](docs/reviews/games/slithergar.md) |
+| [Ticktock Tower](games/spire.html) | 4 → **7** | 7 | 7 | 7 | 7 | 6 | 7 | 8 | 7 | 8 | 9 | 8 | 7 | [record](docs/reviews/games/spire.md) |
 | [Sprouty's Garden](games/sproutys-garden.html) | 2 → **7** | 7 | 7 | 7 | 8 | 7 | 6 | 8 | 8 | 7 | 8 | 8 | 7 | [record](docs/reviews/games/sproutys-garden.md) |
 | [Star Trail Adventure](games/star-trail-adventure.html) | 4 → **7** | 7 | 6 | 7 | 8 | 6 | 6 | 7 | 7 | 6 | 8 | 8 | 7 | [record](docs/reviews/games/star-trail-adventure.md) |
 
-Averages: overall **7.4** · Fun 7.4 · Depth 7.3 · Feel 7.4 · Look 7.7 · Anim 6.8 · Audio 6.8 · Ctrl 7.7 · Onb 7.5 · Replay 7.3 · Perf 8.1 · Robust 8.1 · Polish 7.4
+Averages: overall **7.4** · Fun 7.4 · Depth 7.3 · Feel 7.3 · Look 7.7 · Anim 6.8 · Audio 6.8 · Ctrl 7.7 · Onb 7.5 · Replay 7.3 · Perf 8.1 · Robust 8.1 · Polish 7.4
 
-**Below 8 — revisit first:** ["Arcanum: The Spellbound Table"](games/arcanum-pinball.html) (7), [Bounce Dungeon](games/bounce-dungeon.html) (7), [Breach Vector](games/breach-vector.html) (7), [Cosmic Devourer](games/cosmic-devourer.html) (7), [Thimble & the Bramble King](games/little-hero-adventure.html) (7), ["Neon Galaxy: Ore Run"](games/neon-galaxy.html) (7), [Neon Hagen](games/neon-hagen.html) (7), [Neon Pinball Rush](games/neon-pinball-rush.html) (7), [Static Bloom](games/neon-strike.html) (7), [Orbit Drift 3D — Ringstream](games/orbit-drift-3d.html) (7), [Physics Charades — Pose or Splat](games/physics-charades.html) (7), ["Spire: The Climbing Table"](games/pinball-wizard-3d.html) (7), [Puppet Panic — String-Pulling Charades](games/puppet-panic.html) (7), [Slurpentine](games/slithergar.html) (7), [Sprouty's Garden](games/sproutys-garden.html) (7), [Star Trail Adventure](games/star-trail-adventure.html) (7)
+**Below 8 — revisit first:** ["Arcanum: The Spellbound Table"](games/arcanum-pinball.html) (7), [Bounce Dungeon](games/bounce-dungeon.html) (7), [Breach Vector](games/breach-vector.html) (7), [Cosmic Devourer](games/cosmic-devourer.html) (7), [Thimble & the Bramble King](games/little-hero-adventure.html) (7), ["Neon Galaxy: Ore Run"](games/neon-galaxy.html) (7), [Neon Hagen](games/neon-hagen.html) (7), [Neon Pinball Rush](games/neon-pinball-rush.html) (7), [Static Bloom](games/neon-strike.html) (7), [Orbit Drift 3D — Ringstream](games/orbit-drift-3d.html) (7), [Physics Charades — Pose or Splat](games/physics-charades.html) (7), ["Spire: The Climbing Table"](games/pinball-wizard-3d.html) (7), [Puppet Panic — String-Pulling Charades](games/puppet-panic.html) (7), [Slurpentine](games/slithergar.html) (7), [Ticktock Tower](games/spire.html) (7), [Sprouty's Garden](games/sproutys-garden.html) (7), [Star Trail Adventure](games/star-trail-adventure.html) (7)
 
-<details><summary>37 not yet reviewed (baseline prototypes)</summary>
+<details><summary>36 not yet reviewed (baseline prototypes)</summary>
 
-`games/aura-rooms` · `games/bloom-bureau` · `games/busy-beavers` · `games/chomp-chain-rush` · `games/exquisite-corpse` · `games/frequency` · `games/grapple-gliders` · `games/hyper-dash` · `games/last-war-ultimate` · `games/lumberjack-idle-empire` · `games/lumis-luminescence` · `games/lysarkivet` · `games/maze-munch-rush` · `games/neon-ash` · `games/neon-nexus-omega` · `games/neon-pin-climb` · `games/neon-runner-overdrive` · `games/neon-survivor-overdrive` · `games/painted-wilds` · `games/pinata-pop` · `games/pitch-26` · `games/pocket-football` · `games/pulsar` · `games/ricochet-brawlers` · `games/sonar-abyss` · `games/spire` · `games/svev-miner` · `games/swarm-logic` · `games/the-elevator` · `games/the-global-dig` · `games/the-grid-war` · `games/the-tower` · `games/tiny-detective-cafe` · `games/tiny-tactics-cards` · `games/unscrew-it` · `games/void-drift` · `games/word-forts`
+`games/aura-rooms` · `games/bloom-bureau` · `games/busy-beavers` · `games/chomp-chain-rush` · `games/exquisite-corpse` · `games/frequency` · `games/grapple-gliders` · `games/hyper-dash` · `games/last-war-ultimate` · `games/lumberjack-idle-empire` · `games/lumis-luminescence` · `games/lysarkivet` · `games/maze-munch-rush` · `games/neon-ash` · `games/neon-nexus-omega` · `games/neon-pin-climb` · `games/neon-runner-overdrive` · `games/neon-survivor-overdrive` · `games/painted-wilds` · `games/pinata-pop` · `games/pitch-26` · `games/pocket-football` · `games/pulsar` · `games/ricochet-brawlers` · `games/sonar-abyss` · `games/svev-miner` · `games/swarm-logic` · `games/the-elevator` · `games/the-global-dig` · `games/the-grid-war` · `games/the-tower` · `games/tiny-detective-cafe` · `games/tiny-tactics-cards` · `games/unscrew-it` · `games/void-drift` · `games/word-forts`
 
 </details>
 
