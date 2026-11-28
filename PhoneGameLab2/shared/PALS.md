@@ -29,7 +29,8 @@ twist, and the stars are *our* characters.) `shared/pals.js` draws them procedur
   driver/passenger bust (seated in a car, boat or basket).
 - **Returns anchors** in stage coordinates — `{handL, handR, head, mouth, feet}` as `[x,y]` — so you can draw props
   (a held balloon, a hat, a fish in the beak) that follow the pose. Draw the prop after the pal.
-- `Pals.bubble(ctx, x, y, w, h, {tailX, tailY, thought:true})` draws a speech or thought bubble; put your icon/text on top.
+- `Pals.bubble(ctx, x, y, w, h, {tailX, tailY, thought:true})` draws a speech or thought bubble centred on (x, y); put your icon/text on top.
+- Pals are front-view only: for top-down games use `pose:'lie'` + `tilt` sparingly, or show the pal in a vehicle/bubble.
 - `Pals.cast[id]` → `{name, kind, body, dark, belly, accent, cheek}` (build palettes from these) · `Pals.list` · `Pals.ink`
 
 `Pals.backdrop(ctx, W, H, t, {scene, ground})` draws a cozy sky + sun + drifting clouds + hills and returns the ground Y.

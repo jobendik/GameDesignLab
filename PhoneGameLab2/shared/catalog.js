@@ -4,62 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 21,
-    "slug": "destroy-aliens",
-    "t": "Destroy Aliens",
-    "d": "Hold off waves of descending alien invaders.",
-    "thumb": "../thumbs/PhoneGameLab2--destroy-aliens.jpg"
-   },
-   {
-    "n": 22,
-    "slug": "donut-spin",
-    "t": "Donut Spin",
-    "d": "Throw knives into a spinning donut without hitting them.",
-    "thumb": "../thumbs/PhoneGameLab2--donut-spin.jpg"
-   },
-   {
-    "n": 23,
-    "slug": "dress-up",
-    "t": "Dress Up",
-    "d": "Drag hats, glasses and outfits onto the character.",
-    "thumb": "../thumbs/PhoneGameLab2--dress-up.jpg"
-   },
-   {
-    "n": 24,
-    "slug": "face-designer",
-    "t": "Face Designer",
-    "d": "Paint face make-up on a character with your finger.",
-    "thumb": "../thumbs/PhoneGameLab2--face-designer.jpg"
-   },
-   {
-    "n": 25,
-    "slug": "find-pattern",
-    "t": "Find Pattern",
-    "d": "Watch the sequence, then repeat it perfectly.",
-    "thumb": "../thumbs/PhoneGameLab2--find-pattern.jpg"
-   },
-   {
-    "n": 26,
-    "slug": "fishtastic",
-    "t": "Fishtastic",
-    "d": "Swim through the sea and catch the requested fish.",
-    "thumb": "../thumbs/PhoneGameLab2--fishtastic.jpg"
-   },
-   {
-    "n": 27,
-    "slug": "fishy-frenzy",
-    "t": "Fishy Frenzy",
-    "d": "Eat smaller fish to grow; flee the bigger ones.",
-    "thumb": "../thumbs/PhoneGameLab2--fishy-frenzy.jpg"
-   },
-   {
-    "n": 28,
-    "slug": "flappy-tom",
-    "t": "Flappy Tom",
-    "d": "Tap to flap through narrow gaps between pipes.",
-    "thumb": "../thumbs/PhoneGameLab2--flappy-tom.jpg"
-   },
-   {
     "n": 29,
     "slug": "football",
     "t": "Football",
@@ -490,12 +434,28 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--bun-voyage.jpg"
    },
    {
+    "slug": "fin-focus",
+    "t": "Fin Focus",
+    "d": "Steer Bolt's diving bell and snap the fish the pals ask for.",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--fin-focus.jpg"
+   },
+   {
     "slug": "flicknic",
     "t": "Flicknic",
     "d": "Flick the bugs off the blanket. Save Bun's cake.",
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--flicknic.jpg"
+   },
+   {
+    "slug": "flutterbun",
+    "t": "Flutterbun",
+    "d": "Flap left, flap right. Flutter Bun up the giant beanstalk.",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--flutterbun.jpg"
    },
    {
     "slug": "jampoline",
@@ -528,6 +488,14 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--ramp-scamp.jpg"
+   },
+   {
+    "slug": "topping-toss",
+    "t": "Topping Toss",
+    "d": "Toss toppings on the spinning donut. Three of a kind and Momo gobbles them!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--topping-toss.jpg"
    }
   ]
  },
@@ -575,12 +543,28 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--reef-relief.jpg"
    },
    {
+    "slug": "return-to-sender",
+    "t": "Return to Sender",
+    "d": "No blaster, just a beam. Fling the jellies back where they came from!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--return-to-sender.jpg"
+   },
+   {
     "slug": "sunny-soak",
     "t": "Sunny Soak",
     "d": "Lob water balloons. Cool your pals down.",
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--sunny-soak.jpg"
+   },
+   {
+    "slug": "top-frog",
+    "t": "Top Frog",
+    "d": "Kick, snap, grow. Today's snack was yesterday's bully.",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--top-frog.jpg"
    }
   ]
  },
@@ -588,12 +572,41 @@ window.LAB_GAMES = [
   "cat": "Creative",
   "items": [
    {
+    "slug": "cheeky-brush",
+    "t": "Cheeky Brush",
+    "d": "Face painting at the fair. Copy the design, make the pals beam!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--cheeky-brush.jpg"
+   },
+   {
     "slug": "clatter-castle",
     "t": "Clatter Castle",
     "d": "Build what the pals ask for. Mind the wobble!",
     "v2": true,
     "score": 7,
     "thumb": "../thumbs/PhoneGameLab2--clatter-castle.jpg"
+   },
+   {
+    "slug": "party-hopper",
+    "t": "Party Hopper",
+    "d": "Eight parties, one impatient fox. Dress Pip before he dashes off!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--party-hopper.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Music",
+  "items": [
+   {
+    "slug": "echo-jam",
+    "t": "Echo Jam",
+    "d": "The band plays it. You play it back — mind Olli's twists!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--echo-jam.jpg"
    }
   ]
  },

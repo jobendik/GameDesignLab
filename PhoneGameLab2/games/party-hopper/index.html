@@ -1,0 +1,360 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Party Hopper</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PARTY HOPPER — Pip has eight parties today and no patience at all. Dress him for each one before he runs out of
+ * the door in whatever he's wearing.
+ * Core idea kept: drag hats, glasses and outfits onto a character.
+ * Goal layer: each invitation names a party theme (beach, snow, space, fancy, spooky), later two themes at once, a
+ * colour to wear ("2+ blue") or a rule ("no hats!"). Five slots (head, eyes, neck, body, hand), five themed pieces per
+ * slot. Pip reacts to every piece live (a heart for on-theme, a shiver for its opposite), tap a worn piece to recolour
+ * it, drag it off to take it off. Tap GO (or wait for Pip to lose patience) and he hops to the party, where the host
+ * and a guest judge the look (0-3 stars) and the camera snaps a polaroid for the photo line. Three no-star parties
+ * close the day early. The last eight looks are kept in a gallery (Lab.store) shown on the splash screen.
+ * Identity: a cosy closet: striped wallpaper, wooden trunk drawer with tabs, polaroids on a string, party scenes from
+ * the shared backdrops with each theme's host pal.                                                                 */
+let demo = false;
+Lab.init({
+  title: "Party Hopper", tagline: "Eight parties, one impatient fox. Dress Pip before he dashes off!", category: "Creative", kicker: "Pocket Pals",
+  howto: ["Drag or tap clothes onto Pip", "Match the party; tap a piece to recolour", "Press GO before Pip loses patience"],
+  theme: { bg: "#ffe9d6", bg2: "#fff7ee", fg: "#43303a", muted: "#8b7078", accent: "#ff8a3d", accent2: "#6c8cff", light: true },
+  orient: "any", music: { style: "chill", key: "F", vol: .34 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink, shade = Lab.color.shade;
+const SLOTS = ["head", "eyes", "neck", "body", "hand"];
+const THEMES = { beach: { adj: "Sunny", noun: "Beach Bash", host: "momo", scene: "beach", c: "#ffb648" }, snow: { adj: "Frosty", noun: "Snow Ball", host: "nori", scene: "snow", c: "#6fc3ff" },
+  space: { adj: "Cosmic", noun: "Star Camp", host: "bolt", scene: "night", c: "#8a7dff" }, fancy: { adj: "Fancy", noun: "Tea Party", host: "bun", scene: "golden", c: "#ff7aa8" },
+  spooky: { adj: "Spooky", noun: "Sleepover", host: "olli", scene: "dusk", c: "#9a6bd8" } };
+const TH = Object.keys(THEMES), OPP = { beach: "snow", snow: "beach", fancy: "spooky", spooky: "fancy", space: "" };
+const COLS = [["pink", "#ff7aa8"], ["blue", "#59a9ff"], ["yellow", "#ffcf3a"], ["green", "#4fd08f"], ["purple", "#a98bff"], ["red", "#ff5d5d"]];
+const ITEMS = [], NAMES = { head: ["sun hat", "bobble hat", "space helmet", "top hat", "witch hat"], eyes: ["sunglasses", "ski goggles", "star visor", "monocle", "masquerade mask"],
+  neck: ["flower lei", "cosy scarf", "star medal", "bow tie", "bat charm"], body: ["swim ring", "puffy vest", "jetpack", "tutu", "vampire cape"], hand: ["ice cream", "cocoa mug", "toy rocket", "teacup", "lantern"] };
+const DEF = { head: [5, 0, 1, 4, 4], eyes: [0, 5, 1, 2, 4], neck: [0, 5, 2, 5, 4], body: [5, 1, 1, 0, 5], hand: [0, 5, 1, 1, 2] };
+SLOTS.forEach(sl => TH.forEach((th, i) => ITEMS.push({ id: ITEMS.length, slot: sl, theme: th, name: NAMES[sl][i], col: DEF[sl][i], ti: i })));
+const TABICON = { head: "fancy", eyes: "beach", neck: "fancy", body: "fancy", hand: "beach" }, BAN = { head: "no hats", eyes: "no glasses", neck: "no neckwear", body: "no outfits", hand: "no props" };
+const itemOf = (sl, th) => ITEMS.find(it => it.slot === sl && it.theme === th);
+let S, wide, card, stage, pipSize, goB, drawer, tabs, tiles, rope;
+let outfit, tab, drag, inv, idx, patience, patMax, score, stars3, starsTot, strikes, streak, bestStreak, phase, phaseT, clock, pip, bubble, told, photos, party, sel, kb;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function say(txt, dur) { if (!demo) bubble = { txt, t: 0, dur: dur || 2.4 }; }
+function once(id, txt, dur) { if (!told[id]) { told[id] = 1; say(txt, dur || 3.2); } }
+
+/* ---------- layout ---------- */
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15;
+  if (wide) {
+    S = Math.min(P.h / 390, P.w / 844) * 1.05; const lw = Math.min(P.w * .46, 460 * S);
+    card = { x: P.x + 12, y: P.y + 6, w: lw - 18, h: 62 * S }; rope = { x: card.x, y: card.y + card.h + 6 * S, w: lw - 18, h: 44 * S };
+    pipSize = Math.min(118 * S, (P.y + P.h - rope.y - rope.h) * .42); stage = { x: P.x + lw * .45, y: P.y + P.h - pipSize * .62 - 8 };
+    goB = { x: P.x + lw - 52 * S, y: P.y + P.h - 46 * S, r: 34 * S };
+    drawer = { x: P.x + lw, y: P.y + 6, w: P.w - lw - 10, h: P.h - 12 };
+  } else {
+    S = Math.min(P.w / 390, P.h / 760); card = { x: P.x + 12, y: P.y + 8, w: P.w - 24, h: 74 * S }; rope = { x: card.x, y: card.y + card.h + 4 * S, w: card.w, h: 56 * S };
+    pipSize = 140 * S; stage = { x: P.x + P.w * .4, y: rope.y + rope.h + 34 * S + pipSize * .72 + pipSize * .5 };
+    goB = { x: P.x + P.w - 58 * S, y: stage.y + pipSize * .12, r: 38 * S };
+    const dy = stage.y + pipSize * .5 + 26 * S; drawer = { x: P.x + 8, y: dy, w: P.w - 16, h: P.y + P.h - dy - 6 };
+  }
+  const th = Math.min(48 * S, drawer.h * .2), tw = (drawer.w - 14) / 5; tabs = SLOTS.map((sl, i) => ({ sl, x: drawer.x + 7 + tw * i, y: drawer.y + 3, w: tw, h: th }));
+  const gy = drawer.y + th + 8 * S, gh = drawer.y + drawer.h - gy - 8 * S, cw = (drawer.w - 24 * S) / 3, ch = Math.min(gh / 2, cw * 1.1); tiles = [];
+  for (let i = 0; i < 5; i++) { const r = i < 3 ? 0 : 1, cI = i < 3 ? i : i - 3 + .5; tiles.push({ i, x: drawer.x + 12 * S + cI * cw, y: gy + r * ch + (gh - ch * 2) / 2, w: cw - 8 * S, h: ch - 8 * S }); }
+  Lab.sprite.clear("ph_");
+}
+Lab.onResize(() => { if (outfit) layout(); });
+
+/* ---------- item art (local units: s = half of Pip's body height) ---------- */
+function slotOrigin(sl, s) { return sl === "head" ? [0, -s * .93] : sl === "eyes" ? [0, -s * .2] : sl === "neck" ? [0, s * .3] : sl === "body" ? [0, s * .5] : [s * .95, s * .1]; }
+function drawItem(c, it, col, s, layer) {
+  const C = COLS[col][1], D = shade(C, -.25), L = shade(C, .35); c.lineJoin = "round"; c.lineCap = "round"; c.lineWidth = Math.max(1, s * .045); c.strokeStyle = "rgba(43,35,64,.45)";
+  const E = (x, y, rx, ry, f, st, a0, a1) => { c.beginPath(); c.ellipse(x, y, Math.max(0, rx), Math.max(0, ry), 0, a0 || 0, a1 == null ? TAU : a1); if (f) { c.fillStyle = f; c.fill(); } if (st) c.stroke(); };
+  const id = it.slot + "." + it.theme, back = layer === "back";
+  if (back && !["body.beach", "body.space", "body.spooky"].includes(id)) return;
+  switch (id) {
+    case "head.beach": E(0, 0, s * 1.05, s * .22, "#f3d49b", 1); E(0, -s * .14, s * .52, s * .42, "#f3d49b", 1, Math.PI, TAU); c.fillStyle = C; c.fillRect(-s * .52, -s * .2, s * 1.04, s * .14); E(s * .42, -s * .2, s * .14, s * .1, "#fff6"); break;
+    case "head.snow": E(0, -s * .05, s * .6, s * .62, C, 1, Math.PI, TAU); draw.rect(c, -s * .64, -s * .12, s * 1.28, s * .22, s * .08, L, "rgba(43,35,64,.45)", s * .045); for (let i = -2; i <= 2; i++) { c.beginPath(); c.moveTo(i * s * .22, -s * .1); c.lineTo(i * s * .22, s * .08); c.stroke(); } E(0, -s * .7, s * .2, s * .2, "#fffaf2", 1); break;
+    case "head.space": c.globalAlpha *= .28; E(0, s * .78, s * 1.12, s * 1.1, "#bfefff"); c.globalAlpha /= .28; c.strokeStyle = "rgba(255,255,255,.85)"; c.lineWidth = s * .08; c.beginPath(); c.arc(0, s * .78, s * .95, -2.5, -1.9); c.stroke();
+      c.strokeStyle = C; c.lineWidth = s * .14; c.beginPath(); c.arc(0, s * .78, s * 1.1, -Math.PI, 0); c.stroke(); E(0, -s * .38, s * .1, s * .1, C); break;
+    case "head.fancy": E(0, 0, s * .7, s * .14, "#3b3350", 1); draw.rect(c, -s * .42, -s * .95, s * .84, s * .95, s * .06, "#3b3350", "rgba(43,35,64,.6)", s * .045); c.fillStyle = C; c.fillRect(-s * .42, -s * .3, s * .84, s * .18); E(s * .3, -s * .26, s * .1, s * .1, L); break;
+    case "head.spooky": E(0, 0, s * 1.0, s * .17, D, 1); c.fillStyle = C; c.beginPath(); c.moveTo(-s * .5, -s * .04); c.quadraticCurveTo(-s * .1, -s * .8, s * .25, -s * 1.35); c.quadraticCurveTo(s * .1, -s * .75, s * .5, -s * .04); c.closePath(); c.fill(); c.stroke();
+      c.fillStyle = "#43303a"; c.fillRect(-s * .46, -s * .2, s * .92, s * .14); draw.rect(c, -s * .1, -s * .22, s * .2, s * .18, s * .03, null, "#ffcf3a", s * .05); break;
+    case "eyes.beach": for (const d of [-1, 1]) draw.rect(c, d * s * .36 - s * .25, -s * .17, s * .5, s * .34, s * .14, "#2d2a3e", C, s * .07); c.strokeStyle = C; c.lineWidth = s * .07; c.beginPath(); c.moveTo(-s * .11, -s * .06); c.quadraticCurveTo(0, -s * .14, s * .11, -s * .06); c.stroke(); c.fillStyle = "rgba(255,255,255,.4)"; c.fillRect(-s * .5, -s * .1, s * .12, s * .05); c.fillRect(s * .22, -s * .1, s * .12, s * .05); break;
+    case "eyes.snow": c.strokeStyle = D; c.lineWidth = s * .12; c.beginPath(); c.moveTo(-s * .95, -s * .02); c.lineTo(s * .95, -s * .02); c.stroke(); { const g = c.createLinearGradient(0, -s * .2, 0, s * .2); g.addColorStop(0, "#ffd36e"); g.addColorStop(1, "#ff7a6b"); draw.rect(c, -s * .66, -s * .21, s * 1.32, s * .4, s * .18, g, C, s * .08); } c.fillStyle = "rgba(255,255,255,.55)"; c.fillRect(-s * .45, -s * .12, s * .3, s * .05); break;
+    case "eyes.space": c.fillStyle = C; c.globalAlpha *= .55; c.beginPath(); c.moveTo(-s * .78, -s * .16); c.lineTo(s * .78, -s * .16); c.lineTo(s * .66, s * .16); c.lineTo(-s * .66, s * .16); c.closePath(); c.fill(); c.globalAlpha /= .55; c.strokeStyle = D; c.lineWidth = s * .06; c.stroke(); draw.star(c, s * .5, -s * .02, s * .09, "#fff", 4, .4); break;
+    case "eyes.fancy": c.strokeStyle = C; c.lineWidth = s * .07; c.beginPath(); c.arc(s * .36, 0, s * .22, 0, TAU); c.stroke(); c.fillStyle = "rgba(255,255,255,.25)"; c.fill(); c.lineWidth = s * .03; c.beginPath(); c.moveTo(s * .56, s * .08); c.quadraticCurveTo(s * .7, s * .5, s * .5, s * .7); c.stroke(); break;
+    case "eyes.spooky": c.fillStyle = C; c.beginPath(); c.moveTo(-s * .8, -s * .22); c.quadraticCurveTo(0, -s * .02, s * .8, -s * .22); c.quadraticCurveTo(s * .8, s * .22, s * .35, s * .22); c.quadraticCurveTo(0, s * .08, -s * .35, s * .22); c.quadraticCurveTo(-s * .8, s * .22, -s * .8, -s * .22); c.closePath();
+      c.moveTo(-s * .2, 0); c.ellipse(-s * .36, 0, s * .16, s * .12, 0, 0, TAU); c.moveTo(s * .52, 0); c.ellipse(s * .36, 0, s * .16, s * .12, 0, 0, TAU); c.fill("evenodd"); c.stroke(); draw.circle(c, -s * .78, -s * .28, s * .08, L); draw.circle(c, s * .78, -s * .28, s * .08, L); break;
+    case "neck.beach": for (let i = 0; i <= 6; i++) { const a = Math.PI * (.95 - i / 6 * .9), x = Math.cos(a) * s * .62, y = Math.sin(a) * s * .26 - s * .08; for (let p = 0; p < 5; p++) draw.circle(c, x + Math.cos(p * 1.26) * s * .07, y + Math.sin(p * 1.26) * s * .07, s * .065, i % 2 ? C : L); draw.circle(c, x, y, s * .04, "#ffe27a"); } break;
+    case "neck.snow": draw.rect(c, -s * .68, -s * .14, s * 1.36, s * .26, s * .12, C, "rgba(43,35,64,.45)", s * .045); draw.rect(c, s * .2, 0, s * .26, s * .62, s * .08, C, "rgba(43,35,64,.45)", s * .045); c.fillStyle = L; for (let i = 0; i < 3; i++) c.fillRect(s * .2, s * .15 + i * s * .14, s * .26, s * .05); c.fillRect(-s * .55, -s * .04, s * .3, s * .06); break;
+    case "neck.space": c.strokeStyle = C; c.lineWidth = s * .12; c.beginPath(); c.moveTo(-s * .4, -s * .1); c.lineTo(0, s * .28); c.lineTo(s * .4, -s * .1); c.stroke(); draw.circle(c, 0, s * .4, s * .17, "#ffcf3a", "#c99a12", s * .04); draw.star(c, 0, s * .4, s * .11, "#fff3b0", 5, .45); break;
+    case "neck.fancy": c.fillStyle = C; c.beginPath(); c.moveTo(0, 0); c.lineTo(-s * .36, -s * .17); c.lineTo(-s * .36, s * .17); c.closePath(); c.moveTo(0, 0); c.lineTo(s * .36, -s * .17); c.lineTo(s * .36, s * .17); c.closePath(); c.fill(); c.stroke(); draw.circle(c, 0, 0, s * .08, D); break;
+    case "neck.spooky": c.strokeStyle = "#43303a"; c.lineWidth = s * .035; c.beginPath(); c.moveTo(-s * .5, -s * .12); c.quadraticCurveTo(0, s * .25, s * .5, -s * .12); c.stroke(); c.fillStyle = C;
+      for (const d of [-1, 1]) { c.beginPath(); c.moveTo(d * s * .06, s * .14); c.lineTo(d * s * .28, s * .02); c.lineTo(d * s * .48, s * .1); c.quadraticCurveTo(d * s * .42, s * .2, d * s * .36, s * .3); c.quadraticCurveTo(d * s * .3, s * .22, d * s * .22, s * .26); c.quadraticCurveTo(d * s * .14, s * .2, d * s * .06, s * .3); c.closePath(); c.fill(); c.stroke(); }
+      E(0, s * .2, s * .1, s * .13, C, 1); c.beginPath(); c.moveTo(-s * .08, s * .1); c.lineTo(-s * .06, s * .0); c.lineTo(-s * .01, s * .08); c.moveTo(s * .08, s * .1); c.lineTo(s * .06, s * .0); c.lineTo(s * .01, s * .08); c.fill(); draw.circle(c, -s * .035, s * .17, s * .022, "#fff3a0"); draw.circle(c, s * .035, s * .17, s * .022, "#fff3a0"); break;
+    case "body.beach": c.strokeStyle = C; c.lineWidth = s * .26; if (back) { c.beginPath(); c.ellipse(0, s * .05, s * 1.02, s * .3, 0, Math.PI, TAU); c.stroke(); } else { c.beginPath(); c.ellipse(0, s * .05, s * 1.02, s * .3, 0, 0, Math.PI); c.stroke(); c.strokeStyle = "#fff"; c.lineWidth = s * .26; for (const a of [.55, 1.57, 2.6]) { c.beginPath(); c.ellipse(0, s * .05, s * 1.02, s * .3, 0, a - .14, a + .14); c.stroke(); } } break;
+    case "body.snow": for (const d of [-1, 1]) { c.fillStyle = C; c.beginPath(); c.moveTo(d * s * .22, -s * .48); c.quadraticCurveTo(d * s * .95, -s * .55, d * s * .95, s * .05); c.quadraticCurveTo(d * s * .85, s * .42, d * s * .28, s * .42); c.closePath(); c.fill(); c.stroke(); c.strokeStyle = D; for (let i = 0; i < 3; i++) { c.beginPath(); c.moveTo(d * s * .3, -s * .3 + i * s * .24); c.lineTo(d * s * .88, -s * .3 + i * s * .24); c.stroke(); } c.strokeStyle = "rgba(43,35,64,.45)"; } break;
+    case "body.space": if (back) { for (const d of [-1, 1]) { draw.rect(c, d * s * .78 - s * .2, -s * .85, s * .4, s * .95, s * .18, C, "rgba(43,35,64,.45)", s * .045); E(d * s * .78, -s * .85, s * .14, s * .1, L); if (party && phase === "party") { E(d * s * .78, s * .25 + Math.sin(clock * 40) * s * .04, s * .1, s * .22, "#ffb648"); } } } else { c.strokeStyle = D; c.lineWidth = s * .1; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(d * s * .5, -s * .7); c.quadraticCurveTo(d * s * .35, -s * .2, d * s * .6, s * .15); c.stroke(); } } break;
+    case "body.fancy": c.fillStyle = C; c.beginPath(); for (let i = 0; i <= 16; i++) { const a = i / 16, x = lerp(-s * 1.08, s * 1.08, a), y = s * .3 + (i % 2 ? s * .1 : 0); i ? c.lineTo(x, y) : c.moveTo(x, y); } c.lineTo(s * .8, s * .02); c.lineTo(-s * .8, s * .02); c.closePath(); c.fill(); c.stroke(); c.fillStyle = L; for (let i = 0; i < 6; i++) draw.circle(c, lerp(-s * .75, s * .75, i / 5), s * .14, s * .05, L); c.fillStyle = D; c.fillRect(-s * .8, -s * .02, s * 1.6, s * .08); break;
+    case "body.spooky": if (back) { c.fillStyle = "#43303a"; c.beginPath(); c.moveTo(-s * .7, -s * 1.05); c.quadraticCurveTo(-s * 1.5, s * .1, -s * 1.3, s * .5); c.lineTo(s * 1.3, s * .5); c.quadraticCurveTo(s * 1.5, s * .1, s * .7, -s * 1.05); c.closePath(); c.fill(); c.fillStyle = C; c.beginPath(); c.moveTo(-s * .62, -s * 1.0); c.quadraticCurveTo(-s * 1.36, s * .1, -s * 1.16, s * .44); c.lineTo(s * 1.16, s * .44); c.quadraticCurveTo(s * 1.36, s * .1, s * .62, -s * 1.0); c.closePath(); c.fill(); }
+      else { c.fillStyle = "#43303a"; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(d * s * .35, -s * .9); c.lineTo(d * s * 1.0, -s * 1.5); c.lineTo(d * s * .85, -s * .75); c.closePath(); c.fill(); } } break;
+    case "hand.beach": c.fillStyle = "#e9b46a"; c.beginPath(); c.moveTo(-s * .16, -s * .05); c.lineTo(0, s * .45); c.lineTo(s * .16, -s * .05); c.closePath(); c.fill(); c.stroke(); E(0, -s * .14, s * .2, s * .17, C, 1); E(0, -s * .3, s * .15, s * .12, L, 1); draw.circle(c, s * .02, -s * .45, s * .06, "#ff4f6d"); break;
+    case "hand.snow": draw.rect(c, -s * .2, -s * .22, s * .4, s * .44, s * .08, C, "rgba(43,35,64,.45)", s * .045); c.strokeStyle = C; c.lineWidth = s * .07; c.beginPath(); c.arc(s * .22, 0, s * .1, -1.3, 1.3); c.stroke(); E(-s * .06, -s * .24, s * .09, s * .06, "#fff"); E(s * .08, -s * .26, s * .08, s * .05, "#fff");
+      c.strokeStyle = "rgba(160,160,180,.6)"; c.lineWidth = s * .03; c.beginPath(); c.moveTo(0, -s * .36); c.quadraticCurveTo(s * .08, -s * .48, -s * .02, -s * .6); c.stroke(); break;
+    case "hand.space": c.fillStyle = C; c.beginPath(); c.moveTo(0, -s * .5); c.quadraticCurveTo(s * .2, -s * .2, s * .14, s * .22); c.lineTo(-s * .14, s * .22); c.quadraticCurveTo(-s * .2, -s * .2, 0, -s * .5); c.fill(); c.stroke(); draw.circle(c, 0, -s * .12, s * .07, "#bfefff", "rgba(43,35,64,.45)", s * .03);
+      c.fillStyle = D; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(d * s * .12, s * .05); c.lineTo(d * s * .26, s * .3); c.lineTo(d * s * .12, s * .22); c.fill(); } E(0, s * .3, s * .06, s * .1, "#ffb648"); break;
+    case "hand.fancy": E(0, s * .18, s * .3, s * .07, L, 1); c.fillStyle = C; c.beginPath(); c.moveTo(-s * .22, -s * .1); c.lineTo(s * .22, -s * .1); c.quadraticCurveTo(s * .2, s * .15, 0, s * .15); c.quadraticCurveTo(-s * .2, s * .15, -s * .22, -s * .1); c.fill(); c.stroke(); c.strokeStyle = C; c.lineWidth = s * .05; c.beginPath(); c.arc(s * .25, s * .0, s * .07, -1.4, 1.4); c.stroke(); break;
+    case "hand.spooky": c.strokeStyle = "#7a5a3a"; c.lineWidth = s * .05; c.beginPath(); c.moveTo(0, s * .3); c.lineTo(0, -s * .15); c.stroke(); E(0, -s * .32, s * .28, s * .22, C, 1); c.fillStyle = "#fff3a0"; c.beginPath(); c.moveTo(-s * .15, -s * .38); c.lineTo(-s * .06, -s * .3); c.lineTo(-s * .16, -s * .28); c.fill(); c.beginPath(); c.moveTo(s * .15, -s * .38); c.lineTo(s * .06, -s * .3); c.lineTo(s * .16, -s * .28); c.fill(); c.fillRect(-s * .12, -s * .22, s * .24, s * .05); c.fillStyle = "#4fa04a"; c.fillRect(-s * .03, -s * .6, s * .06, s * .1); break;
+  }
+}
+function drawPip(c, x, y, size, o, look) { // Pip + the outfit layered around him
+  const s = size / 2; o = o || {};
+  const at = (sl, fn) => { const p = slotOrigin(sl, s); c.save(); c.translate(x, y); if (o.tilt) c.rotate(o.tilt); c.translate(p[0], p[1]); fn(); c.restore(); };
+  for (const sl of ["body"]) if (look[sl]) at(sl, () => drawItem(c, ITEMS[look[sl][0]], look[sl][1], s, "back"));
+  const an = Pals.draw(c, "pip", x, y, size, Object.assign({ arms: look.hand ? "hold" : o.arms || "down" }, o));
+  for (const sl of ["body", "neck", "eyes", "head"]) if (look[sl] && !(o.lift === sl)) at(sl, () => drawItem(c, ITEMS[look[sl][0]], look[sl][1], s, "front"));
+  if (look.hand && o.lift !== "hand") { c.save(); c.translate(an.handR[0], an.handR[1] - s * .1); drawItem(c, ITEMS[look.hand[0]], look.hand[1], s, "front"); c.restore(); }
+  return an;
+}
+
+/* ---------- invitations + judging ---------- */
+function makeInvite(i) {
+  const two = i >= 3 && Lab.chance(.55), a = Lab.choose(TH); let b = null;
+  if (two) { const opts = TH.filter(t => t !== a && OPP[a] !== t); b = Lab.choose(opts); }
+  const colour = i >= 3 && Lab.chance(.5) ? Lab.randInt(0, COLS.length - 1) : -1;
+  const ban = i >= 5 && Lab.chance(.35) ? Lab.choose(SLOTS) : null;
+  return { themes: b ? [a, b] : [a], colour, need: 2, ban, title: b ? THEMES[a].adj + " " + THEMES[b].noun : THEMES[a].noun, host: THEMES[b || a].host };
+}
+function judge(look, iv) {
+  iv = iv || inv; let pts = 0, max = 0; const per = {};
+  for (const sl of SLOTS) {
+    const w = look[sl]; if (iv.ban === sl) { per[sl] = w ? -3 : 0; pts += per[sl]; continue; } max += 2;
+    if (!w) { per[sl] = 0; continue; } const th = ITEMS[w[0]].theme;
+    per[sl] = iv.themes.includes(th) ? 2 : iv.themes.some(t => OPP[t] === th) ? -1 : 0; pts += per[sl];
+  }
+  if (iv.themes.length > 1) for (const t of iv.themes) if (!SLOTS.some(sl => look[sl] && iv.ban !== sl && ITEMS[look[sl][0]].theme === t)) pts -= 2;
+  let colOk = true; if (iv.colour >= 0) { max += 2; const n = SLOTS.filter(sl => look[sl] && look[sl][1] === iv.colour).length; colOk = n >= iv.need; if (colOk) pts += 2; }
+  const r = max ? Math.max(0, pts) / max : 0, st = r >= .88 ? 3 : r >= .6 ? 2 : r >= .3 ? 1 : 0;
+  return { pts, max, r, stars: st, per, colOk };
+}
+function reaction(sl, w) {
+  const th = ITEMS[w[0]].theme; pip.react = 1.2;
+  if (inv.ban === sl) { pip.mood = "angry"; say("No " + (sl === "eyes" ? "glasses" : sl === "hand" ? "props" : sl + " stuff") + " today, remember?"); snd("error", { vol: .5 }); return; }
+  if (inv.themes.includes(th)) { pip.mood = "joy"; pip.hop = 1; snd("chime", { pitch: .9 + SLOTS.indexOf(sl) * .1 }); const p = slotPos(sl); fx.burst(p[0], p[1], { n: 6, color: "#ff7aa8", shape: "star", speed: 90 * S, life: .6, size: 5 * S, gravity: -60 }); once("good", "Ooh, that's perfect!"); }
+  else if (inv.themes.some(t => OPP[t] === th)) { pip.mood = "sad"; snd("hurt", { vol: .4, pitch: 1.4 }); say(th === "snow" ? "Too toasty for that!" : th === "beach" ? "Brr! Not for that party." : th === "spooky" ? "Too creepy for this!" : "Too fancy for this!"); }
+  else { pip.mood = "think"; snd("pop", { pitch: .8 }); once("meh", "Hmm... not really the theme."); }
+}
+function slotPos(sl) { const s = pipSize / 2, p = slotOrigin(sl, s); return [stage.x + p[0], stage.y + p[1]]; }
+
+/* ---------- run ---------- */
+function reset() {
+  layout(); outfit = {}; tab = 0; drag = null; idx = 0; score = 0; stars3 = 0; starsTot = 0; strikes = 0; streak = 0; bestStreak = 0; clock = 0; told = {}; bubble = null; photos = []; party = null; sel = 0; kb = false;
+  pip = { mood: "happy", react: 0, hop: 0, sq: 0 }; newInvite();
+}
+function newInvite() { inv = makeInvite(idx); patMax = Math.max(20, 42 - idx * 2.8); patience = patMax; phase = "dress"; phaseT = 0; outfit = {}; }
+function start() {
+  demo = false; reset(); Lab.setScore(0); Lab.music.intensity(.2);
+  Lab.input.onDown = [(x, y) => down(x, y)]; Lab.input.onMove = [(x, y) => { if (drag) { drag.x = x; drag.y = y; if (Math.hypot(x - drag.x0, y - drag.y0) > 12) drag.moved = true; } }]; Lab.input.onUp = [(x, y) => up(x, y)];
+  Lab.input.onKey = [k => key(k)];
+  Lab.loop(frame);
+  Lab.after(.5, () => once("hi", "A " + inv.title + "! Dress me up!", 3));
+}
+function inRect(x, y, r) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
+function down(x, y) {
+  if (phase !== "dress") return;
+  if (Math.hypot(x - goB.x, y - goB.y) < goB.r * 1.15) { go(false); return; }
+  for (const tb of tabs) if (inRect(x, y, tb)) { if (tab !== SLOTS.indexOf(tb.sl)) { tab = SLOTS.indexOf(tb.sl); snd("tick"); } return; }
+  for (const tl of tiles) if (inRect(x, y, tl)) { const it = ITEMS.find(q => q.slot === SLOTS[tab] && q.ti === tl.i); drag = { it, col: it.col, from: "tray", x, y, x0: x, y0: y, moved: false }; snd("tap", { vol: .5 }); return; }
+  // pick up a worn piece (nearest slot to the touch)
+  let best = null, bd = pipSize * .45;
+  for (const sl of SLOTS) if (outfit[sl]) { const p = sl === "hand" ? (pip.hand || slotPos(sl)) : slotPos(sl), d = Math.hypot(x - p[0], y - p[1]); if (d < bd) { bd = d; best = sl; } }
+  if (best) { const w = outfit[best]; drag = { it: ITEMS[w[0]], col: w[1], from: "pip", slot: best, x, y, x0: x, y0: y, moved: false }; }
+}
+function up(x, y) {
+  if (!drag) return; const d = drag; drag = null; if (phase !== "dress") return;
+  const onPip = Math.hypot(x - stage.x, y - (stage.y - pipSize * .2)) < pipSize * .95;
+  if (d.from === "tray") { if (!d.moved || onPip) wear(d.it, d.col); }
+  else if (!d.moved) { const w = outfit[d.slot]; w[1] = (w[1] + 1) % COLS.length; snd("bubble", { pitch: 1 + w[1] * .1 }); const p = slotPos(d.slot); fx.burst(p[0], p[1], { n: 5, color: COLS[w[1]][1], speed: 70 * S, life: .4, size: 4 * S }); once("recol", "Ooh, " + COLS[w[1]][0] + "!"); }
+  else if (!onPip) { delete outfit[d.slot]; snd("swish"); pip.mood = "happy"; }
+}
+function wear(it, col) {
+  const had = outfit[it.slot]; outfit[it.slot] = [it.id, had && ITEMS[had[0]] === it ? had[1] : col]; pip.sq = .12;
+  snd("pop", { pitch: 1 + SLOTS.indexOf(it.slot) * .08 }); reaction(it.slot, outfit[it.slot]);
+  const p = slotPos(it.slot); fx.ring(p[0], p[1], { r0: 4, r1: pipSize * .35, color: "#fff", life: .3, width: 3 });
+  if (Object.keys(outfit).length >= 3) once("go", "Tap GO when I look great!");
+}
+function key(k) {
+  if (phase !== "dress") return; kb = true;
+  if (k === "ArrowLeft") sel = (sel + 4) % 5; else if (k === "ArrowRight") sel = (sel + 1) % 5;
+  else if (k === "ArrowUp") tab = (tab + 4) % 5; else if (k === "ArrowDown") tab = (tab + 1) % 5;
+  else if (k === " " || k === "Enter") { const it = ITEMS.find(q => q.slot === SLOTS[tab] && q.ti === sel); wear(it, it.col); }
+  else if (k === "c" || k === "C") { const w = outfit[SLOTS[tab]]; if (w) { w[1] = (w[1] + 1) % COLS.length; snd("bubble"); } }
+  else if (k === "x" || k === "Backspace" || k === "Delete") { delete outfit[SLOTS[tab]]; snd("swish"); }
+  else if (k === "g" || k === "G") go(false);
+}
+function go(late) {
+  if (phase !== "dress") return; if (!late && !Object.keys(outfit).length) { say("Dress me first!"); snd("error", { vol: .4 }); return; } drag = null;
+  const res = judge(outfit), look = JSON.parse(JSON.stringify(outfit));
+  party = { res, look, inv, t: 0, shown: 0, late, guest: Lab.choose(Pals.list.filter(p => p !== "pip" && p !== inv.host)) };
+  phase = "party"; phaseT = 0; snd(late ? "warn" : "whoosh"); snd("jump"); bubble = null;
+  if (late) say("I'm going like THIS!", 1.5);
+}
+function scoreParty() {
+  const r = party.res, st = r.stars; starsTot += st;
+  if (st === 3) { stars3++; streak++; bestStreak = Math.max(bestStreak, streak); } else streak = 0;
+  if (st === 0) strikes++;
+  const pts = st * 100 + (st ? Math.ceil(Math.max(0, patience)) * 4 : 0) + (st === 3 ? 40 * (streak - 1) : 0);
+  score += pts; Lab.setScore(score); if (pts && !demo) Lab.bumpScore();
+  if (pts) fx.text(Lab.W / 2, Lab.H * .3, "+" + pts, { color: "#ff8a3d", size: 26 * Math.max(S, .8) });
+  if (st >= 2 && !demo) { const look = { o: party.look, th: party.inv.themes, st, id: Lab.randInt(1, 1e9) }; photos.push(look); try { const g = Lab.store.get("looks") || []; g.push(look); Lab.store.set("looks", g.slice(-8)); } catch (e) { } }
+}
+function frame(dt, t) { clock += dt; phaseT += dt; update(dt); render(t); }
+function update(dt) {
+  if (bubble) { bubble.t += dt; if (bubble.t > bubble.dur) bubble = null; }
+  pip.react = Math.max(0, pip.react - dt); pip.hop = Math.max(0, pip.hop - dt * 2.5); pip.sq = Lab.damp(pip.sq, 0, 10, dt);
+  if (phase === "dress") {
+    patience -= dt; const k = patience / patMax; Lab.music.intensity(.2 + (1 - k) * .6);
+    if (k < .3) once("hurry" + idx, Lab.choose(["Hurry, hurry!", "I'm gonna be late!", "Are we done yet?"]), 2);
+    if (k < .3 && Math.floor(clock * 4) !== Math.floor((clock - dt) * 4)) snd("tick", { pitch: 1.6, vol: .4 });
+    if (patience <= 0) go(true);
+  } else if (phase === "party") {
+    const p = party; p.t += dt;
+    for (let i = p.shown; i < 3 && p.t > 1.0 + i * .35; i++) { p.shown = i + 1; if (i < p.res.stars) snd("star", { pitch: 1 + i * .2 }); else snd("tick", { pitch: .6 }); }
+    if (p.t > 2.3 && !p.snap) { p.snap = true; Lab.flash("#ffffff", .25, .8); snd("click"); scoreParty(); if (p.res.stars === 3) Lab.fx.confetti(); }
+    if (p.t > 3.6) {
+      idx++;
+      if (strikes >= 3) return end(false); if (idx >= 8) return end(true);
+      newInvite(); Lab.banner("Party " + (idx + 1) + " of 8", { color: "#ff8a3d", ms: 1000, y: .45 }); snd("unlock");
+      if (inv.themes.length > 1) once("two", "Two themes! Mix them up."); else if (inv.colour >= 0) once("colour", "Tap a piece to change its colour!");
+      if (inv.ban) once("ban", "No " + inv.ban + " things this time!");
+    }
+  }
+}
+function end(full) {
+  phase = "over";
+  Lab.gameover({ title: full ? "What a day!" : "Pip went home early", message: full ? "Pip partied at all eight. Snap snap!" : "Three parties without a single star...", score, neutral: full,
+    stats: [["3-star looks", stars3], ["Stars", starsTot + " / 24"], ["Best streak", bestStreak]] });
+}
+
+/* ---------- drawing ---------- */
+function themeIcon(c, th, x, y, r) {
+  const col = THEMES[th].c;
+  if (th === "beach") { draw.circle(c, x, y - r * .15, r * .45, "#ffcf3a"); c.strokeStyle = "#59a9ff"; c.lineWidth = r * .18; c.beginPath(); c.moveTo(x - r * .8, y + r * .55); c.quadraticCurveTo(x - r * .4, y + r * .3, x, y + r * .55); c.quadraticCurveTo(x + r * .4, y + r * .8, x + r * .8, y + r * .55); c.stroke(); }
+  else if (th === "snow") { c.strokeStyle = col; c.lineWidth = r * .16; c.lineCap = "round"; for (let i = 0; i < 3; i++) { const a = i * Math.PI / 3; c.beginPath(); c.moveTo(x - Math.cos(a) * r * .8, y - Math.sin(a) * r * .8); c.lineTo(x + Math.cos(a) * r * .8, y + Math.sin(a) * r * .8); c.stroke(); } }
+  else if (th === "space") { draw.circle(c, x, y, r * .5, col); c.strokeStyle = "#ffcf3a"; c.lineWidth = r * .14; c.beginPath(); c.ellipse(x, y, r * .9, r * .28, -.35, 0, TAU); c.stroke(); }
+  else if (th === "fancy") { c.fillStyle = "#ffcf3a"; c.beginPath(); c.moveTo(x - r * .7, y + r * .45); c.lineTo(x - r * .75, y - r * .35); c.lineTo(x - r * .35, y); c.lineTo(x, y - r * .6); c.lineTo(x + r * .35, y); c.lineTo(x + r * .75, y - r * .35); c.lineTo(x + r * .7, y + r * .45); c.closePath(); c.fill(); draw.circle(c, x, y - r * .6, r * .12, col); }
+  else { c.fillStyle = "#fffaf6"; c.beginPath(); c.arc(x, y - r * .1, r * .55, Math.PI, 0); c.lineTo(x + r * .55, y + r * .6); for (let i = 0; i < 3; i++) c.quadraticCurveTo(x + r * (.37 - i * .37), y + r * .35, x + r * (.18 - i * .37), y + r * .6); c.closePath(); c.fill(); c.strokeStyle = col; c.lineWidth = r * .1; c.stroke(); draw.circle(c, x - r * .18, y - r * .1, r * .08, INK); draw.circle(c, x + r * .18, y - r * .1, r * .08, INK); }
+}
+function bgSprite() {
+  const W = Lab.W, H = Lab.H;
+  return Lab.sprite("ph_bg" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40); g.fillStyle = "#fff2e4"; g.fillRect(-40, -40, W + 80, H + 80);
+    g.fillStyle = "rgba(255,180,140,.22)"; for (let x = -40; x < W + 40; x += 44) g.fillRect(x, -40, 18, H + 80);
+    g.fillStyle = "rgba(255,138,61,.12)"; for (let x = -18; x < W + 40; x += 44) for (let y = -40; y < H + 40; y += 30) { g.beginPath(); g.arc(x + 4, y + ((x / 44) % 2) * 15, 3, 0, TAU); g.fill(); }
+    // stage rug
+    g.fillStyle = "#ffd0c2"; g.beginPath(); g.ellipse(stage.x, stage.y + pipSize * .52, pipSize * .95, pipSize * .2, 0, 0, TAU); g.fill(); g.strokeStyle = "#ffab94"; g.lineWidth = 4; g.setLineDash([8, 6]); g.beginPath(); g.ellipse(stage.x, stage.y + pipSize * .52, pipSize * .82, pipSize * .15, 0, 0, TAU); g.stroke(); g.setLineDash([]);
+    // trunk drawer
+    const d = drawer; draw.rect(g, d.x, d.y, d.w, d.h, 18 * S, "#c98a5a"); draw.rect(g, d.x + 5, d.y + 5, d.w - 10, d.h - 10, 14 * S, "#f6dcc0");
+    g.strokeStyle = "rgba(160,100,60,.25)"; g.lineWidth = 2; for (let y = d.y + 70 * S; y < d.y + d.h - 10; y += 34 * S) { g.beginPath(); g.moveTo(d.x + 12, y); g.lineTo(d.x + d.w - 12, y); g.stroke(); }
+  });
+}
+function render(t) {
+  const c = Lab.ctx;
+  if (phase === "party" || phase === "over" && party) return renderParty(c, t);
+  const bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  drawRope(c); drawCard(c); drawTray(c);
+  // Pip
+  const k = patience / patMax, impatient = k < .3 && phase === "dress";
+  const tap = impatient ? Math.abs(Math.sin(clock * 9)) * .06 : 0, hop = ease.outQuad(Math.sin(pip.hop * Math.PI)) * pipSize * .12;
+  const mood = pip.react > 0 ? pip.mood : impatient ? "angry" : k < .55 ? "focus" : "happy";
+  const look = drag ? [clamp((drag.x - stage.x) / pipSize, -1, 1), clamp((drag.y - stage.y) / pipSize, -1, 1)] : [0, .2];
+  const lift = drag && drag.from === "pip" ? drag.slot : null;
+  const an = drawPip(c, stage.x, stage.y - hop, pipSize, { t, mood, look, squash: pip.sq + tap, hot: impatient ? 1 - k / .3 : 0, lift, arms: pip.react > 0 && pip.mood === "joy" ? "cheer" : "down" }, outfit);
+  pip.hand = an.handR;
+  // GO button
+  const ready = Object.keys(outfit).length > 0, pulse = ready ? 1 + Math.sin(clock * 6) * .04 : 1;
+  draw.circle(c, goB.x, goB.y + 4, goB.r * pulse, "rgba(0,0,0,.12)"); draw.circle(c, goB.x, goB.y, goB.r * pulse, ready ? "#ff8a3d" : "#e9c8b4", "#fff", 3);
+  draw.text(c, "GO!", goB.x, goB.y + 1, { size: 21 * Math.max(S, .8), color: "#fff", weight: 700 });
+  if (drag) { c.save(); c.translate(drag.x, drag.y - pipSize * .1); c.scale(1.1, 1.1); drawItem(c, drag.it, drag.col, pipSize / 2, "back"); drawItem(c, drag.it, drag.col, pipSize / 2, "front"); c.restore(); }
+  if (bubble) drawBubble(c);
+}
+function drawCard(c) {
+  const k = Math.max(S, .8), r = card; draw.rect(c, r.x, r.y + 3, r.w, r.h, 16 * k, "rgba(120,70,40,.12)"); draw.rect(c, r.x, r.y, r.w, r.h, 16 * k, "#fffdf8", "rgba(67,48,58,.12)", 1.5);
+  const ic = r.h * .28; inv.themes.forEach((th, i) => { draw.circle(c, r.x + r.h * .5 + i * ic * 2.1, r.y + r.h * .42, ic * 1.05, shade(THEMES[th].c, .65)); themeIcon(c, th, r.x + r.h * .5 + i * ic * 2.1, r.y + r.h * .42, ic * .85); });
+  const tx = r.x + r.h * .5 + inv.themes.length * ic * 2.1 - ic * .5;
+  draw.text(c, inv.title, tx, r.y + r.h * .3, { size: 16 * k, color: "#43303a", weight: 700, align: "left", maxWidth: r.x + r.w - 58 * k - tx });
+  let rule = "party " + (idx + 1) + "/8"; if (inv.colour >= 0) rule += " · 2+ " + COLS[inv.colour][0]; if (inv.ban) rule += " · " + BAN[inv.ban];
+  draw.text(c, rule, tx, r.y + r.h * .56, { size: 12 * k, color: "#8b7078", weight: 700, align: "left", maxWidth: r.x + r.w - 58 * k - tx });
+  if (inv.colour >= 0) draw.circle(c, r.x + r.w - 56 * k, r.y + r.h * .3, 7 * k, COLS[inv.colour][1], "#fff", 2);
+  const bw = r.w - 24 * k, bx = r.x + 12 * k, by = r.y + r.h - 14 * k, p = clamp(patience / patMax, 0, 1);
+  draw.rect(c, bx, by, bw, 7 * k, 4 * k, "rgba(67,48,58,.1)"); draw.rect(c, bx, by, Math.max(7 * k, bw * p), 7 * k, 4 * k, p < .3 ? "#ff5d5d" : p < .55 ? "#ffb648" : "#4fd08f");
+  Pals.draw(c, inv.host, r.x + r.w - 34 * k, r.y + r.h * .45, r.h * .5, { t: clock, mood: "happy", shadow: false, clipY: r.h * .14 });
+}
+function drawRope(c) {
+  const r = rope, n = 8, k = Math.max(S, .8); c.strokeStyle = "#b07a45"; c.lineWidth = 2; c.beginPath(); c.moveTo(r.x, r.y + 6); c.quadraticCurveTo(r.x + r.w / 2, r.y + 16, r.x + r.w, r.y + 6); c.stroke();
+  const pw = Math.min(r.w / n - 6, r.h * .78); for (let i = 0; i < n; i++) { const x = r.x + (i + .5) * r.w / n, y = r.y + 8 + Math.sin(i / (n - 1) * Math.PI) * 8, ph = photos[i];
+    c.save(); c.translate(x, y); c.rotate(Math.sin(i * 2.3 + clock * .8) * .05);
+    if (ph) polaroid(c, ph, pw, i); else { c.globalAlpha = .35; draw.rect(c, -pw / 2, 4, pw, pw * 1.15, 3, null, "#c9a58a", 1.5); c.globalAlpha = 1; }
+    c.fillStyle = "#d9a066"; c.fillRect(-2.5, -3, 5, 10); c.restore(); }
+}
+function polaroid(c, ph, pw, i) {
+  if (!ph.id) ph.id = Lab.randInt(1, 1e9); const sp = Lab.sprite("ph_pol" + ph.id + "_" + Math.round(pw), pw, pw * 1.18, (g, w, h) => {
+    draw.rect(g, 0, 0, w, h, 3, "#fff", "rgba(67,48,58,.15)", 1); const th = THEMES[ph.th[ph.th.length - 1]]; g.fillStyle = shade(th.c, .55); g.fillRect(w * .08, w * .08, w * .84, w * .84);
+    g.save(); g.beginPath(); g.rect(w * .08, w * .08, w * .84, w * .84); g.clip(); drawPip(g, w / 2, w * .62, w * .45, { mood: "joy", shadow: false }, ph.o); g.restore();
+    for (let k = 0; k < ph.st; k++) draw.star(g, w * (.3 + k * .2), h - w * .1, w * .07, "#ffb648", 5, .45);
+  });
+  c.drawImage(sp, -pw / 2, 4, sp.w, sp.h);
+}
+function drawTray(c) {
+  const k = Math.max(S, .8);
+  tabs.forEach((tb, i) => { const on = i === tab, cx = tb.x + tb.w / 2, cy = tb.y + tb.h / 2 + 2; draw.rect(c, tb.x + 4, tb.y + 4, tb.w - 8, tb.h - 4, 12 * k, on ? "#fffdf8" : "rgba(255,255,255,.35)", on ? "#ff8a3d" : null, 2.5);
+    const w = outfit[tb.sl], it = w ? ITEMS[w[0]] : itemOf(tb.sl, TABICON[tb.sl]), s = tb.h * (tb.sl === "body" ? .26 : .34); c.save(); c.translate(cx, cy + (tb.sl === "head" ? s * .55 : tb.sl === "body" ? -s * .3 : 0)); drawItem(c, it, w ? w[1] : it.col, s, "back"); drawItem(c, it, w ? w[1] : it.col, s, "front"); c.restore();
+    if (w) draw.circle(c, tb.x + tb.w - 12 * k, tb.y + 12 * k, 4.5 * k, "#4fd08f"); });
+  tiles.forEach(tl => { const it = ITEMS.find(q => q.slot === SLOTS[tab] && q.ti === tl.i), worn = outfit[it.slot] && outfit[it.slot][0] === it.id;
+    draw.rect(c, tl.x, tl.y, tl.w, tl.h, 14 * k, worn ? "#fff3e6" : "#fffdf8", worn ? "#ff8a3d" : kb && sel === tl.i ? "#6c8cff" : "rgba(67,48,58,.1)", worn || kb && sel === tl.i ? 3 : 1.5);
+    const s = Math.min(tl.w, tl.h) * (it.slot === "body" ? .32 : it.slot === "hand" ? .52 : .42), yo = it.slot === "head" ? (it.theme === "space" ? -s * .6 : s * .45) : it.slot === "hand" ? 0 : 0;
+    c.save(); c.beginPath(); c.rect(tl.x + 2, tl.y + 2, tl.w - 4, tl.h - 22 * k); c.clip(); c.translate(tl.x + tl.w / 2, tl.y + (tl.h - 20 * k) / 2 + yo); drawItem(c, it, it.col, s, "back"); drawItem(c, it, it.col, s, "front"); c.restore();
+    draw.text(c, it.name, tl.x + tl.w / 2, tl.y + tl.h - 12 * k, { size: 11.5 * k, color: "#8b7078", weight: 700, maxWidth: tl.w - 8 }); });
+}
+function renderParty(c, t) {
+  const p = party, sc = THEMES[p.inv.themes[p.inv.themes.length - 1]].scene, gy = Pals.backdrop(c, Lab.W, Lab.H, t, { scene: sc, ground: .8 }), P = Lab.play;
+  const big = Math.min(P.h * .32, P.w * .38), x = Lab.W / 2, y = gy - big * .5, inT = clamp(p.t / .5, 0, 1), px = lerp(-big, x, ease.outBack(inT)), hop = Math.abs(Math.sin(p.t * 8)) * big * .12 * (1 - inT);
+  const good = p.res.stars >= 2, gm = p.t < 1 ? "wow" : good ? "joy" : p.res.stars === 1 ? "think" : "sad";
+  for (const [who, d] of [[p.inv.host, -1], [p.guest, 1]]) Pals.draw(c, who, x + d * big * 1.15, gy - big * .38, big * .75, { t, mood: gm, look: [-d * .6, 0], arms: good && p.t > 1.2 ? "cheer" : "down", flip: d > 0 });
+  drawPip(c, px, y - hop, big, { t, mood: p.res.stars >= 2 ? "joy" : p.res.stars === 1 ? "happy" : "sad", arms: "cheer", look: [0, 0] }, p.look);
+  const k = Math.max(S, .8);
+  for (let i = 0; i < p.shown; i++) { const on = i < p.res.stars, sx = x + (i - 1) * 54 * k, sy = P.y + 70 * k, u = clamp((p.t - 1 - i * .35) / .3, 0, 1); draw.star(c, sx, sy, 24 * k * ease.outBack(u), on ? "#ffcf3a" : "rgba(255,255,255,.5)", 5, .48); if (on) { c.strokeStyle = "#e0a01a"; c.lineWidth = 2; c.stroke(); } }
+  const msg = p.res.stars === 3 ? "Best dressed!" : p.res.stars === 2 ? "Looking good!" : p.res.stars === 1 ? "Hmm, interesting..." : "Pip... what is that?";
+  if (p.t > 1.1) { const fs = 15 * k; c.font = Lab.font(fs, 700); const w = c.measureText(msg).width + 26, bx = clamp(x - big * 1.15, w / 2 + 6, Lab.W - w / 2 - 6), by = gy - big * 1.15 - 18 * k; Pals.bubble(c, bx, by, w, fs * 2.1, { tailX: x - big * 1.1, tailY: gy - big * .8 }); draw.text(c, msg, bx, by + 1, { size: fs, color: INK, weight: 700 }); }
+  draw.text(c, p.inv.title, x, P.y + 26 * k, { size: 18 * k, color: "#43303a", weight: 700, stroke: "rgba(255,255,255,.8)", strokeW: 4 });
+}
+function drawBubble(c) {
+  const k = ease.outBack(clamp(bubble.t / .2, 0, 1)) * clamp((bubble.dur - bubble.t) / .25, 0, 1); if (k <= 0) return;
+  const fs = 13.5 * Math.max(S, .85); c.font = Lab.font(fs, 700); const w = c.measureText(bubble.txt).width + 24, h = fs * 2.1;
+  const x = clamp(stage.x + pipSize * .55 + w / 2 - 20, w / 2 + 6, Lab.W - w / 2 - 6), y = stage.y - pipSize * 1.0;
+  c.save(); c.translate(x, y); c.scale(k, k); c.translate(-x, -y); Pals.bubble(c, x, y, w, h, { tailX: stage.x + pipSize * .3, tailY: stage.y - pipSize * .55 }); draw.text(c, bubble.txt, x, y + 1, { size: fs, color: INK, weight: 700 }); c.restore();
+}
+
+/* ---------- splash: the gallery of saved looks ---------- */
+const SAMPLE = [{ o: { head: [3, 4], eyes: [8, 2], neck: [13, 5], hand: [23, 1] }, th: ["fancy"], st: 3 }, { o: { head: [0, 5], eyes: [5, 0], body: [15, 5], hand: [20, 0] }, th: ["beach"], st: 3 }];
+let attractInit = false, showI = 0, showT = 0;
+function attract(dt, t) {
+  if (!attractInit) { attractInit = true; demo = true; reset(); let g = []; try { g = Lab.store.get("looks") || []; } catch (e) { } photos = (g.length ? g : SAMPLE).slice(-8); }
+  demo = true; clock += dt; showT += dt; if (showT > 2.5) { showT = 0; showI++; pip.hop = 1; }
+  const ph = photos[showI % photos.length]; outfit = JSON.parse(JSON.stringify(ph.o)); inv = { themes: ph.th, title: ph.th.map(x => THEMES[x].noun).join(" "), colour: -1, ban: null, host: THEMES[ph.th[0]].host }; patience = patMax;
+  update(dt); render(t); demo = false;
+}
+
+Lab.expose({
+  get score() { return score; }, get phase() { return phase; }, get party() { return idx; }, get strikes() { return strikes; }, get streak() { return streak; },
+  get outfit() { return JSON.parse(JSON.stringify(outfit)); }, get invite() { return JSON.parse(JSON.stringify(inv)); }, get tab() { return tab; }, get patience() { return patience; },
+  get lastStars() { return party && party.res.stars; }, get photos() { return photos.length; },
+  judge(look, iv) { const o = {}; for (const sl in look) { const it = itemOf(sl, look[sl][0]); o[sl] = [it.id, look[sl][1] || 0]; } return judge(o, iv); },
+  tabRect(i) { const t = tabs[i]; return [t.x + t.w / 2, t.y + t.h / 2]; }, tile(theme) { const it = itemOf(SLOTS[tab], theme), t = tiles[it.ti]; return [t.x + t.w / 2, t.y + t.h / 2]; },
+  slot(sl) { return sl === "hand" && pip.hand ? pip.hand : slotPos(sl); }, get pipXY() { return [stage.x, stage.y - pipSize * .2]; }, get goXY() { return [goB.x, goB.y]; },
+  setParty(n) { idx = n; newInvite(); },
+  setInvite(o) { inv = Object.assign({ colour: -1, need: 2, ban: null, title: "Test Party", host: "bun" }, o); patMax = patience = o.patience || 40; outfit = {}; },
+});
+Lab.boot();
+})();
+</script></body></html>

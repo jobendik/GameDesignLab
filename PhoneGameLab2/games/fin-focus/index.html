@@ -1,0 +1,353 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Fin Focus</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* FIN FOCUS — Bolt pilots a brass diving bell with a camera on the front. The pals each want a page of fish photos for
+ * their album; Bolt dives to get the shots before the bell's air runs out.
+ * Core idea kept: swim through the sea and get the fish that is asked for — but the verb is PHOTOGRAPH, not catch/hook:
+ *   hold to steer the bell (it lags and glides); hold a wanted fish in the viewfinder while moving gently and the focus
+ *   ring fills — click! Two wanted fish in one frame pay more; dead-centre framing pays more.
+ * Each fish asks for its own approach: Sunnyfins school in the shallows, Stripeys dart, a Puffer only counts puffed
+ * (get close), a shy Blushfin flees a fast bell (creep up), Eels peek out of the reef, Glowfins hide in the dark deep.
+ * Air is the clock: it drains faster the deeper you go; wanted photos and vent bubbles top it up, a full page refills it.
+ * Jellies zap the bell. Later pages ask for more and rarer fish, deeper; after page 6 the sea turns to night.
+ * Identity: a sloping toy-ocean cross-section from sunny kelp shallows to an inky trench; brass bell, warm lamp light. */
+let demo = false;
+Lab.init({
+  title: "Fin Focus", tagline: "Steer Bolt's diving bell and snap the fish the pals ask for.", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Hold to steer the bell", "Glide slowly to focus a photo", "Photos and vents refill your air"],
+  theme: { bg: "#0f4f7c", bg2: "#7fe0f0", fg: "#fffdf4", muted: "#d4f3ff", accent: "#ffd23f", accent2: "#3ec5ff" },
+  orient: "any", music: { style: "chill", key: "F", vol: .4 }, restart: start,
+  attract(dt, t) { if (!bell) { demo = true; setup(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink, mix = Lab.color.mix;
+fx.auto = false;
+const WW = 1600, DH = 2000, VF = 64, AHEAD = 96, STEADY = 85;
+const SP = {   // y range in world units, value, colours
+  sunny: { n: "Sunnyfin", y: [70, 520], v: 10, r: 15, c: "#ffd23f", c2: "#ff9f43" },
+  stripe: { n: "Stripey", y: [160, 820], v: 20, r: 16, c: "#fff6e6", c2: "#2f3d73" },
+  puffer: { n: "Puffer", y: [420, 1050], v: 30, r: 17, c: "#f2c47c", c2: "#b9874a" },
+  blush: { n: "Blushfin", y: [760, 1420], v: 35, r: 17, c: "#ff9ec4", c2: "#e0609a" },
+  eel: { n: "Peek Eel", y: [0, 0], v: 40, r: 14, c: "#7fcf8a", c2: "#3f8f5a" },
+  glow: { n: "Glowfin", y: [1330, 1940], v: 50, r: 16, c: "#3b4a9c", c2: "#9ff3ff" },
+};
+const UNLOCK = ["sunny", "stripe", "puffer", "blush", "eel", "glow"];
+const CLIENTS = ["nori", "pip", "bun", "momo", "olli"];
+let W, H, S, cy0, bell, cam, fish, jellies, eels, vents, bubbles, kelp, slots, page, client, air, score, photos, zaps, focus, snapT, told,
+  clock, hold, decor, pageT, deepest, centered, nightK, flashT, nextT, sayTxt, sayT, lightHud;
+
+const floorY = x => 640 + (x / WW) * 1360 + Math.sin(x * .011) * 40 + Math.sin(x * .027 + 1) * 18;
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() {
+  W = Lab.W; H = Lab.H; S = clamp(Math.sqrt(W * H / (400 * 720)), .8, 2); cy0 = Lab.play.y + Lab.play.h * .56;
+  Lab.sprite.clear("ff-");
+}
+Lab.onResize(layout);
+const toWorld = (x, y) => [(x - W / 2) / S + cam.x, (y - cy0) / S + cam.y];
+const toScreen = (x, y) => [(x - cam.x) * S + W / 2, (y - cam.y) * S + cy0];
+
+/* ---------- world ---------- */
+function spawnFish(kind, x, y) {
+  const s = SP[kind]; let tries = 0;
+  if (x == null) do { y = Lab.rand(s.y[0], s.y[1]); x = Lab.rand(40, WW - 40); } while (y > floorY(x) - 40 && tries++ < 60);
+  const f = { id: fish.length ? fish[fish.length - 1].id + 1 : 1, kind, x, y, hx: x, hy: y, vx: Lab.choose([-1, 1]) * Lab.rand(20, 40), vy: 0, ph: Lab.rand(0, TAU), puff: 0, puffT: 0, flee: 0, snapT: 0, dart: 0, school: null, frozen: false };
+  fish.push(f); return f;
+}
+function setup() {
+  layout(); fish = []; jellies = []; eels = []; vents = []; bubbles = []; kelp = []; told = {};
+  bell = { x: 260, y: 160, vx: 0, vy: 0, face: 1, faceS: 1, sq: 0, zap: 0, joy: 0, prop: 0 }; cam = { x: 260, y: 160 };
+  page = 0; air = 1; score = 0; photos = 0; zaps = 0; focus = 0; snapT = 0; clock = 0; hold = null; deepest = 0; centered = 0; nightK = 0; flashT = 0; nextT = 0; sayTxt = ""; sayT = 0; lightHud = null;
+  for (let k = 0; k < 3; k++) { const lead = spawnFish("sunny"); for (let i = 0; i < 3; i++) { const f = spawnFish("sunny", lead.x + Lab.rand(-50, 50), lead.y + Lab.rand(-30, 30)); f.school = lead; f.ox = f.x - lead.x; f.oy = f.y - lead.y; } }
+  for (let i = 0; i < 6; i++) spawnFish("stripe"); for (let i = 0; i < 5; i++) spawnFish("puffer"); for (let i = 0; i < 5; i++) spawnFish("blush"); for (let i = 0; i < 6; i++) spawnFish("glow");
+  for (const x of [330, 520, 760, 980]) { const y = floorY(x) - 8; eels.push({ x, y, out: 0, t: Lab.rand(1, 4), dir: x < 640 ? 1 : -1, snapT: 0, kind: "eel", id: 1000 + x }); }
+  for (const x of [190, 700, 1180, 1480]) vents.push({ x, y: floorY(x) - 4 });
+  for (let i = 0; i < 26; i++) { const x = Lab.rand(20, 900); kelp.push({ x, y: floorY(x), h: Lab.rand(120, 260), ph: Lab.rand(0, TAU), c: Lab.choose(["#3f9e6a", "#58b878", "#2f8a5e"]) }); }
+  decor = []; for (let x = 30; x < WW; x += Lab.rand(40, 90)) decor.push({ x, k: Lab.randInt(0, 3), s: Lab.rand(.7, 1.3), c: Lab.choose(["#ff8fa3", "#ffb36b", "#b9a3ff", "#7fd6c2"]) });
+  for (let i = 0; i < 4; i++) addJelly();
+  newPage();
+}
+function addJelly() { const y = Lab.rand(300, 1800), x = Lab.rand(100, WW - 100); jellies.push({ x, y, hy: y, ph: Lab.rand(0, TAU), cool: 0, r: 20 }); }
+function newPage() {
+  page++; pageT = 0; const pool = UNLOCK.slice(0, Math.min(UNLOCK.length, page + 1)), n = page >= 4 ? 4 : 3;
+  const pick = [pool[pool.length - 1]]; while (pick.length < n) pick.push(Lab.choose(pool));
+  slots = Lab.shuffle(pick).map(k => ({ kind: k, done: false, pop: 0 }));
+  client = CLIENTS[(page - 1) % CLIENTS.length]; air = 1;
+  if (page > 1 && jellies.length < 10) addJelly();
+  nightK = page > 6 ? 1 : 0;
+  if (!demo) { Lab.banner(Pals.cast[client].name + "'s album · page " + page, { color: "#fffdf4", ms: 1300, y: .3 }); const nk = pick[0]; if (!told[nk]) tip(nk); }
+}
+function tip(kind) {
+  told[kind] = 1;
+  const t = { sunny: "Hold to steer — glide gently to focus", stripe: "Stripeys dart — stay with them", puffer: "Puffers only count puffed: get close!", blush: "Blushfins are shy — creep up slowly", eel: "Peek Eels hide in the reef — wait for them", glow: "Glowfins live deep in the dark" }[kind];
+  say(t, 3.2);
+}
+function start() {
+  demo = false; setup(); Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => { hold = [x, y]; }]; Lab.input.onMove = [(x, y) => { if (Lab.input.down) hold = [x, y]; }]; Lab.input.onUp = [() => { hold = null; }];
+  Lab.expose({
+    get score() { return score; }, get air() { return air; }, set air(v) { air = v; }, get page() { return page; }, get focus() { return focus; }, get photos() { return photos; }, get zaps() { return zaps; },
+    slots: () => slots.map(s => ({ kind: s.kind, done: s.done })), get bell() { return { x: bell.x, y: bell.y, vx: bell.vx, vy: bell.vy, face: bell.face }; },
+    vf: () => vfPos(), toScreen: (x, y) => toScreen(x, y), fish: () => fish.map(f => ({ id: f.id, kind: f.kind, x: f.x, y: f.y, puff: f.puff, flee: f.flee })),
+    place(kind, dx, dy, frozen) { const v = vfPos(); const f = spawnFish(kind, v.x + (dx || 0), v.y + (dy || 0)); f.frozen = frozen !== false; f.vx = 0; return f.id; },
+    clearFish(kind) { fish = fish.filter(f => kind && f.kind !== kind); }, clearJellies() { jellies = []; },
+    jellyAt(dx, dy) { jellies.push({ x: bell.x + dx, y: bell.y + dy, hy: bell.y + dy, ph: 0, cool: 0, r: 20, still: 1 }); },
+    setBell(x, y) { bell.x = x; bell.y = y; bell.vx = bell.vy = 0; cam.x = x; cam.y = y; }, setSlots(k) { slots = k.map(kind => ({ kind, done: false, pop: 0 })); },
+  });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+function say(txt, dur) { sayTxt = txt; sayT = dur || 2.4; }
+function vfPos() { return { x: bell.x + bell.faceS * AHEAD, y: bell.y + 6 }; }
+function needed(kind) { return slots.some(s => !s.done && s.kind === kind); }
+
+/* ---------- update ---------- */
+function tick(dt) {
+  if (!bell) return; clock += dt; pageT += dt; flashT = Math.max(0, flashT - dt);
+  if (nextT > 0) { nextT -= dt; if (nextT <= 0) newPage(); }
+  sayT = Math.max(0, sayT - dt);
+  const lt = cam.y - cy0 / S < 260; if (lt !== lightHud && !demo) { lightHud = lt; Lab.setTheme(lt ? { light: true, fg: "#1e2850", muted: "#3d5a80" } : { light: false, fg: "#fffdf4", muted: "#d4f3ff" }); }
+  // steering: the bell chases the finger (or the keys), with lag and glide
+  let tx = 0, ty = 0, want = 0;
+  if (demo) { const g = fish.find(f => f.kind === "sunny") || bell; const v = vfPos(); tx = g.x - v.x; ty = g.y - v.y; want = Math.hypot(tx, ty) > 30 ? 1 : 0; }
+  else if (hold) { const [wx, wy] = toWorld(hold[0], hold[1]); tx = wx - bell.x; ty = wy - bell.y; want = clamp(Math.hypot(tx, ty) / 140, 0, 1); }
+  const ax = Lab.input.axisX(), ay = Lab.input.axisY(); if (ax || ay) { tx = ax; ty = ay; want = 1; }
+  const d = Math.hypot(tx, ty) || 1, vmax = 230;
+  if (want > 0) { bell.vx = Lab.damp(bell.vx, tx / d * vmax * want, 2.4, dt); bell.vy = Lab.damp(bell.vy, ty / d * vmax * want, 2.4, dt); }
+  else { bell.vx = Lab.damp(bell.vx, 0, 1.3, dt); bell.vy = Lab.damp(bell.vy, Math.sin(clock * 1.3) * 6, 1.3, dt); }
+  bell.x = clamp(bell.x + bell.vx * dt, 40, WW - 40); bell.y = clamp(bell.y + bell.vy * dt, 40, floorY(bell.x) - 38);
+  if (bell.y >= floorY(bell.x) - 39 && bell.vy > 60) { bell.vy *= -.3; bell.sq = .2; snd("thud", { vol: .5 }); }
+  if (Math.abs(bell.vx) > 25) bell.face = Math.sign(bell.vx); bell.faceS = Lab.damp(bell.faceS, bell.face, 5, dt);
+  bell.sq = Lab.damp(bell.sq, 0, 6, dt); bell.zap = Math.max(0, bell.zap - dt); bell.joy = Math.max(0, bell.joy - dt); bell.prop += (2 + Math.hypot(bell.vx, bell.vy) / 20) * dt;
+  deepest = Math.max(deepest, bell.y);
+  // camera
+  const vw = W / 2 / S, top = -70 + (cy0 - Lab.play.y) / S, bot = DH + 30 - (H - cy0) / S;
+  cam.x = Lab.damp(cam.x, WW < vw * 2 ? WW / 2 : clamp(bell.x + bell.faceS * 40, vw - 30, WW + 30 - vw), 4, dt);
+  cam.y = Lab.damp(cam.y, clamp(bell.y, top, Math.max(top, bot)), 4, dt);
+  // fish
+  const spd = Math.hypot(bell.vx, bell.vy);
+  for (const f of fish) {
+    f.snapT = Math.max(0, f.snapT - dt); if (f.frozen) { f.ph += dt * 3; continue; }
+    const s = SP[f.kind], dx = f.x - bell.x, dy = f.y - bell.y, dist = Math.hypot(dx, dy);
+    if (f.school) { const L = f.school; f.x = Lab.damp(f.x, L.x + f.ox + Math.sin(clock + f.ph) * 10, 2, dt); f.y = Lab.damp(f.y, L.y + f.oy + Math.cos(clock * 1.3 + f.ph) * 8, 2, dt); f.vx = L.vx; f.ph += dt * 6; continue; }
+    if (f.kind === "stripe") { f.dart -= dt; if (f.dart <= 0) { f.dart = Lab.rand(1.2, 2.6); f.vx = Lab.choose([-1, 1]) * Lab.rand(60, 120); f.vy = Lab.rand(-40, 40); } }
+    if (f.kind === "blush" && dist < 175 && spd > STEADY && f.flee <= 0 && !demo) { f.flee = 1.4; f.vx = Math.sign(dx || 1) * 210; f.vy = Math.sign(dy || 1) * 80; snd("swish", { pitch: 1.4, vol: .6 }); }
+    if (f.kind === "puffer") { if (f.puffT > 0) { f.puffT -= dt; f.puff = Lab.damp(f.puff, f.puffT > .6 ? 1 : 0, 10, dt); if (f.puffT <= 0) f.puffT = -1.4; } else { f.puffT = Math.min(0, f.puffT + dt); f.puff = Lab.damp(f.puff, 0, 6, dt); if (f.puffT === 0 && dist < 135) { f.puffT = 3; snd("pop", { pitch: .6 }); } } }
+    f.flee = Math.max(0, f.flee - dt);
+    const base = f.kind === "puffer" ? 14 : f.kind === "glow" ? 22 : 30;
+    if (f.flee <= 0 && f.kind !== "stripe") { f.vx = Lab.damp(f.vx, Math.sign(f.vx || 1) * base, 1.5, dt); f.vy = Lab.damp(f.vy, (f.hy - f.y) * .3, 1, dt); }
+    else f.vy = Lab.damp(f.vy, 0, 1, dt);
+    f.x += f.vx * dt; f.y += f.vy * dt; f.ph += dt * (4 + Math.abs(f.vx) / 20);
+    if (f.x < 30 || f.x > WW - 30 || (f.vx < 0 && f.y > floorY(f.x - 40) - 30) || (f.vx > 0 && f.y > floorY(f.x + 40) - 30)) { f.vx = -f.vx || 20; f.x = clamp(f.x, 30, WW - 30); }
+    f.y = clamp(f.y, s.y[0] - 40, Math.min(s.y[1] + 60, floorY(f.x) - 25));
+  }
+  for (const e of eels) { e.snapT = Math.max(0, e.snapT - dt); e.t -= dt; if (e.t <= 0) { if (e.out > .5) { e.target = 0; e.t = Lab.rand(2.4, 4.2); } else { e.target = 1; e.t = 1.9; } } e.out = Lab.damp(e.out, e.target || 0, 5, dt); e.x2 = e.x + e.dir * e.out * 46; e.y2 = e.y - e.out * 38; }
+  for (const j of jellies) {
+    j.ph += dt; j.cool = Math.max(0, j.cool - dt); if (!j.still) j.y = j.hy + Math.sin(j.ph * .5) * 60;
+    if (j.cool <= 0 && Math.hypot(j.x - bell.x, j.y - bell.y) < 34 + j.r && !demo) {
+      j.cool = 2.5; zaps++; air = Math.max(0, air - .12); bell.zap = 1; focus = 0; const a = Math.atan2(bell.y - j.y, bell.x - j.x); bell.vx = Math.cos(a) * 260; bell.vy = Math.sin(a) * 260;
+      snd("zap"); Lab.shake(7, .3); Lab.buzz(40); fx.burst(bell.x, bell.y, { n: 14, color: "#c9f6ff", speed: 220, life: .4, size: 3, shape: "spark" }); fx.text(bell.x, bell.y - 50, "Zap! −air", { color: "#c9f6ff", size: 16 });
+    }
+  }
+  // vents and bubbles
+  for (const v of vents) { if (Lab.chance(dt * 9) && bubbles.length < 90) bubbles.push({ x: v.x + Lab.rand(-10, 10), y: v.y, r: Lab.rand(3, 8), vy: Lab.rand(-80, -55), ph: Lab.rand(0, TAU), top: v.y - 520 }); if (Math.abs(bell.x - v.x) < 36 && bell.y < v.y && bell.y > v.y - 520 && !demo) { air = Math.min(1, air + .1 * dt); if (Lab.chance(dt * 6)) snd("bubble", { pitch: Lab.rand(.9, 1.4), vol: .4 }); } }
+  for (const b of bubbles) { b.y += b.vy * dt; b.ph += dt * 3; } bubbles = bubbles.filter(b => b.y > Math.max(b.top, 0));
+  // air
+  if (!demo) {
+    air -= (.011 + clamp(bell.y / DH, 0, 1) * .017 + Math.min(.01, page * .0012)) * dt;
+    Lab.music.intensity(clamp(.2 + (1 - air) * .8, 0, 1));
+    if (air < .25 && !told.air) { told.air = 1; say("Air low! A vent or a full page!", 2.6); }
+    if (air <= 0) { air = 0; lose(); return; }
+  } else air = 1;
+  // focus
+  snapT = Math.max(0, snapT - dt);
+  const cands = candidates(), steady = spd < STEADY;
+  if (cands.length && steady && snapT <= 0) { const was = focus; focus = Math.min(1, focus + dt / .55); if (was < .05 && !demo) snd("tick", { pitch: 1.6, vol: .5 }); if (focus >= 1) snap(cands); }
+  else focus = Math.max(0, focus - dt * (cands.length ? 1.2 : 2.5));
+}
+function candidates() {
+  const v = vfPos(), out = [];
+  for (const f of fish) { if (f.snapT > 0 || !needed(f.kind)) continue; if (f.kind === "puffer" && f.puff < .7) continue; if (Math.hypot(f.x - v.x, f.y - v.y) < VF + SP[f.kind].r * .3) out.push(f); }
+  for (const e of eels) if (e.out > .75 && e.snapT <= 0 && needed("eel") && Math.hypot(e.x2 - v.x, e.y2 - v.y) < VF + 8) out.push(e);
+  return out;
+}
+function snap(cands) {
+  const v = vfPos(); focus = 0; snapT = .7; flashT = .18; let got = 0, pts = 0, cen = false;
+  for (const f of cands) {
+    const sl = slots.find(s => !s.done && s.kind === f.kind); if (!sl) continue;
+    sl.done = true; sl.pop = 1; got++; f.snapT = 3; const fx0 = f.x2 != null ? f.x2 : f.x, fy0 = f.y2 != null ? f.y2 : f.y;
+    const c = Math.hypot(fx0 - v.x, fy0 - v.y) < 24; if (c) { cen = true; centered++; }
+    pts += Math.round(SP[f.kind].v * (c ? 1.5 : 1));
+  }
+  if (!got) return;
+  if (got > 1) pts = Math.round(pts * (1 + .5 * (got - 1)));
+  if (!demo) { score += pts; Lab.setScore(score); Lab.bumpScore(); }
+  photos += got; air = Math.min(1, air + .06 * got); bell.joy = 1.2;
+  snd("click", { pitch: .8 }); if (!demo) Lab.audio.noise({ dur: .07, vol: .12, hp: 2500 }); snd("chime", { pitch: 1 + photos % 5 * .1, vol: .6 }); if (!demo) Lab.flash("#ffffff", .12, .35); Lab.buzz(15);
+  fx.ring(v.x, v.y, { r0: VF, r1: VF * 1.5, color: "#fffbe0", life: .35, width: 4 });
+  fx.text(v.x, v.y - VF - 14, (got > 1 ? "Double! " : cen ? "Centred! " : "") + "+" + pts, { color: "#fff3a0", size: 20 });
+  if (slots.every(s => s.done)) pageDone();
+}
+function pageDone() {
+  const bonus = 60 + page * 30 + Math.round(air * 50);
+  if (!demo) { score += bonus; Lab.setScore(score); snd("levelup"); Lab.banner("Page done! +" + bonus, { color: "#ffd23f", ms: 1200, y: .42 }); }
+  nextT = 1.1; slots.forEach(s => s.pop = 1);
+}
+function lose() {
+  fx.clear();
+  Lab.gameover({ title: "Oops! Out of air", message: "Bolt bobs back to the surface with " + photos + " photos.", score, stats: [["Album pages", page - 1], ["Photos", photos], ["Deepest", Math.round(deepest / 10) + " m"]] });
+}
+
+/* ---------- drawing ---------- */
+function fishSprite(kind, puffed) {
+  const s = SP[kind], R = s.r;
+  return Lab.sprite("ff-" + kind + (puffed ? "p" : ""), R * 4, R * 3, (g, w, h) => {
+    g.translate(w / 2, h / 2); g.lineWidth = 1.6; g.strokeStyle = "rgba(43,35,64,.55)";
+    if (kind === "puffer" && puffed) {
+      g.fillStyle = s.c2; for (let i = 0; i < 14; i++) { const a = i / 14 * TAU; g.beginPath(); g.moveTo(Math.cos(a) * R * 1.05, Math.sin(a) * R * 1.05); g.lineTo(Math.cos(a + .1) * R * 1.4, Math.sin(a + .1) * R * 1.4); g.lineTo(Math.cos(a + .2) * R * 1.05, Math.sin(a + .2) * R * 1.05); g.fill(); }
+      draw.circle(g, 0, 0, R * 1.15, s.c, "rgba(43,35,64,.55)", 1.6); draw.circle(g, R * .1, R * .35, R * .65, "#fff3dc");
+      for (let i = 0; i < 6; i++) draw.circle(g, Math.cos(i * 2.3) * R * .7, Math.sin(i * 2.3) * R * .5 - R * .3, 2.2, s.c2);
+      draw.circle(g, -R * .55, -R * .25, R * .26, "#fff"); draw.circle(g, -R * .6, -R * .25, R * .14, INK); g.strokeStyle = INK; g.beginPath(); g.arc(-R * .65, R * .25, R * .18, 0, TAU); g.stroke(); return;
+    }
+    const tall = kind === "blush" ? 1.25 : kind === "puffer" ? 1 : .78;
+    g.fillStyle = s.c2; g.beginPath(); g.moveTo(R * .75, 0); g.lineTo(R * 1.45, -R * .62); g.quadraticCurveTo(R * 1.2, 0, R * 1.45, R * .62); g.closePath(); g.fill();   // tail
+    if (kind === "blush") { g.beginPath(); g.moveTo(-R * .2, -R * .6); g.quadraticCurveTo(R * .4, -R * 1.5, R * .8, -R * .3); g.fill(); g.beginPath(); g.moveTo(-R * .2, R * .6); g.quadraticCurveTo(R * .4, R * 1.5, R * .8, R * .3); g.fill(); }
+    else { g.beginPath(); g.moveTo(-R * .3, -R * .6); g.quadraticCurveTo(R * .2, -R * 1.1, R * .5, -R * .5); g.fill(); }
+    g.fillStyle = s.c; g.beginPath(); g.ellipse(0, 0, R, R * tall * .78, 0, 0, TAU); g.fill(); g.stroke();
+    g.save(); g.beginPath(); g.ellipse(0, 0, R, R * tall * .78, 0, 0, TAU); g.clip();
+    if (kind === "stripe") { g.fillStyle = s.c2; for (const x of [-.25, .2, .62]) g.fillRect(x * R, -R, R * .18, R * 2); }
+    if (kind === "sunny") { g.fillStyle = "#ffe98a"; g.beginPath(); g.ellipse(-R * .1, R * .3, R * .7, R * .3, 0, 0, TAU); g.fill(); }
+    if (kind === "glow") { g.fillStyle = "#5b6fd0"; g.beginPath(); g.ellipse(0, R * .35, R, R * .35, 0, 0, TAU); g.fill(); for (let i = 0; i < 4; i++) draw.circle(g, -R * .3 + i * R * .3, R * .1, 1.8, s.c2); }
+    if (kind === "puffer") for (let i = 0; i < 5; i++) draw.circle(g, -R * .3 + i * R * .25, -R * .25 + (i % 2) * R * .2, 2, s.c2);
+    g.restore();
+    if (kind === "glow") { g.strokeStyle = s.c2; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-R * .5, -R * .55); g.quadraticCurveTo(-R * .9, -R * 1.3, -R * 1.25, -R * .9); g.stroke(); draw.circle(g, -R * 1.25, -R * .9, 3.5, "#d8fbff"); }
+    draw.circle(g, -R * .5, -R * .12, R * .22, "#fff"); draw.circle(g, -R * .55, -R * .12, R * .12, INK); draw.circle(g, -R * .6, -R * .17, R * .04, "#fff");
+    g.fillStyle = "#ff8fa3"; g.globalAlpha = .5; g.beginPath(); g.ellipse(-R * .35, R * .2, R * .14, R * .08, 0, 0, TAU); g.fill();
+  });
+}
+function drawFish(c, f, sz) {
+  const s = SP[f.kind], spr = fishSprite(f.kind, f.puff > .5), k = (sz || 1) * (f.kind === "puffer" ? 1 + f.puff * .2 : 1), wob = Math.sin(f.ph) * .08;
+  c.save(); c.translate(f.x, f.y); c.scale(f.vx > 0 ? -k : k, k * (1 + wob * .3)); c.rotate(wob * .4); c.drawImage(spr, -spr.w / 2, -spr.h / 2, spr.w, spr.h); c.restore();
+  if (f.flee > 0) draw.text(c, "!", f.x, f.y - s.r - 12, { size: 16, color: "#fff", stroke: INK });
+}
+function drawEel(c, e) {
+  if (e.out < .03) return; const s = SP.eel, n = 7;
+  c.lineCap = "round"; c.strokeStyle = s.c2; c.lineWidth = 15; c.beginPath();
+  for (let i = 0; i <= n; i++) { const k = i / n, x = lerp(e.x, e.x2, k) + Math.sin(clock * 4 + k * 5) * 4 * k, y = lerp(e.y, e.y2, k); i ? c.lineTo(x, y) : c.moveTo(x, y); } c.stroke();
+  c.strokeStyle = s.c; c.lineWidth = 11; c.stroke();
+  c.save(); c.translate(e.x2, e.y2); c.scale(e.dir, 1); draw.circle(c, 0, 0, 10, s.c, "rgba(43,35,64,.5)", 1.5); draw.circle(c, 3, -3, 4, "#fff"); draw.circle(c, 4, -3, 2.2, INK); c.restore();
+}
+function drawJelly(c, j, glow) {
+  const p = Math.sin(j.ph * 3) * .12, r = j.r;
+  if (glow) { draw.glow(c, j.x, j.y, r * 2.4, "#d29bff", .35); return; }
+  c.strokeStyle = "rgba(220,170,255,.7)"; c.lineWidth = 2.5; for (let i = -2; i <= 2; i++) { c.beginPath(); c.moveTo(j.x + i * r * .3, j.y); c.quadraticCurveTo(j.x + i * r * .3 + Math.sin(j.ph * 3 + i) * 6, j.y + r * 1.2, j.x + i * r * .25, j.y + r * 2); c.stroke(); }
+  c.fillStyle = j.cool > 2 ? "#ffffff" : "rgba(214,160,255,.88)"; c.beginPath(); c.ellipse(j.x, j.y, r * (1 + p), r * (.8 - p), 0, Math.PI, TAU); c.closePath(); c.fill();
+  draw.circle(c, j.x - r * .3, j.y - r * .3, 2.4, INK); draw.circle(c, j.x + r * .3, j.y - r * .3, 2.4, INK);
+}
+function drawBell(c, t) {
+  const b = bell, f = b.faceS, R = 34, x = b.x, y = b.y + Math.sin(clock * 2) * 2;
+  c.strokeStyle = "rgba(60,40,30,.7)"; c.lineWidth = 2.5; c.beginPath(); c.moveTo(x, y - R); c.quadraticCurveTo(x - b.vx * .2, (y - R + Math.min(0, cam.y - cy0 / S - 20)) / 2, x - b.vx * .1, Math.min(-10, cam.y - cy0 / S - 20)); c.stroke();
+  c.save(); c.translate(x, y); c.rotate(clamp(b.vx / 900, -.18, .18) + (b.zap > 0 ? Math.sin(b.zap * 40) * .12 : 0)); c.scale(1 + b.sq * .5, 1 - b.sq * .5);
+  // propeller
+  c.fillStyle = "#8d6a3a"; c.fillRect(-f * R * 1.1 - 4, -4, 8, 8); const pa = Math.abs(Math.sin(b.prop * 6)); c.fillStyle = "#f2d49a"; c.beginPath(); c.ellipse(-f * R * 1.18, 0, 4, 15 * pa + 2, 0, 0, TAU); c.fill();
+  // body
+  const g = c.createLinearGradient(-R, 0, R, 0); g.addColorStop(0, "#c98d3a"); g.addColorStop(.45, "#ffd98a"); g.addColorStop(1, "#b77a2c");
+  c.fillStyle = g; c.beginPath(); c.moveTo(-R, R * .6); c.lineTo(-R, -R * .1); c.quadraticCurveTo(-R, -R, 0, -R); c.quadraticCurveTo(R, -R, R, -R * .1); c.lineTo(R, R * .6); c.closePath(); c.fill(); c.strokeStyle = "#7a4f1e"; c.lineWidth = 2; c.stroke();
+  draw.rect(c, -R - 4, R * .5, R * 2 + 8, 9, 4, "#8d5a24"); for (let i = -2; i <= 2; i++) draw.circle(c, i * R * .42, R * .54 + 4, 2, "#ffd98a");
+  draw.rect(c, -6, -R - 7, 12, 8, 3, "#8d5a24");
+  // porthole with Bolt
+  const px = f * 6, pr = 23; draw.circle(c, px, -2, pr + 5, "#8d5a24"); c.save(); c.beginPath(); c.arc(px, -2, pr, 0, TAU); c.clip(); c.fillStyle = "#26365e"; c.fillRect(px - pr, -2 - pr, pr * 2, pr * 2);
+  const want = candidates()[0]; const look = want ? [clamp((want.x - b.x) / 120, -1, 1), clamp(((want.y2 || want.y) - b.y) / 120, -1, 1)] : [f * .6, .1];
+  Pals.draw(c, "bolt", px, 9, 34, { t, mood: b.zap > 0 ? "dizzy" : b.joy > 0 ? "joy" : air < .25 ? "scared" : focus > .05 ? "think" : "happy", look, shadow: false, flip: f < 0, hot: air < .25 ? 1 - air * 4 : 0 });
+  c.restore(); c.fillStyle = "rgba(255,255,255,.28)"; c.beginPath(); c.ellipse(px - 8, -10, 8, 4, -.6, 0, TAU); c.fill(); c.strokeStyle = "#ffd98a"; c.lineWidth = 2; c.beginPath(); c.arc(px, -2, pr, 0, TAU); c.stroke();
+  // camera
+  draw.rect(c, f * R - (f > 0 ? 2 : 14), -8, 16, 16, 4, "#3a4372"); draw.circle(c, f * (R + 9), 0, 5, "#9fe3ff", INK, 1.5); c.restore();
+}
+function bg(c) {
+  const top = cam.y - cy0 / S, bot = top + H / S, col = y => { const k = clamp(y / DH, 0, 1); const a = ["#8fe6f2", "#3fb3d2", "#1d6fa3", "#123b78", "#0b1a44"]; const i = Math.min(3, Math.floor(k * 4)); return mix(a[i], a[i + 1], k * 4 - i); };
+  const gr = c.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, col(Math.max(0, top))); gr.addColorStop(1, col(Math.max(0, bot))); c.fillStyle = gr; c.fillRect(-40, -40, W + 80, H + 80);
+  const sy = (0 - top) * S; if (sy > -40) { draw.vgrad(c, -40, -40, W + 80, sy + 40, nightK ? ["#1b1f4b", "#3d3a7a"] : ["#ffd9a8", "#fff4d6"]); }
+  if (top < 600) { c.globalAlpha = clamp(1 - top / 600, 0, 1) * .16; c.fillStyle = "#fffbe0"; for (let i = 0; i < 6; i++) { const x = ((i * 300 - cam.x * .5) % (W + 300) + W + 300) % (W + 300) - 150; c.beginPath(); c.moveTo(x, Math.max(sy, -40)); c.lineTo(x + 60, Math.max(sy, -40)); c.lineTo(x + 220, H); c.lineTo(x + 120, H); c.fill(); } c.globalAlpha = 1; }
+  c.fillStyle = "rgba(10,30,70,.18)"; for (let i = 0; i < 5; i++) { const x = ((i * 260 - cam.x * S * .3) % (W + 260) + W + 260) % (W + 260) - 130, y = (900 - top * .3) * S * .5 + H * .4; c.beginPath(); c.ellipse(x, y + 200, 160, 220, 0, 0, TAU); c.fill(); }
+}
+function render(t) {
+  const c = Lab.ctx; if (!bell) return; bg(c);
+  c.save(); c.translate(W / 2 - cam.x * S, cy0 - cam.y * S); c.scale(S, S);
+  const vx0 = cam.x - W / 2 / S - 60, vx1 = cam.x + W / 2 / S + 60, vy0 = cam.y - cy0 / S - 60, vy1 = cam.y + (H - cy0) / S + 60;
+  if (vy0 < 20) { c.fillStyle = "rgba(255,255,255,.55)"; c.beginPath(); c.moveTo(vx0, 0); for (let x = vx0; x <= vx1; x += 20) c.lineTo(x, Math.sin(x * .05 + clock * 2) * 3); c.lineTo(vx1, -6); c.lineTo(vx0, -6); c.fill(); }
+  for (const k of kelp) if (k.x > vx0 && k.x < vx1) { c.strokeStyle = k.c; c.lineWidth = 7; c.lineCap = "round"; c.beginPath(); c.moveTo(k.x, k.y); const sw = Math.sin(clock * 1.2 + k.ph) * 22; c.bezierCurveTo(k.x + sw, k.y - k.h * .3, k.x - sw, k.y - k.h * .6, k.x + sw * 1.4, k.y - k.h); c.stroke(); c.fillStyle = k.c; for (let i = 1; i < 4; i++) { c.beginPath(); c.ellipse(k.x + sw * (i % 2 ? .6 : -.4), k.y - k.h * i / 4, 9, 4, .6, 0, TAU); c.fill(); } }
+  for (const b of bubbles) if (b.y > vy0 && b.y < vy1) draw.circle(c, b.x + Math.sin(b.ph) * 4, b.y, b.r, "rgba(230,250,255,.35)", "rgba(255,255,255,.6)", 1.2);
+  for (const e of eels) drawEel(c, e);
+  // seabed
+  c.fillStyle = "#e9cf94"; c.beginPath(); c.moveTo(vx0, vy1 + 100); for (let x = Math.floor(vx0 / 20) * 20; x <= vx1 + 20; x += 20) c.lineTo(x, floorY(x)); c.lineTo(vx1 + 20, vy1 + 100); c.fill();
+  for (const d of decor) if (d.x > vx0 && d.x < vx1) { const y = floorY(d.x) + 4, z = d.s * 14; c.fillStyle = d.c;
+    if (d.k === 0) { c.beginPath(); c.ellipse(d.x, y, z * 1.4, z * .8, 0, Math.PI, TAU); c.fill(); } else if (d.k === 1) { c.lineWidth = 5 * d.s; c.strokeStyle = d.c; c.lineCap = "round"; c.beginPath(); c.moveTo(d.x, y); c.lineTo(d.x, y - z * 2); c.moveTo(d.x, y - z); c.lineTo(d.x + z * .8, y - z * 1.8); c.moveTo(d.x, y - z * 1.2); c.lineTo(d.x - z * .7, y - z * 1.9); c.stroke(); }
+    else if (d.k === 2) { for (let i = 0; i < 3; i++) draw.circle(c, d.x + (i - 1) * z * .6, y - z * .4 - (i % 2) * z * .3, z * .4, d.c); } else { c.fillStyle = "#c9a76a"; c.beginPath(); c.ellipse(d.x, y - 2, z * .9, z * .45, 0, 0, TAU); c.fill(); } }
+  c.fillStyle = "#8a6a8e"; for (const e of eels) { c.beginPath(); c.ellipse(e.x, e.y + 8, 34, 22, 0, Math.PI, TAU); c.fill(); draw.circle(c, e.x, e.y + 4, 9, "#2b2340"); }
+  for (const v of vents) { c.fillStyle = "#7d6b8f"; c.beginPath(); c.moveTo(v.x - 22, v.y + 6); c.lineTo(v.x - 8, v.y - 18); c.lineTo(v.x + 8, v.y - 18); c.lineTo(v.x + 22, v.y + 6); c.fill(); }
+  for (const f of fish) if (f.x > vx0 && f.x < vx1 && f.y > vy0 && f.y < vy1) drawFish(c, f);
+  for (const j of jellies) if (j.y > vy0 && j.y < vy1) drawJelly(c, j);
+  drawBell(c, t);
+  // viewfinder
+  const v = vfPos(), sel = candidates().length > 0, steady = Math.hypot(bell.vx, bell.vy) < STEADY;
+  c.save(); c.strokeStyle = sel ? (steady ? "#fff3a0" : "rgba(255,243,160,.6)") : "rgba(255,255,255,.45)"; c.lineWidth = 3; const L = 16;
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { c.beginPath(); c.moveTo(v.x + sx * VF, v.y + sy * (VF - L)); c.lineTo(v.x + sx * VF, v.y + sy * VF); c.lineTo(v.x + sx * (VF - L), v.y + sy * VF); c.stroke(); }
+  if (focus > 0) { c.strokeStyle = "#fff3a0"; c.lineWidth = 5; c.beginPath(); c.arc(v.x, v.y, VF * .8, -Math.PI / 2, -Math.PI / 2 + focus * TAU); c.stroke(); }
+  if (sel && !steady) draw.text(c, "Gently…", v.x, v.y + VF + 14, { size: 13, color: "#fff3a0", stroke: "rgba(10,30,70,.5)" });
+  draw.circle(c, v.x, v.y, 3, "rgba(255,255,255,.6)"); c.restore();
+  fx.draw(c); c.restore();
+  // darkness + lamp
+  const dark = clamp((cam.y - 750) / 900, 0, .82) + nightK * .45;
+  if (dark > .01) {
+    const [bx, by] = toScreen(bell.x + bell.faceS * 50, bell.y), lr = 210 * S, g = c.createRadialGradient(bx, by, lr * .25, bx, by, lr);
+    const a = Math.min(.9, dark); g.addColorStop(0, "rgba(5,10,35,0)"); g.addColorStop(1, `rgba(5,10,35,${a})`); c.fillStyle = g; c.fillRect(-40, -40, W + 80, H + 80);
+    c.save(); c.translate(W / 2 - cam.x * S, cy0 - cam.y * S); c.scale(S, S);
+    for (const f of fish) if (f.kind === "glow") { draw.glow(c, f.x - Math.sign(f.vx || 1) * -SP.glow.r * 1.25, f.y - SP.glow.r * .9, 18, "#9ff3ff", .55 * Math.min(1, a * 1.5)); }
+    for (const j of jellies) drawJelly(c, j, true); for (const b of bubbles) if (Math.abs(b.y - bell.y) < 400) draw.circle(c, b.x, b.y, b.r * .5, `rgba(200,240,255,${a * .3})`);
+    c.restore();
+  }
+  c.save(); c.translate(W / 2 - cam.x * S, cy0 - cam.y * S); c.scale(S, S);
+  if (sayT > 0 && sayTxt) { const a = Math.min(1, sayT * 3, (3.2 - sayT) * 8 + .2); c.globalAlpha = clamp(a, 0, 1); c.font = Lab.font(13, 800); const tw = Math.min(c.measureText(sayTxt).width + 24, W / S - 30), bx = clamp(bell.x, cam.x - W / 2 / S + tw / 2 + 10, cam.x + W / 2 / S - tw / 2 - 10), by = bell.y - 78;
+    Pals.bubble(c, bx, by, tw, 30, { tailX: bell.x, tailY: bell.y - 44, lineWidth: 2 }); draw.text(c, sayTxt, bx, by + 1, { size: 13, color: INK, weight: 800, maxWidth: tw - 14 }); c.globalAlpha = 1; }
+  c.restore();
+  if (flashT > 0) { c.fillStyle = `rgba(255,255,255,${flashT * 2})`; c.fillRect(-40, -40, W + 80, H + 80); }
+  hud(c, t);
+}
+function hud(c, t) {
+  const P = Lab.play, k = clamp(Math.min(W / 390, 1.25), .85, 1.25), x0 = P.x + 10 * k, y0 = P.y + 12 * k, n = slots.length;
+  const pw = Math.min(P.w - 20 * k, (118 + n * 46) * k), ph = 62 * k;
+  draw.rect(c, x0, y0, pw, ph, 16 * k, "rgba(255,253,244,.92)", INK, 2);
+  c.save(); c.beginPath(); c.rect(x0 + 4 * k, y0 + 2, 52 * k, ph - 4); c.clip(); Pals.draw(c, client, x0 + 30 * k, y0 + 44 * k, 38 * k, { t, mood: slots.every(s => s.done) ? "joy" : "happy", shadow: false, arms: "hold" }); c.restore();
+  draw.text(c, Pals.cast[client].name + " · p" + page, x0 + 62 * k, y0 + 14 * k, { size: 11 * k, color: "#5a6b8a", align: "left", weight: 800 });
+  for (let i = 0; i < n; i++) {
+    const s = slots[i], sx = x0 + 62 * k + i * 46 * k, sy = y0 + 26 * k, pop = s.pop > 0 ? 1 + Math.sin(s.pop * Math.PI) * .25 : 1; s.pop = Math.max(0, s.pop - 1 / 40);
+    c.save(); c.translate(sx + 20 * k, sy + 15 * k); c.scale(pop, pop); draw.rect(c, -20 * k, -15 * k, 40 * k, 30 * k, 6 * k, s.done ? "#fff" : "#dff3fb", s.done ? "#5fd39a" : "rgba(43,35,64,.35)", 2);
+    if (s.kind === "eel") { c.strokeStyle = SP.eel.c2; c.lineWidth = 6 * k; c.lineCap = "round"; c.beginPath(); c.moveTo(-12 * k, 8 * k); c.quadraticCurveTo(0, -12 * k, 10 * k, -2 * k); c.stroke(); draw.circle(c, 10 * k, -2 * k, 5 * k, SP.eel.c); }
+    else { const spr = fishSprite(s.kind, s.kind === "puffer"), sc = k * .62 * 16 / SP[s.kind].r; c.drawImage(spr, -spr.w * sc / 2, -spr.h * sc / 2, spr.w * sc, spr.h * sc); }
+    if (s.done) { draw.circle(c, 13 * k, -10 * k, 7 * k, "#5fd39a"); draw.text(c, "✓", 13 * k, -9.5 * k, { size: 10 * k, color: "#fff", weight: 900 }); }
+    c.restore();
+  }
+  // air gauge
+  const gw = 14 * k, gh = Math.min(150 * k, P.h * .4), gx = P.x + P.w - gw - 14 * k, gy = y0 + 4 * k, low = air < .25;
+  draw.rect(c, gx - 3, gy - 3, gw + 6, gh + 6, 9 * k, "rgba(255,253,244,.9)", INK, 2); draw.rect(c, gx, gy + gh * (1 - air), gw, gh * air, 6 * k, low ? (Math.sin(t * 12) > 0 ? "#ff6b6b" : "#ffb3b3") : "#3ec5ff");
+  draw.circle(c, gx + gw / 2, gy + gh + 16 * k, 8 * k, "rgba(255,255,255,.85)", "#3ec5ff", 2); draw.text(c, "air", gx + gw / 2, gy + gh + 32 * k, { size: 10 * k, color: "#fffdf4", weight: 800, stroke: "rgba(10,30,70,.5)" });
+  draw.text(c, Math.round(bell.y / 10) + " m", gx + gw / 2, gy + gh + 46 * k, { size: 10 * k, color: "#fffdf4", weight: 800, stroke: "rgba(10,30,70,.5)" });
+  // compass arrows to the nearest wanted fish off-screen
+  const seen = {};
+  for (const s of slots) {
+    if (s.done || seen[s.kind]) continue; seen[s.kind] = 1; let best = null, bd = 1e9;
+    for (const f of (s.kind === "eel" ? eels : fish)) if (f.kind === s.kind) { const d = Math.hypot(f.x - bell.x, f.y - bell.y); if (d < bd) { bd = d; best = f; } }
+    if (!best) continue; const [sx, sy] = toScreen(best.x, best.y); if (sx > 0 && sx < W && sy > P.y + ph + 20 && sy < H) continue;
+    const [bx, by] = toScreen(bell.x, bell.y), a = Math.atan2(sy - by, sx - bx), m = 30 * k, dx = Math.cos(a), dy = Math.sin(a);
+    const L = P.x + m, R = P.x + P.w - m - 30 * k, T = P.y + (W > H ? 30 : 40) * k + (W > H ? 0 : ph), B = H - Lab.safe.bottom - m; let tt = 1e9;
+    if (dx > 1e-4) tt = Math.min(tt, (R - bx) / dx); if (dx < -1e-4) tt = Math.min(tt, (L - bx) / dx); if (dy > 1e-4) tt = Math.min(tt, (B - by) / dy); if (dy < -1e-4) tt = Math.min(tt, (T - by) / dy);
+    const qx = clamp(bx + dx * tt, L, R), qy = Math.max(clamp(by + dy * tt, T, B), qx < x0 + pw + 22 * k ? y0 + ph + 24 * k : 0);
+    c.save(); c.translate(qx, qy); draw.circle(c, 0, 0, 17 * k, "rgba(255,253,244,.85)", SP[s.kind].c2, 2.5);
+    c.rotate(a); c.fillStyle = SP[s.kind].c2; c.beginPath(); c.moveTo(25 * k, 0); c.lineTo(16 * k, -6 * k); c.lineTo(16 * k, 6 * k); c.fill(); c.rotate(-a);
+    if (s.kind === "eel") draw.circle(c, 0, 0, 7 * k, SP.eel.c); else { const spr = fishSprite(s.kind, s.kind === "puffer"), sc = k * .5 * 16 / SP[s.kind].r; c.drawImage(spr, -spr.w * sc / 2, -spr.h * sc / 2, spr.w * sc, spr.h * sc); }
+    c.restore();
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

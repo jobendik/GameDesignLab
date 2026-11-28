@@ -1,0 +1,301 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Topping Toss</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* TOPPING TOSS — Bun is decorating a giant spinning donut, and Momo is peeking through the hole, very hungry.
+ * Core idea kept: tap to throw something into a spinning ring, and never land on a piece that is already stuck.
+ * The rule that makes it a different game: toppings MATCH. Land a topping touching two of its kind (three in a row
+ * around the ring) and Momo's tongue zips out of the hole and gobbles the lot, freeing space. So you are pulled
+ * toward the crowd (land snug beside your pairs) while a direct hit on a topping bonks it off (a heart).
+ * Crowd the ring with set-ups and you'll run out of safe gaps; cash pairs in on consecutive tosses for a chain bonus.
+ * You see the next topping and can swap it once per toss. Each donut is an order ("feed Momo 12"); donuts get new
+ * spins (steady, surging, swaying, stop-and-go, sudden flips with a wobble warning), more kinds, candles that never
+ * get eaten, and sprinkle stars that match anything.
+ * Identity: a pastel bakery counter, a glazed donut that changes flavour each order, chunky toppings with distinct
+ * shapes (cherry, blueberry, choc square, marshmallow, lemon star), Bun tossing from the basket, Momo in the hole.     */
+let demo = false;
+Lab.init({
+  title: "Topping Toss", tagline: "Toss toppings on the spinning donut. Three of a kind and Momo gobbles them!", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Tap to toss a topping onto the donut", "Land beside two of a kind: Momo eats!", "Hit a topping head-on and it bonks off"],
+  theme: { bg: "#ffd9e4", bg2: "#fff4e4", fg: "#4a2f3a", muted: "#8a6a74", accent: "#ff6f91", accent2: "#5fd39a", light: true },
+  orient: "any", music: { style: "bounce", key: "A", vol: .34 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const KINDS = [{ n: "cherries", c: "#ff4f6d" }, { n: "blueberries", c: "#5a78e8" }, { n: "choc squares", c: "#8a5233" }, { n: "marshmallows", c: "#fff2f6" }, { n: "lemon stars", c: "#ffd23f" }];
+const WILD = -1, CANDLE = -2;
+const GLAZE = [["#ff9cc0", "#ff6f9c"], ["#9b6447", "#6e4430"], ["#fff0a8", "#f5d25a"], ["#b6f0d2", "#70d6a6"], ["#c9d8ff", "#8fa8ef"], ["#e7c9ff", "#bd8ef0"]];
+const PATS = ["steady", "steady", "surge", "sway", "stopgo", "flip"];
+let S, wide, D, R, Rm, TR, HW, bunP, bunSize, nextBox, cardR;
+let tops, fly, falls, queue, swapped, buffer, hearts, score, chain, bestChain, eatenTot, donuts, bonks, lvl, phase, phaseT, clock, tongue, bun, momo, told, bubble, nid, throws, sinceWild, roll;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function say(txt, dur) { if (!demo) bubble = { txt, t: 0, dur: dur || 2.6 }; }
+function once(id, txt, dur) { if (!told[id]) { told[id] = 1; say(txt, dur || 3.4); } }
+const adist = (a, b) => Math.abs(Lab.angleDiff(a, b));
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15;
+  if (wide) { R = Math.min(P.h * .3, P.w * .2); S = R / 120; D.x = P.x + P.w / 2; D.y = P.y + R + 14 * S; bunSize = Math.min(R * .62, P.y + P.h - (D.y + R) - 4); bunP = { x: D.x, y: P.y + P.h - bunSize * .52 };
+    cardR = { x: P.x + 16, y: P.y + 10, w: Math.min(D.x - R - P.x - 40, 230 * Math.max(S, .8)), h: 70 * Math.max(S, .8) }; nextBox = { x: D.x + R * 1.25 + 40 * S, y: bunP.y - bunSize * .3, r: 30 * Math.max(S, .8) }; }
+  else { S = Math.min(P.w / 390, P.h / 760); R = Math.min(P.w * .41, P.h * .25); D.x = P.x + P.w / 2; bunSize = 92 * S; bunP = { x: D.x, y: P.y + P.h - bunSize * .62 - 8 * S };
+    cardR = { x: P.x + 14, y: P.y + 10, w: P.w - 28, h: 64 * S }; nextBox = { x: D.x + 120 * S, y: bunP.y + bunSize * .05, r: 31 * S };
+    D.y = Math.max(cardR.y + cardR.h + R + 30 * S, (cardR.y + cardR.h + bunP.y - bunSize * 1.3) / 2); }
+  Rm = R * .71; TR = R * .155; HW = TR / Rm;
+  Lab.sprite.clear("tt_");
+}
+Lab.onResize(() => { if (D) layout(); });
+
+/* ---------- donut + toppings ---------- */
+function newDonut(n, quiet) {
+  lvl = n; const kinds = n <= 2 ? 3 : n <= 5 ? 4 : 5;
+  D.kinds = kinds; D.target = Math.min(24, 6 + n * 3); D.eaten = 0; D.pat = n <= PATS.length ? PATS[n - 1] : Lab.choose(PATS.slice(1)); D.t = 0; D.dir = Lab.chance(.5) ? 1 : -1;
+  D.base = Math.min(2.5, .9 + n * .14); D.glaze = (n - 1) % GLAZE.length; D.flipT = rand(2.5, 4); D.warn = 0; D.sq = 0; D.bonks = 0;
+  tops = []; tongue = null; const pre = Math.min(7, 2 + n), cand = n >= 4 ? (n >= 8 ? 2 : 1) : 0;
+  for (let i = 0; i < pre + cand; i++) for (let tries = 0; tries < 30; tries++) {
+    const a = rand(0, TAU); if (tops.some(t => adist(t.a, a) < HW * 3.2)) continue;
+    const k = i < cand ? CANDLE : Lab.randInt(0, kinds - 1); const t = { a, k, id: nid++, wob: 0, born: quiet ? 1 : -i * .08, eat: 0 };
+    tops.push(t); if (k >= 0 && groupOf(t).length >= 3) { tops.pop(); continue; } break;
+  }
+  Lab.sprite.clear("tt_donut");
+}
+function sorted() { return tops.filter(t => !t.eat).sort((a, b) => a.a - b.a); }
+function linked(a, b) { return adist(a.a, b.a) < HW * 3.1; }
+function groupOf(t) { // run of touching toppings that share t's kind (sprinkle stars count as anything)
+  const s = sorted(), n = s.length, i = s.indexOf(t); if (i < 0 || t.k === CANDLE) return [t];
+  const run = K => { const out = [t]; for (const d of [-1, 1]) { let j = i; for (let m = 1; m < n; m++) { const nx = s[((j + d) % n + n) % n]; if (out.includes(nx) || !linked(s[j], nx) || !(nx.k === K || nx.k === WILD && K !== CANDLE)) break; out.push(nx); j = ((j + d) % n + n) % n; } } return out; };
+  if (t.k !== WILD) return run(t.k);
+  let best = [t]; for (let K = 0; K < KINDS.length; K++) { const g = run(K); if (g.length > best.length && g.some(x => x.k === K)) best = g; } return best;
+}
+function topPos(t) { const a = t.a + D.rot; return [D.x + Math.cos(a) * Rm, D.y + Math.sin(a) * Rm, a]; }
+function spin(dt) {
+  D.t += dt; let w = D.base * D.dir;
+  if (D.pat === "surge") w *= 1 + .65 * Math.sin(D.t * 1.4);
+  else if (D.pat === "sway") w = D.base * 1.5 * Math.sin(D.t * .85);
+  else if (D.pat === "stopgo") w *= Math.sin(D.t * 1.2) > -.25 ? 1.35 : .08;
+  else if (D.pat === "flip") { D.flipT -= dt; if (D.flipT < .55 && !D.warn) { D.warn = 1; snd("tick", { pitch: 1.4 }); } if (D.flipT <= 0) { D.dir *= -1; D.flipT = rand(2.2, 4); D.warn = 0; D.sq = .06; } w = D.base * D.dir * (D.warn ? .55 : 1); }
+  D.w = Lab.damp(D.w || 0, w, 6, dt); D.rot += D.w * dt;
+}
+
+/* ---------- tossing ---------- */
+function nextItem() {
+  throws++; sinceWild++;
+  if (sinceWild > 8 && Lab.chance(.35)) { sinceWild = 0; return WILD; }
+  if (Lab.chance(.4)) { const pairs = sorted().filter(t => t.k >= 0 && groupOf(t).length === 2); if (pairs.length) return Lab.choose(pairs).k; }
+  return Lab.randInt(0, D.kinds - 1);
+}
+function toss() {
+  if (phase !== "play") return;
+  if (fly) { buffer = .18; return; }
+  const k = queue.shift(); queue.push(nextItem()); swapped = false;
+  fly = { k, x: bunP.x, y: bunP.y - bunSize * .7, y0: bunP.y - bunSize * .7, u: 0 }; bun.throwT = .3; bun.sq = -.18;
+  snd("whoosh", { pitch: 1.4, vol: .6 });
+}
+function swap() { if (phase !== "play" || swapped) return; queue.reverse(); swapped = true; snd("flip"); nextBox.pop = 1; once("swap", "Swapped! One swap per toss."); }
+function land() {
+  const k = fly.k, x = fly.x, y = D.y + Rm, a = ((Math.PI / 2 - D.rot) % TAU + TAU) % TAU; fly = null;
+  const hit = tops.find(t => !t.eat && adist(t.a, a) < HW * (t.k === CANDLE ? 1.5 : 1.55));
+  if (hit) { bonk(hit, k, x, y); return; }
+  const t = { a, k, id: nid++, wob: 1, born: 1, eat: 0 }; tops.push(t); D.sq = .05;
+  snd("pop", { pitch: k === WILD ? 1.6 : .8 + k * .12 }); fx.burst(x, y, { n: 6, color: k >= 0 ? KINDS[k].c : "#fff6c8", speed: 90 * S, life: .35, size: 3 * S });
+  const g = groupOf(t);
+  if (g.length >= 3) eat(g);
+  else { if (chain >= 2) fx.text(x, y + 30 * S, "chain over", { color: "#8a6a74", size: 14 * Math.max(S, .8) }); chain = 0; if (g.length === 2) { momo.wow = .6; snd("tick", { pitch: 1.8, vol: .5 }); once("pair", "A pair! One more and Momo eats them."); } }
+}
+function bonk(hit, k, x, y) {
+  hit.wob = 1.4; D.sq = .1; chain = 0; if (demo) { falls.push({ x, y, vx: 0, vy: 200, r: 0, vr: 5, k }); return; } bonks++; D.bonks++; hearts--;
+  falls.push({ x, y, vx: rand(-1, 1) * 160 * S, vy: 260 * S, r: 0, vr: rand(-12, 12), k });
+  snd("knock"); snd("boing", { pitch: .7 }); Lab.shake(7, .25); Lab.flash("#ff6f91", .15, .25); Lab.buzz(50); bun.flinch = 1; momo.scared = 1;
+  fx.burst(x, y, { n: 10, colors: ["#fff", "#ff9cc0"], shape: "star", speed: 200 * S, life: .5, size: 4 * S });
+  if (hearts <= 0) end(); else say(Lab.choose(["Bonk! Mind the gaps.", "Oops, right on top!", "Eek! It bounced off."]));
+}
+function eat(g) {
+  chain++; bestChain = Math.max(bestChain, chain);
+  const n = g.length, pts = (30 + (n - 3) * 15) * Math.min(5, chain) + (g.some(t => t.k === WILD) ? 10 : 0);
+  g.forEach(t => { t.eat = 1; }); const ord = g.slice().sort((p, q) => adist(p.a, (Math.PI / 2 - D.rot)) - adist(q.a, (Math.PI / 2 - D.rot)));
+  if (tongue) tongue.list.push(...ord); else tongue = { list: ord, i: 0, t: 0, ext: 0 };
+  score += pts; if (!demo) { Lab.setScore(score); Lab.bumpScore(); } D.eaten += n; eatenTot += n;
+  const [x, y] = topPos(g[0]); fx.text(D.x, D.y + R + 26 * S, "+" + pts + (chain >= 2 ? "  chain x" + Math.min(5, chain) : ""), { color: "#ff6f91", size: 19 * Math.max(S, .8) });
+  momo.eatT = .9; if (chain >= 3) say(Lab.choose(["Chain! Momo's on a roll!", "Keep 'em coming!", "Nom nom NOM!"]));
+  if (n >= 4 && !demo) Lab.banner(n + " in a row!", { color: "#5fd39a", ms: 900, y: .2 });
+  if (D.eaten >= D.target) Lab.after(.25 + n * .09, finishDonut);
+}
+function finishDonut() {
+  if (phase !== "play") return; if (demo) { newDonut(1, true); return; } phase = "done"; phaseT = 0; donuts++; fly = null;
+  const left = tops.filter(t => !t.eat && t.k !== CANDLE), bonus = 100 * lvl + left.length * 10 + (D.bonks === 0 ? 150 : 0);
+  score += bonus; Lab.setScore(score); if (D.bonks === 0 && hearts < 3) { hearts++; Lab.toast("Clean donut: +1 heart", 1300, { y: .62 }); }
+  Lab.banner("Order " + lvl + " done!", { color: "#ff6f91", ms: 1500, y: .2 }); snd("levelup"); Lab.fx.confetti();
+  fx.text(D.x, D.y, "+" + bonus, { color: "#4a2f3a", size: 24 * Math.max(S, .8) }); bun.joy = 2; momo.eatT = 1.4;
+  roll = { t: 0 };
+}
+function end() {
+  phase = "over"; fly = null;
+  Lab.after(.9, () => Lab.gameover({ title: "Oops! Bonked out", message: "Momo still munched " + eatenTot + " toppings.", score, stats: [["Donuts done", donuts], ["Toppings eaten", eatenTot], ["Best chain", "x" + Math.max(1, bestChain)]] }));
+}
+
+/* ---------- run ---------- */
+function reset() {
+  D = D || {}; D.rot = 0; D.w = 0; nid = 0; throws = 0; sinceWild = 0; layout();
+  hearts = 3; score = 0; chain = 0; bestChain = 0; eatenTot = 0; donuts = 0; bonks = 0; clock = 0; told = {}; bubble = null; tongue = null; fly = null; falls = []; buffer = 0; swapped = false; roll = null;
+  bun = { sq: 0, throwT: 0, flinch: 0, joy: 0 }; momo = { eatT: 0, scared: 0, wow: 0 };
+  newDonut(1, true); queue = [nextItem(), nextItem()]; phase = "play"; phaseT = 0;
+}
+function start() {
+  demo = false; reset(); Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => { if (Math.hypot(x - nextBox.x, y - nextBox.y) < nextBox.r * 1.35) swap(); else toss(); }];
+  Lab.input.onKey = [k => { if (k === " " || k === "Enter" || k === "ArrowUp") toss(); else if (k === "s" || k === "S" || k === "Shift" || k === "ArrowDown") swap(); }];
+  Lab.loop(frame); Lab.music.intensity(.25);
+  Lab.after(.6, () => once("hi", "Tap to toss! Land it next to its kind.", 3.6));
+}
+function frame(dt, t) { clock += dt; phaseT += dt; update(dt); render(t); }
+function update(dt) {
+  if (bubble) { bubble.t += dt; if (bubble.t > bubble.dur) bubble = null; }
+  bun.sq = Lab.damp(bun.sq, 0, 9, dt); for (const k of ["throwT", "flinch", "joy"]) bun[k] = Math.max(0, bun[k] - dt);
+  for (const k of ["eatT", "scared", "wow"]) momo[k] = Math.max(0, momo[k] - dt);
+  D.sq = Lab.damp(D.sq, 0, 8, dt);
+  if (phase !== "over") spin(dt);
+  for (const t of tops) { t.wob = Lab.damp(t.wob, 0, 5, dt); if (t.born < 1) t.born = Math.min(1, t.born + dt * 3); }
+  if (buffer > 0) { buffer -= dt; if (!fly && buffer > 0) { buffer = 0; toss(); } }
+  if (fly) { const ty = D.y + Rm, sp = 1900 * Math.max(S, .7); fly.y -= sp * dt; fly.u += dt; if (fly.y <= ty) { fly.y = ty; land(); } }
+  for (let i = falls.length - 1; i >= 0; i--) { const f = falls[i]; f.vy += 1400 * S * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.r += f.vr * dt; if (f.y > Lab.H + 60) falls.splice(i, 1); }
+  if (tongue) {
+    tongue.t += dt; const cur = tongue.list[tongue.i];
+    if (!cur) { tongue.ext = Math.max(0, tongue.ext - dt * 8); if (tongue.ext <= 0) tongue = null; }
+    else { tongue.ext = Math.min(1, tongue.ext + dt * 9); if (tongue.ext >= 1) {
+      const [x, y] = topPos(cur), ti = tops.indexOf(cur); if (ti >= 0) tops.splice(ti, 1); tongue.i++; tongue.ext = .35;
+      snd("crunch", { pitch: 1 + tongue.i * .12, vol: .7 }); if (!demo) Lab.audio.combo(tongue.i + chain);
+      fx.burst(x, y, { n: 8, color: cur.k >= 0 ? KINDS[cur.k].c : "#fff6c8", speed: 120 * S, life: .4, size: 3 * S }); } }
+  }
+  if (phase === "done" && roll) { roll.t += dt; if (roll.t > 1.5 && !roll.swapped) { roll.swapped = true; newDonut(lvl + 1); queue = [nextItem(), nextItem()]; if (!demo) Lab.banner("Order " + lvl + ": feed Momo " + D.target, { color: "#5a78e8", ms: 1400, y: .2 }); if (D.pat === "flip" && lvl === 6) say("Watch it wobble before it flips!"); if (lvl === 4) say("Candles never get eaten. Work around them!"); }
+    if (roll.t > 2.2) { phase = "play"; roll = null; } }
+  Lab.music.intensity(.25 + clamp(sorted().length / 14, 0, 1) * .55);
+}
+function rollX() { if (!roll) return 0; const u = roll.t; if (u < 1) return ease.inBack(clamp(u / .9, 0, 1)) * (Lab.W * .9 + R); if (u < 1.5) return -(Lab.W * .9 + R); return -(1 - ease.outBack(clamp((u - 1.5) / .7, 0, 1))) * (Lab.W * .9 + R); }
+
+/* ---------- drawing ---------- */
+function donutSprite() {
+  const r = Math.round(R), gl = GLAZE[D.glaze];
+  return Lab.sprite("tt_donut" + D.glaze + "_" + r, r * 2.2, r * 2.2, (g, w, h) => {
+    const cx = w / 2, cy = h / 2, rnd = Lab.rng(D.glaze * 31 + 5);
+    g.fillStyle = "#e9a868"; g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.arc(cx, cy, r * .42, 0, TAU, true); g.fill("evenodd");
+    g.strokeStyle = "#c98448"; g.lineWidth = r * .04; g.beginPath(); g.arc(cx, cy, r * .98, 0, TAU); g.stroke();
+    g.fillStyle = gl[0]; g.beginPath(); for (let i = 0; i <= 48; i++) { const a = i / 48 * TAU, rr = r * (.9 + Math.sin(i * 1.7) * .035 + (i % 5 === 0 ? -.05 : 0)); g.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
+    g.closePath(); g.moveTo(cx + r * .5, cy); g.arc(cx, cy, r * .5, 0, TAU, true); g.fill("evenodd");
+    g.fillStyle = "rgba(255,255,255,.18)"; g.beginPath(); g.ellipse(cx - r * .35, cy - r * .55, r * .3, r * .1, -.6, 0, TAU); g.fill();
+    g.strokeStyle = gl[1]; g.lineWidth = r * .03; g.globalAlpha = .6; g.beginPath(); g.arc(cx, cy, r * .52, 0, TAU); g.stroke(); g.globalAlpha = 1;
+    const sc = ["#ffffff", "#ffd23f", "#5fd39a", "#5a78e8", "#ff4f6d", "#b9a3ff"];
+    for (let i = 0; i < 46; i++) { const a = rnd() * TAU, rr = r * (.58 + rnd() * .27), x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr; g.save(); g.translate(x, y); g.rotate(rnd() * TAU); g.fillStyle = sc[i % sc.length]; draw.rr(g, -r * .035, -r * .011, r * .07, r * .022, r * .011); g.fill(); g.restore(); }
+    g.fillStyle = "#5c3a2a"; g.globalAlpha = .25; g.beginPath(); g.arc(cx, cy, r * .42, 0, TAU); g.fill(); g.globalAlpha = 1;
+  });
+}
+function topSprite(k) {
+  const s = Math.round(TR * 2.6);
+  return Lab.sprite("tt_t" + k + "_" + s, s, s, (g, w) => {
+    const c = w / 2, r = TR; g.lineWidth = Math.max(1.5, r * .12); g.strokeStyle = "rgba(43,35,64,.35)";
+    if (k === 0) { g.strokeStyle = "#3e7a3a"; g.lineWidth = r * .14; g.beginPath(); g.moveTo(c, c - r * .2); g.quadraticCurveTo(c + r * .2, c - r * 1.1, c + r * .6, c - r * 1.15); g.stroke(); for (const d of [-1, 1]) { draw.circle(g, c + d * r * .38, c + r * .15, r * .58, "#ff4f6d", "#c92a4a", r * .1); draw.circle(g, c + d * r * .38 - r * .2, c - r * .05, r * .14, "rgba(255,255,255,.7)"); } }
+    else if (k === 1) { for (const [dx, dy] of [[-.45, .25], [.45, .25], [0, -.35]]) { draw.circle(g, c + dx * r, c + dy * r, r * .5, "#5a78e8", "#3b55b8", r * .09); draw.star(g, c + dx * r, c + dy * r - r * .18, r * .14, "#2c3f90", 5, .5); } }
+    else if (k === 2) { g.save(); g.translate(c, c); g.rotate(-.15); draw.rect(g, -r * .8, -r * .8, r * 1.6, r * 1.6, r * .25, "#8a5233", "#5e3520", r * .1); g.fillStyle = "#a8683f"; for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { draw.rr(g, dx * r * .38 - r * .28, dy * r * .38 - r * .28, r * .56, r * .56, r * .12); g.fill(); } g.restore(); }
+    else if (k === 3) { g.save(); g.translate(c, c); g.rotate(.2); draw.rect(g, -r * .78, -r * .62, r * 1.56, r * 1.24, r * .38, "#fff2f6", "#e0a8bf", r * .1); g.fillStyle = "#ffc6da"; draw.rr(g, -r * .78, -r * .05, r * 1.56, r * .2, r * .1); g.fill(); g.restore(); }
+    else if (k === 4) { draw.star(g, c, c, r * 1.02, "#ffd23f", 5, .5); g.strokeStyle = "#d9a21a"; g.stroke(); draw.circle(g, c - r * .15, c - r * .1, r * .14, "rgba(255,255,255,.7)"); }
+    else if (k === WILD) { for (let i = 0; i < 8; i++) { g.save(); g.translate(c, c); g.rotate(i * TAU / 8); g.fillStyle = ["#ff4f6d", "#ffd23f", "#5fd39a", "#5a78e8"][i % 4]; draw.rr(g, r * .15, -r * .12, r * .8, r * .24, r * .12); g.fill(); g.restore(); } draw.star(g, c, c, r * .45, "#fff", 5, .5); }
+    else { draw.rect(g, c - r * .32, c - r * .55, r * .64, r * 1.45, r * .12, "#7fd3ff", "#3c9bd0", r * .08); g.strokeStyle = "rgba(255,255,255,.75)"; g.lineWidth = r * .14; for (let i = 0; i < 3; i++) { g.beginPath(); g.moveTo(c - r * .32, c - r * .2 + i * r * .42); g.lineTo(c + r * .32, c - r * .45 + i * r * .42); g.stroke(); } }
+  });
+}
+function drawTop(c, k, x, y, ang, o) {
+  o = o || {}; const sp = topSprite(k), sc = (o.scale || 1) * (1 + (o.wob || 0) * .25 * Math.sin(clock * 28));
+  c.save(); c.translate(x, y); c.rotate(ang); c.scale(sc, sc); if (o.alpha != null) c.globalAlpha = o.alpha; c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h);
+  if (k === CANDLE) { const f = 1 + Math.sin(clock * 18 + x) * .15; c.fillStyle = "#ffb52e"; c.beginPath(); c.ellipse(0, -TR * .85, TR * .2 * f, TR * .4 * f, 0, 0, TAU); c.fill(); c.fillStyle = "#fff3b0"; c.beginPath(); c.ellipse(0, -TR * .78, TR * .09, TR * .2, 0, 0, TAU); c.fill(); }
+  c.restore();
+}
+function drawScene(c, t) {
+  const W = Lab.W, H = Lab.H, bg = Lab.sprite("tt_bg" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40); const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, "#ffe6ee"); gr.addColorStop(1, "#fff6e6"); g.fillStyle = gr; g.fillRect(-40, -40, W + 80, H + 80);
+    g.fillStyle = "rgba(255,170,195,.18)"; const st = 34; for (let x = -40; x < W + 40; x += st * 2) g.fillRect(x, -40, st, H + 80);
+    const cy = bunP.y + bunSize * .35; g.fillStyle = "#f6c6a0"; g.fillRect(-40, cy, W + 80, H); const q = 28;
+    for (let y = cy; y < H + 40; y += q) for (let x = -40 + ((y - cy) / q % 2) * q; x < W + 40; x += q * 2) { g.fillStyle = "rgba(255,111,145,.35)"; g.fillRect(x, y, q, q); }
+    g.fillStyle = "#e8a982"; g.fillRect(-40, cy - 6, W + 80, 8);
+  });
+  c.drawImage(bg, -40, -40, bg.w, bg.h);
+}
+function render(t) {
+  const c = Lab.ctx; drawScene(c, t);
+  const ox = rollX(), dx = D.x + ox, dy = D.y;
+  // Momo, peeking through the hole (drawn behind the donut, clipped to the hole)
+  const hole = R * .42; c.save(); c.beginPath(); c.arc(dx, dy, hole, 0, TAU); c.clip(); c.fillStyle = "#6a3e2a"; c.fillRect(dx - hole, dy - hole, hole * 2, hole * 2);
+  const ms = hole * 2.3, look = fly ? [0, .9] : tongue && tongue.list[tongue.i] ? (() => { const [x, y] = topPos(tongue.list[tongue.i]); return [clamp((x - D.x) / R, -1, 1), clamp((y - D.y) / R, -1, 1)]; })() : [Math.sin(clock * .7) * .5, .2];
+  const mood = phase === "over" ? "sad" : momo.scared > 0 ? "scared" : momo.eatT > 0 ? "joy" : momo.wow > 0 ? "wow" : fly ? "think" : "happy";
+  const an = Pals.draw(c, "momo", dx, dy + ms * .32, ms, { t, mood, look, talk: tongue ? .8 : 0, shadow: false, tilt: momo.scared ? Math.sin(clock * 40) * .05 : 0 });
+  c.restore();
+  // donut
+  c.save(); c.translate(dx, dy); c.scale(1 + D.sq, 1 - D.sq); c.rotate(D.rot + (D.warn ? Math.sin(clock * 50) * .03 : 0)); const sp = donutSprite(); c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore();
+  // glaze bridges show which neighbours already belong together (a pair pulses: one more of that kind eats them)
+  const ss = sorted(); if (ss.length > 1) { c.lineCap = "round"; for (let i = 0; i < ss.length; i++) { const p = ss[i], q = ss[(i + 1) % ss.length]; if (p === q || !linked(p, q) || p.k === CANDLE || q.k === CANDLE || !(p.k === q.k || p.k === WILD || q.k === WILD)) continue;
+    let a0 = p.a + D.rot, a1 = q.a + D.rot; if (Lab.angleDiff(a0, a1) > 0) { const tt = a0; a0 = a1; a1 = tt; } const col = p.k >= 0 ? KINDS[p.k].c : KINDS[q.k] ? KINDS[q.k].c : "#fff";
+    c.strokeStyle = "rgba(255,255,255,.85)"; c.lineWidth = TR * .75; c.beginPath(); c.arc(dx, dy, Rm, a0, a0 + adist(a0, a1)); c.stroke();
+    c.globalAlpha = .55 + .3 * Math.sin(clock * 6); c.strokeStyle = col === "#fff2f6" ? "#ffb3cf" : col; c.lineWidth = TR * .35; c.beginPath(); c.arc(dx, dy, Rm, a0, a0 + adist(a0, a1)); c.stroke(); c.globalAlpha = 1; } }
+  for (const tp of tops) { const a = tp.a + D.rot, x = dx + Math.cos(a) * Rm, y = dy + Math.sin(a) * Rm; drawTop(c, tp.k, x, y, a + Math.PI / 2, { wob: tp.wob, scale: ease.outBack(Math.max(0, tp.born)), alpha: tp.eat ? .85 : 1 }); }
+  // landing marker under the donut
+  if (phase === "play") { c.fillStyle = "rgba(74,47,58,.35)"; c.beginPath(); c.moveTo(dx, dy + R + 9 * S); c.lineTo(dx - 7 * S, dy + R + 19 * S); c.lineTo(dx + 7 * S, dy + R + 19 * S); c.fill(); }
+  // tongue
+  if (tongue && tongue.list[tongue.i]) { const [tx, ty] = topPos(tongue.list[tongue.i]), mx = an.mouth[0], my = an.mouth[1], e = tongue.ext, ex = lerp(mx, tx, e), ey = lerp(my, ty, e);
+    c.strokeStyle = "#ff7d9c"; c.lineCap = "round"; c.lineWidth = 9 * Math.max(S, .7); c.beginPath(); c.moveTo(mx, my); c.lineTo(ex, ey); c.stroke(); draw.circle(c, ex, ey, 7 * Math.max(S, .7), "#ff5c86"); }
+  // flying + falling
+  if (fly) drawTop(c, fly.k, fly.x, fly.y, Math.sin(clock * 20) * .3, { scale: 1.05 });
+  for (const f of falls) drawTop(c, f.k, f.x, f.y, f.r, {});
+  drawBun(c, t); drawHud(c); if (bubble) drawBubble(c);
+}
+function drawBun(c, t) {
+  const mood = phase === "over" ? "sad" : bun.flinch > 0 ? "scared" : bun.joy > 0 || (momo.eatT > 0 && phase === "play") ? "joy" : "think";
+  const an = Pals.draw(c, "bun", bunP.x, bunP.y, bunSize, { t, mood, look: [0, -1], arms: bun.throwT > 0 || bun.joy > 0 ? "cheer" : phase === "play" && !fly ? "up" : "down", squash: bun.sq, tilt: bun.flinch ? Math.sin(clock * 40) * .06 : 0 });
+  // basket + the topping in hand
+  const bx = bunP.x - bunSize * .85, by = bunP.y + bunSize * .3, bw = bunSize * .36;
+  for (let i = 0; i < 3; i++) drawTop(c, [0, 1, 3][i], bx + (i - 1) * bw * .5, by - bw * .28, (i - 1) * .4, { scale: .6 });
+  c.fillStyle = "#d9a066"; c.beginPath(); c.moveTo(bx - bw, by - bw * .2); c.quadraticCurveTo(bx, by + bw * 1.1, bx + bw, by - bw * .2); c.closePath(); c.fill();
+  c.strokeStyle = "#b07a45"; c.lineWidth = 2; c.stroke(); for (let i = -1; i <= 1; i++) { c.beginPath(); c.moveTo(bx + i * bw * .45, by - bw * .15); c.lineTo(bx + i * bw * .3, by + bw * .4); c.stroke(); }
+  if (phase === "play" && !fly && bun.throwT <= 0) drawTop(c, queue[0], an.head[0], an.head[1] - TR * .2 - bunSize * .2, 0, { scale: 1 });
+  // next / swap button
+  const nb = nextBox; nb.pop = Math.max(0, (nb.pop || 0) - .05); const r = nb.r * (1 + nb.pop * .2);
+  draw.circle(c, nb.x, nb.y, r, swapped ? "rgba(255,255,255,.55)" : "#fffaf3", "rgba(74,47,58,.25)", 2.5);
+  drawTop(c, queue[1], nb.x, nb.y - r * .08, 0, { scale: .8 * r / (TR * 1.5), alpha: swapped ? .5 : 1 });
+  draw.text(c, swapped ? "next" : "swap", nb.x, nb.y + r + 11 * Math.max(S, .8), { size: 12.5 * Math.max(S, .8), color: "#8a6a74", weight: 700 });
+}
+function drawHud(c) {
+  const k = Math.max(S, .8), cr = cardR, fs = 15 * k;
+  draw.rect(c, cr.x, cr.y, cr.w, cr.h, 16 * k, "rgba(255,255,255,.72)", "rgba(74,47,58,.12)", 1.5);
+  for (let i = 0; i < 3; i++) draw.heart(c, cr.x + 20 * k + i * 22 * k, cr.y + 22 * k, 8 * k, i < hearts ? "#ff6f91" : "rgba(74,47,58,.15)");
+  draw.text(c, "Order " + lvl, cr.x + cr.w - 14 * k, cr.y + 22 * k, { size: fs, color: "#4a2f3a", align: "right", weight: 700 });
+  const bw = cr.w - 28 * k, bx = cr.x + 14 * k, by = cr.y + cr.h - 24 * k, p = clamp(D.eaten / D.target, 0, 1);
+  const bh = 17 * k; draw.rect(c, bx, by - bh / 2 + 4 * k, bw, bh, bh / 2, "rgba(74,47,58,.1)"); if (p > 0) draw.rect(c, bx, by - bh / 2 + 4 * k, Math.max(bh, bw * p), bh, bh / 2, "#5fd39a");
+  draw.text(c, "Momo ate " + Math.min(D.eaten, D.target) + " / " + D.target, bx + bw / 2, by + 4 * k, { size: 12 * k, color: "#4a2f3a", weight: 700 });
+  if (chain >= 2) draw.text(c, "chain x" + Math.min(5, chain), D.x, D.y - R - 16 * S, { size: 16 * k, color: "#ff6f91", weight: 700 });
+}
+function drawBubble(c) {
+  const k = ease.outBack(clamp(bubble.t / .2, 0, 1)) * clamp((bubble.dur - bubble.t) / .25, 0, 1); if (k <= 0) return;
+  const fs = 13.5 * Math.max(S, .85); c.font = Lab.font(fs, 700); const w = c.measureText(bubble.txt).width + 24, h = fs * 2.1;
+  const x = wide ? bunP.x - bunSize * .7 - w / 2 : clamp(bunP.x - w * .3, w / 2 + 6, Lab.W - w / 2 - 6), y = wide ? bunP.y - bunSize * .45 : bunP.y - bunSize * 1.05 - h / 2;
+  c.save(); c.translate(x, y + h / 2); c.scale(k, k); c.translate(-x, -(y + h / 2));
+  Pals.bubble(c, x, y, w, h, wide ? { tailX: bunP.x - bunSize * .35, tailY: bunP.y - bunSize * .2 } : { tailX: bunP.x - bunSize * .25, tailY: bunP.y - bunSize * .6 }); draw.text(c, bubble.txt, x, y + 1, { size: fs, color: INK, weight: 700 }); c.restore();
+}
+
+/* ---------- splash backdrop: Bun tosses on her own ---------- */
+let demoT = 0;
+function attract(dt, t) {
+  demo = true; if (!D || !tops) reset(); clock += dt; demoT -= dt;
+  if (demoT <= 0 && !fly) { const a = ((Math.PI / 2 - D.rot) % TAU + TAU) % TAU; if (!tops.some(tp => adist(tp.a, a) < HW * 2.2)) { toss(); demoT = .9; } }
+  if (phase === "over" || sorted().length > 11) { reset(); }
+  update(dt); render(t); demo = false;
+}
+
+Lab.expose({
+  get score() { return score; }, get hearts() { return hearts; }, get chain() { return chain; }, get level() { return lvl; }, get phase() { return phase; },
+  get eaten() { return D.eaten; }, get target() { return D.target; }, get queue() { return queue.slice(); }, get flying() { return !!fly; }, get tongue() { return !!tongue; },
+  get tops() { return tops.filter(t => !t.eat).map(t => ({ a: t.a, k: t.k })); }, get rot() { return D.rot; }, get HW() { return HW; },
+  get nextBox() { return [nextBox.x, nextBox.y]; }, landAngle() { return ((Math.PI / 2 - D.rot) % TAU + TAU) % TAU; },
+  goto(n) { newDonut(n, true); queue = [nextItem(), nextItem()]; },
+  // test helper: lay out a donut and a queue; spin frozen unless speed is given
+  setup(o) { tops = (o.tops || []).map(([a, k]) => ({ a, k, id: nid++, wob: 0, born: 1, eat: 0 })); queue = o.queue.slice(); D.base = o.speed || 0; D.pat = "steady"; D.dir = 1; D.w = 0; D.rot = o.rot || 0; D.target = o.target || D.target; D.eaten = 0; fly = null; tongue = null; },
+});
+Lab.boot();
+})();
+</script></body></html>

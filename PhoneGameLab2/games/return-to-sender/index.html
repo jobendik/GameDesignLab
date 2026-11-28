@@ -1,0 +1,415 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Return to Sender</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* RETURN TO SENDER — moon jellies are drifting down onto Bun's garden, and Bolt has no blaster: only a tractor beam.
+ * Core idea kept: a descending invader formation that must be stopped before it lands, while you dodge its fire.
+ * The twist changes the verb: Bolt never shoots. HOLD to beam the lowest jelly above him down into his arms, slide to
+ * aim, LET GO to fling it back up. A thrown jelly that hits one of its own colour pops the whole touching same-colour
+ * patch (they all bounce home to the moon); a wrong colour only pops the one it hits. So every shot is ammo you choose:
+ * which colour to pull, which column to send it to, and how long to hold it while the goo drips.
+ * Matched throws in a row build a streak multiplier (x2..x5). Later waves add pot-helmet jellies (can't be beamed;
+ * knock the pot off first), rainbow jellies (wild ammo / bridge colours), fizzy jellies (pop a 3x3 burst), divers that
+ * peel off at Bolt (catch them in the beam!), a shooting-star saucer worth a heart, and every 5th wave Big Wobble,
+ * a mother jelly that refills the formation until she's hit enough times.
+ * Identity: a starry garden at night, glossy pastel jellies with belly symbols (not colour-only), Bolt's cyan beam,
+ * Bun peeking from the cabbages. Funk music that tightens as the formation sinks.                                   */
+let demo = false;
+Lab.init({
+  title: "Return to Sender", tagline: "No blaster, just a beam. Fling the jellies back where they came from!", category: "Arcade", kicker: "Pocket Pals",
+  howto: ["Hold to beam a jelly down to Bolt", "Slide and let go to fling it back up", "Same colour hit = the whole patch pops"],
+  theme: { bg: "#1b1f4b", bg2: "#3d3a7a", fg: "#fff6e8", muted: "#b9b6e6", accent: "#3ec5ff", accent2: "#ff8fc7" },
+  orient: "any", music: { style: "funk", key: "E", vol: .34 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const JC = [{ c: "#ff8fc7", s: "heart" }, { c: "#5fe0ae", s: "drop" }, { c: "#7cc4ff", s: "star" }, { c: "#ffd84d", s: "moon" }, { c: "#c4a3ff", s: "flower" }];
+const RAIN = 5;
+let S, cell, fw, fx0, fy0, ufoY, groundY, fenceY, bSize, bY, wide, hudY;
+let grid, gc, gr, form, tow, held, shots, divers, drips, ufo, boss, bolt, beam, pressing, aimX, queueThrow, keyWas,
+  wave, spec, hearts, score, streak, bestStreak, biggest, popped, phase, phaseT, clock, dripT, diveT, ufoT, bossT, spitT, told, bubble, clonkT, hum, dangerK;
+
+function humSet(o) { if (hum && !demo) hum.set(o); }
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function say(txt, dur) { if (!demo) bubble = { txt, t: 0, dur: dur || 2.6 }; }
+function once(id, txt, dur) { if (!told[id]) { told[id] = 1; say(txt, dur || 3.4); } }
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.2;
+  const cols = gc || (wide ? 9 : 7);
+  cell = Math.min((P.w - 16) / (cols + 1.8), P.h / 12.4); S = cell / 44;
+  fw = Math.min(P.w - 16, Math.max(cell * (cols + 1.8), wide ? P.w * .5 : 0)); fx0 = P.x + (P.w - fw) / 2;
+  hudY = P.y + 16 * Math.max(S, .75); ufoY = P.y + 30 * Math.max(S, .75) + cell * .45; fy0 = ufoY + cell * .55;
+  groundY = P.y + P.h - cell * .7; bSize = cell * 1.25; bY = groundY - bSize / 2; fenceY = groundY - bSize * 1.2;
+  Lab.sprite.clear("jel"); Lab.sprite.clear("beam");
+}
+Lab.onResize(() => { layout(); if (bolt) bolt.x = clamp(bolt.x, fx0 + cell * .5, fx0 + fw - cell * .5); });
+
+/* ---------- formation ---------- */
+const jx = c => fx0 + form.ox + (c + .5) * cell, jy = r => fy0 + form.oy + form.off + (r + .5) * cell * .9;
+function mkJ(k, type) { return { k, type: type || "n", helm: type === "helm", ph: rand(0, TAU), wob: 0, warn: 0 }; }
+function waveSpec(n) {
+  const b = n % 5 === 0;
+  return { boss: b, rows: b ? 2 : Math.min(5, 3 + Math.floor((n - 1) / 2)), cols: n <= 1 ? 2 : n <= 3 ? 3 : n <= 7 ? 4 : 5,
+    helm: n >= 3 ? Math.min(7, n - 1) : 0, rain: n >= 4 ? 1 + (n >= 8 ? 1 : 0) : 0, fizz: n >= 6 ? Math.min(3, n - 5) : 0,
+    speed: .5 + Math.min(n, 14) * .055, drip: n === 1 ? 3.4 : Math.max(.75, 2.7 - n * .17), dive: n >= 3 ? Math.max(3.2, 9 - n * .45) : 0, ufo: n >= 2 && !b };
+}
+function buildWave(n, rows) {
+  spec = waveSpec(n); gc = wide ? 9 : 7; layout(); gr = spec.rows;
+  grid = [];
+  for (let r = 0; r < gr; r++) { grid.push([]); for (let c = 0; c < gc; c++) {
+    let k = Lab.randInt(0, spec.cols - 1);
+    if (Lab.chance(Math.max(.3, .6 - n * .03))) { const nb = [r > 0 && grid[r - 1][c], c > 0 && grid[r][c - 1]].filter(Boolean); if (nb.length) k = Lab.choose(nb).k; }
+    grid[r].push(mkJ(k)); } }
+  if (rows) grid = rows.map(row => [...row].map(ch => ch === "." ? null : ch === "R" ? mkJ(RAIN, "rain") : ch === "H" ? mkJ(0, "helm") : ch === "F" ? mkJ(1, "fizz") : mkJ(+ch))), gr = grid.length, gc = grid[0].length;
+  else {
+    const spots = []; for (let r = 0; r < gr; r++) for (let c = 0; c < gc; c++) spots.push([r, c]); Lab.shuffle(spots);
+    const put = (m, type, minR) => { for (let i = 0; i < spots.length && m > 0; i++) { const [r, c] = spots[i]; if (r >= minR && grid[r][c].type === "n") { grid[r][c].type = type; if (type === "helm") grid[r][c].helm = true; if (type === "rain") grid[r][c].k = RAIN; m--; } } };
+    put(spec.helm, "helm", gr > 3 ? 1 : 0); put(spec.rain, "rain", 0); put(spec.fizz, "fizz", 0);
+  }
+  layout();
+  form = { ox: (fw - gc * cell) / 2, oy: -(fy0 - Lab.play.y + gr * cell + cell * (spec.boss ? 2 : 0)), drop: 0, dir: Lab.chance(.5) ? 1 : -1, off: spec.boss ? cell * 1.7 : 0 };
+  boss = spec.boss ? { x: fx0 + fw / 2, hp: 5 + (n / 5 - 1) * 3, max: 5 + (n / 5 - 1) * 3, dir: 1, sq: 0, hit: 0 } : null;
+  phase = "intro"; phaseT = 0; dripT = n === 1 ? 6 : 2.2; diveT = spec.dive || 99; ufoT = rand(9, 16); bossT = 3.5; spitT = 3;
+}
+function alive() { const a = []; for (let r = 0; r < gr; r++) for (let c = 0; c < gc; c++) if (grid[r][c]) a.push([r, c]); return a; }
+function frontline() { const out = []; for (let c = 0; c < gc; c++) for (let r = gr - 1; r >= 0; r--) if (grid[r][c]) { out.push([r, c]); break; } return out; }
+
+/* ---------- popping ---------- */
+function popAt(r, c, delay, k) {
+  const j = grid[r][c]; if (!j) return 0; grid[r][c] = null; popped++;
+  const x = jx(c), y = jy(r);
+  Lab.after(delay, () => {
+    const col = j.k === RAIN ? "#fff" : JC[j.k].c;
+    fx.burst(x, y, { n: 10, colors: [col, "#fff", col], speed: 160 * S, life: .5, size: 3.2 * S, gravity: 120 }); fx.burst(x, y, { n: 3, color: "#fff6c8", shape: "star", speed: 60 * S, life: 1, size: 6 * S, gravity: -160 });
+    fx.ring(x, y, { r0: 4, r1: cell * .7, color: col, life: .3, width: 3 });
+    if (!demo) Lab.audio.combo(k || 1);
+    if (j.type === "fizz") { const n = blast(r, c, .05); addScore(n * 15, x, y + cell * .4, "#ffd84d"); }
+  });
+  return 1;
+}
+function blast(r, c, delay) {
+  if (!demo) { Lab.after(delay, () => { snd("boom", { vol: .6, pitch: 1.3 }); Lab.shake(5, .2); }); }
+  let n = 0; for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) { const rr = r + dr, cc = c + dc; if (rr < 0 || cc < 0 || rr >= gr || cc >= gc || !grid[rr][cc]) continue;
+    if (grid[rr][cc].helm) { grid[rr][cc].helm = false; continue; } n += popAt(rr, cc, delay + .06, 3); }
+  return n;
+}
+function cluster(r, c, K) {
+  const seen = new Set([r * 64 + c]), out = [[r, c, 0]];
+  for (let i = 0; i < out.length; i++) { const [rr, cc, d] = out[i]; for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const r2 = rr + dr, c2 = cc + dc, key = r2 * 64 + c2;
+    if (r2 < 0 || c2 < 0 || r2 >= gr || c2 >= gc || seen.has(key)) continue; const j = grid[r2][c2]; if (!j || j.helm) continue;
+    if (j.k === K || j.k === RAIN) { seen.add(key); out.push([r2, c2, d + 1]); } } }
+  return out;
+}
+function addScore(n, x, y, col) { if (n <= 0) return; score += n; Lab.setScore(score); if (!demo) { Lab.bumpScore(); fx.text(x, y, "+" + n, { color: col || "#fff6e8", size: 17 * Math.max(S, .8) }); } }
+function hitJelly(r, c, sh) {
+  const j = grid[r][c], x = jx(c), y = jy(r);
+  if (j.helm) {
+    j.helm = false; j.wob = 1; snd("knock", { pitch: 1.2 }); fx.sparks(x, y - cell * .3, -Math.PI / 2, { n: 8, color: "#e6ecf5" });
+    fx.burst(x, y - cell * .35, { n: 5, color: "#b7c3d6", shape: "square", speed: 150 * S, life: .5, size: 3 * S, gravity: 400 });
+    addScore(5, x, y - cell * .4); once("helm", "Pot's off! Now I can beam it."); return;
+  }
+  if (sh.type === "fizz") { const n = blast(r, c, 0); addScore(15 * n * mult(), x, y, "#ffd84d"); streak++; bump(n); return; }
+  let K = j.k; if (K === RAIN) { K = sh.k === RAIN ? (frontNeighbourColour(r, c)) : sh.k; }
+  const match = sh.k === RAIN || j.k === RAIN || sh.k === j.k;
+  if (match) {
+    const cl = cluster(r, c, K); let n = 0;
+    cl.forEach(([rr, cc, d], i) => { n += popAt(rr, cc, d * .055, Math.min(14, i + 1)); });
+    streak++; const pts = 10 * n * (n + 1) / 2 * mult(); addScore(pts, x, y - cell * .5, JC[K] ? JC[K].c : "#fff");
+    if (n >= 3) { bolt.joy = 1.1; Lab.shake(2 + n * .4, .18); if (!demo) Lab.hitstop(.03); }
+    if (n >= 6) { say(Lab.choose(["Whoa! Bye-bye!", "Back to the moon!", "Jelly jackpot!"])); if (!demo) Lab.banner(n + " popped!", { color: "#3ec5ff", ms: 900, y: .5 }); }
+    if (streak >= 2) fx.text(sh.x, bY - bSize * .8, "x" + mult(), { color: "#3ec5ff", size: 20 * Math.max(S, .8) });
+    bump(n);
+  } else {
+    popAt(r, c, 0, 1); if (streak >= 2) say("Streak lost!"); streak = 0; addScore(10, x, y);
+    once("wrong", "Match the colour to pop more!");
+  }
+}
+function frontNeighbourColour(r, c) { for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) { const j = grid[r + dr] && grid[r + dr][c + dc]; if (j && j.k !== RAIN) return j.k; } return 0; }
+function mult() { return Math.min(5, 1 + Math.max(0, streak - 1)); }
+function bump(n) { biggest = Math.max(biggest, n); bestStreak = Math.max(bestStreak, streak); }
+
+/* ---------- run ---------- */
+function reset() {
+  wave = 1; hearts = 3; score = 0; streak = 0; bestStreak = 0; biggest = 0; popped = 0; clock = 0; told = {}; bubble = null; clonkT = 0; dangerK = 0;
+  tow = null; held = null; shots = []; divers = []; drips = []; ufo = null; pressing = false; queueThrow = false; keyWas = false; gc = 0;
+  layout(); bolt = { x: fx0 + fw / 2, sq: 0, joy: 0, hurt: 0, inv: 0, face: 1, vx: 0, wet: 0 }; aimX = bolt.x; beam = { on: 0, t: 0, ty: 0 };
+  buildWave(1);
+}
+function start() {
+  demo = false; reset(); Lab.setScore(0);
+  hum = Lab.audio.loop({ type: "sine", f: 280, vol: 0 });
+  Lab.input.onDown = [(x) => { pressing = true; aimX = x; }];
+  Lab.input.onMove = [(x) => { if (Lab.input.down) aimX = x; }];
+  Lab.input.onUp = [() => release()];
+  Lab.music.intensity(.2);
+  Lab.loop(frame);
+  Lab.after(.8, () => once("hi", "Hold under a jelly to beam it down!", 3.6));
+}
+function release() { if (!pressing) return; pressing = false; if (held) fling(); else if (tow) queueThrow = true; }
+function fling() {
+  if (!held) return;
+  shots.push({ x: held.x, y: held.y, k: held.k, type: held.type, vy: -cell * 24, t: 0 }); held = null; bolt.sq = -.22;
+  snd("whoosh", { pitch: 1.2 }); queueThrow = false; once("fling", "Same colour pops the whole patch!", 3);
+}
+function hurt(why) {
+  if (bolt.inv > 0 || phase === "over") return;
+  hearts--; bolt.hurt = 1; bolt.inv = 1.6; bolt.wet = 1; streak = 0; Lab.shake(8, .3); Lab.flash("#5fe0ae", .2, .3); Lab.buzz(60); snd("hurt");
+  fx.burst(bolt.x, bY - bSize * .3, { n: 14, color: "#7df0c0", speed: 200 * S, life: .6, size: 4 * S, gravity: 500 });
+  if (hearts <= 0) end("Bolt got gooped!", "Too much jelly goo. He needs a bath.");
+  else say(why || Lab.choose(["Ew, goo!", "Sticky!", "Bleh!"]));
+}
+function end(title, msg) {
+  if (phase === "over") return; phase = "over"; phaseT = 0; pressing = false; tow = null; held = null;
+  Lab.after(1.1, () => { Lab.gameover({ title, message: msg, score, stats: [["Waves cleared", wave - 1], ["Biggest pop", biggest], ["Best streak", "x" + Math.min(5, Math.max(1, bestStreak))]] }); });
+}
+function holdPos() { return [bolt.x, bY - bSize * 1.02 - cell * .32]; }
+
+function frame(dt, t) {
+  clock += dt; phaseT += dt;
+  update(dt, t); render(t);
+}
+function update(dt, t) {
+  const P = Lab.play, keys = Lab.input.keys;
+  if (bubble) { bubble.t += dt; if (bubble.t > bubble.dur) bubble = null; }
+  for (const k of ["joy", "hurt"]) bolt[k] = Math.max(0, bolt[k] - dt); bolt.inv = Math.max(0, bolt.inv - dt); bolt.wet = Math.max(0, bolt.wet - dt * .4); clonkT = Math.max(0, clonkT - dt);
+  bolt.sq = Lab.damp(bolt.sq, 0, 10, dt);
+  // keyboard
+  const kd = (keys.ArrowLeft || keys.a ? -1 : 0) + (keys.ArrowRight || keys.d ? 1 : 0), kh = !!(keys[" "] || keys.Space || keys.ArrowUp || keys.w);
+  if (kd) aimX = bolt.x + kd * cell * 2.2;
+  if (kh && !keyWas) { pressing = true; if (!kd) aimX = bolt.x; } if (!kh && keyWas) release(); keyWas = kh;
+  if (phase === "over") { form.oy += cell * 2 * dt; return; }
+  // Bolt movement
+  const ox = bolt.x; aimX = clamp(aimX, fx0 + cell * .45, fx0 + fw - cell * .45);
+  bolt.x = Lab.damp(bolt.x, aimX, 16, dt); bolt.vx = (bolt.x - ox) / Math.max(dt, 1e-4); if (Math.abs(bolt.vx) > 20) bolt.face = Math.sign(bolt.vx);
+  if (Math.abs(bolt.vx) > cell * 9 && Lab.chance(dt * 20)) fx.puff(bolt.x - Math.sign(bolt.vx) * bSize * .3, groundY - 2, { n: 2, color: "rgba(220,220,255,.5)", size: 4 * S });
+  // formation motion
+  if (phase === "intro") { form.oy = Lab.damp(form.oy, 0, 4, dt); if (phaseT > 1.1) { phase = "play"; phaseT = 0; form.oy = 0; } }
+  const live = alive(), total = gr * gc;
+  if (phase === "play" && live.length) {
+    let minC = gc, maxC = -1; for (const [, c] of live) { minC = Math.min(minC, c); maxC = Math.max(maxC, c); }
+    const sp = cell * spec.speed * (1 + 1.3 * (1 - live.length / total)) * (spec.boss ? .7 : 1);
+    form.ox += form.dir * sp * dt;
+    const L = -minC * cell, R = fw - (maxC + 1) * cell;
+    if (form.ox < L || form.ox > R) { form.ox = clamp(form.ox, L, R); form.dir *= -1; form.drop += cell * .3; }
+    const d = Math.min(form.drop, cell * 1.4 * dt); form.oy += d; form.drop -= d;
+    for (const [r, c] of live) if (jy(r) + cell * .38 >= fenceY) { end("They landed!", "The jellies plopped into Bun's cabbages."); return; }
+  }
+  let low = 0; for (const [r] of live) low = Math.max(low, jy(r)); dangerK = live.length ? clamp((low - fy0) / (fenceY - fy0), 0, 1) : 0;
+  Lab.music.intensity(.2 + dangerK * .7);
+  for (const [r, c] of live) { const j = grid[r][c]; j.wob = Lab.damp(j.wob, 0, 6, dt); if (j.warn > 0) { j.warn -= dt; if (j.warn <= 0) { drips.push({ x: jx(c), y: jy(r) + cell * .4, vx: 0, vy: cell * 2 }); snd("bubble", { pitch: .6, vol: .5 }); } } }
+  // enemy goo
+  if (phase === "play") {
+    dripT -= dt; if (dripT <= 0) { dripT = spec.drip * rand(.75, 1.25); const f = frontline().filter(([r, c]) => grid[r][c].warn <= 0); if (f.length) { const [r, c] = Lab.chance(.4) ? f.reduce((a, b) => Math.abs(jx(a[1]) - bolt.x) < Math.abs(jx(b[1]) - bolt.x) ? a : b) : Lab.choose(f); grid[r][c].warn = .75; } }
+    if (spec.dive) { diveT -= dt; if (diveT <= 0) { diveT = spec.dive * rand(.8, 1.2); const f = frontline().filter(([r, c]) => !grid[r][c].helm && grid[r][c].type !== "fizz"); if (f.length && divers.length < 2) { const [r, c] = Lab.choose(f), j = grid[r][c]; grid[r][c] = null; divers.push({ x: jx(c), y: jy(r), k: j.k, type: j.type, tx: bolt.x, t: 0, x0: jx(c) }); snd("swish", { pitch: .8 }); once("dive", "Incoming! Beam it to catch it!"); } } }
+    if (spec.ufo && !ufo) { ufoT -= dt; if (ufoT <= 0) { const d = Lab.chance(.5) ? 1 : -1; ufo = { x: d > 0 ? fx0 - cell : fx0 + fw + cell, dir: d, t: 0 }; snd("chime", { pitch: 1.5 }); } }
+    if (boss) {
+      boss.x += boss.dir * cell * 1.1 * dt; if (boss.x < fx0 + cell * 1.4 || boss.x > fx0 + fw - cell * 1.4) { boss.x = clamp(boss.x, fx0 + cell * 1.4, fx0 + fw - cell * 1.4); boss.dir *= -1; }
+      bossT -= dt; if (bossT <= 0) { bossT = 3.4; const empty = []; for (let c = 0; c < gc; c++) if (!grid[0][c]) empty.push(c); if (empty.length) { const c = Lab.choose(empty); grid[0][c] = mkJ(Lab.randInt(0, spec.cols - 1)); grid[0][c].wob = 1; boss.sq = .3; snd("boing", { pitch: .7 }); } }
+      spitT -= dt; if (spitT <= 0 && !boss.warn) { boss.warn = .8; } if (boss.warn) { boss.warn -= dt; if (boss.warn <= 0) { boss.warn = 0; spitT = 2.8; for (const a of [-.25, 0, .25]) drips.push({ x: boss.x, y: fy0 + cell * .6, vx: a * cell * 3, vy: cell * 3 }); snd("splash", { pitch: 1.4, vol: .6 }); } }
+      boss.sq = Lab.damp(boss.sq, 0, 8, dt); boss.hit = Math.max(0, boss.hit - dt);
+    }
+  }
+  if (ufo) { ufo.t += dt; ufo.x += ufo.dir * cell * 2.6 * dt; if (ufo.x < fx0 - cell * 1.5 || ufo.x > fx0 + fw + cell * 1.5) { ufo = null; ufoT = rand(15, 24); } }
+  // divers
+  for (let i = divers.length - 1; i >= 0; i--) { const d = divers[i]; d.t += dt; d.y += cell * (2.4 + wave * .08) * dt; d.x = lerp(d.x0, d.tx, clamp(d.t / 1.6, 0, 1)) + Math.sin(d.t * 5) * cell * .5;
+    if (Math.hypot(d.x - bolt.x, d.y - (bY - bSize * .1)) < bSize * .5 + cell * .3) { divers.splice(i, 1); splat(d.x, d.y, d.k); hurt("Oof! A diver!"); continue; }
+    if (d.y > groundY - cell * .2) { divers.splice(i, 1); splat(d.x, groundY - 4, d.k); } }
+  // drips
+  const hp = holdPos();
+  for (let i = drips.length - 1; i >= 0; i--) { const d = drips[i]; d.vy += cell * 6 * dt; d.x += d.vx * dt; d.y += d.vy * dt;
+    const carried = held || (tow && tow.u > .6 ? tow : null);
+    if (carried && Math.hypot(d.x - carried.x, d.y - carried.y) < cell * .45) { drips.splice(i, 1); splat(carried.x, carried.y, carried.k); held = null; tow = null; queueThrow = false; snd("splash", { vol: .7 }); say("My jelly! Splat."); continue; }
+    if (Math.abs(d.x - bolt.x) < bSize * .42 && d.y > bY - bSize * .55 && d.y < bY + bSize * .45) { drips.splice(i, 1); hurt(); continue; }
+    if (d.y > groundY) { drips.splice(i, 1); fx.burst(d.x, groundY - 2, { n: 6, color: "#7df0c0", speed: 90 * S, angle: -Math.PI / 2, spread: 1.6, life: .35, size: 3 * S, gravity: 500 }); } }
+  // beam
+  beam.on = pressing && !held && phase !== "over" ? Math.min(1, beam.on + dt * 10) : Math.max(0, beam.on - dt * 6); beam.t += dt;
+  beam.ty = groundY - 9999;
+  if (pressing && !held && !tow && Math.abs(bolt.x - aimX) < cell * .35) {
+    let best = null, by = -1e9;
+    for (const [r, c] of live) if (Math.abs(jx(c) - bolt.x) < cell * .48 && jy(r) > by) { by = jy(r); best = { r, c }; }
+    for (const d of divers) if (Math.abs(d.x - bolt.x) < cell * .65 && d.y > by) { by = d.y; best = { d }; }
+    if (best) beam.ty = by;
+    if (best && best.d) { divers.splice(divers.indexOf(best.d), 1); startTow(best.d.x, best.d.y, best.d.k, best.d.type); addScore(25, best.d.x, best.d.y, "#3ec5ff"); say("Nice catch!"); }
+    else if (best) { const j = grid[best.r][best.c];
+      if (j.helm) { j.pry = (j.pry || 0) + dt; // beam keeps tugging: the pot wiggles loose
+        if (clonkT <= 0) { clonkT = .3; j.wob = .6; snd("knock", { pitch: .8 + j.pry * .5, vol: .6 }); fx.sparks(jx(best.c), jy(best.r) - cell * .3, -Math.PI / 2, { n: 4, color: "#e6ecf5" }); once("clonk", "A pot! Keep tugging, or throw one at it."); }
+        if (j.pry >= 1) { j.helm = false; j.pry = 0; j.wob = 1; snd("pop", { pitch: .7 }); fx.burst(jx(best.c), jy(best.r) - cell * .4, { n: 6, color: "#b7c3d6", shape: "square", speed: 120 * S, life: .6, size: 3.5 * S, gravity: 500 }); } }
+      else if (phase !== "intro") { grid[best.r][best.c] = null; startTow(jx(best.c), jy(best.r), j.k, j.type); } }
+  } else if (tow) beam.ty = tow.y;
+  if (tow) { tow.u = Math.min(1, tow.u + dt / tow.dur); const e = ease.inQuad(tow.u); tow.x = lerp(tow.x0, hp[0], e); tow.y = lerp(tow.y0, hp[1], e);
+    humSet({ vol: .05, f: 260 + tow.u * 420 });
+    if (tow.u >= 1) { held = { x: hp[0], y: hp[1], k: tow.k, type: tow.type }; tow = null; snd("pickup", { pitch: .9 + (held.k === RAIN ? 5 : held.k) * .08 }); bolt.sq = .18; if (queueThrow || !pressing) fling(); } }
+  else humSet({ vol: .03 * beam.on, f: 240 + Math.sin(clock * 9) * 20 });
+  if (held) { held.x = hp[0]; held.y = hp[1]; }
+  // shots
+  for (let i = shots.length - 1; i >= 0; i--) {
+    const sh = shots[i]; let hit = false; const step = cell * .25, n = Math.ceil(Math.abs(sh.vy * dt) / step);
+    for (let s = 0; s < n && !hit; s++) {
+      sh.y += sh.vy * dt / n;
+      for (let k = drips.length - 1; k >= 0; k--) if (Math.hypot(drips[k].x - sh.x, drips[k].y - sh.y) < cell * .4) { fx.burst(drips[k].x, drips[k].y, { n: 5, color: "#7df0c0", speed: 80 * S, life: .3, size: 3 * S }); drips.splice(k, 1); }
+      if (boss && Math.hypot(sh.x - boss.x, sh.y - (fy0 + cell * .3)) < cell * 1.25) { hit = true; bossHit(sh); break; }
+      if (ufo && Math.hypot(sh.x - ufo.x, sh.y - ufoY) < cell * .7) { hit = true; ufoHit(); break; }
+      for (let r = gr - 1; r >= 0 && !hit; r--) for (let c = 0; c < gc; c++) if (grid[r][c] && Math.abs(jx(c) - sh.x) < cell * .5 && Math.abs(jy(r) - sh.y) < cell * .45) { hit = true; hitJelly(r, c, sh); break; }
+    }
+    if (hit) { shots.splice(i, 1); fx.burst(sh.x, sh.y, { n: 6, color: sh.k === RAIN ? "#fff" : JC[sh.k].c, speed: 120 * S, life: .35, size: 3 * S }); }
+    else if (sh.y < Lab.play.y - cell) { shots.splice(i, 1); if (streak >= 2) say("Missed! Streak lost."); streak = 0; snd("swish", { pitch: .6, vol: .5 }); }
+  }
+  // wave clear
+  if ((phase === "play" || phase === "intro") && !alive().length && !divers.length && !boss) clearWave();
+  if (phase === "clear" && phaseT > 2) { wave++; buildWave(wave); if (spec.boss) { Lab.banner("Big Wobble!", { color: "#ff8fc7", ms: 1500, y: .42 }); snd("warn"); say("That's a BIG one!"); } else Lab.banner("Wave " + wave, { color: "#3ec5ff", ms: 1100, y: .42 }); }
+}
+function startTow(x, y, k, type) { tow = { x0: x, y0: y, x, y, k, type, u: 0, dur: .2 + Math.abs(holdPos()[1] - y) / (cell * 30) }; snd("zap", { pitch: 1.6, vol: .4 }); }
+function splat(x, y, k) { fx.burst(x, y, { n: 12, colors: [k === RAIN ? "#fff" : JC[k].c, "#7df0c0"], speed: 170 * S, life: .5, size: 3.5 * S, gravity: 500 }); snd("splash", { pitch: 1.2, vol: .5 }); }
+function bossHit(sh) {
+  boss.hp--; boss.sq = .45; boss.hit = .25; snd("thud"); snd("boing", { pitch: .6 + (1 - boss.hp / boss.max) * .8 }); Lab.shake(4, .2); addScore(40 * wave / 5 | 0, boss.x, fy0, "#ff8fc7");
+  fx.burst(boss.x, fy0 + cell * .5, { n: 12, color: "#ffb3de", speed: 180 * S, life: .5, size: 4 * S });
+  if (boss.hp <= 0) { const bx = boss.x; boss = null; Lab.hitstop(.08); Lab.shake(10, .4); snd("explode", { pitch: 1.3 }); Lab.flash("#ffb3de", .25, .35);
+    fx.burst(bx, fy0, { n: 40, colors: ["#ff8fc7", "#fff", "#c4a3ff"], speed: 320 * S, life: .9, size: 5 * S, shape: "star" });
+    let n = 0, i = 0; for (const [r, c] of alive()) n += popAt(r, c, .25 + (i++) * .04, Math.min(14, i)); addScore(500 + n * 20, bx, fy0 + cell, "#ffd84d"); say("Bye, Big Wobble!"); }
+}
+function ufoHit() { const x = ufo.x; ufo = null; ufoT = rand(16, 26); snd("powerup"); fx.burst(x, ufoY, { n: 24, colors: ["#fff6c8", "#3ec5ff"], shape: "star", speed: 220 * S, life: .8, size: 5 * S });
+  addScore(150, x, ufoY + cell * .5, "#fff6c8"); if (hearts < 3) { hearts++; say("A heart! Thanks, shooting star!"); } else say("Shooting star!"); }
+function clearWave() {
+  if (demo) { buildWave(1); phase = "play"; form.oy = 0; return; }
+  phase = "clear"; phaseT = 0; streak = Math.max(streak, 0); const bonus = 50 * wave + hearts * 20; addScore(bonus, Lab.W / 2, Lab.H * .5, "#ffd84d");
+  for (const q of [held, tow]) if (q) { fx.burst(q.x, q.y, { n: 8, color: "#fff6c8", shape: "star", speed: 90 * S, gravity: -200, life: 1 }); addScore(20, q.x, q.y); }
+  held = null; tow = null; queueThrow = false; drips.length = 0; shots.length = 0; ufo = null;
+  Lab.banner("Wave " + wave + " sent home!", { color: "#ffd84d", ms: 1500, y: .32 }); snd("levelup"); bolt.joy = 2;
+}
+
+/* ---------- drawing ---------- */
+function jellySprite(k, m) {
+  const r = Math.round(cell * (m || 1));
+  return Lab.sprite("jel" + k + "_" + r, r * 1.1, r * 1.1, (g, w, h) => {
+    const cx = w / 2, cy = h / 2, R = r * .4, base = k === RAIN ? "#ffffff" : JC[k].c;
+    let fill = base; if (k === RAIN) { fill = g.createLinearGradient(cx - R, 0, cx + R, 0); ["#ff8fc7", "#ffd84d", "#5fe0ae", "#7cc4ff", "#c4a3ff"].forEach((cc, i) => fill.addColorStop(i / 4, cc)); }
+    g.beginPath(); g.moveTo(cx - R, cy + R * .45); g.bezierCurveTo(cx - R * 1.05, cy - R * 1.25, cx + R * 1.05, cy - R * 1.25, cx + R, cy + R * .45);
+    for (let i = 0; i < 4; i++) { const x1 = cx + R - (i + .5) * R / 2, x2 = cx + R - (i + 1) * R / 2; g.quadraticCurveTo(x1, cy + R * (i % 2 ? .55 : .95), x2, cy + R * .5); }
+    g.closePath(); g.globalAlpha = .92; g.fillStyle = fill; g.fill(); g.globalAlpha = 1;
+    g.strokeStyle = Lab.color.shade(k === RAIN ? "#c4a3ff" : base, -.28); g.lineWidth = Math.max(1.5, r * .05); g.stroke();
+    g.fillStyle = "rgba(255,255,255,.45)"; g.beginPath(); g.ellipse(cx - R * .38, cy - R * .5, R * .28, R * .17, -.6, 0, TAU); g.fill();
+    for (const d of [-1, 1]) { g.fillStyle = INK; g.beginPath(); g.ellipse(cx + d * R * .34, cy - R * .12, R * .11, R * .14, 0, 0, TAU); g.fill(); g.fillStyle = "#fff"; g.beginPath(); g.arc(cx + d * R * .34 - R * .03, cy - R * .17, R * .04, 0, TAU); g.fill(); }
+    g.strokeStyle = INK; g.lineWidth = Math.max(1, r * .035); g.beginPath(); g.arc(cx, cy + R * .02, R * .1, .2, Math.PI - .2); g.stroke();
+    // belly symbol (shape as well as colour)
+    g.fillStyle = "rgba(255,255,255,.8)"; const sx = cx, sy = cy + R * .32, q = R * .17, s = k === RAIN ? "star" : JC[k].s;
+    if (s === "heart") draw.heart(g, sx, sy, q * 1.1, "rgba(255,255,255,.8)");
+    else if (s === "drop") { g.beginPath(); g.moveTo(sx, sy - q); g.quadraticCurveTo(sx + q, sy + q * .2, sx, sy + q * .8); g.quadraticCurveTo(sx - q, sy + q * .2, sx, sy - q); g.fill(); }
+    else if (s === "star") draw.star(g, sx, sy, q, "rgba(255,255,255,.85)", 5, .45);
+    else if (s === "moon") { g.beginPath(); g.arc(sx, sy, q * .8, 0, TAU); g.fill(); g.globalCompositeOperation = "destination-out"; g.beginPath(); g.arc(sx + q * .4, sy - q * .25, q * .7, 0, TAU); g.fill(); g.globalCompositeOperation = "source-over"; }
+    else for (let i = 0; i < 5; i++) { g.beginPath(); g.arc(sx + Math.cos(i * TAU / 5) * q * .5, sy + Math.sin(i * TAU / 5) * q * .5, q * .36, 0, TAU); g.fill(); }
+  });
+}
+function drawJelly(c, x, y, k, o) {
+  o = o || {}; const sp = jellySprite(k), wob = (o.wob || 0) * Math.sin(clock * 30) * .12 + Math.sin(clock * 3 + (o.ph || 0)) * .035, sc = o.scale || 1;
+  c.save(); c.translate(x, y); c.scale(sc * (1 + wob + (o.sx || 0)), sc * (1 - wob - (o.sx || 0)));
+  if (o.alpha != null) c.globalAlpha = o.alpha;
+  c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h);
+  const R = cell * .4;
+  if (o.helm) { c.save(); c.rotate((o.pry || 0) * .5 * Math.sin(clock * 40)); c.translate(0, -(o.pry || 0) * R * .35); c.fillStyle = "#c9d3e2"; c.strokeStyle = "#7d8aa3"; c.lineWidth = 1.5; c.beginPath(); c.ellipse(0, -R * .72, R * .78, R * .5, 0, Math.PI, TAU); c.closePath(); c.fill(); c.stroke();
+    c.fillRect(-R * .9, -R * .78, R * 1.8, R * .16); c.strokeRect(-R * .9, -R * .78, R * 1.8, R * .16); c.fillStyle = "#7d8aa3"; c.fillRect(R * .85, -R * .76, R * .4, R * .1); c.fillStyle = "rgba(255,255,255,.6)"; c.fillRect(-R * .45, -R * 1.06, R * .2, R * .2); c.restore(); }
+  if (o.type === "fizz") { c.fillStyle = "rgba(255,255,255,.85)"; for (let i = 0; i < 4; i++) { const u = (clock * .9 + i * .25) % 1; c.beginPath(); c.arc(Math.sin(i * 2.1 + clock * 2) * R * .4, R * .3 - u * R * 1.1, R * (.05 + u * .07), 0, TAU); c.fill(); }
+    draw.star(c, 0, -R * 1.05, R * .22 * (1 + Math.sin(clock * 14) * .25), "#fff3a0", 5, .45); }
+  if (o.type === "rain") { c.globalAlpha *= .5 + .5 * Math.sin(clock * 6 + (o.ph || 0)); draw.star(c, R * .6, -R * .6, R * .18, "#fff", 4, .4); }
+  c.restore();
+}
+function drawBolt(c, t) {
+  const inv = bolt.inv > 0 && Math.floor(clock * 12) % 2 === 0 && phase !== "over";
+  const carry = held || tow, mood = phase === "over" ? "sad" : bolt.hurt > 0 ? "dizzy" : bolt.joy > 0 ? "joy" : tow ? "wow" : beam.on > .5 ? "think" : dangerK > .75 ? "scared" : "happy";
+  let look = [0, -1]; if (tow) look = [clamp((tow.x - bolt.x) / cell, -1, 1), -1]; else if (drips.length) { const d = drips.reduce((a, b) => b.y > a.y ? b : a); look = [clamp((d.x - bolt.x) / (cell * 2), -1, 1), -.6]; }
+  const lean = clamp(bolt.vx / (cell * 30), -.18, .18);
+  Pals.draw(c, "bolt", bolt.x, bY, bSize, { t, mood, look, squash: bolt.sq, tilt: lean, arms: carry ? "up" : bolt.joy > 0 ? "cheer" : beam.on > .5 ? "up" : "down", wet: bolt.wet, alpha: inv ? .45 : 1 });
+}
+function drawBeam(c) {
+  if (beam.on <= 0) return; const x = bolt.x, y0 = bY - bSize * .5 * 1.34, y1 = Math.max(Lab.play.y, beam.ty), w = cell * .7;
+  c.save(); c.globalAlpha = beam.on * (.55 + Math.sin(clock * 40) * .05);
+  const g = c.createLinearGradient(x - w / 2, 0, x + w / 2, 0); g.addColorStop(0, "rgba(62,197,255,0)"); g.addColorStop(.5, "rgba(140,225,255,.55)"); g.addColorStop(1, "rgba(62,197,255,0)");
+  c.fillStyle = g; c.beginPath(); c.moveTo(x - w * .12, y0); c.lineTo(x + w * .12, y0); c.lineTo(x + w / 2, y1); c.lineTo(x - w / 2, y1); c.closePath(); c.fill();
+  c.strokeStyle = "rgba(200,245,255,.7)"; c.lineWidth = 2;
+  for (let i = 0; i < 4; i++) { const u = 1 - ((clock * 1.8 + i / 4) % 1), yy = lerp(y0, y1, u), ww = lerp(w * .12, w / 2, u); c.beginPath(); c.ellipse(x, yy, ww, ww * .25, 0, 0, TAU); c.stroke(); }
+  c.restore();
+}
+function drawWorld(c, t) {
+  const W = Lab.W, H = Lab.H, sky = Lab.sprite("beamsky" + W + "x" + H + "_" + Math.round(groundY), W + 80, H + 80, (g) => {
+    g.translate(40, 40); const gr2 = g.createLinearGradient(0, 0, 0, H); gr2.addColorStop(0, "#151a42"); gr2.addColorStop(.6, "#2f2d6b"); gr2.addColorStop(1, "#4b3f86"); g.fillStyle = gr2; g.fillRect(-40, -40, W + 80, H + 80);
+    const rnd = Lab.rng(7); for (let i = 0; i < 90; i++) { g.globalAlpha = .25 + rnd() * .6; g.fillStyle = "#fff"; const x = rnd() * W, y = rnd() * groundY * .9, r = rnd() < .1 ? 1.6 : .9; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+    g.globalAlpha = 1; const mx = wide ? fx0 + fw + cell * 2.4 : fx0 + fw - cell * 1.1, my = wide ? Lab.play.y + Lab.play.h * .38 : lerp(fy0, fenceY, .62), mr = cell * (wide ? 1.1 : .7);
+    g.fillStyle = "rgba(255,246,200,.12)"; g.beginPath(); g.arc(mx, my, mr * 2, 0, TAU); g.fill(); g.fillStyle = "#fff3c4"; g.beginPath(); g.arc(mx, my, mr, 0, TAU); g.fill();
+    g.fillStyle = "rgba(200,190,150,.35)"; for (const [dx, dy, rr] of [[-.3, -.2, .22], [.25, .2, .16], [-.1, .4, .1]]) { g.beginPath(); g.arc(mx + dx * mr, my + dy * mr, rr * mr, 0, TAU); g.fill(); }
+    for (let l = 0; l < 2; l++) { g.fillStyle = l ? "#1f2750" : "#2e3a6b"; g.beginPath(); g.moveTo(-40, H + 40); const base = groundY - (1 - l) * cell * .9; for (let x = -40; x <= W + 40; x += 16) g.lineTo(x, base + Math.sin(x * (.012 + l * .006) + l * 2) * cell * (.35 - l * .15)); g.lineTo(W + 40, H + 40); g.closePath(); g.fill(); }
+  });
+  c.drawImage(sky, -40, -40, sky.w, sky.h);
+  // danger line: where the jellies would touch down
+  const a = .12 + dangerK * dangerK * .6; c.save(); c.globalAlpha = a; c.strokeStyle = dangerK > .7 ? "#ff8fa3" : "#cfd3ff"; c.lineWidth = 2; c.setLineDash([6, 8]); c.lineDashOffset = -clock * 20;
+  c.beginPath(); c.moveTo(fx0, fenceY); c.lineTo(fx0 + fw, fenceY); c.stroke(); c.restore();
+  // cabbage patch at the edges of the garden
+  for (let i = 0; i < 10; i++) { const x = fx0 + (i + .5) * fw / 10, y = groundY + cell * .28 + (i % 2) * 4; c.fillStyle = i % 3 ? "#4e9a5a" : "#5fb86b"; c.beginPath(); c.ellipse(x, y, cell * .3, cell * .17, 0, 0, TAU); c.fill(); c.fillStyle = "rgba(255,255,255,.15)"; c.beginPath(); c.ellipse(x - cell * .08, y - cell * .05, cell * .12, cell * .06, 0, 0, TAU); c.fill(); }
+  // Bun peeks from behind the cabbages, watching
+  const bx = wide ? fx0 - cell * 1.6 : fx0 + cell * .45, bs = cell * (wide ? 1.4 : .9), scared = dangerK > .7 || phase === "over";
+  Pals.draw(c, "bun", bx, groundY - bs * .2 + (scared ? Math.sin(clock * 30) : 0), bs, { t, mood: phase === "clear" ? "joy" : scared ? "scared" : "happy", look: [.6, -1], arms: phase === "clear" ? "cheer" : "down", clipY: bs * .2, shadow: false });
+  for (const [dx, rr, col] of [[-.45, .3, "#3f8a4e"], [.45, .3, "#3f8a4e"], [0, .36, "#4e9a5a"]]) { c.fillStyle = col; c.beginPath(); c.ellipse(bx + dx * bs, groundY + bs * .02, bs * rr, bs * .2, 0, 0, TAU); c.fill(); }
+}
+function render(t) {
+  const c = Lab.ctx; drawWorld(c, t);
+  // boss
+  if (boss) { const by = fy0 + cell * .3 + Math.sin(clock * 2) * 4, s = 1 + boss.sq, warn = boss.warn ? Math.sin(clock * 30) * .06 : 0;
+    c.save(); c.translate(boss.x, by); c.scale(s * (1 + warn), (2 - s) * (1 - warn)); const sp = jellySprite(0, 2.9); if (boss.hit) c.filter = "brightness(1.5)"; c.drawImage(sp, -sp.w / 2, -sp.h / 2, sp.w, sp.h); c.restore();
+    draw.star(c, boss.x, by - cell * 1.25, cell * .28, "#ffd84d", 5, .45);
+    for (let i = 0; i < boss.max; i++) draw.circle(c, boss.x + (i - (boss.max - 1) / 2) * cell * .28, by + cell * 1.3, cell * .09, i < boss.hp ? "#ff8fc7" : "rgba(255,255,255,.25)"); }
+  // formation
+  for (let r = 0; r < gr; r++) for (let c2 = 0; c2 < gc; c2++) { const j = grid[r][c2]; if (!j) continue; const x = jx(c2), y = jy(r);
+    if (j.warn > 0) { const u = 1 - j.warn / .75; draw.circle(c, x, y + cell * .4 + u * cell * .15, cell * (.04 + u * .08), "#7df0c0"); }
+    drawJelly(c, x, y, j.k, { wob: j.wob + (j.warn > 0 ? .4 : 0), ph: j.ph, helm: j.helm, pry: j.pry, type: j.type }); }
+  if (ufo) { const x = ufo.x, y = ufoY + Math.sin(ufo.t * 4) * 3; c.fillStyle = "rgba(255,246,200,.25)"; c.fillRect(x - ufo.dir * cell * 1.6, y - 2, ufo.dir * cell * 1.4, 4);
+    draw.circle(c, x, y - cell * .12, cell * .2, "rgba(180,235,255,.85)"); c.fillStyle = "#ffd23f"; c.beginPath(); c.ellipse(x, y, cell * .5, cell * .16, 0, 0, TAU); c.fill(); c.strokeStyle = "#e0a91a"; c.lineWidth = 2; c.stroke();
+    for (let i = -1; i <= 1; i++) draw.circle(c, x + i * cell * .25, y + cell * .02, cell * .045, Math.floor(ufo.t * 8 + i) % 2 ? "#ff8fc7" : "#fff"); }
+  for (const d of divers) drawJelly(c, d.x, d.y, d.k, { type: d.type, sx: -.12, ph: d.t });
+  for (const d of drips) { c.fillStyle = "#7df0c0"; c.beginPath(); c.moveTo(d.x, d.y - cell * .22); c.quadraticCurveTo(d.x + cell * .12, d.y, d.x, d.y + cell * .1); c.quadraticCurveTo(d.x - cell * .12, d.y, d.x, d.y - cell * .22); c.fill();
+    const k = clamp((d.y - fy0) / (groundY - fy0), 0, 1); c.fillStyle = "rgba(125,240,192," + (.15 + k * .35) + ")"; c.beginPath(); c.ellipse(d.x, groundY + 2, cell * .25 * k + 2, cell * .07 * k + 1, 0, 0, TAU); c.fill(); }
+  drawBeam(c);
+  for (const sh of shots) { c.fillStyle = "rgba(255,255,255,.18)"; c.fillRect(sh.x - cell * .12, sh.y + cell * .3, cell * .24, cell * .9); drawJelly(c, sh.x, sh.y, sh.k, { type: sh.type, sx: -.18 }); }
+  drawBolt(c, t);
+  if (tow) drawJelly(c, tow.x, tow.y, tow.k, { type: tow.type, sx: -.1 * Math.sin(tow.u * Math.PI), wob: .5 });
+  if (held) drawJelly(c, held.x, held.y, held.k, { type: held.type, wob: .15, scale: 1.05 });
+  drawHud(c);
+  if (bubble) drawBubble(c);
+}
+function drawHud(c) {
+  const fs = 15 * Math.max(S, .8), x0 = wide ? fx0 - cell * 2.6 : Lab.play.x + 14, x1 = wide ? fx0 + fw + cell * 2.6 : Lab.play.x + Lab.play.w - 14;
+  for (let i = 0; i < 3; i++) draw.heart(c, x0 + 8 + i * fs * 1.45, hudY, fs * .55, i < hearts ? "#ff6b8a" : "rgba(255,255,255,.22)");
+  draw.text(c, spec && spec.boss ? "Big Wobble" : "Wave " + wave, x1, hudY, { size: fs, color: "#fff6e8", align: "right", weight: 700 });
+  if (streak >= 2) draw.text(c, "streak x" + mult(), (x0 + x1) / 2, hudY, { size: fs, color: "#3ec5ff", weight: 700 });
+}
+function drawBubble(c) {
+  const k = ease.outBack(clamp(bubble.t / .2, 0, 1)) * clamp((bubble.dur - bubble.t) / .25, 0, 1); if (k <= 0) return;
+  const fs = 13.5 * Math.max(S, .85); c.font = Lab.font(fs, 700); const w = c.measureText(bubble.txt).width + 24, h = fs * 2.1;
+  const right = bolt.x < Lab.W / 2, x = clamp(bolt.x + (right ? 1 : -1) * (w / 2 + bSize * .25), w / 2 + 6, Lab.W - w / 2 - 6), y = bY - bSize * 1.55 - h / 2;
+  c.save(); c.translate(x, y + h / 2); c.scale(k, k); c.translate(-x, -(y + h / 2));
+  Pals.bubble(c, x, y, w, h, { tailX: bolt.x + (right ? 1 : -1) * bSize * .2, tailY: bY - bSize * .75 }); draw.text(c, bubble.txt, x, y + 1, { size: fs, color: INK, weight: 700 }); c.restore();
+}
+
+/* ---------- splash backdrop ---------- */
+let demoBoot = false;
+function attract(dt, t) {
+  if (!demoBoot) { demoBoot = true; demo = true; reset(); phase = "play"; form.oy = 0; spec.drip = 99; spec.dive = 0; spec.ufo = false; }
+  demo = true; clock += dt; const P = Lab.play;
+  if (!tow && !held && !shots.length) { const f = frontline(); if (f.length && Math.sin(t * .9) > .6) { const [r, c] = f[(Math.floor(t * .9 / TAU) * 3) % f.length]; aimX = jx(c); pressing = true; } }
+  if (held) { pressing = false; fling(); }
+  if (!alive().length) { buildWave(1); phase = "play"; form.oy = 0; spec.drip = 99; spec.dive = 0; spec.ufo = false; }
+  update(dt, t); render(t); demo = false;
+}
+
+Lab.expose({
+  get score() { return score; }, get hearts() { return hearts; }, get wave() { return wave; }, get phase() { return phase; }, get streak() { return streak; },
+  get cols() { return gc; }, get rows() { return gr; }, get held() { return held && { k: held.k, type: held.type }; }, get towing() { return !!tow; },
+  get shots() { return shots.length; }, get boltX() { return bolt.x; }, get count() { return alive().length; }, get drips() { return drips.length; }, get boss() { return boss && { hp: boss.hp }; },
+  grid() { return grid.map(row => row.map(j => j ? (j.helm ? "H" : j.k === RAIN ? "R" : String(j.k)) : ".")); },
+  colX(c) { return jx(c); }, get groundY() { return groundY; }, get fenceY() { return fenceY; }, get bY() { return bY; },
+  setWave(n, rows) { wave = n; buildWave(n, rows); form.oy = 0; phase = "play"; phaseT = 0; dripT = 99; diveT = 99; ufoT = 99; drips.length = 0; divers.length = 0; tow = null; held = null; shots.length = 0; },
+  calm() { dripT = 1e9; diveT = 1e9; ufoT = 1e9; if (boss) { bossT = 1e9; spitT = 1e9; } },
+  sink(dy) { form.oy += dy; }, drip(x) { drips.push({ x: x == null ? bolt.x : x, y: bY - bSize * 2.5, vx: 0, vy: cell * 4 }); },
+});
+Lab.boot();
+})();
+</script></body></html>

@@ -104,7 +104,8 @@ module.exports = {
     s = await st(); if (s.mode === 'play' && !s.tilted) {
       const swipe = async () => { await page.mouse.move(vp.width * .3, vp.height * .7); await page.mouse.down(); await page.mouse.move(vp.width * .3, vp.height * .7 - 80, { steps: 3 }); await page.mouse.up(); };
       await swipe(); s = await st(); expect(s.tiltM > .9, 'swipe up nudges (tilt meter ' + s.tiltM.toFixed(2) + ')');
-      for (let i = 0; i < 4; i++) { await page.locator('#bNudge').click(); }
+      expect(!(await page.locator('#bNudge').isVisible()), 'portrait uses swipe-up, no NUDGE button over the table');
+      for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowUp');
       s = await st(); expect(s.tilted && s.dmd.includes('T I L T'), 'repeated nudges TILT the table');
       await page.evaluate(() => window.__gdl.flip(0, true)); await adv(.1); s = await st(); expect(Math.abs(s.flips[0].a - s.flips[0].rest) < 1e-6, 'flippers are dead while tilted'); await page.evaluate(() => window.__gdl.flip(0, false));
     }

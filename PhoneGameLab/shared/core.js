@@ -315,7 +315,7 @@
     intensity(v) { music.level = Lab.clamp(v, 0, 1); },
     duck(v) { music._duck = v; if (musicBus && ac) musicBus.gain.setTargetAtTime(audioPrefs.music ? music.vol * v : 0, ac.currentTime, .15); },
     tick() {
-      if (!ac || !music.cfg || !audioPrefs.music || doc.hidden) { if (ac) music.next = Math.max(music.next, ac.currentTime + .05); return; }
+      if (!ac || !music.cfg || doc.hidden) { /* muted music keeps stepping silently (musicBus gain is 0) so onBeat still fires */ if (ac) music.next = Math.max(music.next, ac.currentTime + .05); return; }
       const st = music.st, spb = 60 / music.bpm / 4; let guard = 0;
       while (music.next < ac.currentTime + .14 && guard++ < 8) {
         const s = music.step, bar = Math.floor(s / 16) % st.prog.length, i16 = s % 16, lv = music.level;

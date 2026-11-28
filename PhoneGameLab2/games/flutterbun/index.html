@@ -1,0 +1,201 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Flutterbun</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* FLUTTERBUN — Bun's beanstalk grew to the sky overnight. Bun stitched a pair of petal wings and flutters up it.
+ * Core idea kept: tap to flap, thread the gaps, one bonk and you're down.
+ * The twist (vs. one-button flappers like Jelly Drift / Fizzwhiz): it is a VERTICAL climb and you have TWO WINGS.
+ *   Tap the left half = flap the left way (up-left), the right half = up-right, both halves together = a straight
+ *   strong boost. Steering is the game: every leaf shelf has its gap somewhere else.
+ * Score: 10 per shelf, +5 for a "Clean!" pass through the middle (a clean streak lifts the chime), carrots +5.
+ * Height zones add new trouble: Garden (still shelves) → Beanstalk (sliding gaps, bumblebees) → Cloudland (wind gusts)
+ * → Starry Night (swinging star mobiles, narrow gaps). A rare dandelion puff saves one bonk.
+ * Identity: morning garden to night sky, chunky leaf shelves, petal wings, soft bouncy music. */
+let demo = false;
+Lab.init({
+  title: "Flutterbun", tagline: "Flap left, flap right. Flutter Bun up the giant beanstalk.", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Tap left or right to flap that way", "Tap both sides for a big straight boost", "Thread the gaps. Don't bonk!"],
+  theme: { bg: "#7cc6ef", bg2: "#e9f8ff", fg: "#2b2340", muted: "#4a5a7a", accent: "#b9a3ff", accent2: "#ff8fb8", light: true },
+  orient: "portrait", music: { style: "bounce", key: "G", vol: .38 }, restart: start,
+  attract(dt, t) { if (!bun) { demo = true; setup(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink, mix = Lab.color.mix;
+const UW = 390, R = 14, G = 1150, FLAP = 430, SIDE = 165, TH = 26;
+const ZONES = [
+  { n: "Garden", at: 0, sky: ["#8fd3ff", "#e3f6ff"], shelf: "leaf", fg: "#2b2340", light: true },
+  { n: "Beanstalk", at: 12, sky: ["#7fd6c8", "#f1ffe0"], shelf: "leaf", fg: "#2b2340", light: true },
+  { n: "Cloudland", at: 30, sky: ["#ffb8a0", "#ffe7c4"], shelf: "cloud", fg: "#3b2340", light: true },
+  { n: "Starry Night", at: 50, sky: ["#1b1f4b", "#4a3f8a"], shelf: "branch", fg: "#f4f1ff", light: false },
+];
+let cleanN = 0, W, H, S, bun, shelves, bees, mobiles, winds, items, camY, score, passed, clean, bestClean, carrots, n, started, clock, lastSide, zone, zoneMix, stars, clouds, shield, overT;
+
+function snd(nm, o) { if (!demo) Lab.sfx(nm, o); }
+function layout() { W = Lab.W; H = Lab.H; S = W / UW; Lab.sprite.clear("fb-"); }
+Lab.onResize(layout);
+const viewH = () => H / S;
+const sy = y => (y - camY) * S;
+const zoneAt = k => { let z = 0; for (let i = 0; i < ZONES.length; i++) if (k >= ZONES[i].at) z = i; return z; };
+
+/* ---------- world ---------- */
+function setup() {
+  layout(); bun = { x: UW / 2, y: 0, vx: 0, vy: 0, sq: 0, wl: 0, wr: 0, tilt: 0, dead: false, hurt: 0, joy: 0 };
+  shelves = []; bees = []; mobiles = []; winds = []; items = []; n = 0; camY = -viewH() * .66; score = 0; passed = 0; clean = 0; cleanN = 0; bestClean = 0; carrots = 0;
+  started = false; clock = 0; lastSide = { s: 0, t: -9 }; zone = 0; zoneMix = 0; shield = false; overT = 0;
+  stars = Array.from({ length: 40 }, () => ({ x: Lab.rand(0, UW), y: Lab.rand(0, 1), r: Lab.rand(.6, 1.8) }));
+  clouds = Array.from({ length: 6 }, (_, i) => ({ x: Lab.rand(0, UW), y: i / 6, w: Lab.rand(60, 120) }));
+  while (shelves.length < 6) addShelf();
+}
+function addShelf() {
+  const prev = shelves[shelves.length - 1], k = n++, z = zoneAt(k);
+  const gap = k < 3 ? 210 : lerp(176, 104, Math.min(1, k / 70)), space = lerp(265, 205, Math.min(1, k / 60));
+  const y = prev ? prev.y - space : -270, px = prev ? prev.gx : UW / 2;
+  const gx = k === 0 ? UW / 2 : clamp(px + Lab.rand(-1, 1) * Math.min(150, 50 + k * 5), gap / 2 + 18, UW - gap / 2 - 18);
+  const s = { y, gx, bx: gx, gw: gap, amp: 0, spd: 0, ph: Lab.rand(0, TAU), kind: ZONES[z].shelf, k, passed: false, crossX: null };
+  if (k >= 12 && Lab.chance(.45)) { s.amp = Math.min(Lab.rand(30, 60), gx - gap / 2 - 14, UW - gx - gap / 2 - 14); s.spd = Lab.rand(.8, 1.4); }
+  shelves.push(s);
+  const mid = y + space * .5;
+  if (k >= 20 && Lab.chance(.38)) bees.push({ x: Lab.chance(.5) ? 30 : UW - 30, y: mid + Lab.rand(-20, 20), vx: Lab.choose([-1, 1]) * Lab.rand(70, 110 + k), ph: Lab.rand(0, TAU) });
+  else if (k >= 32 && Lab.chance(.4)) winds.push({ y0: mid - space * .35, y1: mid + space * .35, f: Lab.choose([-1, 1]) * Lab.rand(260, 380) });
+  if (k >= 48 && Lab.chance(.4)) mobiles.push({ ax: clamp(s.gx + Lab.choose([-1, 1]) * s.gw * .3, 30, UW - 30), ay: y + TH / 2, L: Lab.rand(55, 80), A: Lab.rand(.6, .9), w: Lab.rand(1.6, 2.4), ph: Lab.rand(0, TAU), shelf: s });
+  if (k % 14 === 9) items.push({ kind: "puff", x: clamp(gx + Lab.choose([-1, 1]) * Lab.rand(110, 150), 30, UW - 30), y: mid, got: false });
+  else if (k > 0 && Lab.chance(.6)) items.push({ kind: "carrot", x: gx, y: y + space * .42, got: false, s });
+}
+function start() {
+  demo = false; setup(); Lab.setScore(0); Lab.setTheme({ fg: ZONES[0].fg, light: true });
+  Lab.input.onDown = [(x) => flap(x < W / 2 ? -1 : 1)];
+  Lab.input.onKey = [k => { if (k === "ArrowLeft" || k === "a" || k === "A") flap(-1); else if (k === "ArrowRight" || k === "d" || k === "D") flap(1); else if (k === " " || k === "ArrowUp" || k === "w" || k === "W") flap(0); }];
+  Lab.expose({
+    get score() { return score; }, get passed() { return passed; }, get clean() { return clean; }, get cleanN() { return cleanN; }, get lastFlap() { return lastSide.both ? "both" : lastSide.s < 0 ? "left" : "right"; }, get carrots() { return carrots; }, get started() { return started; }, get shield() { return shield; }, set shield(v) { shield = v; },
+    get bun() { return { x: bun.x, y: bun.y, vx: bun.vx, vy: bun.vy, dead: bun.dead }; }, get zone() { return zone; },
+    next() { const s = shelves.find(o => !o.passed); return s && { y: s.y, gx: s.gx, gw: s.gw, k: s.k }; }, flap,
+    toScreen: (x, y) => [x * S, sy(y)], clearHazards() { bees = []; mobiles = []; winds = []; }, sampleHazards() { const s = shelves.find(o => !o.passed); bees.push({ x: 60, y: bun.y - 90, vx: 90, ph: 0 }); winds.push({ y0: s.y + 20, y1: s.y + 110, f: 300 }); mobiles.push({ ax: s.gx + s.gw * .3, ay: s.y + TH / 2, L: 60, A: .8, w: 2, ph: 0, shelf: s }); }, skip(k) { while (n < k + 6) addShelf(); passed = k - 1; started = true; shelves = shelves.filter(s => s.k >= k - 1); const s = shelves[0]; s.passed = true; bun.y = s.y - 60; bun.x = shelves[1].gx; camY = bun.y - viewH() * .62; bees = []; mobiles = []; winds = []; items = []; },
+  });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+function flap(side) {
+  if (bun.dead || Lab.paused) return false;
+  if (!started) { started = true; snd("jump"); }
+  const both = side === 0 || (lastSide.s === -side && clock - lastSide.t < .2);
+  if (both) { bun.vx *= .3; bun.vy = -FLAP * 1.12; bun.wl = bun.wr = 1; snd("flip", { pitch: 1.15 }); snd("whoosh", { pitch: 1.3, vol: .5 }); }
+  else { bun.vy = Math.min(bun.vy, 0) * .2 - FLAP; bun.vx = clamp(bun.vx * .5 + side * SIDE, -270, 270); if (side < 0) bun.wl = 1; else bun.wr = 1; snd("flip", { pitch: side < 0 ? .85 : 1.05 }); }
+  lastSide = { s: side, t: clock, both }; bun.sq = -.22; Lab.buzz(5);
+  fx.burst(bun.x * S - side * 14 * S, sy(bun.y) + 10 * S, { n: 3, colors: ["#ffd6ea", "#fff3b0"], speed: 60, life: .45, size: 3 * S, gravity: 120, shape: "circle" });
+  return true;
+}
+
+/* ---------- update ---------- */
+function tick(dt) {
+  if (!bun) return; clock += dt;
+  if (demo) autopilot();
+  if (started && !bun.dead) {
+    bun.vy = Math.min(bun.vy + G * dt, 620); bun.vx *= Math.exp(-1.6 * dt);
+    for (const w of winds) if (bun.y > w.y0 && bun.y < w.y1) bun.vx += w.f * dt;
+    bun.x += bun.vx * dt; bun.y += bun.vy * dt;
+    if (bun.x < R + 4) { bun.x = R + 4; bun.vx = Math.abs(bun.vx) * .5; } if (bun.x > UW - R - 4) { bun.x = UW - R - 4; bun.vx = -Math.abs(bun.vx) * .5; }
+  } else if (!started) bun.y = Math.sin(clock * 3) * 4;
+  bun.sq = Lab.damp(bun.sq, 0, 8, dt); bun.wl = Math.max(0, bun.wl - dt * 4); bun.wr = Math.max(0, bun.wr - dt * 4); bun.tilt = Lab.damp(bun.tilt, clamp(bun.vx / 700, -.35, .35), 8, dt); bun.hurt = Math.max(0, bun.hurt - dt); bun.joy = Math.max(0, bun.joy - dt);
+  if (bun.dead) { overT += dt; bun.vy += G * dt; bun.y += bun.vy * dt; bun.x += bun.vx * dt; bun.tilt += dt * 8; return; }
+  camY = Math.min(camY, bun.y - viewH() * .62);
+  for (const s of shelves) {
+    s.gx = s.bx + (s.amp ? Math.sin(clock * s.spd + s.ph) * s.amp : 0);
+    if (!s.passed && s.crossX == null && bun.y < s.y) s.crossX = bun.x;
+    if (!s.passed && bun.y < s.y - TH / 2 - R) passShelf(s);
+    if (Math.abs(bun.y - s.y) < TH / 2 + R && hitShelf(s)) { bonk("shelf"); if (bun.dead) return; }
+  }
+  for (const b of bees) { b.x += b.vx * dt; b.ph += dt * 20; if (b.x < 20 || b.x > UW - 20) b.vx = -b.vx; if (Math.hypot(b.x - bun.x, b.y - bun.y) < R + 10) { bonk("bee"); if (bun.dead) return; } }
+  for (const m of mobiles) { const th = m.A * Math.sin(clock * m.w + m.ph); m.sx = m.ax + Math.sin(th) * m.L; m.sy = m.ay + Math.cos(th) * m.L; if (Math.hypot(m.sx - bun.x, m.sy - bun.y) < R + 12) { bonk("star"); if (bun.dead) return; } }
+  for (const it of items) if (!it.got && Math.hypot(it.x - bun.x, it.y - bun.y) < R + 16) {
+    it.got = true;
+    if (it.kind === "carrot") { carrots++; addScore(5); snd("coin", { pitch: 1.2 }); fx.text(it.x * S, sy(it.y) - 14 * S, "+5", { color: "#ff9f43", size: 15 * S }); }
+    else { shield = true; snd("powerup"); if (!demo) Lab.toast("Dandelion puff — saves one bonk!", 1800, { y: .7 }); }
+    fx.burst(it.x * S, sy(it.y), { n: 10, colors: it.kind === "carrot" ? ["#ff9f43", "#7cc95a"] : ["#ffffff", "#fff3b0"], speed: 140, life: .5, size: 3 * S });
+  }
+  if (sy(bun.y) > H + 40 && started) { if (demo) { setup(); return; } fall(); return; }
+  // housekeeping: generate ahead, drop below
+  while (shelves[shelves.length - 1].y > camY - 320) addShelf();
+  const lim = camY + viewH() + 120; shelves = shelves.filter(s => s.y < lim); bees = bees.filter(b => b.y < lim); mobiles = mobiles.filter(m => m.ay < lim); winds = winds.filter(w => w.y0 < lim); items = items.filter(i => i.y < lim);
+  const z = zoneAt(Math.max(0, passed)); if (z !== zone) { zone = z; if (!demo) { Lab.banner(ZONES[z].n, { color: ZONES[z].light ? "#fffdf4" : "#fff3b0", ms: 1200, y: .3 }); snd("levelup"); Lab.setTheme({ fg: ZONES[z].fg, light: ZONES[z].light }); } }
+  zoneMix = Lab.damp(zoneMix, zone, 1.2, dt);
+  if (!demo) Lab.music.intensity(clamp(.2 + passed / 70, 0, 1));
+}
+function hitShelf(s) {
+  const l = s.gx - s.gw / 2, r = s.gx + s.gw / 2;
+  for (const [x0, x1] of [[-50, l], [r, UW + 50]]) { const cx = clamp(bun.x, x0, x1), cy = clamp(bun.y, s.y - TH / 2, s.y + TH / 2); if (Math.hypot(bun.x - cx, bun.y - cy) < R) return true; }
+  return false;
+}
+function passShelf(s) {
+  s.passed = true; passed++; const c = s.crossX != null && Math.abs(s.crossX - s.gx) < s.gw * .2;
+  if (c) { clean++; cleanN++; bestClean = Math.max(bestClean, clean); } else clean = 0;
+  addScore(10 + (c ? 5 : 0)); bun.joy = .4;
+  snd("pop", { pitch: 1 + Math.min(clean, 10) * .06 }); if (c && !demo) { Lab.audio.combo(Math.min(clean, 12)); fx.text(s.gx * S, sy(s.y) - 22 * S, clean > 2 ? "Clean ×" + clean : "Clean!", { color: "#fff3a0", size: 15 * S }); }
+}
+function addScore(v) { if (demo) return; score += v; Lab.setScore(score); Lab.bumpScore(); }
+function bonk(what) {
+  if (shield) { shield = false; bun.vy = -FLAP * .9; bun.vx = -bun.vx; bun.hurt = .4; snd("pop", { pitch: .7 }); snd("boing"); Lab.shake(4, .2); fx.burst(bun.x * S, sy(bun.y), { n: 18, color: "#ffffff", speed: 200, life: .7, size: 3 * S }); if (!demo) fx.text(bun.x * S, sy(bun.y) - 30 * S, "Poof! Saved", { color: "#fff", size: 15 * S }); return; }
+  if (demo) { setup(); return; }
+  bun.dead = true; bun.vy = -260; bun.vx = (bun.x < UW / 2 ? 1 : -1) * 90; snd("boing"); snd("hurt"); Lab.shake(8, .35); Lab.hitstop(.1); Lab.buzz(50);
+  end(what === "bee" ? "Oops! Buzzed by a bee" : what === "star" ? "Oops! Bonked by a star" : "Oops! Bun bonked a leaf");
+}
+function fall() { bun.dead = true; snd("whoosh", { pitch: .6 }); end("Oops! Bun fluttered down"); }
+function end(title) {
+  Lab.music.intensity(0);
+  Lab.gameover({ title, message: "Height reached: " + Math.round(-bun.y / 10) + " m", score, stats: [["Shelves", passed], ["Best clean streak", bestClean], ["Carrots", carrots]] });
+}
+function autopilot() {
+  const s = shelves.find(o => !o.passed); if (!s || !started) { if (clock > .8) flap(0); return; }
+  const tx = s.gx, below = bun.y - s.y;
+  if (bun.vy > -60 && (below > 70 || Math.abs(bun.x - tx) < s.gw * .25)) flap(Math.abs(bun.x - tx) < 18 ? 0 : Math.sign(tx - bun.x));
+}
+
+/* ---------- drawing ---------- */
+function sky(c) {
+  const z = zoneMix, i = Math.min(ZONES.length - 2, Math.floor(z)), f = z - i, A = ZONES[i].sky, B = ZONES[i + 1].sky;
+  draw.vgrad(c, -40, -40, W + 80, H + 80, [mix(A[0], B[0], f), mix(A[1], B[1], f)]);
+  const night = clamp(z - 2, 0, 1);
+  if (night > 0) for (const s of stars) { c.globalAlpha = night * (.5 + .5 * Math.sin(clock * 2 + s.x)); draw.circle(c, s.x * S, ((s.y * H - camY * S * .05) % H + H) % H, s.r * S, "#fffbe0"); } c.globalAlpha = 1;
+  for (const cl of clouds) { const y = ((cl.y * (H + 120) - camY * S * .25) % (H + 120) + H + 120) % (H + 120) - 60; c.fillStyle = night > .5 ? "rgba(200,205,255,.18)" : "rgba(255,255,255,.75)"; for (let k = 0; k < 3; k++) { c.beginPath(); c.ellipse((cl.x + k * cl.w * .3) * S, y - (k % 2) * 8 * S, cl.w * .35 * S, cl.w * .2 * S, 0, 0, TAU); c.fill(); } }
+  // the beanstalk itself, far behind
+  c.strokeStyle = night > .5 ? "rgba(60,110,90,.5)" : "rgba(80,160,90,.45)"; c.lineWidth = 34 * S; c.lineCap = "round"; c.beginPath();
+  for (let y = -60; y <= H + 60; y += 20) { const wy = y / S + camY * .6; const x = (UW / 2 + Math.sin(wy * .006) * 70) * S; y === -60 ? c.moveTo(x, y) : c.lineTo(x, y); } c.stroke();
+  c.fillStyle = c.strokeStyle; const off = ((camY * .6 * S) % (110 * S) + 110 * S) % (110 * S);
+  for (let y = -off - 110 * S; y < H + 110 * S; y += 110 * S) { const wy = y / S + camY * .6, x = (UW / 2 + Math.sin(wy * .006) * 70) * S, d = Math.round(wy / 110) % 2 ? 1 : -1; c.beginPath(); c.ellipse(x + d * 30 * S, y, 26 * S, 11 * S, d * -.5, 0, TAU); c.fill(); }
+  // the garden ground at the start
+  const gy = sy(R + 30); if (gy < H + 40) { c.fillStyle = "#8ed081"; c.fillRect(-40, gy, W + 80, H); c.fillStyle = "#5fb86b"; c.beginPath(); c.ellipse(W * .2, gy + 6, W * .45, 30 * S, 0, Math.PI, TAU); c.fill(); draw.rect(c, W / 2 - 26 * S, gy - 22 * S, 52 * S, 34 * S, 8 * S, "#e0895a"); draw.rect(c, W / 2 - 30 * S, gy - 26 * S, 60 * S, 10 * S, 5 * S, "#c86d42"); }
+}
+function shelf(c, s) {
+  const y = sy(s.y), l = (s.gx - s.gw / 2) * S, r = (s.gx + s.gw / 2) * S, h = TH * S;
+  const segs = [[-40, l], [r, W + 40]];
+  if (s.kind === "cloud") { for (const [a, b] of segs) { c.fillStyle = "rgba(255,255,255,.96)"; draw.rr(c, a, y - h / 2, b - a, h, h / 2); c.fill(); for (let x = a + 12 * S; x < b - 6 * S; x += 22 * S) draw.circle(c, x, y - h * .35, h * .5, "#ffffff"); c.fillStyle = "rgba(160,170,220,.35)"; c.fillRect(a, y + h * .2, b - a, h * .3); } }
+  else {
+    const night = s.kind === "branch", base = night ? "#5b4a7a" : "#4f9e53", leaf = night ? "#8a76c0" : "#7cc95a";
+    for (const [a, b] of segs) { draw.rect(c, a, y - h * .28, b - a, h * .56, h * .28, base); for (let x = a + 14 * S; x < b - 4 * S; x += 30 * S) { c.fillStyle = leaf; c.beginPath(); c.ellipse(x, y - h * .18, 16 * S, 9 * S, -.4, 0, TAU); c.fill(); c.fillStyle = "rgba(255,255,255,.25)"; c.beginPath(); c.ellipse(x - 3 * S, y - h * .26, 8 * S, 3 * S, -.4, 0, TAU); c.fill(); if (night && (x / S | 0) % 3 === 0) draw.circle(c, x, y + h * .3, 2.5 * S, "#fff3a0"); } }
+    for (const [x, d] of [[l, 1], [r, -1]]) { c.strokeStyle = base; c.lineWidth = 4 * S; c.beginPath(); c.arc(x - d * 4 * S, y - 6 * S, 7 * S, d > 0 ? -1 : Math.PI - 2, d > 0 ? 2 : Math.PI + 1); c.stroke(); }
+  }
+}
+function render(t) {
+  const c = Lab.ctx; if (!bun) return; sky(c);
+  for (const w of winds) { const y0 = sy(w.y0), y1 = sy(w.y1); if (y1 < -20 || y0 > H + 20) continue; c.fillStyle = "rgba(255,255,255,.12)"; c.fillRect(-40, y0, W + 80, y1 - y0); c.strokeStyle = "rgba(255,255,255,.6)"; c.lineWidth = 2 * S; for (let i = 0; i < 6; i++) { const yy = y0 + (i + .5) / 6 * (y1 - y0), x = ((clock * w.f * .6 + i * 97) % (UW + 80) + UW + 80) % (UW + 80) - 40; c.beginPath(); c.moveTo(x * S, yy); c.lineTo((x - Math.sign(w.f) * 26) * S, yy); c.stroke(); c.beginPath(); c.moveTo(x * S, yy); c.lineTo((x - Math.sign(w.f) * 7) * S, yy - 5 * S); c.moveTo(x * S, yy); c.lineTo((x - Math.sign(w.f) * 7) * S, yy + 5 * S); c.stroke(); } }
+  for (const s of shelves) if (sy(s.y) > -40 && sy(s.y) < H + 40) shelf(c, s);
+  for (const it of items) if (!it.got) { const x = it.x * S, y = sy(it.y) + Math.sin(clock * 3 + it.x) * 3 * S;
+    if (it.kind === "carrot") { c.fillStyle = "#ff9f43"; c.beginPath(); c.moveTo(x - 7 * S, y - 8 * S); c.lineTo(x + 7 * S, y - 8 * S); c.lineTo(x, y + 12 * S); c.fill(); c.fillStyle = "#6cc04a"; for (const d of [-1, 0, 1]) { c.beginPath(); c.ellipse(x + d * 4 * S, y - 12 * S, 2.5 * S, 6 * S, d * .4, 0, TAU); c.fill(); } }
+    else { draw.glow(c, x, y, 26 * S, "#ffffff", .5); c.strokeStyle = "#8a9a6a"; c.lineWidth = 2 * S; c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + 18 * S); c.stroke(); for (let i = 0; i < 12; i++) { const a = i / 12 * TAU; c.strokeStyle = "rgba(255,255,255,.9)"; c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a) * 11 * S, y + Math.sin(a) * 11 * S); c.stroke(); } } }
+  for (const b of bees) { const x = b.x * S, y = sy(b.y) + Math.sin(b.ph * .3) * 4 * S; c.fillStyle = "rgba(255,255,255,.8)"; for (const d of [-1, 1]) { c.beginPath(); c.ellipse(x + d * 4 * S, y - 9 * S, 6 * S, 4 * S + Math.sin(b.ph) * 2 * S, d * .6, 0, TAU); c.fill(); } c.fillStyle = "#ffd23f"; c.beginPath(); c.ellipse(x, y, 12 * S, 9 * S, 0, 0, TAU); c.fill(); c.fillStyle = INK; for (const d of [-3, 3]) c.fillRect(x + d * S - 1.5 * S, y - 8 * S, 3 * S, 16 * S); draw.circle(c, x + Math.sign(b.vx) * 8 * S, y - 2 * S, 2 * S, INK); }
+  for (const m of mobiles) { if (m.sx == null) continue; c.strokeStyle = "rgba(255,255,255,.6)"; c.lineWidth = 1.5 * S; c.beginPath(); c.moveTo(m.ax * S, sy(m.ay)); c.lineTo(m.sx * S, sy(m.sy)); c.stroke(); draw.glow(c, m.sx * S, sy(m.sy), 22 * S, "#fff3a0", .45); draw.star(c, m.sx * S, sy(m.sy), 13 * S, "#ffd23f", 5, .5); }
+  // Bun with petal wings
+  const bx = bun.x * S, by = sy(bun.y), sz = 40 * S;
+  for (const d of [-1, 1]) { const f = d < 0 ? bun.wl : bun.wr, ang = d * (-.5 - f * 1.1 + Math.sin(clock * 10) * .08 * (started ? 1 : .3)); c.save(); c.translate(bx + d * sz * .32, by - sz * .05); c.rotate(bun.tilt + ang); for (let k = 0; k < 2; k++) { c.fillStyle = k ? "#fff0f7" : "#ffb3d4"; c.beginPath(); c.ellipse(d * sz * (.42 - k * .06), -sz * .02, sz * (.46 - k * .14), sz * (.22 - k * .07), d * .15, 0, TAU); c.fill(); } c.restore(); }
+  const mood = bun.dead ? "dizzy" : bun.hurt > 0 ? "scared" : bun.joy > 0 ? "joy" : !started ? "happy" : bun.vy > 300 ? "scared" : bun.wl > .5 || bun.wr > .5 ? "wow" : "think";
+  Pals.draw(c, "bun", bx, by, sz, { t, mood, tilt: bun.tilt, squash: bun.sq, arms: bun.wl > .3 || bun.wr > .3 ? "up" : "cheer", shadow: false, look: [clamp(bun.vx / 200, -1, 1), clamp(bun.vy / 400, -1, 1)] });
+  if (shield) { c.globalAlpha = .55 + Math.sin(clock * 5) * .15; draw.circle(c, bx, by, sz * .95, null, "#ffffff", 2.5 * S); c.globalAlpha = 1; }
+  // height meter
+  const P = Lab.play, hm = Math.max(0, Math.round(-bun.y / 10));
+  draw.rect(c, P.x + 10 * S, P.y + 12 * S, 76 * S, 26 * S, 13 * S, ZONES[zone].light ? "rgba(255,255,255,.75)" : "rgba(20,20,60,.55)");
+  draw.text(c, hm + " m", P.x + 48 * S, P.y + 25.5 * S, { size: 14 * S, color: ZONES[zone].fg, weight: 800 });
+  if (clean > 1) draw.text(c, "clean ×" + clean, P.x + P.w - 12 * S, P.y + 25 * S, { size: 13 * S, color: ZONES[zone].fg, weight: 800, align: "right" });
+  if (!started && !demo) { const k = .6 + Math.sin(clock * 4) * .2; c.globalAlpha = k; for (const d of [-1, 1]) { draw.rect(c, W / 2 + d * W * .25 - 34 * S, H * .72, 68 * S, 54 * S, 18 * S, "rgba(255,255,255,.55)", "rgba(43,35,64,.4)", 2); draw.text(c, d < 0 ? "◀ tap" : "tap ▶", W / 2 + d * W * .25, H * .72 + 27 * S, { size: 15 * S, color: INK, weight: 800 }); } c.globalAlpha = 1; }
+}
+Lab.boot();
+})();
+</script></body></html>

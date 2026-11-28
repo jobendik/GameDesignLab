@@ -17,6 +17,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--arcanum-pinball.jpg"
   },
   {
@@ -191,6 +193,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--cosmic-devourer.jpg"
   },
   {
@@ -467,15 +471,20 @@ window.GDL_CATALOG = {
    "id": "games/neon-galaxy",
    "path": "games/neon-galaxy.html",
    "collection": "arcade",
-   "title": "Neon Galaxy .io",
-   "desc": "Space / asteroids style demo.",
+   "title": "Neon Galaxy: Ore Run",
+   "desc": "Crack neon asteroids, drag the ore behind your skiff on a glowing tether and haul it into the Forge before rival salvagers shoot your chain loose — five sectors, rising quotas, an upgrade between each.",
    "genre": [
+    "Shooter",
+    ".io",
     "Arcade"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--neon-galaxy.jpg"
   },
   {
@@ -688,16 +697,19 @@ window.GDL_CATALOG = {
    "id": "games/pinball-wizard-3d",
    "path": "games/pinball-wizard-3d.html",
    "collection": "arcade",
-   "title": "SPIRE — The Pinball Wizard",
-   "desc": "3D pinball wizard variant of Spire.",
+   "title": "Spire: The Climbing Table",
+   "desc": "A three-tier 3D pinball tower: ramp the ball up from the Courtyard to the Library to the Belfry, ring the bell for Storm multiball and climb the spire floor by floor.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Physics"
    ],
    "controls": [
     "touch",
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--pinball-wizard-3d.jpg"
   },
   {
@@ -2557,6 +2569,25 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--cakewalk.jpg"
   },
   {
+   "id": "PhoneGameLab2/cheeky-brush",
+   "path": "PhoneGameLab2/games/cheeky-brush/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Cheeky Brush",
+   "desc": "Face painting at the fair. Copy the design, make the pals beam!",
+   "genre": [
+    "Creative"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--cheeky-brush.jpg"
+  },
+  {
    "id": "PhoneGameLab2/clatter-castle",
    "path": "PhoneGameLab2/games/clatter-castle/index.html",
    "collection": "PhoneGameLab2",
@@ -2576,89 +2607,42 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--clatter-castle.jpg"
   },
   {
-   "id": "PhoneGameLab2/destroy-aliens",
-   "path": "PhoneGameLab2/games/destroy-aliens/index.html",
+   "id": "PhoneGameLab2/echo-jam",
+   "path": "PhoneGameLab2/games/echo-jam/index.html",
    "collection": "PhoneGameLab2",
-   "title": "Destroy Aliens",
-   "desc": "Hold off waves of descending alien invaders.",
+   "title": "Echo Jam",
+   "desc": "The band plays it. You play it back — mind Olli's twists!",
    "genre": [
-    "Minigame"
+    "Music"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
-   "n": 21,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--destroy-aliens.jpg"
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--echo-jam.jpg"
   },
   {
-   "id": "PhoneGameLab2/donut-spin",
-   "path": "PhoneGameLab2/games/donut-spin/index.html",
+   "id": "PhoneGameLab2/fin-focus",
+   "path": "PhoneGameLab2/games/fin-focus/index.html",
    "collection": "PhoneGameLab2",
-   "title": "Donut Spin",
-   "desc": "Throw knives into a spinning donut without hitting them.",
+   "title": "Fin Focus",
+   "desc": "Steer Bolt's diving bell and snap the fish the pals ask for.",
    "genre": [
-    "Minigame"
+    "Skill"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
-   "n": 22,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--donut-spin.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/dress-up",
-   "path": "PhoneGameLab2/games/dress-up/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Dress Up",
-   "desc": "Drag hats, glasses and outfits onto the character.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 23,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--dress-up.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/face-designer",
-   "path": "PhoneGameLab2/games/face-designer/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Face Designer",
-   "desc": "Paint face make-up on a character with your finger.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 24,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--face-designer.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/find-pattern",
-   "path": "PhoneGameLab2/games/find-pattern/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Find Pattern",
-   "desc": "Watch the sequence, then repeat it perfectly.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 25,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--find-pattern.jpg"
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--fin-focus.jpg"
   },
   {
    "id": "PhoneGameLab2/fish-fizz",
@@ -2680,57 +2664,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--fish-fizz.jpg"
   },
   {
-   "id": "PhoneGameLab2/fishtastic",
-   "path": "PhoneGameLab2/games/fishtastic/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Fishtastic",
-   "desc": "Swim through the sea and catch the requested fish.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 26,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--fishtastic.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/fishy-frenzy",
-   "path": "PhoneGameLab2/games/fishy-frenzy/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Fishy Frenzy",
-   "desc": "Eat smaller fish to grow; flee the bigger ones.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 27,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--fishy-frenzy.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/flappy-tom",
-   "path": "PhoneGameLab2/games/flappy-tom/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Flappy Tom",
-   "desc": "Tap to flap through narrow gaps between pipes.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 28,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--flappy-tom.jpg"
-  },
-  {
    "id": "PhoneGameLab2/flicknic",
    "path": "PhoneGameLab2/games/flicknic/index.html",
    "collection": "PhoneGameLab2",
@@ -2747,6 +2680,25 @@ window.GDL_CATALOG = {
    "score": 8,
    "status": "transformed",
    "thumb": "thumbs/PhoneGameLab2--flicknic.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/flutterbun",
+   "path": "PhoneGameLab2/games/flutterbun/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Flutterbun",
+   "desc": "Flap left, flap right. Flutter Bun up the giant beanstalk.",
+   "genre": [
+    "Skill"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--flutterbun.jpg"
   },
   {
    "id": "PhoneGameLab2/football",
@@ -3218,6 +3170,25 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--pack-ice.jpg"
   },
   {
+   "id": "PhoneGameLab2/party-hopper",
+   "path": "PhoneGameLab2/games/party-hopper/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Party Hopper",
+   "desc": "Eight parties, one impatient fox. Dress Pip before he dashes off!",
+   "genre": [
+    "Creative"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--party-hopper.jpg"
+  },
+  {
    "id": "PhoneGameLab2/peekaboo-park",
    "path": "PhoneGameLab2/games/peekaboo-park/index.html",
    "collection": "PhoneGameLab2",
@@ -3378,6 +3349,25 @@ window.GDL_CATALOG = {
    "score": 8,
    "status": "transformed",
    "thumb": "thumbs/PhoneGameLab2--reef-relief.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/return-to-sender",
+   "path": "PhoneGameLab2/games/return-to-sender/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Return to Sender",
+   "desc": "No blaster, just a beam. Fling the jellies back where they came from!",
+   "genre": [
+    "Arcade"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--return-to-sender.jpg"
   },
   {
    "id": "PhoneGameLab2/rocket-fun",
@@ -3807,6 +3797,44 @@ window.GDL_CATALOG = {
    "n": 75,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--tom-run.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/top-frog",
+   "path": "PhoneGameLab2/games/top-frog/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Top Frog",
+   "desc": "Kick, snap, grow. Today's snack was yesterday's bully.",
+   "genre": [
+    "Arcade"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--top-frog.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/topping-toss",
+   "path": "PhoneGameLab2/games/topping-toss/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Topping Toss",
+   "desc": "Toss toppings on the spinning donut. Three of a kind and Momo gobbles them!",
+   "genre": [
+    "Skill"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--topping-toss.jpg"
   },
   {
    "id": "PhoneGameLab2/totem-blast",

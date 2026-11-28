@@ -1,0 +1,278 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Top Frog</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* TOP FROG — Momo starts as the smallest frog in the lily pond and eats its way up the pecking order.
+ * Core idea kept: eat smaller critters to grow, flee bigger ones.
+ * How it differs from an eat-and-grow slider (Big Drip): Momo SWIMS IN KICKS — press to coil (aim at the finger),
+ *   release to kick; a longer press is a stronger kick — and EATS WITH HER TONGUE: any snack-sized critter ahead within
+ *   reach is snapped up automatically, so good kicks line up chains of gulps (combo multiplier).
+ * Hunters (perch, pike, catfish, turtle) STALK, WIND UP (shake + "!" + a dashed lunge line) and LUNGE — a kick
+ *   sideways dodges. Outgrow a hunter and the pecking order flips: it sweats and flees from you.
+ * From "Splashy Momo" a HERON visits: its shadow crosses the pond, a target follows Momo, locks, strikes. Hide under a
+ *   lily pad (pads also hide you from hunters). Caught = spat out ("Bleh!"), smaller, one heart lost; three hearts.
+ * Identity: top-down toy pond, morning mint to night blue as Momo grows; a pecking-order strip shows what is a snack. */
+let demo = false;
+Lab.init({
+  title: "Top Frog", tagline: "Kick, snap, grow. Today's snack was yesterday's bully.", category: "Arcade", kicker: "Pocket Pals",
+  howto: ["Press to aim, release to kick", "Her tongue snaps up smaller critters", "Dodge lunges, hide from the heron"],
+  theme: { bg: "#3c8f7a", bg2: "#bdebd6", fg: "#16372f", muted: "#2f6b5c", accent: "#ff8a3d", accent2: "#ff6b8a", light: true },
+  orient: "any", music: { style: "funk", key: "D", vol: .36 }, restart: start,
+  attract(dt, t) { if (!M) { demo = true; setup(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink, mix = Lab.color.mix, shade = Lab.color.shade;
+fx.auto = false;
+const WS = 2200;
+const K = {
+  gnat: { r: 5, pts: 5, sp: 26, c: "#4a4560", n: "Gnat" }, tad: { r: 8, pts: 10, sp: 42, c: "#6b5640", flee: 1, n: "Tadpole" },
+  minnow: { r: 11, pts: 15, sp: 64, c: "#b9cde0", flee: 1, n: "Minnow" }, beetle: { r: 15, pts: 25, sp: 38, c: "#40548f", flee: 1, n: "Beetle" },
+  newt: { r: 20, pts: 40, sp: 52, c: "#ff8a3d", flee: 1, n: "Newt" }, perch: { r: 27, pts: 60, sp: 52, c: "#a7cf5e", hunt: 520, n: "Perch" },
+  pike: { r: 37, pts: 100, sp: 58, c: "#7f9c70", hunt: 600, n: "Pike" }, cat: { r: 50, pts: 160, sp: 44, c: "#a0805e", hunt: 520, n: "Catfish" },
+  turtle: { r: 66, pts: 300, sp: 34, c: "#72ab6c", hunt: 420, n: "Turtle" },
+};
+const KINDS = Object.keys(K);
+const TIERS = [{ r: 0, n: "Froglet", w: "#86d9bd" }, { r: 20, n: "Little Momo", w: "#73cdb0" }, { r: 28, n: "Splashy Momo", w: "#69bf9c" },
+  { r: 38, n: "Big Momo", w: "#6aa98f" }, { r: 50, n: "Huge Momo", w: "#5f85a3" }, { r: 64, n: "Pond King", w: "#41558f" }];
+let W, H, Z, cam, M, crit, pads, decor, reeds, heron, score, hearts, combo, lastGulp, eaten, bestCombo, tier, clock, aim, nextId, told, keyCool, dodges;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() { W = Lab.W; H = Lab.H; }
+Lab.onResize(layout);
+const baseZ = () => clamp(Math.min(W, H * .75) / 260, 1, 2.6);
+const toWorld = (x, y) => [(x - W / 2) / Z + cam.x, (y - (H + Lab.play.y) / 2) / Z + cam.y];
+const toScreen = (x, y) => [(x - cam.x) * Z + W / 2, (y - cam.y) * Z + (H + Lab.play.y) / 2];
+const edible = k => K[k].r < M.r * .92;
+const threat = k => K[k].hunt && K[k].r > M.r * 1.08;
+
+/* ---------- setup ---------- */
+function setup() {
+  layout(); nextId = 1; told = {}; crit = []; pads = []; decor = []; reeds = [];
+  M = { x: WS / 2, y: WS / 2, vx: 0, vy: 0, a: -Math.PI / 2, m: 1, r: 14, charge: 0, hold: false, inv: 0, sq: 0, tg: null, cool: 0, joy: 0, dizzy: 0, hidden: false, kickT: 0 };
+  cam = { x: M.x, y: M.y }; Z = baseZ();
+  heron = { st: "idle", t: 16, x: 0, y: 0, tx: 0, ty: 0, sx: 0 };
+  score = 0; hearts = 3; combo = 0; lastGulp = -9; eaten = 0; bestCombo = 0; tier = 0; clock = 0; aim = null; keyCool = 0; dodges = 0;
+  for (let i = 0; i < 16; i++) { const r = Lab.rand(46, 92); pads.push({ x: Lab.rand(150, WS - 150), y: Lab.rand(150, WS - 150), r, a: Lab.rand(0, TAU), spin: Lab.rand(-.05, .05), flower: Lab.chance(.3) }); }
+  pads.push({ x: WS / 2 + 140, y: WS / 2 - 40, r: 70, a: 1, spin: .03, flower: true });
+  for (let i = 0; i < 140; i++) decor.push({ x: Lab.rand(0, WS), y: Lab.rand(0, WS), r: Lab.rand(6, 22), k: Lab.randInt(0, 2), c: Lab.choose(["#5fae8f", "#7cc0a0", "#4e9c84", "#9dcfb2"]) });
+  for (let i = 0; i < 160; i++) { const s = i % 4, u = Lab.rand(0, WS), o = Lab.rand(-30, 10); reeds.push(s === 0 ? { x: u, y: -o } : s === 1 ? { x: u, y: WS + o } : s === 2 ? { x: -o, y: u } : { x: WS + o, y: u }); }
+  for (let i = 0; i < 14; i++) spawn(true);
+}
+function spawn(near) {
+  const vr = viewR(), a = Lab.rand(0, TAU), d = near ? Lab.rand(120, vr + 300) : Lab.rand(vr + 40, vr + 320);
+  const x = clamp(M.x + Math.cos(a) * d, 60, WS - 60), y = clamp(M.y + Math.sin(a) * d, 60, WS - 60);
+  const ed = KINDS.filter(k => K[k].r < M.r * .85), th = KINDS.filter(k => K[k].hunt && K[k].r > M.r * 1.15);
+  let kind;
+  if (th.length && Lab.chance(near ? .15 : .3) && crit.filter(c => threat(c.kind)).length < 2 + tier) kind = th[0];
+  else if (ed.length) { const w = ed.map(k => Math.pow(K[k].r / M.r, 1.4) + .15); let s = Lab.rand(0, w.reduce((a, b) => a + b, 0)); kind = ed[0]; for (let i = 0; i < ed.length; i++) { s -= w[i]; if (s <= 0) { kind = ed[i]; break; } } }
+  else kind = "gnat";
+  if (Math.hypot(x - M.x, y - M.y) < 150 && K[kind].hunt) return;
+  const n = kind === "minnow" ? 3 : kind === "tad" ? 2 : 1;
+  for (let i = 0; i < n; i++) addCrit(kind, x + Lab.rand(-30, 30), y + Lab.rand(-30, 30));
+}
+function addCrit(kind, x, y, st) { const c = { id: nextId++, kind, x, y, a: Lab.rand(0, TAU), v: 0, st: st || "roam", t: Lab.rand(0, 2), ph: Lab.rand(0, TAU), la: 0, grab: false, sweat: 0 }; crit.push(c); return c; }
+const viewR = () => Math.hypot(W, H) / 2 / (Z || 1);
+function start() {
+  demo = false; setup(); Lab.setScore(0); Lab.setTheme({ light: true, fg: "#16372f", muted: "#2f6b5c" });
+  Lab.input.onDown = [(x, y) => { M.hold = true; aim = [x, y]; M.charge = 0; }];
+  Lab.input.onMove = [(x, y) => { if (M.hold) aim = [x, y]; }];
+  Lab.input.onUp = [(x, y) => { if (M.hold) { aim = [x, y]; const [wx, wy] = toWorld(x, y), d = Math.hypot(wx - M.x, wy - M.y); kick(d > M.r * .8 ? Math.atan2(wy - M.y, wx - M.x) : M.a, M.charge); } M.hold = false; }];
+  Lab.input.onKey = [k => { if (keyCool > 0) return; const ax = Lab.input.axisX(), ay = Lab.input.axisY(); if (ax || ay) kick(Math.atan2(ay, ax), .45); else if (k === " ") kick(M.a, .8); }];
+  Lab.toast("Press, aim, release to kick!", 2400, { y: .74 });
+  Lab.expose({
+    get score() { return score; }, get hearts() { return hearts; }, get r() { return M.r; }, get m() { return M.m; }, set m(v) { M.m = v; grow(0); }, get tier() { return tier; }, get combo() { return combo; }, get eaten() { return eaten; },
+    get momo() { return { x: M.x, y: M.y, vx: M.vx, vy: M.vy, a: M.a, inv: M.inv, hidden: M.hidden }; }, set inv(v) { M.inv = v; }, toScreen: (x, y) => toScreen(x, y),
+    crit: () => crit.map(c => ({ id: c.id, kind: c.kind, x: c.x, y: c.y, st: c.st })), edible, threat, get heron() { return heron.st; },
+    place(kind, dx, dy, st) { const c = addCrit(kind, M.x + dx, M.y + dy, st); if (st === "hold") c.v = 0; if (st === "lunge") { c.a = Math.atan2(-dy, -dx); c.t = .6; c.v = K[kind].hunt; } return c.id; },
+    clear() { crit = []; }, setMomo(x, y, a) { M.x = x; M.y = y; M.vx = M.vy = 0; if (a != null) M.a = a; cam.x = x; cam.y = y; }, kick, heronNow() { heron.st = "idle"; heron.t = 0; },
+    pads: () => pads.map(p => ({ x: p.x, y: p.y, r: p.r })), padHere() { pads.push({ x: M.x, y: M.y, r: 80, a: 0, spin: 0 }); }, noPads() { pads = []; },
+  });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+function kick(a, ch) {
+  if (Lab.paused) return; ch = clamp(ch || 0, 0, 1);
+  const imp = (160 + 330 * ch) * Math.pow(14 / M.r, .12);
+  M.vx = M.vx * .25 + Math.cos(a) * imp; M.vy = M.vy * .25 + Math.sin(a) * imp; M.a = a; M.sq = -.3; M.charge = 0; M.kickT = .35; keyCool = .16;
+  snd("swish", { pitch: 1.25 - Math.min(.6, (M.r - 14) / 100) + ch * .2, vol: .7 }); Lab.buzz(6);
+  fx.ring(M.x - Math.cos(a) * M.r, M.y - Math.sin(a) * M.r, { r0: M.r * .4, r1: M.r * (1.2 + ch), color: "rgba(255,255,255,.7)", life: .45, width: 2.5 });
+}
+
+/* ---------- update ---------- */
+function tick(dt) {
+  if (!M) return; clock += dt; keyCool -= dt;
+  // demo: kick toward the nearest snack, away from threats
+  if (demo) { M.inv = 9; if (M.kickT <= -.6) { const s = crit.filter(c => edible(c.kind)).sort((a, b) => Math.hypot(a.x - M.x, a.y - M.y) - Math.hypot(b.x - M.x, b.y - M.y))[0]; kick(s ? Math.atan2(s.y - M.y, s.x - M.x) : Lab.rand(0, TAU), .5); } if (M.r > 40) setup(); }
+  if (M.hold) { M.charge = Math.min(1, M.charge + dt / .45); if (aim) { const [wx, wy] = toWorld(aim[0], aim[1]); if (Math.hypot(wx - M.x, wy - M.y) > M.r * .8) M.a += Lab.angleDiff(M.a, Math.atan2(wy - M.y, wx - M.x)) * Math.min(1, dt * 14); } }
+  const drag = Math.exp(-(M.hold ? 3.2 : 1.9) * dt); M.vx *= drag; M.vy *= drag; M.x += M.vx * dt; M.y += M.vy * dt;
+  if (M.x < M.r + 20 || M.x > WS - M.r - 20) { M.vx *= -.5; M.x = clamp(M.x, M.r + 20, WS - M.r - 20); }
+  if (M.y < M.r + 20 || M.y > WS - M.r - 20) { M.vy *= -.5; M.y = clamp(M.y, M.r + 20, WS - M.r - 20); }
+  M.sq = Lab.damp(M.sq, M.hold ? M.charge * .22 : 0, 10, dt); M.inv = Math.max(0, M.inv - dt); M.joy = Math.max(0, M.joy - dt); M.dizzy = Math.max(0, M.dizzy - dt); M.kickT -= dt; M.cool -= dt;
+  M.hidden = pads.some(p => Math.hypot(p.x - M.x, p.y - M.y) < p.r - M.r * .35);
+  for (const p of pads) p.a += p.spin * dt;
+  // camera + zoom
+  Z = Lab.damp(Z, baseZ() * Math.pow(14 / M.r, .55), 2, dt);
+  cam.x = Lab.damp(cam.x, M.x + M.vx * .25, 5, dt); cam.y = Lab.damp(cam.y, M.y + M.vy * .25, 5, dt);
+  // tongue
+  if (M.tg) {
+    const g = M.tg; g.t += dt;
+    if (!g.c.grab && g.t >= .1) { g.c.grab = true; g.t = 0; }
+    if (g.c.grab) { const k = Math.min(1, g.t / .1); g.c.x = lerp(g.x0, M.x + Math.cos(M.a) * M.r, k); g.c.y = lerp(g.y0, M.y + Math.sin(M.a) * M.r, k); if (k >= 1) gulp(g.c); }
+    else { g.x0 = g.c.x; g.y0 = g.c.y; }
+  } else if (M.cool <= 0 && M.dizzy <= 0) {
+    const reach = M.r * 2.4 + 34; let best = null, bd = 1e9;
+    for (const c of crit) { if (!edible(c.kind)) continue; const d = Math.hypot(c.x - M.x, c.y - M.y) - K[c.kind].r; if (d < reach && d < bd && Math.abs(Lab.angleDiff(M.a, Math.atan2(c.y - M.y, c.x - M.x))) < 1.5) { bd = d; best = c; } }
+    if (best) { M.tg = { c: best, t: 0, x0: best.x, y0: best.y }; snd("pop", { pitch: 1.6, vol: .4 }); }
+  }
+  // critters
+  for (const c of crit) {
+    if (c.grab) continue; const k = K[c.kind], dx = M.x - c.x, dy = M.y - c.y, d = Math.hypot(dx, dy), toM = Math.atan2(dy, dx);
+    c.ph += dt * (3 + c.v / 20); c.t -= dt; c.sweat = Math.max(0, c.sweat - dt);
+    const isT = threat(c.kind), canEat = edible(c.kind), sight = 240 + k.r * 3;
+    if (c.st === "hold") { c.v = 0; continue; }
+    if (isT && !demo) {
+      if (c.st === "roam" && d < sight && !M.hidden && M.inv <= 0) { c.st = "stalk"; c.t = 6; }
+      if (c.st === "stalk") { c.a += Lab.angleDiff(c.a, toM) * Math.min(1, dt * 3); c.v = Lab.damp(c.v, k.sp * 1.15, 3, dt); if (M.hidden || M.inv > 0 || d > sight * 1.6 || c.t < 0) { c.st = "roam"; c.t = 2; } else if (d < k.r + M.r + 150) { c.st = "wind"; c.t = .65; c.la = Math.atan2(M.y + M.vy * .25 - c.y, M.x + M.vx * .25 - c.x); snd("warn", { pitch: 1.4 - k.r / 100, vol: .5 }); } }
+      else if (c.st === "wind") { c.v = Lab.damp(c.v, 0, 8, dt); c.a += Lab.angleDiff(c.a, c.la) * Math.min(1, dt * 12); if (c.t <= 0) { c.st = "lunge"; c.t = .42; c.v = k.hunt; c.a = c.la; snd("whoosh", { pitch: .7 }); } }
+      else if (c.st === "lunge") { if (c.t <= 0) { c.st = "rest"; c.t = 1.3; if (d > k.r + M.r + 20) { dodges++; if (!demo && d < k.r + M.r + 90) fx.text(M.x, M.y - M.r - 26, "Dodge!", { color: "#fff7c2", size: 16 }); } } }
+      else if (c.st === "rest") { c.v = Lab.damp(c.v, k.sp * .3, 3, dt); if (c.t <= 0) { c.st = "roam"; c.t = 1; } }
+      if ((c.st === "stalk" || c.st === "lunge") && M.inv <= 0 && d < k.r * .75 + M.r * .6) { caught(c); continue; }
+    } else if (c.st !== "roam" && c.st !== "flee") c.st = "roam";
+    if (!isT || c.st === "roam") {
+      const scared = canEat && (k.flee || k.hunt) && d < 120 + M.r * 2.2;
+      if (scared) { c.st = "flee"; c.a += Lab.angleDiff(c.a, toM + Math.PI) * Math.min(1, dt * 6); c.v = Lab.damp(c.v, k.sp * 1.7, 4, dt); if (k.hunt) c.sweat = .5; }
+      else { if (c.st === "flee") c.st = "roam"; if (c.t <= 0) { c.t = Lab.rand(1, 3); c.la = c.a + Lab.rand(-1.2, 1.2); } c.a += Lab.angleDiff(c.a, c.la) * Math.min(1, dt * 1.5); c.v = Lab.damp(c.v, k.sp * .6, 2, dt); }
+      if (!canEat && !isT && d < k.r + M.r) { const n = 1 / (d || 1); M.vx += dx * n * 120; M.vy += dy * n * 120; c.a = toM + Math.PI; snd("boing", { pitch: 1.3, vol: .4 }); }
+    }
+    if (c.x < 40 || c.x > WS - 40 || c.y < 40 || c.y > WS - 40) c.a += Lab.angleDiff(c.a, Math.atan2(WS / 2 - c.y, WS / 2 - c.x)) * Math.min(1, dt * 4);
+    const wob = c.kind === "gnat" ? Math.sin(c.ph) * .8 : 0;
+    c.x = clamp(c.x + Math.cos(c.a + wob) * c.v * dt, 20, WS - 20); c.y = clamp(c.y + Math.sin(c.a + wob) * c.v * dt, 20, WS - 20);
+  }
+  // keep the pond stocked; recycle far critters
+  const vr = viewR(); crit = crit.filter(c => c.grab || c.st === "hold" || Math.hypot(c.x - M.x, c.y - M.y) < vr * 2.4);
+  if (crit.length < 18 + tier * 2 && Lab.chance(dt * 3)) spawn(false);
+  heronTick(dt);
+  if (!demo) Lab.music.intensity(clamp(.25 + tier * .12 + (crit.some(c => c.st === "wind" || c.st === "lunge") ? .3 : 0), 0, 1));
+}
+function gulp(c) {
+  M.tg = null; M.cool = .12; crit = crit.filter(o => o !== c);
+  combo = clock - lastGulp < 1.6 ? combo + 1 : 1; lastGulp = clock; bestCombo = Math.max(bestCombo, combo); eaten++;
+  const mult = Math.min(3, 1 + .25 * (combo - 1)), pts = Math.round(K[c.kind].pts * mult);
+  if (!demo) { score += pts; Lab.setScore(score); Lab.bumpScore(); fx.text(M.x, M.y - M.r - 18, (combo > 1 ? "×" + mult.toFixed(2).replace(/0+$/, "").replace(/\.$/, "") + " " : "") + "+" + pts, { color: combo > 2 ? "#fff36b" : "#ffffff", size: 13 + Math.min(8, combo) }); }
+  snd("crunch", { pitch: 1.5 - Math.min(.8, K[c.kind].r / 80), vol: .6 }); if (combo > 1 && !demo) Lab.audio.combo(combo);
+  fx.burst(M.x + Math.cos(M.a) * M.r, M.y + Math.sin(M.a) * M.r, { n: 6, color: "#e8fff4", speed: 60, life: .35, size: 2.5 });
+  M.joy = .5; M.sq = .18; grow((K[c.kind].r / 14) * (K[c.kind].r / 14) * .38);
+}
+function grow(dm) {
+  const r0 = M.r; M.m += dm; M.r = Math.min(92, 14 * Math.sqrt(M.m));
+  let t = 0; for (let i = 0; i < TIERS.length; i++) if (M.r >= TIERS[i].r) t = i;
+  const fresh = KINDS.filter(k => K[k].hunt && K[k].r < M.r * .92 && K[k].r >= r0 * .92);
+  if (demo) { tier = t; return; }
+  if (fresh.length && dm > 0) Lab.toast("The " + K[fresh[fresh.length - 1]].n.toLowerCase() + " is a snack now!", 2200, { y: .74 });
+  if (t > tier) {
+    tier = t; if (t === 4) Lab.setTheme({ light: false, fg: "#f4fff8", muted: "#cfe9dd" }); snd("levelup"); Lab.banner(TIERS[t].n + "!", { color: "#fff7c2", ms: 1200, y: .3 }); Lab.flash("#ffffff", .1, .25);
+    if (t === 2 && !told.heron) { told.heron = 1; heron.t = 4; }
+  }
+}
+function caught(c) {
+  if (demo) return; hearts--; M.inv = 2.4; M.dizzy = 1; M.tg = null; combo = 0;
+  M.m = Math.max(1, M.m * .7); M.r = 14 * Math.sqrt(M.m);
+  const a = c ? Math.atan2(M.y - c.y, M.x - c.x) : Lab.rand(0, TAU); M.vx = Math.cos(a) * 380; M.vy = Math.sin(a) * 380;
+  if (c) { c.st = "rest"; c.t = 2; c.v = 0; }
+  Lab.hitstop(.12); Lab.shake(9, .35); Lab.buzz(60); snd("hurt"); snd("splash", { pitch: .8 });
+  fx.text(M.x, M.y - M.r - 24, hearts > 0 ? "Bleh! Spat out!" : "Gulp!", { color: "#ffd0d8", size: 18 });
+  if (hearts <= 0) { fx.clear(); Lab.gameover({ title: "Oops! Momo got gobbled", message: "Even a top frog has a bigger fish somewhere.", score, stats: [["Biggest", TIERS[tier].n], ["Critters eaten", eaten], ["Best combo", "×" + bestCombo]] }); }
+}
+function heronTick(dt) {
+  const h = heron; if (demo || tier < 2) return;
+  h.t -= dt;
+  if (h.st === "idle" && h.t <= 0) { h.st = "shadow"; h.t = 1.8; h.sx = -1; snd("warn", { pitch: .7 }); if (!told.heronTip) { told.heronTip = 1; Lab.toast("Heron! Hide under a lily pad!", 2600, { y: .74 }); } else Lab.banner("Heron!", { color: "#ffe0e6", ms: 700, y: .28 }); }
+  else if (h.st === "shadow") { h.sx = 1 - h.t / 1.8; if (h.t <= 0) { h.st = "aim"; h.t = 1.1; h.x = M.x + Lab.rand(-80, 80); h.y = M.y + Lab.rand(-80, 80); } }
+  else if (h.st === "aim") { h.x = Lab.damp(h.x, M.x, 3.2, dt); h.y = Lab.damp(h.y, M.y, 3.2, dt); if (h.t <= 0) { h.st = "lock"; h.t = .45; snd("tick", { pitch: 1.6 }); } }
+  else if (h.st === "lock") { if (h.t <= 0) { h.st = "strike"; h.t = .5; snd("splash"); Lab.shake(5, .2); fx.ring(h.x, h.y, { r0: 10, r1: M.r + 60, color: "#ffffff", life: .5, width: 4 });
+    if (Math.hypot(M.x - h.x, M.y - h.y) < M.r + 34 && !M.hidden && M.inv <= 0) caught(null); else if (!demo) fx.text(h.x, h.y - 30, M.hidden ? "Hidden!" : "Missed!", { color: "#fff7c2", size: 16 }); } }
+  else if (h.st === "strike" && h.t <= 0) { h.st = "idle"; h.t = Math.max(7, Lab.rand(13, 18) - tier); }
+}
+
+/* ---------- drawing ---------- */
+function drawCrit(c, o, t) {
+  const k = K[o.kind], r = k.r, isT = threat(o.kind), wind = o.st === "wind", sh = wind ? Math.sin(t * 60) * 2 : 0;
+  c.save(); c.translate(o.x + sh, o.y); c.rotate(o.a);
+  c.fillStyle = "rgba(20,60,50,.18)"; c.beginPath(); c.ellipse(-2, 5, r * 1.1, r * .6, 0, 0, TAU); c.fill();
+  const sw = Math.sin(o.ph) * .35, eyeC = isT && o.st !== "roam" && o.st !== "rest" ? "#c4304a" : INK;
+  const eyes = (ex, ey, er) => { for (const d of [-1, 1]) { draw.circle(c, ex, d * ey, er, "#fff"); draw.circle(c, ex + er * .25, d * ey, er * .55, eyeC); } };
+  if (o.kind === "gnat") { c.fillStyle = "rgba(255,255,255,.7)"; for (const d of [-1, 1]) { c.beginPath(); c.ellipse(-1, d * 4, 4, 2.4 + Math.sin(t * 50) * 1, d * .5, 0, TAU); c.fill(); } draw.circle(c, 0, 0, 3, k.c); }
+  else if (o.kind === "tad") { c.strokeStyle = k.c; c.lineWidth = 3; c.lineCap = "round"; c.beginPath(); c.moveTo(-3, 0); c.quadraticCurveTo(-r * 1.2, sw * 8, -r * 2, -sw * 6); c.stroke(); draw.circle(c, 0, 0, r * .7, k.c); eyes(r * .3, r * .35, 2); }
+  else if (o.kind === "beetle") { for (let i = -1; i <= 1; i++) for (const d of [-1, 1]) { c.strokeStyle = INK; c.lineWidth = 1.5; c.beginPath(); c.moveTo(i * r * .4, d * r * .4); c.lineTo(i * r * .4 + Math.sin(o.ph + i) * 3, d * r * .95); c.stroke(); } c.fillStyle = k.c; c.beginPath(); c.ellipse(0, 0, r * .9, r * .62, 0, 0, TAU); c.fill(); c.strokeStyle = "rgba(255,255,255,.35)"; c.beginPath(); c.moveTo(-r * .7, 0); c.lineTo(r * .4, 0); c.stroke(); draw.circle(c, r * .75, 0, r * .3, shade(k.c, -.3)); }
+  else if (o.kind === "newt") { c.strokeStyle = k.c; c.lineWidth = r * .35; c.lineCap = "round"; c.beginPath(); c.moveTo(-r * .3, 0); c.quadraticCurveTo(-r, sw * r * .8, -r * 1.6, -sw * r * .6); c.stroke(); for (const s of [-1, 1]) for (const d of [-1, 1]) { c.lineWidth = r * .18; c.beginPath(); c.moveTo(s * r * .35, 0); c.lineTo(s * r * .5 + Math.sin(o.ph + s) * 3, d * r * .6); c.stroke(); } c.fillStyle = k.c; c.beginPath(); c.ellipse(0, 0, r * .75, r * .32, 0, 0, TAU); c.fill(); draw.circle(c, r * .7, 0, r * .28, k.c); for (let i = 0; i < 3; i++) draw.circle(c, -r * .4 + i * r * .3, 0, 2, "#5a2a10"); eyes(r * .8, r * .15, 2.4); }
+  else if (o.kind === "turtle") { for (const s of [-1, 1]) for (const d of [-1, 1]) { c.fillStyle = shade(k.c, -.15); c.beginPath(); c.ellipse(s * r * .45, d * r * .62, r * .3, r * .14, d * s * (.6 + Math.sin(o.ph) * .3), 0, TAU); c.fill(); } draw.circle(c, r * .95, 0, r * .26, shade(k.c, -.05)); c.fillStyle = "#5a7a3a"; c.beginPath(); c.ellipse(0, 0, r * .85, r * .72, 0, 0, TAU); c.fill(); c.strokeStyle = "#a9c97a"; c.lineWidth = 3; for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; c.beginPath(); c.moveTo(Math.cos(a) * r * .25, Math.sin(a) * r * .22); c.lineTo(Math.cos(a) * r * .7, Math.sin(a) * r * .6); c.stroke(); } c.beginPath(); c.arc(0, 0, r * .28, 0, TAU); c.stroke(); eyes(r * 1.05, r * .12, 3.5); }
+  else { // fish: minnow, perch, pike, catfish
+    const L = o.kind === "pike" ? 1.35 : 1.05, Wd = o.kind === "cat" ? .52 : o.kind === "pike" ? .34 : .42;
+    c.fillStyle = shade(k.c, -.12); c.beginPath(); c.moveTo(-r * L * .8, 0); c.lineTo(-r * L * 1.3, r * .4 + sw * r * .2); c.lineTo(-r * L * 1.3, -r * .4 + sw * r * .2); c.closePath(); c.fill();
+    c.save(); c.rotate(sw * .12); c.fillStyle = k.c; c.beginPath(); c.ellipse(0, 0, r * L, r * Wd, 0, 0, TAU); c.fill();
+    if (o.kind === "perch") { c.fillStyle = "rgba(40,70,30,.35)"; for (const x of [-.4, 0, .4]) c.fillRect(x * r, -r * Wd, r * .14, r * Wd * 2); }
+    if (o.kind === "cat") { c.strokeStyle = shade(k.c, -.4); c.lineWidth = 2; for (const d of [-1, 1]) { c.beginPath(); c.moveTo(r * .9, d * r * .15); c.quadraticCurveTo(r * 1.3, d * r * .5, r * 1.15 + Math.sin(o.ph) * 3, d * r * .8); c.stroke(); } }
+    if (o.kind === "pike") { c.fillStyle = "#fff"; for (let i = 0; i < 4; i++) { c.beginPath(); c.moveTo(r * (1 + i * .07), r * .08); c.lineTo(r * (1.03 + i * .07), r * .17); c.lineTo(r * (1.06 + i * .07), r * .08); c.fill(); } }
+    c.fillStyle = "rgba(255,255,255,.25)"; c.beginPath(); c.ellipse(r * .1, -r * Wd * .3, r * L * .6, r * Wd * .3, 0, 0, TAU); c.fill();
+    eyes(r * L * .62, r * Wd * .55, Math.max(2.2, r * .12)); c.restore();
+  }
+  c.restore();
+  if (wind) { draw.text(c, "!", o.x, o.y - r - 16, { size: 22, color: "#ff5d73", stroke: "#fff", strokeW: 4, weight: 900 }); c.save(); c.setLineDash([8, 8]); c.strokeStyle = "rgba(255,80,110,.55)"; c.lineWidth = 3; c.beginPath(); c.moveTo(o.x, o.y); c.lineTo(o.x + Math.cos(o.la) * (k.hunt * .42 + r), o.y + Math.sin(o.la) * (k.hunt * .42 + r)); c.stroke(); c.restore(); }
+  if (o.sweat > 0) { c.fillStyle = "#9fe3ff"; c.beginPath(); c.ellipse(o.x + r * .6, o.y - r * .9 + (t * 20 % 6), 3, 5, 0, 0, TAU); c.fill(); }
+}
+function drawPad(c, p) {
+  c.save(); c.translate(p.x, p.y); c.rotate(p.a); c.fillStyle = "rgba(20,60,50,.2)"; c.beginPath(); c.arc(4, 6, p.r, .25, TAU - .05); c.lineTo(4, 6); c.fill();
+  c.fillStyle = "#5fbf6f"; c.beginPath(); c.arc(0, 0, p.r, .3, TAU - .1); c.lineTo(0, 0); c.closePath(); c.fill(); c.strokeStyle = "#3f9e55"; c.lineWidth = 3; c.stroke();
+  c.strokeStyle = "rgba(255,255,255,.25)"; c.lineWidth = 2; for (let i = 0; i < 7; i++) { const a = .5 + i * .8; c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(a) * p.r * .85, Math.sin(a) * p.r * .85); c.stroke(); }
+  if (p.flower) { for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; c.fillStyle = "#ffd0e4"; c.beginPath(); c.ellipse(Math.cos(a) * 10 - p.r * .3, Math.sin(a) * 10 + p.r * .2, 9, 5, a, 0, TAU); c.fill(); } draw.circle(c, -p.r * .3, p.r * .2, 6, "#ffe066"); }
+  c.restore();
+}
+function render(t) {
+  const c = Lab.ctx; if (!M) return; const wc = TIERS[tier].w;
+  c.fillStyle = "#9fd27a"; c.fillRect(-40, -40, W + 80, H + 80);
+  const cy0 = (H + Lab.play.y) / 2;
+  c.save(); c.translate(W / 2 - cam.x * Z, cy0 - cam.y * Z); c.scale(Z, Z);
+  const vr = viewR() + 40, x0 = cam.x - vr, x1 = cam.x + vr, y0 = cam.y - vr, y1 = cam.y + vr;
+  c.fillStyle = "#e9d49a"; Lab.draw.rr(c, -34, -34, WS + 68, WS + 68, 120); c.fill();
+  c.fillStyle = wc; Lab.draw.rr(c, 0, 0, WS, WS, 100); c.fill();
+  for (const d of decor) if (d.x > x0 && d.x < x1 && d.y > y0 && d.y < y1) { c.fillStyle = mix(d.c, wc, .45); if (d.k === 0) { c.beginPath(); c.ellipse(d.x, d.y, d.r, d.r * .7, d.r, 0, TAU); c.fill(); } else if (d.k === 1) { for (let i = 0; i < 3; i++) { c.beginPath(); c.ellipse(d.x + i * 6, d.y - i * 4, d.r * .3, d.r * .9, i * .5 + Math.sin(clock + d.x) * .1, 0, TAU); c.fill(); } } else draw.circle(c, d.x, d.y, d.r * .45, mix("#d9cfae", wc, .5)); }
+  for (let i = 0; i < 6; i++) { const gx = cam.x + Math.sin(clock * .2 + i * 2.1) * vr * .7, gy = cam.y + Math.cos(clock * .17 + i * 1.7) * vr * .7; c.fillStyle = "rgba(255,255,240,.07)"; c.beginPath(); c.ellipse(gx, gy, 140, 70, i, 0, TAU); c.fill(); }
+  for (const o of crit) if (o.x > x0 && o.x < x1 && o.y > y0 && o.y < y1) drawCrit(c, o, t);
+  // tongue + Momo
+  const left = Math.cos(M.a) < 0, blink = M.inv > 0 && !demo && Math.sin(t * 30) > 0;
+  const mood = M.dizzy > 0 ? "dizzy" : M.tg ? "wow" : M.joy > 0 ? "joy" : M.hold ? "focus" : crit.some(o => o.st === "wind" && Math.hypot(o.x - M.x, o.y - M.y) < 300) ? "scared" : "happy";
+  let an = null;
+  if (!blink) an = Pals.draw(c, "momo", M.x, M.y, M.r * 2.3, { pose: "lie", flip: left, tilt: left ? M.a - Math.PI : M.a, mood, squash: M.sq, t, shadow: false, talk: M.tg ? 1 : 0, alpha: M.hidden ? .9 : 1 });
+  if (M.tg) { const mx = M.x + Math.cos(M.a) * M.r * .8, my = M.y + Math.sin(M.a) * M.r * .8, g = M.tg, tip = g.c.grab ? [g.c.x, g.c.y] : [lerp(mx, g.c.x, Math.min(1, g.t / .1)), lerp(my, g.c.y, Math.min(1, g.t / .1))];
+    c.strokeStyle = "#ff7a9a"; c.lineWidth = Math.max(3, M.r * .16); c.lineCap = "round"; c.beginPath(); c.moveTo(mx, my); c.lineTo(tip[0], tip[1]); c.stroke(); draw.circle(c, tip[0], tip[1], Math.max(3, M.r * .16), "#ff5d84"); }
+  // aim arrow while coiling
+  if (M.hold && !demo) { const L = M.r + 18 + M.charge * 60; c.strokeStyle = `rgba(255,255,255,${.5 + M.charge * .4})`; c.lineWidth = 4; c.lineCap = "round"; c.beginPath(); c.moveTo(M.x + Math.cos(M.a) * (M.r + 8), M.y + Math.sin(M.a) * (M.r + 8)); c.lineTo(M.x + Math.cos(M.a) * L, M.y + Math.sin(M.a) * L); c.stroke(); c.fillStyle = c.strokeStyle; c.beginPath(); c.moveTo(M.x + Math.cos(M.a) * (L + 10), M.y + Math.sin(M.a) * (L + 10)); c.lineTo(M.x + Math.cos(M.a + 2.5) * 9 + Math.cos(M.a) * L, M.y + Math.sin(M.a + 2.5) * 9 + Math.sin(M.a) * L); c.lineTo(M.x + Math.cos(M.a - 2.5) * 9 + Math.cos(M.a) * L, M.y + Math.sin(M.a - 2.5) * 9 + Math.sin(M.a) * L); c.fill(); }
+  for (const p of pads) if (p.x > x0 - 100 && p.x < x1 + 100 && p.y > y0 - 100 && p.y < y1 + 100) drawPad(c, p);
+  if (M.hidden && !blink) { c.globalAlpha = .35; Pals.draw(c, "momo", M.x, M.y, M.r * 2.3, { pose: "lie", flip: left, tilt: left ? M.a - Math.PI : M.a, mood: "think", t, shadow: false }); c.globalAlpha = 1; }
+  c.strokeStyle = "#5f8f3a"; c.lineWidth = 4; for (const r of reeds) if (r.x > x0 && r.x < x1 && r.y > y0 && r.y < y1) { const s = Math.sin(clock * 1.5 + r.x) * 4; c.beginPath(); c.moveTo(r.x, r.y); c.lineTo(r.x + s, r.y - 34); c.stroke(); c.fillStyle = "#8a5a2a"; c.beginPath(); c.ellipse(r.x + s, r.y - 38, 4, 9, 0, 0, TAU); c.fill(); }
+  // heron target
+  const h = heron;
+  if (h.st === "aim" || h.st === "lock" || h.st === "strike") { const rr = M.r + 34, k = h.st === "lock" ? (Math.sin(t * 30) > 0 ? 1 : .5) : .7; c.strokeStyle = `rgba(255,70,100,${k})`; c.lineWidth = 4; c.beginPath(); c.arc(h.x, h.y, rr, 0, TAU); c.stroke(); for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; c.beginPath(); c.moveTo(h.x + Math.cos(a) * rr * .6, h.y + Math.sin(a) * rr * .6); c.lineTo(h.x + Math.cos(a) * rr * 1.2, h.y + Math.sin(a) * rr * 1.2); c.stroke(); }
+    if (h.st === "strike") { const k2 = h.t / .5; c.fillStyle = `rgba(255,190,80,${k2})`; c.beginPath(); c.moveTo(h.x - 10, h.y - 220 * k2); c.lineTo(h.x + 10, h.y - 220 * k2); c.lineTo(h.x, h.y - 20 * k2); c.fill(); } }
+  fx.draw(c); c.restore();
+  if (h.st === "shadow" || h.st === "aim") { const k = h.st === "shadow" ? h.sx : 1, x = lerp(-W * .4, W * 1.4, k * .7), y = H * .45; c.save(); c.globalAlpha = h.st === "aim" ? .12 : .22; c.fillStyle = "#14322a"; c.translate(x, y); c.beginPath(); c.ellipse(0, 0, 180, 40, -.2, 0, TAU); c.fill(); c.beginPath(); c.ellipse(-20, 0, 60, 160, .3, 0, TAU); c.fill(); c.beginPath(); c.ellipse(170, -30, 50, 12, -.4, 0, TAU); c.fill(); c.restore(); }
+  if (tier >= 4) { c.fillStyle = `rgba(20,20,70,${(tier - 3) * .1})`; c.fillRect(-40, -40, W + 80, H + 80); }
+  hud(c, t);
+}
+function hud(c, t) {
+  const P = Lab.play, k = clamp(Math.min(W, H * 1.2) / 390, .85, 1.3), x0 = P.x + 12 * k, y0 = P.y + 12 * k;
+  for (let i = 0; i < 3; i++) draw.heart(c, x0 + 10 * k + i * 24 * k, y0 + 10 * k, 9 * k, i < hearts ? "#ff6b8a" : "rgba(30,60,50,.25)");
+  // pecking-order strip: everything left of Momo's marker is a snack
+  const sw = Math.min(P.w - 24 * k - 90 * k, 300 * k), sx = P.x + P.w - 12 * k - sw, sy = y0 + 10 * k, n = KINDS.length;
+  draw.rect(c, sx - 8 * k, sy - 16 * k, sw + 16 * k, 46 * k, 14 * k, "rgba(255,255,245,.85)", "rgba(43,35,64,.3)", 2);
+  const tierName = TIERS[tier].n; draw.text(c, tierName, sx, sy + 22 * k, { size: 10.5 * k, color: "#2f6b5c", align: "left", weight: 800 });
+  const pos = i => sx + 10 * k + i / (n - 1) * (sw - 20 * k);
+  let mi = 0; for (let i = 0; i < n; i++) if (K[KINDS[i]].r < M.r) mi = i + (M.r - K[KINDS[i]].r) / ((K[KINDS[i + 1]] || { r: 100 }).r - K[KINDS[i]].r);
+  for (let i = 0; i < n; i++) { const kk = KINDS[i], ed = edible(kk), th = threat(kk), r = (3 + Math.sqrt(K[kk].r) * 1.05) * k; draw.circle(c, pos(i), sy, r, ed ? K[kk].c : th ? "#ff9aa8" : "rgba(120,140,130,.45)", ed ? "rgba(43,35,64,.5)" : th ? "#d6455f" : null, 1.5); }
+  const mx = pos(clamp(mi, 0, n - 1)); c.fillStyle = "#36a873"; c.beginPath(); c.moveTo(mx, sy - 5 * k); c.lineTo(mx - 6 * k, sy - 14 * k); c.lineTo(mx + 6 * k, sy - 14 * k); c.fill();
+  const nx = TIERS[tier + 1]; if (nx) { const p0 = TIERS[tier].r || 14, f = clamp((M.r - p0) / (nx.r - p0), 0, 1), bx = sx + sw * .48, bw = sw * .52; draw.rect(c, bx, sy + 18 * k, bw, 8 * k, 4 * k, "rgba(43,35,64,.15)"); draw.rect(c, bx, sy + 18 * k, Math.max(8 * k, bw * f), 8 * k, 4 * k, "#5fd39a"); }
+  if (combo > 1 && clock - lastGulp < 1.6) draw.text(c, "combo ×" + combo, x0, y0 + 34 * k, { size: 14 * k, color: "#fff7c2", align: "left", weight: 900, stroke: "rgba(20,60,50,.6)" });
+}
+Lab.boot();
+})();
+</script></body></html>

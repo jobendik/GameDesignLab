@@ -1,0 +1,316 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Echo Jam</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* ECHO JAM — the Pocket Pals have a band on a little toy-theatre stage. Olli conducts: the band plays a tune, one pal per
+ * note, and you play it back by tapping the pals. Every cleared song adds a note.
+ * Core idea kept: watch a sequence, then repeat it.
+ * Twists (Olli calls them out, they unlock as the songs grow):
+ *   BACKWARDS — play the tune last note first.
+ *   SWAP      — after the call two pals hop seats; the note goes with the pal, not the spot.
+ *   NEW NOTE  — Olli only plays the newest note: you remember the rest.
+ *   Late songs mix SWAP + BACKWARDS, the tempo climbs and Bolt joins the band (five voices).
+ * Groove: a note tapped on the beat scores double and builds a groove streak; the band plays your tune back as a reward.
+ * Three hearts; a flawless twist song wins one back. Each pal has its own timbre, pitch and pad symbol (not colour-only). */
+let demo = false;
+Lab.init({
+  title: "Echo Jam", tagline: "The band plays it. You play it back — mind Olli's twists!", category: "Music", kicker: "Pocket Pals",
+  howto: ["Watch and listen as the band plays", "Tap the pals in the same order", "On the beat scores double"],
+  theme: { bg: "#5b2a4e", bg2: "#ffd9a8", fg: "#fff7ea", muted: "#ffd9c4", accent: "#ffb52e", accent2: "#ff6b8a" },
+  orient: "any", music: { style: "bounce", key: "C", bpm: 92, vol: .32 }, restart: start,
+  attract(dt, t) { if (!band) { demo = true; setup(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink, shade = Lab.color.shade;
+const ORDER = ["momo", "nori", "pip", "bun", "bolt"];               // low → high
+const MIDI = { momo: 55, nori: 60, pip: 64, bun: 69, bolt: 74 };    // G3 C4 E4 A4 D5 — pentatonic, always sweet together
+const SYM = { momo: "circle", nori: "tri", pip: "star", bun: "heart", bolt: "diamond" };
+const TWIST = {
+  echo: { n: "Echo", say: "Listen…", col: "#ffd23f" }, rev: { n: "Backwards!", say: "Play it BACKWARDS!", col: "#ff8fb8" },
+  swap: { n: "Swap!", say: "Watch who hops!", col: "#5fd39a" }, add: { n: "New note!", say: "Just the new note…", col: "#3ec5ff" },
+  mix: { n: "Swap + Back!", say: "Swap AND backwards!", col: "#b9a3ff" },
+};
+let W, H, S, land, panel, band, tune, twist, phase, pt, beat, bpm, round, hearts, score, pos, played, flawless, groove, bestGroove,
+  onBeatN, notesN, twistsDone, olli, say, sayT, dots, crowd, lastTwist, forced, longest, b0;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+function voice(id, o) {
+  o = o || {}; const f = hz(MIDI[id]) * (o.sour ? .943 : 1), v = (o.vol || 1) * (demo ? .5 : 1), d = o.dur || .32, A = Lab.audio;
+  if (demo) return;
+  if (id === "momo") { A.tone({ f: f * 1.06, f2: f * .97, type: "triangle", dur: d * 1.2, vol: .24 * v, slideAt: .3 }); A.tone({ f: f / 2, type: "sine", dur: d, vol: .14 * v }); }
+  else if (id === "nori") { A.tone({ f, type: "sine", dur: d * .9, vol: .26 * v }); A.tone({ f: f * 4, type: "sine", dur: .05, vol: .06 * v }); }
+  else if (id === "pip") { A.tone({ f, type: "square", dur: d * .8, vol: .1 * v, lp: 1900, lp2: 700 }); A.noise({ dur: .05, vol: .06 * v, hp: 3000 }); }
+  else if (id === "bun") { A.tone({ f, type: "triangle", dur: d * 1.3, vol: .2 * v }); A.tone({ f: f * 2.01, type: "sine", dur: d * 1.6, vol: .07 * v }); }
+  else { A.tone({ f, f2: f * 1.01, type: "sawtooth", dur: d, vol: .09 * v, lp: 1500, lp2: 500 }); A.tone({ f: f * 1.5, type: "square", dur: .06, vol: .03 * v, lp: 2500 }); }
+  if (o.sour) { A.tone({ f: f * 1.06, type: "sawtooth", dur: .3, vol: .08, lp: 900 }); }
+}
+
+/* ---------- layout ---------- */
+function layout() {
+  W = Lab.W; H = Lab.H; const P = Lab.play; land = W > H * 1.15;
+  S = land ? clamp(Math.min(W / 844, H / 390), .75, 1.6) : clamp(Math.min(W / 390, H / 760), .72, 1.6);
+  panel = land ? { x: P.x + 10 * S, y: P.y + 12 * S, w: Math.min(230 * S, W * .28), h: P.h - 20 * S } : { x: P.x + 12 * S, y: P.y + 12 * S, w: P.w - 24 * S, h: 118 * S };
+  Lab.sprite.clear("ej-");
+  if (band) for (const m of band) { const s = seatXY(m.seat); m.x = s.x; m.y = s.y; m.swap = null; }
+}
+Lab.onResize(layout);
+function bandRect() {
+  const P = Lab.play;
+  if (land) { const x = panel.x + panel.w + 8 * S; return { x, y: P.y + 64 * S, w: P.x + P.w - x - 8 * S, h: P.y + P.h - (P.y + 64 * S) - 46 * S }; }
+  const y = panel.y + panel.h + 46 * S; return { x: P.x, y, w: P.w, h: H - Lab.safe.bottom - 78 * S - y };
+}
+function seatXY(i) {
+  const n = band.length, R = bandRect();
+  if (land) { const cw = R.w / n; return { x: R.x + cw * (i + .5), y: R.y + R.h * .58, ps: Math.min(cw * .56, R.h * .4, 120 * S), cw }; }
+  const back = n >> 1, front = n - back, inBack = i < back, k = inBack ? i : i - back, row = inBack ? back : front, cw = R.w / Math.max(2.6, row);
+  const x = R.x + R.w / 2 + (k - (row - 1) / 2) * cw, y = R.y + R.h * (inBack ? .3 : .74);
+  return { x, y, ps: Math.min(cw * .6, R.h * .24, 104 * S) * (inBack ? .92 : 1), cw };
+}
+
+/* ---------- state ---------- */
+function member(id, seat) { return { id, seat, x: 0, y: 0, hop: 0, sq: 0, glow: 0, sad: 0, swap: null, joinT: 0 }; }
+function setup() {
+  band = ["momo", "nori", "pip", "bun"].map((id, i) => member(id, i));
+  round = 1; hearts = 3; score = 0; groove = 0; bestGroove = 0; onBeatN = 0; notesN = 0; twistsDone = 0; longest = 0; lastTwist = "echo"; forced = null;
+  olli = { sq: 0, dizzy: 0, joy: 0, baton: 0 }; say = "Listen…"; sayT = 0; dots = []; crowd = []; beat = 0; bpm = 92;
+  layout(); for (const m of band) { const s = seatXY(m.seat); m.x = s.x; m.y = s.y; }
+  for (let i = 0; i < 16; i++) crowd.push({ u: (i + Lab.rand(.1, .9)) / 16, h: Lab.rand(.8, 1.15), c: Lab.choose(["#6b3b6e", "#7a4677", "#5a3160", "#86507f"]), ph: Lab.rand(0, TAU), jump: 0 });
+  tune = []; for (let i = 0; i < 3; i++) tune.push(randPal()); newRound(true);
+}
+function randPal() { let id; do id = Lab.choose(band).id; while (tune.length > 1 && id === tune[tune.length - 1] && id === tune[tune.length - 2]); return id; }
+function pickTwist() {
+  if (forced) { const f = forced; forced = null; return f; }
+  if (round === 4) return "rev"; if (round === 7) return "swap"; if (round === 9) return "add";
+  if (round < 5) return "echo";
+  const pool = ["rev"]; if (round > 7) pool.push("swap"); if (round > 9) pool.push("add"); if (round > 10) pool.push("mix");
+  if (lastTwist !== "echo" || !Lab.chance(.5)) return "echo";
+  return Lab.choose(pool.filter(p => p !== lastTwist));
+}
+function newRound(first) {
+  twist = pickTwist(); lastTwist = twist; pos = 0; played = []; flawless = true;
+  bpm = Math.min(140, 92 + (round - 1) * 4);
+  if (!demo && !first) Lab.music.play({ style: "bounce", key: "C", bpm, vol: .32 });
+  Lab.music.duck(.45);
+  phase = "intro"; pt = 0; beat = 0; b0 = 0; olli.lastB = -1; say = TWIST[twist].say; sayT = 0;
+  if (!demo) { if (twist !== "echo") Lab.banner(TWIST[twist].n, { color: TWIST[twist].col, ms: 1100, y: .46 }); else if (!first) Lab.banner("Song " + round, { color: "#fff7ea", ms: 800, y: .46 }); }
+}
+function answer() { const a = tune.slice(); return twist === "rev" || twist === "mix" ? a.reverse() : a; }
+function callList() { return twist === "add" ? [tune[tune.length - 1]] : tune; }
+function byId(id) { return band.find(m => m.id === id); }
+function start() {
+  demo = false; setup(); Lab.setScore(0); Lab.music.play({ style: "bounce", key: "C", bpm, vol: .32 }); Lab.music.duck(.45);
+  Lab.input.onDown = [(x, y) => { if (phase !== "turn") return; const m = hitTest(x, y); if (m) press(m.id); }];
+  Lab.input.onKey = [k => { if (phase !== "turn") return; const i = +k - 1; if (i >= 0 && i < band.length) { const m = band.find(b => b.seat === i); if (m) press(m.id); } }];
+  Lab.expose({
+    get score() { return score; }, get phase() { return phase; }, get round() { return round; }, get hearts() { return hearts; }, get twist() { return twist; },
+    get tune() { return tune.slice(); }, answer, get pos() { return pos; }, get groove() { return groove; }, get bandSize() { return band.length; },
+    seat: id => { const m = byId(id); return m ? { x: m.x, y: m.y, seat: m.seat } : null; }, seats: () => band.map(m => ({ id: m.id, seat: m.seat, x: m.x, y: m.y })),
+    press, force(t) { forced = t; }, get beatPhase() { return beat - Math.round(beat); }, skipTo(r) { while (round < r) { tune.push(randPal()); round++; if (round === 6) addBolt(); } newRound(); },
+  });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+function hitTest(x, y) {
+  let best = null, bd = 1e9;
+  for (const m of band) { const s = seatXY(m.seat), d = Math.hypot((x - m.x) / Math.max(1, s.cw * .5), (y - (m.y - s.ps * .15)) / Math.max(1, s.ps * 1.15)); if (d < 1.15 && d < bd) { bd = d; best = m; } }
+  return best;
+}
+function addBolt() { if (byId("bolt")) return; band.push(member("bolt", band.length)); band.forEach(m => m.swap = null); const order = band.map(m => m.id); band.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id)); band.forEach((m, i) => { m.seat = i; const s = seatXY(i); m.x = s.x; m.y = s.y; }); byId("bolt").joinT = 1; return order; }
+
+/* ---------- playing ---------- */
+function sing(m, o) { m.hop = 1; m.sq = -.22; m.glow = 1; voice(m.id, o); const s = seatXY(m.seat); fx.burst(m.x, m.y - s.ps * .7, { n: 5, color: Pals.cast[m.id].body, speed: 90, life: .6, size: 4, gravity: -60, shape: "circle" }); }
+function press(id) {
+  if (phase !== "turn" || Lab.paused) return false;
+  const m = byId(id); if (!m) return false;
+  const want = answer()[pos];
+  if (id !== want) { oops(m); return false; }
+  const ph = Math.abs(beat - Math.round(beat)), on = ph < .2;
+  sing(m); notesN++; pos++; played.push(id);
+  const pts = (10 + (on ? 10 : 0)) * (twist === "echo" ? 1 : 2);
+  score += pts; Lab.setScore(score); Lab.bumpScore();
+  if (on) { onBeatN++; groove++; bestGroove = Math.max(bestGroove, groove); if (!demo) { fx.text(m.x, m.y - seatXY(m.seat).ps * 1.1, groove > 2 ? "Groove ×" + groove : "On beat!", { color: "#fff3a0", size: 15 * S }); } }
+  else { groove = 0; if (!demo) fx.text(m.x, m.y - seatXY(m.seat).ps * 1.1, "+" + pts, { color: "#fff", size: 14 * S }); }
+  olli.baton = 1;
+  if (pos >= tune.length) clear();
+  return true;
+}
+function oops(m) {
+  flawless = false; groove = 0; voice(m.id, { sour: true }); m.sad = 1.6; m.hop = .5; olli.dizzy = 1.4;
+  snd("error"); Lab.shake(5, .25); Lab.buzz(30); hearts--;
+  const want = byId(answer()[pos]); if (want) want.glow = 1.4;
+  if (!demo) Lab.fx.text(m.x, m.y - seatXY(m.seat).ps, "Oops!", { color: "#ff9aa8", size: 18 * S });
+  phase = "oops"; pt = 0; say = hearts > 0 ? "Again — from the top!" : "Oh no…";
+}
+function clear() {
+  phase = "clear"; pt = 0; b0 = Math.ceil(beat); olli.lastB = -1; longest = Math.max(longest, tune.length);
+  const bonus = 15 * tune.length * (twist === "echo" ? 1 : 2) + (flawless ? 20 : 0);
+  score += bonus; Lab.setScore(score);
+  if (twist !== "echo") twistsDone++;
+  let heal = false; if (twist !== "echo" && flawless && hearts < 3) { hearts++; heal = true; }
+  say = heal ? "Encore! +1 heart" : flawless ? "Bravo!" : "Got it!"; olli.joy = 2;
+  snd("levelup"); Lab.audio.combo(Math.min(12, round));
+  if (!demo) { fx.text(W / 2, bandRect().y + 4 * S, "+" + bonus, { color: "#ffe08a", size: 24 * S }); for (const c of crowd) c.jump = Lab.rand(.6, 1); Lab.music.duck(1); }
+}
+function next() {
+  round++; tune.push(randPal());
+  if (round === 6 && !byId("bolt")) { addBolt(); say = "Bolt joins the band!"; }
+  newRound();
+}
+function lose() {
+  phase = "over"; Lab.music.intensity(0);
+  Lab.gameover({ title: "Oops! The tune got away", message: "The band will be back for an encore.", score, stats: [["Longest tune", longest + " notes"], ["On-beat taps", notesN ? Math.round(onBeatN / notesN * 100) + "%" : "–"], ["Twists cleared", twistsDone]] });
+}
+
+/* ---------- tick ---------- */
+function tick(dt) {
+  if (!band) return;
+  pt += dt; beat += dt * bpm / 60; sayT += dt;
+  const callBeat = 2, list = callList(), rel = beat - b0;
+  if (phase === "intro") {
+    const b = Math.floor(rel);
+    if (b >= 0 && b < callBeat && b !== olli.lastB) { olli.lastB = b; olli.baton = 1; snd("tick", { pitch: b ? 1.2 : 1 }); }
+    if (rel >= callBeat) { phase = "call"; pt = 0; olli.lastB = -1; say = twist === "add" ? "You know the rest… plus:" : TWIST[twist].say; }
+  } else if (phase === "call") {
+    const k = Math.floor(rel - callBeat);
+    if (k !== olli.lastB && k >= 0 && k < list.length) { olli.lastB = k; olli.baton = 1; sing(byId(list[k])); dots.push(k); }
+    if (rel - callBeat >= list.length + .4) {
+      if (twist === "swap" || twist === "mix") { phase = "swap"; pt = 0; doSwap(round > 12 ? 2 : 1); say = "Hop hop!"; }
+      else toTurn();
+    }
+  } else if (phase === "swap") { if (pt > 1.25) toTurn(); }
+  else if (phase === "turn") {
+    if (demo && pt > .5 && beat - Math.round(beat) > -.05 && beat - Math.round(beat) < .05 && pt - (olli.dt || 0) > .4) { olli.dt = pt; press(answer()[pos]); }
+  } else if (phase === "oops") {
+    if (pt > 1.6) { if (hearts <= 0) { if (demo) { setup(); return; } lose(); return; } if (twist === "add") twist = "echo"; if (twist === "mix") twist = "rev"; phase = "intro"; pt = 0; b0 = Math.ceil(beat); olli.lastB = -1; pos = 0; played = []; dots = []; }
+  } else if (phase === "clear") {
+    const k = Math.floor(rel * 2) - 1;   // the band plays your tune back in eighth notes
+    if (k >= 0 && k < tune.length && k !== olli.lastB) { olli.lastB = k; const m = byId(tune[k]); sing(m, { vol: .7, dur: .22 }); }
+    if (rel > tune.length / 2 + 2) { olli.lastB = -1; if (demo && round > 5) { setup(); return; } next(); }
+  }
+  // animate members
+  for (const m of band) {
+    m.hop = Math.max(0, m.hop - dt * 3.2); m.sq = Lab.damp(m.sq, 0, 9, dt); m.glow = Math.max(0, m.glow - dt * 2.2); m.sad = Math.max(0, m.sad - dt); m.joinT = Math.max(0, m.joinT - dt * .8);
+    const s = seatXY(m.seat);
+    if (m.swap) { m.swap.t = Math.min(1, m.swap.t + dt / .9); const e = ease.inOutQuad(m.swap.t); m.x = lerp(m.swap.x0, s.x, e); m.y = lerp(m.swap.y0, s.y, e) - Math.sin(e * Math.PI) * s.ps * 1.1; if (m.swap.t >= 1) { m.swap = null; m.sq = .25; snd("land", { pitch: 1.2 }); } }
+    else { m.x = s.x; m.y = s.y; }
+  }
+  olli.baton = Math.max(0, olli.baton - dt * 3); olli.dizzy = Math.max(0, olli.dizzy - dt); olli.joy = Math.max(0, olli.joy - dt);
+  for (const c of crowd) c.jump = Math.max(0, c.jump - dt * .7);
+  if (!demo) Lab.music.intensity(clamp(.25 + round * .06, 0, 1));
+}
+function doSwap(times) {
+  for (let k = 0; k < times; k++) {
+    const a = Lab.choose(band); let b; do b = Lab.choose(band); while (b === a);
+    for (const m of [a, b]) m.swap = { t: 0, x0: m.x, y0: m.y };
+    const s = a.seat; a.seat = b.seat; b.seat = s;
+  }
+  snd("boing", { pitch: 1.1 }); snd("whoosh");
+}
+function toTurn() { phase = "turn"; pt = 0; olli.lastB = -1; pos = 0; played = []; dots = []; say = twist === "rev" || twist === "mix" ? "Your turn — backwards!" : "Your turn!"; if (!demo) Lab.sfx("chime", { pitch: 1.3, vol: .6 }); }
+
+/* ---------- drawing ---------- */
+function stage() {
+  return Lab.sprite("ej-bg", W + 80, H + 80, g => {
+    g.translate(40, 40); const R = bandRect(), floorY = R.y + R.h * (land ? .28 : .12);
+    draw.vgrad(g, -40, -40, W + 80, H + 80, ["#4a2245", "#7a3a5c", "#b5596b"]);
+    for (let i = 0; i < 9; i++) { g.fillStyle = `rgba(255,220,180,${.04 + (i % 2) * .03})`; g.fillRect(-40 + i * (W + 80) / 9, -40, (W + 80) / 18, floorY + 40); } // wallpaper stripes
+    const fg = g.createLinearGradient(0, floorY, 0, H + 40); fg.addColorStop(0, "#c98a4b"); fg.addColorStop(1, "#8a5530"); g.fillStyle = fg; g.fillRect(-40, floorY, W + 80, H + 40 - floorY);
+    g.strokeStyle = "rgba(90,45,20,.35)"; g.lineWidth = 2; for (let i = -12; i <= 12; i++) { g.beginPath(); g.moveTo(W / 2 + i * 40 * S, floorY); g.lineTo(W / 2 + i * 110 * S, H + 40); g.stroke(); }
+    g.fillStyle = "#e9b06f"; g.fillRect(-40, floorY - 3, W + 80, 5);
+    // curtains
+    for (const d of [-1, 1]) {
+      const cx = d < 0 ? -40 : W + 40, cw = (land ? 70 : 46) * S; g.fillStyle = "#c4364f"; g.beginPath(); g.moveTo(cx, -40); g.lineTo(cx - d * cw * 1.6, -40); g.quadraticCurveTo(cx - d * cw * .7, H * .5, cx - d * cw * 1.1, H + 40); g.lineTo(cx, H + 40); g.fill();
+      g.strokeStyle = "rgba(90,10,40,.35)"; g.lineWidth = 4 * S; for (let k = 1; k < 4; k++) { g.beginPath(); g.moveTo(cx - d * cw * .4 * k, -40); g.quadraticCurveTo(cx - d * cw * .25 * k, H * .5, cx - d * cw * .3 * k, H + 40); g.stroke(); }
+    }
+    g.fillStyle = "#a82a44"; g.beginPath(); g.moveTo(-40, -40); g.lineTo(W + 40, -40); g.lineTo(W + 40, Lab.play.y - 8); for (let i = 10; i >= 0; i--) { const x = -40 + i * (W + 80) / 10; g.quadraticCurveTo(x + (W + 80) / 20, Lab.play.y + 10 * S, x, Lab.play.y - 8); } g.fill();
+    g.fillStyle = "#ffcf5a"; for (let i = 0; i <= 10; i++) { g.beginPath(); g.arc(-40 + i * (W + 80) / 10, Lab.play.y - 6, 3.5 * S, 0, TAU); g.fill(); }
+  });
+}
+function spot() { return Lab.sprite("ej-spot", 200, 400, g => { const gr = g.createLinearGradient(0, 0, 0, 400); gr.addColorStop(0, "rgba(255,245,200,0)"); gr.addColorStop(1, "rgba(255,245,200,.22)"); g.fillStyle = gr; g.beginPath(); g.moveTo(90, 0); g.lineTo(110, 0); g.lineTo(200, 400); g.lineTo(0, 400); g.fill(); }); }
+function symbol(c, kind, x, y, r, col) {
+  c.fillStyle = col; c.beginPath();
+  if (kind === "circle") c.arc(x, y, r * .8, 0, TAU);
+  else if (kind === "tri") { c.moveTo(x, y - r); c.lineTo(x + r * .95, y + r * .7); c.lineTo(x - r * .95, y + r * .7); c.closePath(); }
+  else if (kind === "star") { draw.star(c, x, y, r, col, 5, .48); return; }
+  else if (kind === "heart") { draw.heart(c, x, y - r * .1, r * .75, col); return; }
+  else { c.moveTo(x, y - r); c.lineTo(x + r * .8, y); c.lineTo(x, y + r); c.lineTo(x - r * .8, y); c.closePath(); }
+  c.fill();
+}
+function drawMember(c, m, t) {
+  const s = seatXY(m.seat), ps = s.ps, p = Pals.cast[m.id], hop = Math.sin(m.hop * Math.PI) * ps * .28;
+  const bob = (phase === "clear" ? Math.abs(Math.sin(beat * Math.PI)) * ps * .12 : Math.max(0, Math.cos((beat % 1) * TAU)) * ps * .03);
+  const padY = m.y + ps * .62, pw = Math.min(ps * 1.02, s.cw * .46), ph = ps * .42, lit = m.glow;
+  // drum pad
+  if (lit > 0) draw.glow(c, m.x, padY, ps * 1.3, p.body, .5 * lit);
+  c.fillStyle = shade(p.dark, -.25); c.beginPath(); c.ellipse(m.x, padY + ph, pw, ph * .45, 0, 0, TAU); c.fill(); c.fillRect(m.x - pw, padY, pw * 2, ph);
+  c.fillStyle = lit > 0 ? Lab.color.mix(p.dark, "#ffffff", lit * .5) : p.dark; c.fillRect(m.x - pw, padY, pw * 2, ph * .9);
+  c.fillStyle = lit > 0 ? Lab.color.mix(p.body, "#fffbe6", lit * .6) : p.body; c.beginPath(); c.ellipse(m.x, padY, pw, ph * .45, 0, 0, TAU); c.fill();
+  c.strokeStyle = "rgba(43,35,64,.35)"; c.lineWidth = 1.5; c.stroke();
+  symbol(c, SYM[m.id], m.x, padY + ph * .55, ph * .34, "#fff8ec");
+  // the pal
+  const listening = phase === "call" || phase === "swap", target = phase === "turn" && played.length ? byId(played[played.length - 1]) : null;
+  let mood = m.sad > 0 ? "sad" : m.hop > .3 ? "joy" : phase === "clear" ? "happy" : listening ? "think" : "happy";
+  if (m.swap) mood = "wow"; if (m.joinT > 0) mood = "joy";
+  const look = target && target !== m ? [clamp((target.x - m.x) / (ps * 3), -1, 1), .1] : listening ? [clamp((olliPos().x - m.x) / W * 3, -1, 1), -.2] : [0, 0];
+  const a = Pals.draw(c, m.id, m.x, m.y - hop - bob, ps, { t: t + m.seat, mood, look, squash: m.sq, arms: m.hop > .2 || phase === "clear" ? "cheer" : m.swap ? "up" : "hold", talk: m.hop > .4 ? .8 : 0, shadow: false, tilt: m.swap ? Math.sin(m.swap.t * Math.PI) * .4 : 0 });
+  // tiny instrument in the hands
+  instrument(c, m.id, a, ps, m.hop);
+  if (m.hop > .2) { c.globalAlpha = m.hop; draw.text(c, "♪", m.x + ps * .55, m.y - ps * (.8 + (1 - m.hop) * .6), { size: ps * .38, color: p.body, stroke: "#fff8ec", strokeW: 3 }); c.globalAlpha = 1; }
+}
+function instrument(c, id, a, ps, hop) {
+  const [lx, ly] = a.handL, [rx, ry] = a.handR, mx = (lx + rx) / 2, my = Math.max((ly + ry) / 2, a.mouth[1] + ps * .12) + ps * .05; c.lineWidth = Math.max(1.5, ps * .045); c.strokeStyle = INK;
+  if (id === "pip") { draw.rect(c, mx - ps * .26, my - ps * .02, ps * .52, ps * .22, ps * .06, "#ff5d73", INK, c.lineWidth); }
+  else if (id === "bun") { draw.circle(c, rx, ry - ps * .08, ps * .1, "#ffd23f", INK, c.lineWidth); draw.circle(c, lx, ly - ps * .08, ps * .1, "#ffd23f", INK, c.lineWidth); }
+  else if (id === "momo") { for (const d of [-1, 1]) { draw.rect(c, mx + d * ps * .15 - ps * .12, my - ps * .02, ps * .24, ps * .26, ps * .05, d < 0 ? "#c98a4b" : "#a86d3a", INK, c.lineWidth); draw.circle(c, mx + d * ps * .15, my - ps * .02, ps * .11, "#fff1dc", INK, c.lineWidth * .7); } }
+  else if (id === "nori") { for (let i = 0; i < 4; i++) draw.rect(c, mx - ps * .3 + i * ps * .155, my - ps * (.02 + i * .015), ps * .13, ps * (.2 - i * .03), ps * .03, ["#ff8fb8", "#ffd23f", "#5fd39a", "#3ec5ff"][i], INK, c.lineWidth * .7); }
+  else { draw.rect(c, mx - ps * .3, my - ps * .02, ps * .6, ps * .17, ps * .05, "#3a4372", INK, c.lineWidth); for (let i = 0; i < 4; i++) draw.rect(c, mx - ps * .25 + i * ps * .13, my + ps * .02, ps * .09, ps * .08, 1, "#fff6cf"); }
+}
+function olliPos() {
+  if (land) return { x: panel.x + panel.w * .3, y: panel.y + panel.h - 70 * S, s: 64 * S };
+  return { x: panel.x + 36 * S, y: panel.y + 76 * S, s: 50 * S };
+}
+function render(t) {
+  const c = Lab.ctx; if (!band) return; c.drawImage(stage(), -40, -40, W + 80, H + 80);
+  const R = bandRect(), sp = spot();
+  for (const m of band) { const s = seatXY(m.seat), on = m.glow > 0 || phase === "turn"; c.globalAlpha = on ? .55 + m.glow * .45 : .35; c.drawImage(sp, m.x - s.ps * 1.3, -10, s.ps * 2.6, m.y + s.ps * 1.2); }
+  c.globalAlpha = 1;
+  const sorted = band.slice().sort((a, b) => a.y - b.y); for (const m of sorted) drawMember(c, m, t);
+  // footlights + crowd
+  const fy = H - Lab.safe.bottom - 40 * S, pulse = Math.max(0, Math.cos((beat % 1) * TAU));
+  for (let i = 0; i < 9; i++) { const x = W * (i + .5) / 9; draw.glow(c, x, fy - 8 * S, 22 * S, "#ffd98a", .25 + pulse * .25); draw.circle(c, x, fy - 6 * S, 4 * S, "#ffe9b0"); }
+  for (const k of crowd) { const x = k.u * W, j = Math.sin(k.jump * Math.PI) * 26 * S + Math.max(0, Math.cos((beat % 1) * TAU + k.ph * .2)) * 3 * S, hh = 34 * S * k.h, y = H - Lab.safe.bottom + 12 * S - j;
+    c.fillStyle = k.c; c.beginPath(); c.ellipse(x, y - hh * .3, 20 * S, hh * .7, 0, 0, TAU); c.fill(); c.beginPath(); c.arc(x, y - hh, 13 * S, 0, TAU); c.fill(); if (k.jump > .3) { c.beginPath(); c.arc(x + 14 * S, y - hh - 12 * S, 5 * S, 0, TAU); c.fill(); } }
+  // panel: Olli + bubble + tune dots + hearts
+  const o = olliPos(), oMood = olli.dizzy > 0 ? "dizzy" : olli.joy > 0 ? "joy" : phase === "turn" ? "think" : "happy";
+  if (land) draw.rect(c, panel.x, o.y + o.s * .6, panel.w * .62, 14 * S, 6 * S, "#7a3a2c");
+  else draw.rect(c, o.x - 30 * S, o.y + o.s * .55, 60 * S, 12 * S, 6 * S, "#7a3a2c");
+  const oa = Pals.draw(c, "olli", o.x, o.y - Math.sin(olli.joy * 6) * 4 * S, o.s, { t, mood: oMood, arms: olli.joy > 0 ? "cheer" : "hold", squash: -olli.baton * .08, look: [.6, .1], shadow: false });
+  const ang = -1.1 + Math.sin((beat % 1) * TAU) * .5 - olli.baton * .4, [hx, hy] = oa.handR;
+  c.strokeStyle = INK; c.lineWidth = 3 * S; c.beginPath(); c.moveTo(hx, hy); c.lineTo(hx + Math.cos(ang) * 30 * S, hy + Math.sin(ang) * 30 * S); c.stroke(); draw.circle(c, hx + Math.cos(ang) * 30 * S, hy + Math.sin(ang) * 30 * S, 3 * S, "#fff");
+  let bx, by, bw, bh; if (land) { bw = panel.w - 8 * S; bh = 56 * S; bx = panel.x + 4 * S; by = o.y - o.s * 1.05 - bh - 14 * S; } else { bx = o.x + 44 * S; by = panel.y + 40 * S; bw = panel.x + panel.w - bx; bh = 50 * S; }
+  const pop = ease.outBack(clamp(sayT / .25, 0, 1));
+  c.save(); c.translate(bx + bw / 2, by + bh / 2); c.scale(pop, pop); c.translate(-bx - bw / 2, -by - bh / 2);
+  Pals.bubble(c, bx + bw / 2, by + bh / 2, bw, bh, land ? { tailX: o.x, tailY: o.y - o.s * .9 } : { tailX: o.x + 22 * S, tailY: o.y - 6 * S });
+  draw.text(c, say, bx + bw / 2, by + bh / 2, { size: 16 * S, color: INK, weight: 800, maxWidth: bw - 18 * S });
+  c.restore();
+  // round chip + hearts
+  const cy = land ? panel.y + 14 * S : panel.y + 12 * S;
+  draw.rect(c, panel.x, cy - 12 * S, 86 * S, 24 * S, 12 * S, "rgba(43,20,50,.55)");
+  draw.text(c, "Song " + round, panel.x + 43 * S, cy + 1, { size: 13 * S, color: "#fff7ea", weight: 800 });
+  for (let i = 0; i < 3; i++) draw.heart(c, (land ? panel.x + panel.w - 14 * S : panel.x + panel.w - 14 * S) - i * 26 * S, cy, 9 * S, i < hearts ? "#ff6b8a" : "rgba(255,255,255,.22)");
+  if (twist !== "echo") { const tw = TWIST[twist], tx = land ? panel.x : panel.x + 94 * S; draw.rect(c, tx, cy + (land ? 18 : -12) * S, 110 * S, 24 * S, 12 * S, tw.col); draw.text(c, tw.n, tx + 55 * S, cy + (land ? 31 : 1) * S, { size: 13 * S, color: INK, weight: 800, maxWidth: 104 * S }); }
+  // tune dots
+  const n = tune.length, dr = Math.min(9 * S, (R.w - 30 * S) / n / 2.6), dy = land ? Lab.play.y + 34 * S : R.y - 22 * S, gap = dr * 2.6;
+  for (let i = 0; i < n; i++) {
+    const x = R.x + R.w / 2 + (i - (n - 1) / 2) * gap; let col = "rgba(255,255,255,.18)", rr = dr;
+    if (phase === "call" || phase === "intro" || phase === "swap") { const k = twist === "add" ? n - 1 : i, lit = phase !== "intro" && dots.indexOf(twist === "add" ? 0 : i) >= 0; if (twist === "add" && i < n - 1) col = "rgba(255,255,255,.4)"; if (lit && k === i) col = "#fff3a0"; }
+    else if (phase === "turn" || phase === "oops") { if (i < played.length) col = Pals.cast[played[i]].body; else if (i === played.length && phase === "turn") rr = dr * (1 + Math.max(0, Math.cos((beat % 1) * TAU)) * .25), col = "rgba(255,255,255,.5)"; }
+    else if (phase === "clear") col = Pals.cast[tune[i]].body;
+    draw.circle(c, x, dy, rr, col, "rgba(43,20,50,.5)", 1.5);
+  }
+  if ((twist === "rev" || twist === "mix") && phase === "turn") draw.text(c, "◀ last note first", R.x + R.w / 2, dy + 20 * S, { size: 12 * S, color: "#ffd9e6", weight: 700 });
+}
+Lab.boot();
+})();
+</script></body></html>

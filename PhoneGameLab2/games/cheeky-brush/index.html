@@ -1,0 +1,262 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Cheeky Brush</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* CHEEKY BRUSH — the face-painting stall at the summer fair. Olli runs it; you hold the brush.
+ * Core idea kept: paint on a character's face with your finger, picking colours from a palette.
+ * Goal layer: pals queue up and each one asks for a design (heart, star, rainbow, whiskers, butterfly...), shown on the
+ * order card. The camera zooms onto their cheek or forehead; copy the design with your finger in the right colours,
+ * then tap DONE: the camera pulls back, the pal checks the hand mirror and you get a likeness score (how much of the
+ * design you covered, in the right colour, and how tidy you stayed) and 0-3 stars. The fair closes when the clock runs
+ * out; good work buys time (3 stars +8 s). Early designs show a dotted guide; it fades for later customers, designs
+ * get more colours, and later customers are ticklish (their face wiggles while you paint).
+ * Identity: striped fair tent, bunting, a wooden palette with paint blobs, big glossy strokes; dreamy music.          */
+let demo = false;
+Lab.init({
+  title: "Cheeky Brush", tagline: "Face painting at the fair. Copy the design, make the pals beam!", category: "Creative", kicker: "Pocket Pals",
+  howto: ["Pick a colour, paint with your finger", "Copy the design on the card", "Tap DONE: neat & fast earns more time"],
+  theme: { bg: "#d8f1ff", bg2: "#fff6e9", fg: "#3a3350", muted: "#7a7392", accent: "#ff6b8a", accent2: "#4aa3ff", light: true },
+  orient: "any", music: { style: "dream", key: "C", vol: .34 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink, shade = Lab.color.shade;
+const PAINT = [["red", "#ff5d73"], ["orange", "#ff9f43"], ["yellow", "#ffd23f"], ["green", "#43c98a"], ["blue", "#4aa3ff"], ["purple", "#a67cff"]];
+const BR = .17, CUST = ["nori", "pip", "bun", "momo"], ZONES = { cheek: [.5, .12, .36], forehead: [0, -.64, .28] }, FROGCHEEK = [.48, -.02, .34];
+/* designs: strokes in zone units [-1,1] — {c: paint index, pts: [[x,y]...]} */
+const arc = (cx, cy, r, a0, a1, n, ry) => Array.from({ length: n + 1 }, (_, i) => { const a = a0 + (a1 - a0) * i / n; return [cx + Math.cos(a) * r, cy + Math.sin(a) * (ry || r)]; });
+const DESIGNS = [
+  { n: "a heart", tier: 0, s: [{ c: 0, pts: Array.from({ length: 41 }, (_, i) => { const t = i / 40 * TAU; return [16 * Math.pow(Math.sin(t), 3) / 20, -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) / 20 - .05]; }) }] },
+  { n: "a star", tier: 0, s: [{ c: 2, pts: Array.from({ length: 11 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? .34 : .8; return [Math.cos(a) * r, Math.sin(a) * r + .06]; }) }] },
+  { n: "a lightning bolt", tier: 0, s: [{ c: 4, pts: [[.3, -.82], [-.32, .06], [.18, .06], [-.28, .84]] }] },
+  { n: "a spiral", tier: 0, s: [{ c: 3, pts: Array.from({ length: 50 }, (_, i) => { const a = i / 49 * TAU * 2.1, r = .08 + i / 49 * .7; return [Math.cos(a) * r, Math.sin(a) * r]; }) }] },
+  { n: "a sunshine", tier: 1, s: [{ c: 1, pts: arc(0, 0, .36, 0, TAU, 28) }].concat(Array.from({ length: 8 }, (_, i) => { const a = i * TAU / 8; return { c: 2, pts: [[Math.cos(a) * .55, Math.sin(a) * .55], [Math.cos(a) * .82, Math.sin(a) * .82]] }; })) },
+  { n: "whiskers", tier: 1, s: [{ c: 5, pts: [[-.75, -.42], [.75, -.58]] }, { c: 5, pts: [[-.8, 0], [.8, 0]] }, { c: 5, pts: [[-.75, .42], [.75, .58]] }, { c: 0, pts: [[-.08, -.02], [.08, .02]] }] },
+  { n: "a moon and star", tier: 1, s: [{ c: 4, pts: arc(-.12, 0, .62, -1.25, 1.25, 20).concat(arc(.1, 0, .45, 1.05, -1.05, 18)).concat([[(-.12 + Math.cos(-1.25) * .62), Math.sin(-1.25) * .62]]) }, { c: 2, pts: Array.from({ length: 11 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? .1 : .24; return [-.42 + Math.cos(a) * r, -.1 + Math.sin(a) * r]; }) }] },
+  { n: "a fish", tier: 1, s: [{ c: 1, pts: arc(-.1, 0, .5, 0, TAU, 30, .32) }, { c: 1, pts: [[.38, 0], [.82, -.36], [.82, .36], [.38, 0]] }, { c: 4, pts: [[-.35, -.06], [-.33, -.04]] }] },
+  { n: "a rainbow", tier: 2, s: [{ c: 0, pts: arc(0, .42, .8, Math.PI, TAU, 24) }, { c: 2, pts: arc(0, .42, .56, Math.PI, TAU, 20) }, { c: 4, pts: arc(0, .42, .32, Math.PI, TAU, 16) }] },
+  { n: "a flower", tier: 2, s: Array.from({ length: 5 }, (_, i) => { const a = -Math.PI / 2 + i * TAU / 5; return { c: 5, pts: arc(Math.cos(a) * .48, Math.sin(a) * .48, .22, 0, TAU, 16) }; }).concat([{ c: 2, pts: arc(0, 0, .08, 0, TAU, 10) }]) },
+  { n: "a butterfly", tier: 2, s: [{ c: 0, pts: arc(-.38, -.3, .32, 0, TAU, 20, .26) }, { c: 0, pts: arc(.38, -.3, .32, 0, TAU, 20, .26) }, { c: 1, pts: arc(-.3, .3, .24, 0, TAU, 16, .22) }, { c: 1, pts: arc(.3, .3, .24, 0, TAU, 16, .22) }, { c: 5, pts: [[0, -.62], [0, .62]] }] },
+  { n: "a paw print", tier: 2, s: [{ c: 4, pts: arc(0, .32, .32, 0, TAU, 20, .26) }].concat([[-.48, -.18], [-.16, -.5], [.18, -.5], [.48, -.18]].map(([x, y]) => ({ c: 4, pts: arc(x, y, .13, 0, TAU, 10) }))) },
+];
+let S, wide, card, area, Z, zc, tb, sw, undoB, doneB, fullP;
+let cust, strokes, cur, sel, served, score, starsTot, three, best, streak, clock, timeLeft, phase, phaseT, view, olli, bubble, told, result, wig, tickle, lastSeen, order;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function say(txt, dur) { if (!demo) bubble = { txt, t: 0, dur: dur || 2.6 }; }
+function once(id, txt, dur) { if (!told[id]) { told[id] = 1; say(txt, dur || 3.2); } }
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15;
+  if (wide) {
+    S = Math.min(P.h / 390, P.w / 844) * 1.05; card = { x: P.x + 10, y: P.y + 8, w: Math.min(220 * S, P.w * .27), h: P.h - 16 };
+    const ax = card.x + card.w + 10, aw = P.x + P.w - ax - 10; tb = { x: ax, y: P.y + P.h - 58 * S, w: aw, h: 54 * S };
+    area = { x: ax, y: P.y + 4, w: aw, h: tb.y - P.y - 8 };
+    undoB = { x: area.x + 34 * S, y: area.y + area.h - 26 * S, r: 26 * S }; doneB = { x: area.x + area.w - 52 * S, y: area.y + area.h - 26 * S, w: 92 * S, h: 42 * S };
+  } else {
+    S = Math.min(P.w / 390, P.h / 760); card = { x: P.x + 10, y: P.y + 6, w: P.w - 20, h: 104 * S };
+    tb = { x: P.x + 8, y: P.y + P.h - 64 * S, w: P.w - 16, h: 58 * S };
+    undoB = { x: P.x + 40 * S, y: tb.y - 34 * S, r: 26 * S }; doneB = { x: P.x + P.w - 62 * S, y: tb.y - 34 * S, w: 100 * S, h: 44 * S };
+    area = { x: P.x, y: card.y + card.h + 6, w: P.w, h: undoB.y - undoB.r - 8 - (card.y + card.h + 6) };
+  }
+  Z = Math.min(area.w * .32, area.h * .28); zc = [area.x + area.w / 2, area.y + area.h * .5];
+  const n = PAINT.length, w = Math.min(tb.w / n, 66 * S); sw = PAINT.map((p, i) => ({ i, x: tb.x + tb.w / 2 + (i - (n - 1) / 2) * w, y: tb.y + tb.h / 2, r: Math.min(w * .4, tb.h * .4) }));
+  const fs = Math.min(area.h * .55, area.w * .5); fullP = { x: zc[0] - fs * .35, y: area.y + area.h * .6, size: fs };
+  Lab.sprite.clear("cb_");
+}
+Lab.onResize(() => { if (strokes) layout(); });
+
+/* ---------- camera: close-up on the paint zone ↔ full view for the mirror ---------- */
+function zoneDef() { return cust.who === "momo" ? FROGCHEEK : ZONES[cust.zone]; }
+function cam() {
+  const [zx, zy, zh] = zoneDef(), k = ease.inOutCubic(clamp(view, 0, 1)), sC = Z / zh, sF = fullP.size / 2;
+  const s = lerp(sC, sF, k), w = wig * (1 - k), ox = Math.sin(clock * 2.3) * Z * .1 * w + Math.sin(clock * 5.1) * Z * .03 * w, oy = Math.sin(clock * 1.6) * Z * .07 * w;
+  const px = lerp(zc[0] - zx * sC, fullP.x, k) + ox + (cust.walk || 0) * Lab.W, py = lerp(zc[1] - zy * sC, fullP.y, k) + oy;
+  return { s, px, py, zx: px + zx * s, zy: py + zy * s, zr: zh * s };
+}
+const toZone = (x, y, C) => [(x - C.zx) / C.zr, (y - C.zy) / C.zr];
+
+/* ---------- likeness ---------- */
+const N = 64, EXT = 1.3; let mc = null, mg = null;
+function mask(list, pick) {
+  if (!mc) { mc = document.createElement("canvas"); mc.width = mc.height = N; mg = mc.getContext("2d", { willReadFrequently: true }); }
+  mg.setTransform(1, 0, 0, 1, 0, 0); mg.clearRect(0, 0, N, N); mg.setTransform(N / (2 * EXT), 0, 0, N / (2 * EXT), N / 2, N / 2);
+  mg.lineWidth = BR; mg.lineCap = mg.lineJoin = "round"; mg.strokeStyle = "#fff";
+  for (const st of list) if (pick(st.c)) { mg.beginPath(); st.pts.forEach((p, i) => i ? mg.lineTo(p[0], p[1]) : mg.moveTo(p[0], p[1])); if (st.pts.length === 1) mg.lineTo(st.pts[0][0] + .001, st.pts[0][1]); mg.stroke(); }
+  const d = mg.getImageData(0, 0, N, N).data, m = new Uint8Array(N * N); for (let i = 0; i < N * N; i++) m[i] = d[i * 4 + 3] > 110 ? 1 : 0; return m;
+}
+function dilate(m, r) { const o = new Uint8Array(N * N); for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (m[y * N + x]) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const X = x + dx, Y = y + dy; if (X >= 0 && Y >= 0 && X < N && Y < N && dx * dx + dy * dy <= r * r + 1) o[Y * N + X] = 1; } return o; }
+function likeness(target, painted) {
+  if (!painted.length) return { sim: 0, recall: 0, prec: 0 };
+  const cols = [...new Set(target.map(s => s.c))], anyP = dilate(mask(painted, () => true), 2), anyT = dilate(mask(target, () => true), 2);
+  let cov = 0, tot = 0, good = 0, all = 0;
+  for (const k of cols) { const T = mask(target, c => c === k), P = dilate(mask(painted, c => c === k), 2); for (let i = 0; i < N * N; i++) if (T[i]) { tot++; cov += P[i] ? 1 : anyP[i] ? .4 : 0; } }
+  for (const j of new Set(painted.map(s => s.c))) { const Pj = mask(painted, c => c === j), Tj = cols.includes(j) ? dilate(mask(target, c => c === j), 2) : null; for (let i = 0; i < N * N; i++) if (Pj[i]) { all++; good += Tj && Tj[i] ? 1 : anyT[i] ? .6 : 0; } }
+  const recall = tot ? cov / tot : 0, prec = all ? good / all : 0;
+  return { sim: Math.round(100 * recall * (.35 + .65 * prec)), recall, prec };
+}
+
+/* ---------- run ---------- */
+function pickDesign() {
+  const tier = served < 2 ? 0 : served < 4 ? Lab.choose([0, 1]) : served < 7 ? Lab.choose([1, 1, 2]) : Lab.choose([1, 2, 2]);
+  const pool = DESIGNS.filter(d => d.tier === tier && d !== lastSeen); const d = Lab.choose(pool.length ? pool : DESIGNS); lastSeen = d; return d;
+}
+function nextCustomer(first) {
+  const who = CUST[(order + served) % CUST.length], d = pickDesign();
+  cust = { who, d, zone: who === "momo" || d.n === "whiskers" ? "cheek" : Lab.choose(["cheek", "forehead"]), guide: served < 3 ? .6 : served < 6 ? .28 : 0, walk: first ? 0 : 1, t: 0 };
+  wig = served >= 6 ? Math.min(1, .45 + (served - 6) * .12) : 0; strokes = []; cur = null; result = null; tickle = 0;
+  phase = "walkin"; phaseT = 0; view = 1;
+}
+function reset() { layout(); served = 0; score = 0; starsTot = 0; three = 0; best = 0; streak = 0; clock = 0; timeLeft = 90; sel = 0; bubble = null; told = {}; lastSeen = null; order = Lab.randInt(0, 3); olli = { mood: "happy", t: 0 }; nextCustomer(true); }
+function start() {
+  demo = false; reset(); Lab.setScore(0); Lab.music.intensity(.2);
+  Lab.input.onDown = [(x, y) => down(x, y)]; Lab.input.onMove = [(x, y) => move(x, y)]; Lab.input.onUp = [() => up()];
+  Lab.input.onKey = [k => { const n = +k; if (n >= 1 && n <= 6) pickColour(n - 1); else if (k === "z" || k === "Z" || k === "Backspace") undo(); else if (k === "Enter" || k === "d" || k === "D") done(); }];
+  Lab.loop(frame);
+}
+function pickColour(i) { if (sel !== i) { sel = i; snd("tick", { pitch: .8 + i * .1 }); } }
+function down(x, y) {
+  if (Math.hypot(x - undoB.x, y - undoB.y) < undoB.r * 1.2) { undo(); return; }
+  if (Math.abs(x - doneB.x) < doneB.w / 2 + 6 && Math.abs(y - doneB.y) < doneB.h / 2 + 6) { done(); return; }
+  for (const s of sw) if (Math.hypot(x - s.x, y - s.y) < s.r * 1.35) { pickColour(s.i); return; }
+  if (phase !== "paint" || y > undoB.y - undoB.r - 4 && (x < undoB.x + undoB.r * 1.5 || x > doneB.x - doneB.w / 2 - 6) || y > tb.y) return;
+  const C = cam(), p = toZone(x, y, C); cur = { c: sel, pts: [p] }; strokes.push(cur); snd("swish", { pitch: 1.4, vol: .3 });
+}
+function move(x, y) {
+  if (!cur || phase !== "paint") return; const C = cam(), p = toZone(x, y, C), q = cur.pts[cur.pts.length - 1];
+  const d = Math.hypot(p[0] - q[0], p[1] - q[1]); if (d < .025) return; cur.pts.push(p); tickle += d;
+  if (cur.pts.length % 6 === 0) snd("slide", { pitch: 1.6 + Math.random() * .3, vol: .18 });
+}
+function up() { if (cur) { cur = null; once("first", "Ooh, it tickles!", 1.6); } }
+function undo() { if (phase !== "paint" || !strokes.length) return; strokes.pop(); cur = null; snd("pop", { pitch: .7 }); }
+function done(auto) {
+  if (phase !== "paint") return; if (!strokes.length && !auto) { say("Paint something first!"); return; }
+  cur = null; const r = likeness(cust.d.s, strokes); const st = r.sim >= 80 ? 3 : r.sim >= 60 ? 2 : r.sim >= 35 ? 1 : 0;
+  result = Object.assign(r, { stars: st }); phase = "mirror"; phaseT = 0; snd("whoosh", { pitch: .8 });
+}
+function award() {
+  const r = result, st = r.stars; served++; starsTot += st; best = Math.max(best, r.sim);
+  if (st === 3) { three++; streak++; } else streak = 0;
+  const pts = r.sim + (st === 3 ? 50 + 10 * (streak - 1) : st === 2 ? 20 : 0), bonus = [0, 1, 4, 8][st];
+  score += pts; Lab.setScore(score); if (!demo) Lab.bumpScore(); timeLeft += bonus;
+  if (!demo) { fx.text(zc[0], area.y + area.h * .2, r.sim + "% alike!", { color: "#3a3350", size: 22 * Math.max(S, .8) }); if (bonus) Lab.toast("+" + bonus + " s", 900, { y: .3 }); }
+  snd(st >= 2 ? "levelup" : st === 1 ? "chime" : "error"); if (st === 3 && !demo) Lab.fx.confetti();
+  olli.mood = st >= 2 ? "joy" : st === 1 ? "happy" : "sad";
+  say(st === 3 ? Lab.choose(["A masterpiece!", "Picture perfect!", "Hoo-hoo, gorgeous!"]) : st === 2 ? Lab.choose(["Lovely work!", "Very nice!"]) : st === 1 ? "Erm... it's art!" : "Hmm, let's try again!");
+}
+function frame(dt, t) { clock += dt; phaseT += dt; update(dt); render(t); }
+function update(dt) {
+  if (bubble) { bubble.t += dt; if (bubble.t > bubble.dur) bubble = null; }
+  tickle = Math.max(0, tickle - dt * 1.5);
+  if (phase !== "over" && phase !== "mirror") { timeLeft -= dt; if (timeLeft <= 0) { timeLeft = 0; if (phase === "paint" && strokes.length) done(true); else return end(); } }
+  Lab.music.intensity(.25 + clamp(1 - timeLeft / 30, 0, 1) * .55);
+  if (timeLeft < 10 && Math.floor(timeLeft) !== Math.floor(timeLeft + dt) && phase !== "over") snd("tick", { pitch: 1.5, vol: .4 });
+  if (phase === "walkin") { cust.walk = Math.max(0, (cust.walk || 0) - dt * 2.4); if (cust.walk <= 0 && phaseT > .45) { view = Math.max(0, view - dt * 2.2); if (view <= 0) { phase = "paint"; phaseT = 0; say("I'd like " + cust.d.n + ", please!", 2.2); if (served === 0) Lab.after(2.4, () => once("guide", "Trace the dotted lines!", 2.5)); if (wig > 0 && served === 6) Lab.after(2.4, () => once("wig", "This one's ticklish. Hold steady!", 2.5)); } } }
+  else if (phase === "mirror") { view = Math.min(1, view + dt * 2); if (phaseT > .7 && !result.awarded) { result.awarded = true; award(); } if (phaseT > 2.6) { if (timeLeft <= 0) return end(); phase = "walkout"; phaseT = 0; } }
+  else if (phase === "walkout") { cust.walk = -ease.inQuad(clamp(phaseT / .5, 0, 1)); if (phaseT > .55) nextCustomer(false); }
+}
+function end() {
+  if (phase === "over") return; phase = "over"; cur = null;
+  Lab.gameover({ title: "The fair is closing!", message: "Olli counts the paint pots. What a day.", score, neutral: true, stats: [["Pals painted", served], ["3-star faces", three], ["Best likeness", best + "%"]] });
+}
+
+/* ---------- drawing ---------- */
+function strokePath(c, st, C, w) { c.beginPath(); st.pts.forEach((p, i) => { const x = C.zx + p[0] * C.zr, y = C.zy + p[1] * C.zr; i ? c.lineTo(x, y) : c.moveTo(x, y); }); if (st.pts.length === 1) c.lineTo(C.zx + st.pts[0][0] * C.zr + .5, C.zy + st.pts[0][1] * C.zr); c.lineWidth = w; c.stroke(); }
+function paintStrokes(c, list, C, alpha) {
+  c.save(); c.lineCap = c.lineJoin = "round"; c.globalAlpha = alpha == null ? .95 : alpha;
+  for (const st of list) { c.strokeStyle = PAINT[st.c][1]; strokePath(c, st, C, BR * C.zr); }
+  c.globalAlpha = (alpha == null ? 1 : alpha) * .35; c.strokeStyle = "#fff"; for (const st of list) { c.save(); c.translate(-BR * C.zr * .12, -BR * C.zr * .14); strokePath(c, st, C, BR * C.zr * .22); c.restore(); }
+  c.restore();
+}
+function drawDesign(c, d, x, y, r, alpha) { paintStrokes(c, d.s, { zx: x, zy: y, zr: r }, alpha); }
+function bgSprite() {
+  const W = Lab.W, H = Lab.H;
+  return Lab.sprite("cb_bg" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40); const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, "#bfe6ff"); gr.addColorStop(1, "#fff3e3"); g.fillStyle = gr; g.fillRect(-40, -40, W + 80, H + 80);
+    const st = 46; for (let x = -40; x < W + 40; x += st * 2) { g.fillStyle = "rgba(255,107,138,.16)"; g.fillRect(x, -40, st, H + 80); }
+    const by = area.y + 14; g.strokeStyle = "#c9a88a"; g.lineWidth = 2; g.beginPath(); g.moveTo(-40, by - 10); g.quadraticCurveTo(W / 2, by + 26, W + 40, by - 10); g.stroke();
+    for (let i = 0; i < 14; i++) { const x = (i + .5) * W / 14, y = by - 10 + Math.sin(i / 13 * Math.PI) * 30 * .62; g.fillStyle = PAINT[i % 6][1]; g.beginPath(); g.moveTo(x - 10, y); g.lineTo(x + 10, y); g.lineTo(x, y + 16); g.closePath(); g.fill(); }
+    g.fillStyle = "#e8c9a6"; g.fillRect(-40, tb.y - 6, W + 80, H); g.fillStyle = "#d9b48c"; g.fillRect(-40, tb.y - 6, W + 80, 5);
+  });
+}
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  const C = cam(), k = ease.inOutCubic(clamp(view, 0, 1)), sz = C.s * 2;
+  // the customer (huge in close-up)
+  const giggle = tickle > .8 && phase === "paint", ptr = Lab.input;
+  const look = phase === "paint" && ptr.down ? [clamp((ptr.x - C.px) / (C.s * 1.2), -1, 1), clamp((ptr.y - (C.py - C.s * .2)) / (C.s * 1.2), -1, 1)] : phase === "mirror" ? [-1, 0] : [0, 0];
+  const mood = phase === "mirror" && result.awarded ? (result.stars >= 2 ? "joy" : result.stars === 1 ? "think" : "sad") : giggle ? "joy" : phase === "paint" ? "happy" : "happy";
+  c.save(); c.beginPath(); c.rect(area.x, area.y, area.w, area.h + (phase === "paint" ? 0 : 60 * S)); c.clip();
+  Pals.draw(c, cust.who, C.px, C.py, sz, { t, mood, look, shadow: k > .5, squash: giggle ? Math.sin(clock * 30) * .02 : 0, arms: phase === "mirror" && result.awarded && result.stars === 3 ? "cheer" : "down" });
+  c.save(); c.beginPath(); c.arc(C.zx, C.zy, C.zr * 1.45, 0, TAU); c.clip();
+  if (cust.guide > 0 && phase === "paint") { c.save(); c.setLineDash([BR * C.zr * .25, BR * C.zr * .55]); c.lineCap = "round"; c.globalAlpha = cust.guide; for (const st of cust.d.s) { c.strokeStyle = shade(PAINT[st.c][1], -.15); strokePath(c, st, C, BR * C.zr * .32); } c.restore(); }
+  paintStrokes(c, strokes, C); c.restore();
+  if (phase === "paint") { c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = 2; c.setLineDash([6, 8]); c.lineDashOffset = -clock * 12; c.beginPath(); c.arc(C.zx, C.zy, C.zr * 1.3, 0, TAU); c.stroke(); c.setLineDash([]); }
+  c.restore();
+  // Olli with the hand mirror during the reveal
+  if (k > .05) { const os = fullP.size * .62, ox = Math.min(area.x + area.w - os * .7, fullP.x + fullP.size * 1.1), oy = fullP.y + fullP.size * .5 - os * .5, slide = (1 - k) * area.w * .5;
+    const an = Pals.draw(c, "olli", ox + slide, oy, os, { t, mood: result && result.awarded ? olli.mood : "think", arms: "hold", look: [-1, 0] });
+    const mx = an.handL[0] - os * .12, my = an.handL[1] - os * .35; c.fillStyle = "#c98a5a"; c.fillRect(mx - 3, my, 6, os * .35); draw.circle(c, mx, my, os * .24, "#e8c9a6", "#c98a5a", 4); draw.circle(c, mx, my, os * .19, "#dff4ff"); c.fillStyle = "rgba(255,255,255,.7)"; c.fillRect(mx - os * .1, my - os * .1, os * .05, os * .14);
+    if (result && result.awarded) for (let i = 0; i < 3; i++) { const u = clamp((phaseT - .8 - i * .25) / .3, 0, 1), on = i < result.stars; draw.star(c, fullP.x + (i - 1) * 46 * Math.max(S, .8), fullP.y - fullP.size * .95, 20 * Math.max(S, .8) * ease.outBack(u), on ? "#ffd23f" : "rgba(58,51,80,.18)", 5, .48); } }
+  drawCard(c); drawTools(c); if (bubble) drawBubble(c);
+}
+function drawCard(c) {
+  const r = card, k = Math.max(S, .8); draw.rect(c, r.x, r.y + 3, r.w, r.h, 16 * k, "rgba(60,40,80,.1)"); draw.rect(c, r.x, r.y, r.w, r.h, 16 * k, "#fffdf8", "rgba(58,51,80,.12)", 1.5);
+  const th = wide ? Math.min(r.w - 30 * k, r.h * .38) : r.h - 30 * k, tx = wide ? r.x + r.w / 2 : r.x + 14 * k + th / 2, ty = wide ? r.y + 58 * k + th / 2 : r.y + 10 * k + th / 2;
+  draw.rect(c, tx - th / 2, ty - th / 2, th, th, 12 * k, "#fbe9dc"); drawDesign(c, cust.d, tx, ty, th * .36);
+  const lx = wide ? r.x + 14 * k : tx + th / 2 + 12 * k, maxW = wide ? r.w - 28 * k : r.x + r.w - lx - 14 * k;
+  const name = Pals.cast[cust.who].name; draw.text(c, wide ? name + " wants" : name + " wants " + cust.d.n, lx, wide ? r.y + 24 * k : r.y + 26 * k, { size: 15 * k, color: "#3a3350", weight: 700, align: "left", maxWidth: maxW });
+  if (wide) draw.text(c, cust.d.n, lx, r.y + 44 * k, { size: 15 * k, color: "#ff6b8a", weight: 700, align: "left", maxWidth: maxW });
+  const ly = wide ? ty + th / 2 + 22 * k : r.y + 50 * k;
+  draw.text(c, "on the " + cust.zone + (wig ? " · ticklish!" : ""), lx, ly, { size: 12.5 * k, color: "#7a7392", weight: 700, align: "left", maxWidth: maxW });
+  draw.text(c, "Painted " + served + " · " + Math.ceil(timeLeft) + " s", lx, ly + 22 * k, { size: 12.5 * k, color: timeLeft < 10 ? "#ff5d73" : "#7a7392", weight: 700, align: "left", maxWidth: maxW });
+  const bw = wide ? r.w - 28 * k : r.x + r.w - lx - 14 * k, by = wide ? ly + 44 * k : r.y + r.h - 20 * k, p = clamp(timeLeft / 90, 0, 1);
+  draw.rect(c, lx, by, bw, 8 * k, 4 * k, "rgba(58,51,80,.1)"); draw.rect(c, lx, by, Math.max(8 * k, bw * p), 8 * k, 4 * k, timeLeft < 10 ? "#ff5d73" : "#4aa3ff");
+  if (wide && r.h > 300 * k && view < .05) Pals.draw(c, "olli", r.x + r.w / 2, r.y + r.h - 52 * k, 64 * k, { t: clock, mood: olli.mood, look: [1, -.3], arms: "hold" });
+}
+function drawTools(c) {
+  const k = Math.max(S, .8), on = phase === "paint";
+  // palette board
+  draw.rect(c, tb.x, tb.y, tb.w, tb.h, tb.h / 2, "#c98a5a"); draw.rect(c, tb.x + 4, tb.y + 4, tb.w - 8, tb.h - 8, tb.h / 2 - 4, "#f2d3ac");
+  for (const s of sw) { const p = sel === s.i, r = s.r * (p ? 1.12 : 1); draw.circle(c, s.x, s.y + 2, r, "rgba(0,0,0,.12)"); draw.circle(c, s.x, s.y, r, PAINT[s.i][1], p ? "#fff" : null, 3.5);
+    draw.circle(c, s.x - r * .3, s.y - r * .3, r * .22, "rgba(255,255,255,.5)"); if (p) draw.circle(c, s.x, s.y - r - 7 * k, 3.5 * k, "#3a3350"); }
+  // undo + done
+  c.globalAlpha = on && strokes.length ? 1 : .45; draw.circle(c, undoB.x, undoB.y, undoB.r, "#fffdf8", "rgba(58,51,80,.2)", 2);
+  c.strokeStyle = "#3a3350"; c.lineWidth = 3 * k; c.lineCap = "round"; c.beginPath(); c.arc(undoB.x + 2 * k, undoB.y + 2 * k, undoB.r * .42, -Math.PI * .9, Math.PI * .6); c.stroke();
+  c.fillStyle = "#3a3350"; c.beginPath(); const ax = undoB.x + 2 * k + Math.cos(-Math.PI * .9) * undoB.r * .42, ay = undoB.y + 2 * k + Math.sin(-Math.PI * .9) * undoB.r * .42; c.moveTo(ax - 6 * k, ay - 2 * k); c.lineTo(ax + 4 * k, ay - 6 * k); c.lineTo(ax + 2 * k, ay + 5 * k); c.fill();
+  c.globalAlpha = on && strokes.length ? 1 : .45; const d = doneB; draw.rect(c, d.x - d.w / 2, d.y - d.h / 2 + 3, d.w, d.h, d.h / 2, "rgba(0,0,0,.12)"); draw.rect(c, d.x - d.w / 2, d.y - d.h / 2, d.w, d.h, d.h / 2, "#ff6b8a", "#fff", 2.5);
+  draw.text(c, "DONE", d.x, d.y + 1, { size: 17 * k, color: "#fff", weight: 700 }); c.globalAlpha = 1;
+  // brush cursor
+  if (on && Lab.input.down && Lab.input.y < tb.y - 4) { const C = cam(); draw.circle(c, Lab.input.x, Lab.input.y, BR * C.zr * .5, null, "rgba(255,255,255,.8)", 2); }
+}
+function drawBubble(c) {
+  const kk = ease.outBack(clamp(bubble.t / .2, 0, 1)) * clamp((bubble.dur - bubble.t) / .25, 0, 1); if (kk <= 0) return;
+  const fs = 13.5 * Math.max(S, .85); c.font = Lab.font(fs, 700); const w = c.measureText(bubble.txt).width + 24, h = fs * 2.1;
+  const mir = phase === "mirror" || phase === "walkout", os = fullP.size * .62, ox = Math.min(area.x + area.w - os * .7, fullP.x + fullP.size * 1.1);
+  const x = clamp(mir ? ox : area.x + area.w / 2, area.x + w / 2 + 6, area.x + area.w - w / 2 - 6), y = mir ? fullP.y + fullP.size * .5 - os * 1.25 - h / 2 : area.y + h / 2 + 34 * S;
+  c.save(); c.translate(x, y); c.scale(kk, kk); c.translate(-x, -y); Pals.bubble(c, x, y, w, h, mir ? { tailX: ox, tailY: y + h * 1.2 } : { tailX: x - w * .2, tailY: y + h }); draw.text(c, bubble.txt, x, y + 1, { size: fs, color: INK, weight: 700 }); c.restore();
+}
+
+/* ---------- splash: a demo painter traces the design ---------- */
+let demoInit = false, demoI = 0;
+function attract(dt, t) {
+  if (!demoInit) { demoInit = true; demo = true; reset(); }
+  demo = true; clock += dt; phaseT += dt;
+  if (phase === "paint") { const all = cust.d.s, st = all[demoI]; if (st) { const k = Math.min(st.pts.length, Math.floor(phaseT * 30) + 1); strokes[demoI] = { c: st.c, pts: st.pts.slice(0, k).map(p => [p[0] + Math.sin(p[1] * 9) * .03, p[1]]) }; if (k >= st.pts.length) { demoI++; phaseT = 0; } } else { demoI = 0; done(true); } }
+  if (phase !== "paint") update(dt); else timeLeft = 90; if (phase === "walkin" && strokes.length === 0) demoI = 0;
+  render(t); demo = false;
+}
+
+Lab.expose({
+  get score() { return score; }, get phase() { return phase; }, get served() { return served; }, get timeLeft() { return timeLeft; }, get sel() { return sel; },
+  get strokes() { return strokes.length; }, get result() { return result && { sim: result.sim, stars: result.stars }; }, get design() { return cust.d.n; },
+  swatch(i) { return [sw[i].x, sw[i].y]; }, get doneXY() { return [doneB.x, doneB.y]; }, get undoXY() { return [undoB.x, undoB.y]; },
+  // screen points of the requested design's strokes (for driving real pointer input), in the current camera
+  path(i) { const C = cam(), st = cust.d.s[i]; return st && { c: st.c, pts: st.pts.map(p => [C.zx + p[0] * C.zr, C.zy + p[1] * C.zr]) }; },
+  get count() { return cust.d.s.length; }, zone() { const C = cam(); return [C.zx, C.zy, C.zr]; },
+  setDesign(name) { cust.d = DESIGNS.find(d => d.n === name); strokes = []; }, setTime(s) { timeLeft = s; }, calm() { wig = 0; },
+  likeness(name, painted) { return likeness(DESIGNS.find(d => d.n === name).s, painted); },
+});
+Lab.boot();
+})();
+</script></body></html>
