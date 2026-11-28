@@ -4,13 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 38,
-    "slug": "hungry-fish",
-    "t": "Hungry Fish",
-    "d": "Guide a hungry fish to its food, past hazards.",
-    "thumb": "../thumbs/PhoneGameLab2--hungry-fish.jpg"
-   },
-   {
     "n": 39,
     "slug": "ice-cream-shop",
     "t": "Ice Cream Shop",
@@ -23,20 +16,6 @@ window.LAB_GAMES = [
     "t": "Ice Smash",
     "d": "Tap to shatter all the ice before moves run out.",
     "thumb": "../thumbs/PhoneGameLab2--ice-smash.jpg"
-   },
-   {
-    "n": 41,
-    "slug": "jigsaw-puzzles",
-    "t": "Jigsaw Puzzles",
-    "d": "Drag scrambled pieces back into the picture.",
-    "thumb": "../thumbs/PhoneGameLab2--jigsaw-puzzles.jpg"
-   },
-   {
-    "n": 42,
-    "slug": "jump",
-    "t": "Jump",
-    "d": "Time your jumps between platforms to survive.",
-    "thumb": "../thumbs/PhoneGameLab2--jump.jpg"
    },
    {
     "n": 43,
@@ -303,6 +282,16 @@ window.LAB_GAMES = [
     "t": "Wire Ball",
     "d": "Drag a ring along a wire without touching it.",
     "thumb": "../thumbs/PhoneGameLab2--wire-ball.jpg"
+   },
+   {
+    "slug": "snack-tank",
+    "t": "Hungry Fish",
+    "d": "Drag the fish to the food past the rocks."
+   },
+   {
+    "slug": "skip-jam",
+    "t": "Jump",
+    "d": "Tap to jump platforms. Time it right!"
    }
   ]
  },
@@ -350,6 +339,13 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--pack-ice.jpg"
    },
    {
+    "slug": "snap-album",
+    "t": "Snap Album",
+    "d": "Piece Olli's photos back together before the sun sets.",
+    "v2": true,
+    "score": 7
+   },
+   {
     "slug": "stew-patch",
     "t": "Stew Patch",
     "d": "Pull the veg, let the neighbours creep in, feed the queue.",
@@ -390,7 +386,8 @@ window.LAB_GAMES = [
     "slug": "gobblepot",
     "t": "Gobblepot",
     "d": "Bun's magic pot gobbles the mess. Small things first!",
-    "v2": true
+    "v2": true,
+    "score": 7
    },
    {
     "slug": "gulp-and-float",

@@ -109,8 +109,8 @@ function newState(seed) {
   return { seed, time: START_TIME, score: 0, floors: [], ball: null, maxFloor: 0, cur: 0, streak: 0, t: 0, cam: Y(0, 300), camV: 0, drops: 0, charged: 0, crystals: 0, shake: 0, flash: 0, hurryT: 0, gates: 0, newBest: false };
 }
 function newRun() {
-  runN++; S = newState((SEED + runN * 0x9E3779B1) >>> 0); floorAt(3);
-  S.ball = { x: 200, y: Y(0, 420), vx: 0, vy: 0, tr: [], tn: 0, still: 0 };
+  runN++; S = newState((SEED + runN * 0x9E3779B1) >>> 0); S.rng = mulberry(S.seed ^ 0x51ed); floorAt(3);
+  S.ball = { x: 200 + (S.rng() - .5) * 120, y: Y(0, 420), vx: 0, vy: 0, tr: [], tn: 0, still: 0 };
   paused = false; hideCard(); mode = 'play'; sfx('start'); banner('FLOOR 0', 'shoot up a side lane', '#58f7ff');
 }
 const floorOf = y => Math.max(0, Math.floor(-y / FH));
@@ -194,7 +194,7 @@ function substep(dt) {
       const ex = b.x - c.x, ey = b.y - c.y, d = Math.sqrt(ex * ex + ey * ey), m = BR + c.r; if (d >= m) continue;
       const nx = d > 1e-6 ? ex / d : 0, ny = d > 1e-6 ? ey / d : -1;
       const v = resolve(b, nx, ny, m - d, 0, 0, c.kind === 'peg' ? .5 : .55, 0);
-      if (c.kind === 'bumper') { const out = b.vx * nx + b.vy * ny; if (out < 800) { b.vx += nx * (800 - out); b.vy += ny * (800 - out); } if (c.cd <= 0) { c.cd = .06; c.fl = 1; addScore(50, c.x, c.y - c.r - 8, F.zc[1]); sfx('bumper', c.r); S.shake = Math.max(S.shake, .07); } }
+      if (c.kind === 'bumper') { const out = b.vx * nx + b.vy * ny; if (out < 800) { b.vx += nx * (800 - out); b.vy += ny * (800 - out); } b.vx += (S.rng() - .5) * 60; if (c.cd <= 0) { c.cd = .06; c.fl = 1; addScore(50, c.x, c.y - c.r - 8, F.zc[1]); sfx('bumper', c.r); S.shake = Math.max(S.shake, .07); } }
       else if (c.kind === 'target' && c.lit && v > 60) { c.lit = false; c.fl = 1; addScore(250, c.x, c.y - 18, F.zc[0]); sfx('target', F.targets.filter(q => !q.lit).length); burst(c.x, c.y, 12, F.zc[0], .9);
         if (F.targets.every(q => !q.lit) && !F.charged) { F.charged = true; S.charged++; S.time += 4; addScore(1000, c.x, c.y - 36, '#7dff8a', 'CHARGED +4s'); sfx('charge'); ring(c.x, c.y, '#7dff8a', 80); } }
       else if (c.kind === 'peg' && v > 200 && c.cd <= 0) { c.cd = .05; c.fl = 1; sfx('peg', c.x); addScore(10); }
@@ -226,12 +226,13 @@ function tick() {
   else if (k > S.cur && k <= S.maxFloor && inField) S.cur = k;
   if (b.y > Y(0, -40)) {   // dropped out of the tower base: relaunch, time penalty
     S.time = Math.max(0, S.time - 3); S.drops++; S.streak = 0;
-    b.x = 200; b.y = Y(0, 430); b.vx = FR(-40, 40) * 0; b.vy = 0; txt(200, Y(0, 400), '-3 s', '#ff4fd8', 20); sfx('drop'); ring(200, Y(0, 430), '#ff4fd8', 50); S.shake = .25;
+    b.x = 200 + (S.rng() - .5) * 120; b.y = Y(0, 430); b.vx = 0; b.vy = 0; txt(200, Y(0, 400), '-3 s', '#ff4fd8', 20); sfx('drop'); ring(200, Y(0, 430), '#ff4fd8', 50); S.shake = .25;
   }
   // stuck guard (not on a flipper)
   const spd = hyp(b.vx, b.vy), onFlip = v > 0 && v < 130 && Math.abs(b.x - 200) < 130;
-  if (spd < 15 && !onFlip) b.still += TICK; else b.still = 0;
-  if (b.still > 2) { b.vy -= 600; b.vx += (b.x < 200 ? 1 : -1) * 150; b.still = 0; txt(b.x, b.y - 18, 'NUDGE', '#58f7ff', 12); }
+  if (spd < 15) b.still += TICK; else b.still = 0;
+  if (onFlip && b.still > .8 && !(b.x < 200 ? heldL : heldR)) { b.vx += b.x < 200 ? 50 : -50; b.still = 0; }   // never balance on a resting flipper pivot
+  if (b.still > 2 && !onFlip) { b.vy -= 600; b.vx += (b.x < 200 ? 1 : -1) * 150; b.still = 0; txt(b.x, b.y - 18, 'NUDGE', '#58f7ff', 12); }
   if ((tickN & 1) === 0) { b.tr[b.tn % 10] = [b.x, b.y]; b.tn++; }
   // clock
   const before = S.time; S.time = Math.max(0, S.time - TICK);
@@ -409,7 +410,7 @@ function drawFloor(F, T) {
     if (F.lane[s] && k >= S.maxFloor) for (let i = 0; i < 3; i++) { const yy = Y(k, 470 + ((T * 120 + i * 80) % 240)); ctx.fillStyle = c0; ctx.globalAlpha = .55; ctx.beginPath(); ctx.moveTo(x, yy - 9); ctx.lineTo(x - 8, yy + 3); ctx.lineTo(x + 8, yy + 3); ctx.fill(); ctx.globalAlpha = 1; } }
   ctx.lineCap = 'round';
   for (const w of F.segs) neon(w.x1, w.y1, w.x2, w.y2, w.kind === 'block' ? '#ff4fd8' : w.kind === 'slope' ? c1 : w.kind === 'lid' ? 'rgba(255,255,255,.55)' : w.kind === 'post' ? c1 : c0, w.r * (w.kind === 'lid' ? .8 : 1.3));
-  for (const s of [0, 1]) if (!F.lane[s]) { const x = s ? 363 : 37, y = Y(k, 450); ctx.strokeStyle = '#ff4fd8'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7); ctx.moveTo(x + 7, y - 7); ctx.lineTo(x - 7, y + 7); ctx.stroke(); }
+  for (const s of [0, 1]) if (!F.lane[s]) { const x = s ? 363 : 37, y = Y(k, 700); ctx.strokeStyle = '#ff4fd8'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7); ctx.moveTo(x + 7, y - 7); ctx.lineTo(x - 7, y + 7); ctx.stroke(); }
   for (const c of F.circ) {
     if (c.kind === 'bumper') { const s = 1 + c.fl * .18; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = .3 + c.fl * .6; ctx.drawImage(glow(c1), c.x - c.r * 2.6, c.y - c.r * 2.6, c.r * 5.2, c.r * 5.2); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
       ctx.fillStyle = '#140a2a'; ctx.beginPath(); ctx.arc(c.x, c.y, c.r * s, 0, TAU); ctx.fill(); ctx.strokeStyle = c.fl > .1 ? '#fff' : c1; ctx.lineWidth = 3.5; ctx.stroke(); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(c.x, c.y, c.r * .45 * s, 0, TAU); ctx.stroke(); }

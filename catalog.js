@@ -151,10 +151,11 @@ window.GDL_CATALOG = {
    "id": "games/chomp-chain-rush",
    "path": "games/chomp-chain-rush.html",
    "collection": "arcade",
-   "title": "Chomp Chain Rush",
-   "desc": "Chomp through chains in a frantic rush.",
+   "title": "Lantern Lasso",
+   "desc": "Steer a firefly trailing a chain of paper lanterns through a night garden: loop your own chain around shadow moths to snare them, line up three colours to flare, and chomp what you stun.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Action"
    ],
    "controls": [
     "touch",
@@ -541,6 +542,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--neon-pin-climb.jpg"
   },
   {
@@ -2747,7 +2750,9 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/gulp-and-float",
@@ -2805,23 +2810,6 @@ window.GDL_CATALOG = {
    "score": 7,
    "status": "transformed",
    "thumb": "thumbs/PhoneGameLab2--huddle-up.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/hungry-fish",
-   "path": "PhoneGameLab2/games/hungry-fish/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Hungry Fish",
-   "desc": "Guide a hungry fish to its food, past hazards.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 38,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--hungry-fish.jpg"
   },
   {
    "id": "PhoneGameLab2/ice-cream-shop",
@@ -2893,40 +2881,6 @@ window.GDL_CATALOG = {
    "score": 8,
    "status": "transformed",
    "thumb": "thumbs/PhoneGameLab2--jampoline.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/jigsaw-puzzles",
-   "path": "PhoneGameLab2/games/jigsaw-puzzles/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Jigsaw Puzzles",
-   "desc": "Drag scrambled pieces back into the picture.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 41,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--jigsaw-puzzles.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/jump",
-   "path": "PhoneGameLab2/games/jump/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Jump",
-   "desc": "Time your jumps between platforms to survive.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 42,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--jump.jpg"
   },
   {
    "id": "PhoneGameLab2/jungle-shot",
@@ -3392,6 +3346,21 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--say-cheese.jpg"
   },
   {
+   "id": "PhoneGameLab2/skip-jam",
+   "path": "PhoneGameLab2/games/skip-jam/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Jump",
+   "desc": "Tap to jump platforms. Time it right!",
+   "genre": [
+    "Minigame"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": false
+  },
+  {
    "id": "PhoneGameLab2/sky-high",
    "path": "PhoneGameLab2/games/sky-high/index.html",
    "collection": "PhoneGameLab2",
@@ -3511,6 +3480,21 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--snack-baskets.jpg"
   },
   {
+   "id": "PhoneGameLab2/snack-tank",
+   "path": "PhoneGameLab2/games/snack-tank/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Hungry Fish",
+   "desc": "Drag the fish to the food past the rocks.",
+   "genre": [
+    "Minigame"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": false
+  },
+  {
    "id": "PhoneGameLab2/snake-trails",
    "path": "PhoneGameLab2/games/snake-trails/index.html",
    "collection": "PhoneGameLab2",
@@ -3543,6 +3527,24 @@ window.GDL_CATALOG = {
    "n": 64,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--snakes-and-ladders.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/snap-album",
+   "path": "PhoneGameLab2/games/snap-album/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Snap Album",
+   "desc": "Piece Olli's photos back together before the sun sets.",
+   "genre": [
+    "Puzzle"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/snappy-frog",

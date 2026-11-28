@@ -1,0 +1,355 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Snap Album</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* SNAP ALBUM — Olli the owl keeps the pals' photo album, and every photo in it got cut into a jigsaw.
+ * Core idea kept: drag pieces to complete a picture.
+ * Made it a game:
+ *   - Real jigsaw pieces, cut procedurally (every inner edge a random tab or blank, every tab slightly different) from a
+ *     picture painted procedurally for each photo: Momo's pond, Nori's ice slide, Bun's garden, Bolt's launch night,
+ *     Pip's beach day, the big picnic. Pieces wait small in the tray and grow to size as you lift them.
+ *   - One clock for the whole run: the sun is setting. Every finished photo wins back daylight, so speed is the score.
+ *   - Streak: every piece that snaps on the first drop raises the streak (and the chime); a wrong drop on the frame resets it.
+ *   - Escalation: the frame's ghost image fades photo by photo; from photo 3 pieces come rotated (tap to turn, or tap with
+ *     a second finger while holding); from photo 4 PIP dashes across the table and scatters loose pieces — he peeks first,
+ *     tap him to shoo him off. Snapped pieces are safe, so the pest rewards finishing areas quickly.
+ * Identity: warm wooden table, linen tray, polaroid thumbnails, camera-flash on completion; puzzle music that hurries as
+ *           the sun drops.  */
+let demo = false;
+Lab.init({
+  title: "Snap Album", tagline: "Piece Olli's photos back together before the sun sets.", category: "Puzzle", kicker: "Pocket Pals",
+  howto: ["Drag pieces into the frame", "Tap a piece to turn it", "Each finished photo wins back daylight"],
+  theme: { bg: "#e9cfa2", bg2: "#f7ead0", fg: "#3b2e4a", muted: "#7a6458", accent: "#e8743b", accent2: "#4fa59a", light: true },
+  orient: "any", music: { style: "puzzle", key: "D", vol: .34 }, restart: start, attract,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, rand = Lab.rand, INK = Pals.ink, shade = Lab.color.shade;
+const SIZES = [[3, 3], [3, 4], [4, 4], [4, 4], [4, 5], [5, 5], [5, 5], [5, 6]];
+const SCENES = [
+  { name: "Momo's Pond Day", bd: "meadow" }, { name: "Nori's Big Slide", bd: "snow" }, { name: "Bun's Carrot Patch", bd: "golden" },
+  { name: "Bolt's Launch Night", bd: "night" }, { name: "Pip at the Beach", bd: "beach" }, { name: "The Big Picnic", bd: "candy" }];
+const START_TIME = 60, MAX_TIME = 99;
+let S, wide, bx, by, bw, bh, cell, tray, strip, ts, bg;
+let photo, pieces, held, phase, doneT, time, score, combo, bestCombo, placed, photos, misses, shoos, clock, uid, olli, pest, pestT, last, lowTick;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function dims(idx) { const d = SIZES[Math.min(idx, SIZES.length - 1)]; return wide ? [d[1], d[0]] : [d[0], d[1]]; } // [cols, rows]
+
+/* ---------- layout ---------- */
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.1; S = Math.min(P.w / 390, P.h / 700, 1.5); if (wide) S = Math.min(P.w / 760, P.h / 360, 1.5);
+  const pad = 12 * S, cols = photo ? photo.cols : dims(0)[0], rows = photo ? photo.rows : dims(0)[1];
+  if (!wide) {
+    const sh = 66 * S; cell = Math.floor(Math.min((P.w - pad * 2) / cols, P.h * .5 / rows)); bw = cell * cols; bh = cell * rows;
+    bx = P.x + (P.w - bw) / 2; by = P.y + 14 * S;
+    strip = { x: P.x + pad, y: by + bh + 8 * S, w: P.w - pad * 2, h: sh };
+    tray = { x: P.x + pad, y: strip.y + sh + 4 * S, w: P.w - pad * 2, h: P.y + P.h - pad - (strip.y + sh + 4 * S) };
+  } else {
+    const sh = 58 * S; cell = Math.floor(Math.min((P.h - pad * 2) / rows, P.w * .52 / cols)); bw = cell * cols; bh = cell * rows;
+    bx = P.x + pad + 6 * S; by = P.y + (P.h - bh) / 2;
+    const tx = bx + bw + 16 * S, tw = P.x + P.w - pad - tx;
+    strip = { x: tx, y: P.y + P.h - pad - sh, w: tw, h: sh };
+    tray = { x: tx, y: P.y + pad, w: tw, h: strip.y - 6 * S - (P.y + pad) };
+  }
+  const n = cols * rows, tc = Math.max(1, Math.ceil(Math.sqrt(n * tray.w / Math.max(1, tray.h)))), tr = Math.ceil(n / tc);
+  ts = clamp(Math.min(tray.w / tc / (cell * 1.38), tray.h / tr / (cell * 1.38)), .34, .8);
+  bg = Lab.sprite("sa_bg" + Lab.W + "x" + Lab.H + "_" + bx + "_" + by + "_" + bw + "_" + bh, Lab.W + 80, Lab.H + 80, (g, w, h) => {
+    g.translate(40, 40); const W = Lab.W, H = Lab.H;
+    draw.vgrad(g, -40, -40, W + 80, H + 80, ["#d9a86b", "#c48c52"]);
+    for (let i = -40; i < H + 40; i += 34) { g.fillStyle = i / 34 % 2 ? "rgba(255,235,200,.07)" : "rgba(90,50,20,.06)"; g.fillRect(-40, i, W + 80, 34); g.fillStyle = "rgba(90,50,20,.12)"; g.fillRect(-40, i, W + 80, 1.5); }
+    const R = Lab.rng(7); g.strokeStyle = "rgba(110,60,25,.13)"; g.lineWidth = 1.2;
+    for (let i = 0; i < 40; i++) { const x = R() * W, y = R() * H; g.beginPath(); g.ellipse(x, y, 20 + R() * 40, 3 + R() * 4, 0, 0, TAU); g.stroke(); }
+    // linen tray
+    g.fillStyle = "rgba(60,30,10,.18)"; draw.rr(g, tray.x + 2, tray.y + 4, tray.w, tray.h, 16 * S); g.fill();
+    draw.vgrad(g, tray.x, tray.y, tray.w, tray.h, ["#f6ecd9", "#ecdcbf"]); g.save(); draw.rr(g, tray.x, tray.y, tray.w, tray.h, 16 * S); g.clip();
+    draw.vgrad(g, tray.x, tray.y, tray.w, tray.h, ["#f6ecd9", "#ead8b8"]); g.strokeStyle = "rgba(150,110,70,.08)"; g.lineWidth = 1;
+    for (let x = tray.x; x < tray.x + tray.w; x += 4) { g.beginPath(); g.moveTo(x, tray.y); g.lineTo(x, tray.y + tray.h); g.stroke(); }
+    g.restore(); g.setLineDash([5, 5]); g.strokeStyle = "rgba(150,100,60,.45)"; g.lineWidth = 1.5; draw.rr(g, tray.x + 6, tray.y + 6, tray.w - 12, tray.h - 12, 12 * S); g.stroke(); g.setLineDash([]);
+    // album frame
+    const f = 9 * S; g.fillStyle = "rgba(60,30,10,.25)"; draw.rr(g, bx - f + 3, by - f + 5, bw + f * 2, bh + f * 2, 10 * S); g.fill();
+    draw.vgrad(g, bx - f, by - f, bw + f * 2, bh + f * 2, ["#7d4f8f", "#5d3a72"]); g.save(); draw.rr(g, bx - f, by - f, bw + f * 2, bh + f * 2, 10 * S); g.clip();
+    draw.vgrad(g, bx - f, by - f, bw + f * 2, bh + f * 2, ["#86569a", "#5d3a72"]); g.restore();
+    g.fillStyle = "#f8f1e2"; g.fillRect(bx, by, bw, bh); g.fillStyle = "rgba(0,0,0,.08)"; g.fillRect(bx, by, bw, 3);
+    for (const [cx, cy, a] of [[bx, by, 0], [bx + bw, by, 1], [bx + bw, by + bh, 2], [bx, by + bh, 3]]) { g.save(); g.translate(cx, cy); g.rotate(a * Math.PI / 2); g.fillStyle = "#e9c46a"; g.beginPath(); g.moveTo(-f * .7, -f * .7); g.lineTo(f * 1.6, -f * .7); g.lineTo(-f * .7, f * 1.6); g.closePath(); g.fill(); g.restore(); }
+  });
+}
+Lab.onResize(() => { if (!photo) return; layout(); bake(); scatter(true); });
+
+/* ---------- picture painting ---------- */
+function paint(g, w, h, sc, seed) {
+  const R = Lab.rng(seed), gy = Pals.backdrop(g, w, h, seed % 50, { scene: SCENES[sc].bd, ground: .68 }), u = Math.min(w, h);
+  const flower = (x, y, r, col) => { g.fillStyle = col; for (let i = 0; i < 5; i++) { g.beginPath(); g.arc(x + Math.cos(i * 1.26) * r, y + Math.sin(i * 1.26) * r, r * .7, 0, TAU); g.fill(); } g.fillStyle = "#ffd54a"; g.beginPath(); g.arc(x, y, r * .6, 0, TAU); g.fill(); };
+  const tree = (x, y, s, col) => { g.fillStyle = "#8a5a3b"; g.fillRect(x - s * .08, y - s * .5, s * .16, s * .5); g.fillStyle = col; for (const [dx, dy, r] of [[0, -.75, .38], [-.25, -.55, .28], [.25, -.55, .28]]) { g.beginPath(); g.arc(x + dx * s, y + dy * s, r * s, 0, TAU); g.fill(); } };
+  if (sc === 0) {
+    for (let i = 0; i < 3; i++) tree(w * (.1 + i * .38) + R() * 20, gy + 4, u * .32, ["#6fae5a", "#82bf63", "#5e9d4f"][i]);
+    g.fillStyle = "#7cc6d8"; g.beginPath(); g.ellipse(w * .5, h * .86, w * .55, h * .17, 0, 0, TAU); g.fill(); g.fillStyle = "rgba(255,255,255,.35)"; for (let i = 0; i < 4; i++) { g.fillRect(w * (.2 + R() * .6), h * (.8 + R() * .12), w * .12, 2); }
+    for (let i = 0; i < 4; i++) { const x = w * (.15 + i * .24), y = h * (.82 + (i % 2) * .08); g.fillStyle = "#4f9b52"; g.beginPath(); g.ellipse(x, y, u * .09, u * .035, 0, .3, TAU - .3); g.lineTo(x, y); g.fill(); }
+    for (let i = 0; i < 6; i++) { g.fillStyle = "#6e8f3a"; g.fillRect(w * (.02 + R() * .96), h * .66, 2.5, -u * (.1 + R() * .1)); g.fillStyle = "#8b5a3c"; g.beginPath(); g.ellipse(w * (.02 + R() * .96), h * .6, 3, 8, 0, 0, TAU); g.fill(); }
+    Pals.draw(g, "momo", w * .52, h * .76, u * .3, { mood: "joy", arms: "wave", shadow: false });
+    for (let i = 0; i < 3; i++) { const x = w * (.15 + R() * .7), y = h * (.25 + R() * .25); g.fillStyle = "rgba(160,220,255,.8)"; g.beginPath(); g.ellipse(x - 6, y, 7, 3, -.4, 0, TAU); g.ellipse(x + 6, y, 7, 3, .4, 0, TAU); g.fill(); g.fillStyle = "#3d7bd1"; g.fillRect(x - 1.5, y - 3, 3, 10); }
+    for (let i = 0; i < 6; i++) flower(w * R(), gy + h * .03 + R() * h * .05, u * .018, ["#ff8fb1", "#fff", "#c79bff"][i % 3]);
+  } else if (sc === 1) {
+    for (let i = 0; i < 4; i++) { const x = w * (.08 + i * .3), s = u * (.22 + R() * .1); g.fillStyle = "#4e8a74"; g.beginPath(); g.moveTo(x, gy - s * 1.3); g.lineTo(x + s * .4, gy); g.lineTo(x - s * .4, gy); g.fill(); g.fillStyle = "#fff"; g.beginPath(); g.moveTo(x, gy - s * 1.3); g.lineTo(x + s * .14, gy - s * .85); g.lineTo(x - s * .14, gy - s * .85); g.fill(); }
+    g.fillStyle = "#cfeefc"; g.beginPath(); g.ellipse(w * .5, h * .84, w * .6, h * .12, -.05, 0, TAU); g.fill(); g.strokeStyle = "rgba(255,255,255,.8)"; g.lineWidth = 2; for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(w * (.1 + i * .2), h * .84); g.lineTo(w * (.18 + i * .2), h * .82); g.stroke(); }
+    Pals.draw(g, "nori", w * .48, h * .8, u * .22, { pose: "lie", mood: "joy", shadow: false });
+    g.fillStyle = "#fff"; for (const [x, r] of [[.82, .07], [.82, .05]]) { g.beginPath(); g.arc(w * x, gy - u * (r === .07 ? .03 : .13), u * r, 0, TAU); g.fill(); } g.fillStyle = "#ff8a3d"; g.fillRect(w * .82, gy - u * .14, u * .05, u * .015);
+    g.fillStyle = INK; g.fillRect(w * .81 - 3, gy - u * .15, 3, 3); g.fillRect(w * .83, gy - u * .15, 3, 3);
+    for (let i = 0; i < 3; i++) { const x = w * (.12 + R() * .7), y = h * (.9 + R() * .05); g.fillStyle = "#6fa8dc"; g.beginPath(); g.ellipse(x, y, u * .03, u * .014, 0, 0, TAU); g.fill(); g.beginPath(); g.moveTo(x + u * .025, y); g.lineTo(x + u * .045, y - u * .015); g.lineTo(x + u * .045, y + u * .015); g.fill(); }
+    g.fillStyle = "#fff"; for (let i = 0; i < 40; i++) { g.globalAlpha = .7; g.beginPath(); g.arc(w * R(), h * R() * .7, 1.5 + R() * 2, 0, TAU); g.fill(); } g.globalAlpha = 1;
+  } else if (sc === 2) {
+    g.fillStyle = "#9a6a43"; g.fillRect(0, h * .72, w, h * .28);
+    for (let r = 0; r < 3; r++) { const y = h * (.76 + r * .085); g.fillStyle = "#7d5331"; g.fillRect(0, y + 6, w, 4); for (let x = w * .06 + (r % 2) * w * .06; x < w; x += w * .13) { g.fillStyle = "#ff8f3a"; g.beginPath(); g.moveTo(x - 4, y + 2); g.lineTo(x + 4, y + 2); g.lineTo(x, y + 14); g.fill(); g.fillStyle = "#5fbb60"; for (let k = -1; k <= 1; k++) { g.beginPath(); g.ellipse(x + k * 3, y - 4, 2, 7, k * .4, 0, TAU); g.fill(); } } }
+    g.fillStyle = "#c98b5a"; for (let x = 0; x < w; x += u * .08) { g.fillRect(x, gy - u * .16, u * .03, u * .16); } g.fillRect(0, gy - u * .12, w, u * .025);
+    for (let i = 0; i < 7; i++) { const x = w * (.05 + i * .14); g.fillStyle = "#5e9d4f"; g.fillRect(x, gy - u * .1, 2, u * .1); flower(x + 1, gy - u * .12, u * .02, ["#ff6f91", "#ffd1dc", "#b388ff"][i % 3]); }
+    const a = Pals.draw(g, "bun", w * .62, h * .66, u * .3, { mood: "happy", arms: "hold", shadow: false });
+    g.fillStyle = "#4fa59a"; draw.rr(g, a.handR[0] - 4, a.handR[1] - 10, u * .1, u * .07, 4); g.fill(); g.fillRect(a.handR[0] + u * .09, a.handR[1] - 10, u * .06, 4);
+    g.fillStyle = "#7cc6ff"; for (let i = 0; i < 5; i++) { g.beginPath(); g.arc(a.handR[0] + u * (.17 + i * .02), a.handR[1] + i * 6, 2, 0, TAU); g.fill(); }
+    tree(w * .14, gy - u * .02, u * .3, "#e98aa0");
+  } else if (sc === 3) {
+    g.fillStyle = "#fff6cf"; g.beginPath(); g.arc(w * .2, h * .2, u * .1, 0, TAU); g.fill(); g.fillStyle = "#1d2350"; g.beginPath(); g.arc(w * .24, h * .18, u * .09, 0, TAU); g.fill();
+    g.fillStyle = "#fff"; for (let i = 0; i < 60; i++) { const s = R() < .1 ? 3 : 1.6; g.fillRect(w * R(), h * R() * .62, s, s); }
+    draw.star(g, w * .4, h * .3, u * .03, "#ffe27a"); draw.star(g, w * .9, h * .4, u * .025, "#ffe27a");
+    const rx = w * .74, ry = h * .5, rs = u * .3; g.fillStyle = "#ff7a59"; g.beginPath(); g.moveTo(rx - rs * .3, ry + rs * .5); g.lineTo(rx - rs * .5, ry + rs * .8); g.lineTo(rx - rs * .2, ry + rs * .7); g.fill(); g.beginPath(); g.moveTo(rx + rs * .3, ry + rs * .5); g.lineTo(rx + rs * .5, ry + rs * .8); g.lineTo(rx + rs * .2, ry + rs * .7); g.fill();
+    g.fillStyle = "#eef2ff"; g.beginPath(); g.ellipse(rx, ry, rs * .26, rs * .7, 0, 0, TAU); g.fill(); g.fillStyle = "#ff7a59"; g.beginPath(); g.ellipse(rx, ry - rs * .5, rs * .18, rs * .22, 0, Math.PI, TAU); g.fill();
+    g.fillStyle = "#6fd3ff"; g.beginPath(); g.arc(rx, ry - rs * .1, rs * .11, 0, TAU); g.fill(); g.strokeStyle = "#9aa6c8"; g.lineWidth = 3; g.stroke();
+    g.fillStyle = "#ffd54a"; g.beginPath(); g.moveTo(rx - rs * .14, ry + rs * .7); g.lineTo(rx, ry + rs * 1.0); g.lineTo(rx + rs * .14, ry + rs * .7); g.fill();
+    Pals.draw(g, "bolt", w * .34, h * .78, u * .28, { mood: "wow", arms: "cheer", shadow: false });
+    g.fillStyle = "#3b4a7a"; g.fillRect(0, h * .9, w, h * .1);
+  } else if (sc === 4) {
+    g.fillStyle = "#f4dc9c"; g.fillRect(0, gy, w, h - gy); g.fillStyle = "rgba(200,160,90,.4)"; for (let i = 0; i < 30; i++) g.fillRect(w * R(), gy + (h - gy) * R(), 2, 2);
+    g.fillStyle = "#ffffff"; g.fillRect(w * .16, gy - u * .38, 3, u * .5); g.fillStyle = "#ff6f91"; g.beginPath(); g.moveTo(w * .16 - u * .2, gy - u * .3); g.quadraticCurveTo(w * .16, gy - u * .5, w * .16 + u * .2, gy - u * .3); g.fill();
+    g.fillStyle = "#fff"; g.beginPath(); g.moveTo(w * .16 - u * .07, gy - u * .335); g.quadraticCurveTo(w * .16, gy - u * .48, w * .16 + u * .07, gy - u * .335); g.fill();
+    const cx = w * .78, cy = h * .9, s = u * .12; g.fillStyle = "#e6be72"; g.fillRect(cx - s, cy - s, s * 2, s); g.fillRect(cx - s * .6, cy - s * 1.6, s * 1.2, s * .7); for (let i = -1; i <= 1; i++) g.fillRect(cx + i * s * .7 - s * .12, cy - s * 1.25, s * .24, s * .25);
+    g.fillStyle = "#ff6f91"; g.beginPath(); g.moveTo(cx, cy - s * 1.6); g.lineTo(cx, cy - s * 2.2); g.lineTo(cx + s * .4, cy - s * 2); g.lineTo(cx, cy - s * 1.85); g.fill();
+    Pals.draw(g, "pip", w * .45, h * .83, u * .3, { mood: "joy", arms: "cheer", shadow: false });
+    for (let i = 0; i < 4; i++) { const x = w * (.05 + R() * .9), y = h * (.93 + R() * .05); g.fillStyle = ["#ffb4a2", "#ffd6a5", "#fff"][i % 3]; g.beginPath(); g.arc(x, y, u * .02, Math.PI, TAU); g.fill(); }
+    g.strokeStyle = "rgba(43,35,64,.6)"; g.lineWidth = 2; for (let i = 0; i < 3; i++) { const x = w * (.4 + i * .1), y = h * (.22 + (i % 2) * .05); g.beginPath(); g.moveTo(x - 8, y); g.quadraticCurveTo(x - 4, y - 5, x, y); g.quadraticCurveTo(x + 4, y - 5, x + 8, y); g.stroke(); }
+  } else {
+    g.fillStyle = "#ff8fb1"; const bw2 = w * .8, by2 = h * .78; g.save(); g.translate(w * .5, by2); g.scale(1, .45); g.fillRect(-bw2 / 2, -bw2 * .4, bw2, bw2 * .8);
+    g.fillStyle = "#fff"; for (let i = 0; i < 8; i++) for (let j = 0; j < 6; j++) if ((i + j) % 2) g.fillRect(-bw2 / 2 + i * bw2 / 8, -bw2 * .4 + j * bw2 * .8 / 6, bw2 / 8, bw2 * .8 / 6); g.restore();
+    const who = ["bun", "momo", "nori", "bolt", "olli", "pip"];
+    who.forEach((p, i) => { const k = i / (who.length - 1); Pals.draw(g, p, w * (.12 + k * .76), h * (i % 2 ? .62 : .74), u * .2, { mood: i % 2 ? "joy" : "happy", arms: i === 2 ? "wave" : i === 4 ? "cheer" : "down", shadow: false }); });
+    g.fillStyle = "#c98b5a"; g.beginPath(); g.ellipse(w * .5, h * .88, u * .12, u * .04, 0, 0, TAU); g.fill(); g.fillStyle = "#ff6f6f"; for (let i = 0; i < 5; i++) { g.beginPath(); g.arc(w * .45 + i * u * .025, h * .87, u * .018, 0, TAU); g.fill(); }
+    for (let i = 0; i < 5; i++) { const x = w * (.1 + i * .2), y = h * (.18 + (i % 2) * .08); g.strokeStyle = "rgba(43,35,64,.5)"; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y + u * .05); g.lineTo(x + 6, y + u * .2); g.stroke(); g.fillStyle = ["#ffd54a", "#7cc6ff", "#b388ff", "#5fbb60", "#ff7a59"][i]; g.beginPath(); g.ellipse(x, y, u * .04, u * .05, 0, 0, TAU); g.fill(); }
+  }
+  g.fillStyle = "rgba(255,240,210,.08)"; g.fillRect(0, 0, w, h);
+}
+
+/* ---------- pieces ---------- */
+function edgeTo(g, ax, ay, bx2, by2, e) {
+  if (!e || !e.s) { g.lineTo(bx2, by2); return; }
+  const dx = bx2 - ax, dy = by2 - ay, nx = dy * e.s * e.k, ny = -dx * e.s * e.k, o = e.o;
+  const P = (u, v) => [ax + dx * (u + o) + nx * v, ay + dy * (u + o) + ny * v];
+  const pts = [[.36, 0], [.40, 0], [.42, .05], [.40, .10], [.36, .18], [.42, .23], [.5, .23], [.58, .23], [.64, .18], [.60, .10], [.58, .05], [.60, 0], [.64, 0]];
+  let p = P(pts[0][0], pts[0][1]); g.lineTo(p[0], p[1]);
+  for (let i = 1; i < pts.length - 1; i += 3) { const a = P(...pts[i]), b = P(...pts[i + 1]), c = P(...pts[i + 2]); g.bezierCurveTo(a[0], a[1], b[0], b[1], c[0], c[1]); }
+  g.lineTo(bx2, by2);
+}
+function piecePath(g, p, h) {
+  const E = photo.edge; g.beginPath(); g.moveTo(-h, -h);
+  edgeTo(g, -h, -h, h, -h, p.r > 0 ? flip(E.v[p.r - 1][p.c]) : null);
+  edgeTo(g, h, -h, h, h, p.c < photo.cols - 1 ? E.h[p.r][p.c] : null);
+  edgeTo(g, h, h, -h, h, p.r < photo.rows - 1 ? E.v[p.r][p.c] : null);
+  edgeTo(g, -h, h, -h, -h, p.c > 0 ? flip(E.h[p.r][p.c - 1]) : null);
+  g.closePath();
+}
+function flip(e) { return { s: -e.s, k: e.k, o: -e.o }; } // the neighbour sees the same edge from the other side
+function bake() {
+  Lab.sprite.clear("sa_p"); const pic = Lab.sprite("sa_pic" + photo.uid + "_" + bw + "x" + bh, bw, bh, (g, w, h) => paint(g, w, h, photo.scene, photo.seed));
+  photo.pic = pic; const m = Math.ceil(cell * .28), sz = cell + m * 2, h = cell / 2;
+  for (const p of pieces) {
+    p.spr = Lab.sprite("sa_p" + photo.uid + "_" + p.i + "_" + cell, sz, sz, g => {
+      g.translate(m + h, m + h); g.save(); piecePath(g, p, h); g.clip(); g.drawImage(pic, -p.c * cell - h, -p.r * cell - h, pic.w, pic.h);
+      g.fillStyle = "rgba(255,255,255,.1)"; g.fillRect(-h - m, -h - m, sz, m + 4); g.restore();
+      piecePath(g, p, h); g.lineJoin = "round"; g.strokeStyle = "rgba(43,35,64,.45)"; g.lineWidth = 1.4; g.stroke();
+      g.save(); g.translate(-.8, -.8); piecePath(g, p, h); g.strokeStyle = "rgba(255,255,255,.45)"; g.lineWidth = 1; g.stroke(); g.restore();
+    });
+    p.sh = Lab.sprite("sa_ps" + photo.uid + "_" + p.i + "_" + cell, sz, sz, g => { g.translate(m + h, m + h); piecePath(g, p, h); g.fillStyle = "rgba(60,30,10,.28)"; g.fill(); });
+    p.sz = sz;
+  }
+}
+function scatter(keepSnapped) {
+  const loose = pieces.filter(p => !(keepSnapped && p.snapped)), n = loose.length; if (!n) return;
+  const tc = Math.max(1, Math.ceil(Math.sqrt(n * tray.w / Math.max(1, tray.h)))), tr = Math.ceil(n / tc), cw = tray.w / tc, ch = tray.h / tr;
+  const order = Lab.shuffle(loose.slice());
+  order.forEach((p, k) => {
+    const c = k % tc, r = (k / tc) | 0, j = Math.min(cw, ch) * .12;
+    p.tx = tray.x + (c + .5) * cw + rand(-j, j); p.ty = tray.y + (r + .5) * ch + rand(-j, j); p.fly = true;
+    if (!keepSnapped) { p.x = tray.x + tray.w / 2; p.y = tray.y + tray.h / 2; p.sc = .2; }
+  });
+  for (const p of pieces) if (p.snapped) { p.x = slotX(p); p.y = slotY(p); }
+}
+const slotX = p => bx + (p.c + .5) * cell, slotY = p => by + (p.r + .5) * cell;
+function newPhoto(idx) {
+  wide = Lab.play.w > Lab.play.h * 1.1; const [cols, rows] = dims(idx); uid++;
+  const scene = idx < SCENES.length ? idx : Lab.randInt(0, SCENES.length - 1), e = () => ({ s: Lab.chance(.5) ? 1 : -1, k: rand(.9, 1.08), o: rand(-.04, .04) });
+  photo = { idx, cols, rows, n: cols * rows, scene, seed: Lab.randInt(1, 99999), uid, rotOn: idx >= 2, pestOn: idx >= 3, ghost: idx < 2 ? .42 : idx < 4 ? .22 : .1,
+    edge: { h: Array.from({ length: rows }, () => Array.from({ length: cols - 1 }, e)), v: Array.from({ length: rows - 1 }, () => Array.from({ length: cols }, e)) } };
+  layout(); pieces = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { const rot = photo.rotOn ? Lab.randInt(0, 3) : 0; pieces.push({ i: pieces.length, r, c, x: 0, y: 0, tx: 0, ty: 0, fly: false, rot, ang: rot * Math.PI / 2, turns: rot, sc: .2, snapped: false, wob: 0 }); }
+  bake(); scatter(false); held = null; last = null; phase = "play"; pest = null; pestT = rand(7, 11);
+}
+function resetRun() {
+  uid = uid || 0; time = START_TIME; score = 0; combo = 0; bestCombo = 0; placed = 0; photos = 0; misses = 0; shoos = 0; clock = 0; doneT = 0; lowTick = 0;
+  olli = { mood: "happy", moodT: 0, sq: 0, say: null };
+  newPhoto(0);
+}
+
+/* ---------- actions ---------- */
+function pick(x, y) {
+  for (let i = pieces.length - 1; i >= 0; i--) { const p = pieces[i]; if (p.snapped) continue; const h = cell * p.sc * .62; if (Math.abs(x - p.x) < h && Math.abs(y - p.y) < h) return p; }
+  return null;
+}
+function front(p) { const k = pieces.indexOf(p); pieces.splice(k, 1); pieces.push(p); }
+function react(mood, t) { olli.mood = mood; olli.moodT = t || 1; olli.sq = .18; }
+function onBoard(p) { return p.x > bx && p.x < bx + bw && p.y > by && p.y < by + bh; }
+function nearSlot(p) { return Math.hypot(p.x - slotX(p), p.y - slotY(p)) < cell * .34; }
+function rotate(p) {
+  if (!p || p.snapped || phase !== "play") return false; last = p;
+  if (!photo.rotOn) { p.wob = 1; snd("tick", { pitch: .8, vol: .5 }); return false; }
+  p.turns++; p.rot = (p.rot + 1) % 4; snd("click", { pitch: 1 + p.rot * .12 }); p.wob = .4;
+  if (held && held.p === p) return true;
+  if (p.rot === 0 && nearSlot(p)) snap(p);
+  return true;
+}
+function drop(p) {
+  if (phase !== "play" || p.snapped) return false; last = p;
+  p.x = clamp(p.x, Lab.play.x + 10, Lab.play.x + Lab.play.w - 10); p.y = clamp(p.y, Lab.play.y + 10, Lab.play.y + Lab.play.h - 10);
+  if (nearSlot(p) && p.rot === 0) { snap(p); return true; }
+  if (nearSlot(p)) { p.wob = 1; if (!demo) fx.text(p.x, p.y - cell * .5, "Turn it!", { color: "#5d3a72", size: 16 * S }); snd("tick", { pitch: .7 }); react("think", 1.2); return false; }
+  if (onBoard(p)) { p.wob = 1; if (combo >= 3 && !demo) fx.text(p.x, p.y - cell * .5, "Streak lost", { color: "#b5523b", size: 14 * S }); combo = 0; misses++; snd("thud", { vol: .6 }); react("sad", .9); return false; }
+  snd("drop", { pitch: 1.4, vol: .4 }); return false;
+}
+function snap(p) {
+  p.snapped = true; p.fly = true; p.tx = slotX(p); p.ty = slotY(p); p.ang = p.turns * Math.PI / 2;
+  const k = pieces.indexOf(p); pieces.splice(k, 1); let j = 0; while (j < pieces.length && pieces[j].snapped) j++; pieces.splice(j, 0, p);
+  combo++; bestCombo = Math.max(bestCombo, combo); placed++;
+  const pts = 10 + 4 * Math.min(combo - 1, 10); if (!demo) { score += pts; Lab.setScore(score); fx.text(p.tx, p.ty - cell * .3, "+" + pts, { color: combo >= 5 ? "#e8743b" : "#5d3a72", size: (15 + Math.min(combo, 8)) * S }); }
+  if (!demo) { Lab.audio.combo(combo); fx.burst(p.tx, p.ty, { n: 8 + Math.min(combo, 10), colors: ["#ffd54a", "#fff", "#ff9e7a"], speed: 140, life: .45, size: 3, shape: "star" }); if (combo > 0 && combo % 5 === 0) Lab.toast("Streak x" + combo + "!", 900, { y: .2 }); }
+  react("joy", .8);
+  if (pieces.every(q => q.snapped)) complete();
+}
+function complete() {
+  phase = "done"; doneT = 1.9; photos++; pest = null;
+  const bonus = 20 * photo.n, add = Math.round(8 + 2.2 * photo.n); time = Math.min(MAX_TIME, time + add);
+  if (!demo) {
+    score += bonus; Lab.setScore(score); Lab.bumpScore(); Lab.flash("#ffffff", .3, .75); Lab.sfx("levelup"); Lab.sfx("snap", { pitch: 1.2 });
+    Lab.banner(SCENES[photo.scene].name, { color: "#5d3a72", ms: 1400, y: .3 }); Lab.toast("+" + bonus + "  ·  +" + add + "s daylight", 1300, { y: .4 });
+  }
+  react("wow", 1.8);
+}
+function shoo() {
+  if (!pest || pest.st !== "peek") return false; pest.st = "flee"; pest.t = 0; shoos++;
+  if (!demo) { score += 15; Lab.setScore(score); fx.text(pest.x, pest.y - cell * .6, "Shoo! +15", { color: "#e8743b", size: 16 * S }); Lab.sfx("boing", { pitch: 1.2 }); }
+  react("joy", 1); return true;
+}
+
+/* ---------- update ---------- */
+function update(dt) {
+  clock += dt; const P = Lab.play;
+  if (phase === "play") {
+    time -= dt;
+    if (!demo && time < 10 && Math.ceil(time) !== lowTick) { lowTick = Math.ceil(time); if (lowTick > 0) Lab.sfx("tick", { pitch: 1.6, vol: .5 }); }
+    if (time <= 0) { time = 0; if (!demo) return end(); time = START_TIME; }
+    if (photo.pestOn) updatePest(dt);
+  } else if (phase === "done") { doneT -= dt; if (doneT <= 0) { newPhoto(photo.idx + 1); if (!demo) Lab.music.intensity(Math.min(1, .2 + photo.idx * .12)); } }
+  if (!demo) Lab.music.intensity(clamp(Math.max(.2 + photo.idx * .1, time < 15 ? .9 : 0), 0, 1));
+  for (const p of pieces) {
+    const isHeld = held && held.p === p, tgt = isHeld ? 1.06 : p.snapped || onBoard(p) ? 1 : ts;
+    p.sc = Lab.damp(p.sc, tgt, 14, dt); p.ang = Lab.damp(p.ang, p.turns * Math.PI / 2, 20, dt); p.wob = Math.max(0, p.wob - dt * 2.5);
+    if (p.fly && !isHeld) { p.x = Lab.damp(p.x, p.tx, p.snapped ? 22 : 9, dt); p.y = Lab.damp(p.y, p.ty, p.snapped ? 22 : 9, dt); if (Math.hypot(p.x - p.tx, p.y - p.ty) < .5) { p.x = p.tx; p.y = p.ty; p.fly = false; } }
+    if (p.vx || p.vy) { p.x += p.vx * dt; p.y += p.vy * dt; const f = Math.exp(-5 * dt); p.vx *= f; p.vy *= f; if (Math.abs(p.vx) + Math.abs(p.vy) < 8) p.vx = p.vy = 0;
+      if (p.x < P.x + 20 || p.x > P.x + P.w - 20) p.vx *= -1; if (p.y < P.y + 20 || p.y > P.y + P.h - 20) p.vy *= -1; p.x = clamp(p.x, P.x + 20, P.x + P.w - 20); p.y = clamp(p.y, P.y + 20, P.y + P.h - 20); }
+  }
+  olli.moodT -= dt; olli.sq = Math.max(0, olli.sq - dt * .8); if (olli.moodT <= 0) olli.mood = time < 12 && phase === "play" ? "scared" : held ? "think" : "happy";
+}
+function updatePest(dt) {
+  if (!pest) { pestT -= dt; if (pestT <= 0 && pieces.some(p => !p.snapped && !(held && held.p === p))) { const dir = Lab.chance(.5) ? 1 : -1, y = rand(tray.y + tray.h * .2, tray.y + tray.h * .8); pest = { st: "peek", t: 0, dir, y, x: dir > 0 ? tray.x + 8 : tray.x + tray.w - 8, r: 44 * S, hit: new Set() }; snd("warn", { vol: .5 }); react("scared", 1.6); } return; }
+  pest.t += dt; const sz = 54 * S;
+  if (pest.st === "peek") { if (pest.t > Math.max(1.1, 1.9 - photo.idx * .1)) { pest.st = "run"; pest.t = 0; snd("whoosh"); } }
+  else if (pest.st === "run") {
+    pest.x += pest.dir * tray.w * 1.05 * dt;
+    for (const p of pieces) if (!p.snapped && !(held && held.p === p) && !pest.hit.has(p) && Math.abs(p.x - pest.x) < sz * .6 && Math.abs(p.y - pest.y) < sz * .9) {
+      pest.hit.add(p); p.fly = false; p.vx = pest.dir * rand(220, 420); p.vy = rand(-260, 260); if (photo.rotOn) { const k = Lab.randInt(1, 3); p.turns += k; p.rot = (p.rot + k) % 4; } snd("pop", { pitch: rand(.8, 1.3), vol: .5 }); }
+    if (pest.x < tray.x - sz || pest.x > tray.x + tray.w + sz) { pest = null; pestT = rand(Math.max(8, 14 - photo.idx), 18 - photo.idx * .5); }
+  } else if (pest.st === "flee") { pest.x -= pest.dir * 300 * S * dt; if (pest.t > .5) { pest = null; pestT = rand(10, 16); } }
+}
+function end() {
+  phase = "over"; held = null; Lab.music.intensity(.1);
+  Lab.gameover({ title: "Sunset!", message: photos ? "Olli glued " + photos + " photo" + (photos > 1 ? "s" : "") + " into the album." : "The light's gone — the album waits for tomorrow.", score, neutral: true,
+    stats: [["Photos", photos], ["Pieces placed", placed], ["Best streak", bestCombo]] });
+}
+
+/* ---------- render ---------- */
+function drawPiece(c, p, lift) {
+  const s = p.sc, d = p.sz * s, wob = Math.sin(p.wob * 18) * p.wob * .12;
+  c.save(); c.translate(p.x, p.y); c.rotate(p.ang + wob);
+  if (!p.snapped) { const o = lift ? 7 : 2.5; c.drawImage(p.sh, -d / 2 + o, -d / 2 + o * 1.3, d, d); }
+  c.drawImage(p.spr, -d / 2, -d / 2, d, d); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx; c.drawImage(bg, -40, -40, bg.w, bg.h);
+  if (photo.pic) { c.globalAlpha = photo.ghost; c.drawImage(photo.pic, bx, by, bw, bh); c.globalAlpha = 1; }
+  c.fillStyle = "rgba(93,58,114,.18)"; for (let r = 0; r <= photo.rows; r++) for (let k = 0; k <= photo.cols; k++) c.fillRect(bx + k * cell - 1.5, by + r * cell - 1.5, 3, 3);
+  for (const p of pieces) if (!(held && held.p === p)) drawPiece(c, p, false);
+  if (phase === "done") { const k = clamp(1 - (doneT - .4) / 1.5, 0, 1); c.fillStyle = `rgba(255,255,255,${.25 * Math.sin(k * Math.PI)})`; c.fillRect(bx, by, bw, bh); }
+  // pest
+  if (pest) {
+    const sz = 54 * S, bob = pest.st === "run" ? Math.abs(Math.sin(clock * 22)) * 8 * S : 0;
+    let px = pest.x; if (pest.st === "peek") px = pest.x + pest.dir * Math.min(1, pest.t * 4) * sz * .1;
+    Pals.draw(c, "pip", px, pest.y - bob, sz, { t, mood: pest.st === "peek" ? "focus" : pest.st === "flee" ? "joy" : "joy", flip: pest.dir < 0, tilt: pest.st === "run" ? pest.dir * .25 : 0, arms: pest.st === "run" ? "up" : "down", squash: pest.st === "run" ? -.1 : 0 });
+    if (pest.st === "peek") { const bxp = px + pest.dir * sz * .7; Pals.bubble(c, bxp, pest.y - sz * .9, 34 * S, 30 * S, { tailX: px, tailY: pest.y - sz * .4 }); draw.text(c, "!", bxp, pest.y - sz * .9, { size: 20 * S, color: "#e8743b", weight: 700 }); c.strokeStyle = "rgba(232,116,59,.6)"; c.lineWidth = 2; c.beginPath(); c.arc(px, pest.y, sz * (.8 + .1 * Math.sin(clock * 12)), 0, TAU); c.stroke(); }
+  }
+  if (held) drawPiece(c, held.p, true);
+  // strip: Olli · daylight · thumbnail
+  const sh = strip.h, os = sh * .78, ox = strip.x + os * .55, oy = strip.y + sh * .55;
+  const look = held ? [clamp((held.p.x - ox) / 200, -1, 1), clamp((held.p.y - oy) / 200, -1, 1)] : pest ? [clamp((pest.x - ox) / 200, -1, 1), .3] : [0, 0];
+  Pals.draw(c, "olli", ox, oy, os, { t, mood: olli.mood, look, squash: olli.sq * Math.sin(clock * 20), arms: olli.mood === "wow" ? "cheer" : olli.mood === "joy" ? "up" : "down" });
+  const th = sh * .86, tw = th * photo.cols / photo.rows, tx = strip.x + strip.w - tw - 6, ty = strip.y + (sh - th) / 2;
+  c.save(); c.translate(tx + tw / 2, ty + th / 2); c.rotate(.06); c.fillStyle = "rgba(60,30,10,.25)"; c.fillRect(-tw / 2 - 2, -th / 2 + 1, tw + 8, th + 8); c.fillStyle = "#fffdf6"; c.fillRect(-tw / 2 - 4, -th / 2 - 4, tw + 8, th + 10);
+  if (photo.pic) c.drawImage(photo.pic, -tw / 2, -th / 2, tw, th); c.restore();
+  const lx = ox + os * .75, rx = tx - 14 * S, ly = strip.y + sh * .6, lw = Math.max(40, rx - lx), f = clamp(time / MAX_TIME, 0, 1), low = time < 12;
+  draw.text(c, "Photo " + (photo.idx + 1) + "  ·  " + pieces.filter(p => p.snapped).length + "/" + photo.n, lx, strip.y + sh * .26, { size: 14 * S, color: "#3b2e4a", align: "left", weight: 600 });
+  draw.rect(c, lx, ly - 8 * S, lw, 16 * S, 8 * S, "rgba(60,30,10,.25)"); draw.rect(c, lx, ly - 8 * S, Math.max(16 * S, lw * f), 16 * S, 8 * S, low ? (Math.sin(clock * 10) > 0 ? "#ff7a59" : "#ffb347") : Lab.color.mix("#ff9a4a", "#ffd54a", f));
+  const sx = lx + Math.max(8 * S, lw * f - 8 * S); draw.circle(c, sx, ly, 10 * S, "#fff3c4"); draw.circle(c, sx, ly, 7 * S, low ? "#ff7a59" : "#ffb347");
+  draw.text(c, Math.ceil(time) + "s", lx + lw, strip.y + sh * .26, { size: 14 * S, color: low ? "#c0392b" : "#3b2e4a", align: "right", weight: 700 });
+  if (combo >= 2) draw.text(c, "Streak x" + combo, lx + lw / 2, ly + 19 * S, { size: 12 * S, color: "#5d3a72", weight: 700 });
+}
+
+function attract(dt, t) {
+  if (!demo || !photo) { demo = true; resetRun(); }
+  demo = true; update(dt);
+  if (phase === "play" && Math.floor(clock / .45) !== Math.floor((clock - dt) / .45)) { const l = pieces.filter(p => !p.snapped); if (l.length) { const p = Lab.choose(l); p.turns += (4 - p.rot) % 4; p.rot = 0; snap(p); } }
+  render(t);
+}
+function start() {
+  demo = false; Lab.fx.clear && Lab.fx.clear(); resetRun(); Lab.setScore(0); Lab.music.intensity(.2);
+  Lab.input.onDown = [(x, y, id) => {
+    if (phase !== "play") return;
+    if (held) { if (id !== held.id) rotate(held.p); return; }
+    if (pest && pest.st === "peek" && Math.hypot(x - pest.x, y - pest.y) < pest.r * 1.4) { shoo(); return; }
+    const p = pick(x, y); if (!p) return;
+    held = { p, id, ox: p.x - x, oy: p.y - y, sx: x, sy: y, t: clock, moved: false }; p.fly = false; p.vx = p.vy = 0; front(p); last = p; snd("tick", { pitch: 1.3, vol: .4 }); react("think", .3);
+  }];
+  Lab.input.onMove = [(x, y, dx, dy, id) => { if (!held || id !== held.id) return; const p = held.p; p.x = x + held.ox; p.y = y + held.oy; if (Math.hypot(x - held.sx, y - held.sy) > 12) held.moved = true; }];
+  Lab.input.onUp = [(x, y, id) => {
+    if (!held || id !== held.id) return; const h = held; held = null;
+    if (!h.moved && clock - h.t < .35) rotate(h.p); else drop(h.p);
+  }];
+  Lab.input.onKey = [k => { if ((k === "r" || k === "R" || k === " ") && phase === "play") rotate(held ? held.p : last); }];
+  Lab.expose({
+    get score() { return score; }, get time() { return time; }, get photo() { return photo.idx; }, get phase() { return phase; }, get combo() { return combo; }, get placed() { return placed; },
+    get snapped() { return pieces.filter(p => p.snapped).length; }, get n() { return photo.n; }, get rotOn() { return photo.rotOn; }, get pest() { return pest ? pest.st : null; }, get misses() { return misses; },
+    pieces() { return pieces.map(p => ({ i: p.i, r: p.r, c: p.c, x: p.x, y: p.y, rot: p.rot, snapped: p.snapped, fly: p.fly, sx: slotX(p), sy: slotY(p) })); },
+    board() { return { bx, by, bw, bh, cell }; },
+    place(i) { const p = pieces.find(q => q.i === i); if (!p || p.snapped) return false; p.x = slotX(p); p.y = slotY(p); p.fly = false; return drop(p); },
+    turn(i) { return rotate(pieces.find(q => q.i === i)); },
+    setTime(s) { time = s; }, pestNow() { pestT = 0; photo.pestOn = true; }, pestPos() { return pest ? [pest.x, pest.y] : null; },
+  });
+  Lab.loop(frame);
+}
+function frame(dt, t) { if (phase !== "over") update(dt); if (phase !== "over" || photo) render(t); }
+Lab.boot();
+})();
+</script></body></html>
