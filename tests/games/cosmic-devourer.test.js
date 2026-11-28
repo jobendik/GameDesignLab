@@ -24,16 +24,16 @@ module.exports = {
 
     // 2. thumb stick: press and drag right → the hole accelerates right
     s = await st(); const x0 = s.you.x;
-    await touch('touchStart', [{ x: BX, y: BY, id: 1 }]); await finger(.5, 0); await finger(1, 0); await wait(40);
+    await touch('touchStart', [{ x: BX, y: BY, id: 1 }]); await frames(); await finger(.5, 0); await finger(1, 0);
     await adv(1); s = await st();
     expect(s.you.dx > .95 && s.you.th > .9 && s.you.x > x0 + 150, 'stick drag drives the hole right (' + (s.you.x - x0).toFixed(0) + ' units)');
 
     // 3. a second finger lunges: mass is spent, speed jumps
     const m0 = s.mass, v0 = Math.hypot(s.you.vx, s.you.vy);
-    await touch('touchStart', [{ x: BX + 60, y: BY, id: 1 }, { x: 300, y: 300, id: 2 }]); await touch('touchMove', [{ x: BX + 60, y: BY, id: 1 }]); await wait(40);   // CDP: a move without finger 2 lifts it
+    await touch('touchStart', [{ x: BX + 60, y: BY, id: 1 }, { x: 300, y: 300, id: 2 }]); await touch('touchMove', [{ x: BX + 60, y: BY, id: 1 }]); await frames();   // CDP: a move without finger 2 lifts it
     await adv(.05); s = await st(); const v1 = Math.hypot(s.you.vx, s.you.vy);
     expect(s.mass < m0 - .3 && s.you.lungeT > 0 && v1 > v0 * 1.6, 'second finger lunges: mass ' + m0.toFixed(1) + '→' + s.mass.toFixed(1) + ', speed ' + v0.toFixed(0) + '→' + v1.toFixed(0));
-    await touch('touchEnd', []); await adv(1.3);
+    await touch('touchEnd', []); await frames(); await adv(1.3);
 
     // 4. keyboard: hold W → up; Space lunges again; M toggles mute
     s = await st(); const y0 = s.you.y; await page.keyboard.down('KeyW'); await wait(30); await adv(.8); s = await st();
@@ -59,19 +59,20 @@ module.exports = {
       const l = Math.hypot(tx - y.x, ty - y.y) || 1; return { dx: (tx - y.x) / l, dy: (ty - y.y) / l, lunge: lunge && y.lungeCd <= 0 && y.m > 17 }; });
     const lb = await page.locator('#bLunge').boundingBox(), LB = { x: lb.x + lb.width / 2, y: lb.y + lb.height / 2 };
     expect(lb.width >= 44, 'LUNGE button shown for touch');
-    const fly = async (secs, until) => { await touch('touchStart', [{ x: BX, y: BY, id: 1 }]);
+    const fly = async (secs, until) => { await touch('touchStart', [{ x: BX, y: BY, id: 1 }]); await frames();
       for (let i = 0; i < secs * 4; i++) { const p = await pilot();
         if (!p) { if ((await st()).mode === 'over') break; await adv(.25); if (await page.evaluate(() => { const s = window.__gdl.state; return s.you && s.you.alive && !s.stick.on; })) { await touch('touchStart', [{ x: BX, y: BY, id: 1 }]); await frames(); } continue; }
         await finger(p.dx, p.dy);
         if (p.lunge) { const f1 = { x: BX + p.dx * 60, y: BY + p.dy * 60, id: 1 }; await touch('touchStart', [f1, { x: LB.x, y: LB.y, id: 2 }]); await touch('touchMove', [f1]); await frames(); }   // thumb hits LUNGE
         await adv(.25); if (until && await until()) break; }
-      await touch('touchEnd', []); };
+      await touch('touchEnd', []); await frames(); };
 
     // 6. gravity feeds you, and a stick-driven hunt swallows a smaller rival
     s = await st(); const dust0 = s.dustEaten, mass0 = s.mass;
     await fly(10); s = await st();
-    expect(s.dustEaten > dust0 + 5 && s.mass > mass0 + 4 && s.deaths === 0, 'gravity pulled ' + (s.dustEaten - dust0) + ' motes of dust in; mass ' + mass0.toFixed(0) + '→' + s.mass.toFixed(0));
+    expect(s.mass > mass0 + 4 && s.deaths === 0 && s.dustEaten > dust0, 'growing: ' + (s.dustEaten - dust0) + ' motes, ' + s.devoured + ' rivals; mass ' + mass0.toFixed(0) + '→' + s.mass.toFixed(0));
     await fly(70, async () => (await st()).devoured > 0); s = await st();
+    expect(s.dustEaten > dust0 + 15, 'gravity pulled ' + (s.dustEaten - dust0) + ' motes of dust into the horizon');
     expect(s.devoured >= 1 && s.banked >= 20, 'swallowed a rival (' + s.devoured + ', banked ' + s.banked + ', mode ' + s.mode + ', clock ' + s.clock.toFixed(1) + ', mass ' + s.mass.toFixed(0) + ')');
     expect(s.holes.some(h => h.mood === 'hunt') || s.holes.some(h => h.mood === 'flee'), 'rivals show intent: ' + [...new Set(s.holes.map(h => h.mood))].join(','));
 

@@ -13,7 +13,7 @@ module.exports = {
   async run({ page, expect, wait }) {
     const st = () => page.evaluate(() => window.__gdl.state);
     const adv = s => page.evaluate(s => window.__gdl.advance(s), s);
-    const place = (x, y, vx, vy) => page.evaluate(a => window.__gdl.place(0, ...a), [x, y, vx, vy]);
+    const place = (x, y, vx, vy) => page.evaluate(a => { window.__gdl.cheat({ save: 99 }); window.__gdl.place(0, ...a); }, [x, y, vx, vy]);   // ball save held on while shots are staged
     const cheat = o => page.evaluate(o => window.__gdl.cheat(o), o);
 
     // 1. menu → PLAY
