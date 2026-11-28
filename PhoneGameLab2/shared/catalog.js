@@ -4,13 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 15,
-    "slug": "castle-craft",
-    "t": "Castle Craft",
-    "d": "Sandbox: place blocks to build your toy castle.",
-    "thumb": "../thumbs/PhoneGameLab2--castle-craft.jpg"
-   },
-   {
     "n": 16,
     "slug": "cats-and-cans",
     "t": "Cats & Cans",
@@ -450,16 +443,6 @@ window.LAB_GAMES = [
     "t": "Wire Ball",
     "d": "Drag a ring along a wire without touching it.",
     "thumb": "../thumbs/PhoneGameLab2--wire-ball.jpg"
-   },
-   {
-    "slug": "sweet-circuit",
-    "t": "Candy Connect",
-    "d": "Drag through 3+ matching candies (horizontal/vertical/diagonal neighbours)."
-   },
-   {
-    "slug": "pine-kick",
-    "t": "Climber Tom",
-    "d": "Tap to jump to the other wall. Avoid spikes."
    }
   ]
  },
@@ -497,6 +480,13 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--stew-patch.jpg"
+   },
+   {
+    "slug": "sweet-circuit",
+    "t": "Sweet Circuit",
+    "d": "Wire up the sweets. Loop them to zap what's inside!",
+    "v2": true,
+    "score": 7
    }
   ]
  },
@@ -554,6 +544,17 @@ window.LAB_GAMES = [
   ]
  },
  {
+  "cat": "Creative",
+  "items": [
+   {
+    "slug": "clatter-castle",
+    "t": "Clatter Castle",
+    "d": "Build what the pals ask for. Mind the wobble!",
+    "v2": true
+   }
+  ]
+ },
+ {
   "cat": "Skill",
   "items": [
    {
@@ -571,6 +572,12 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--jampoline.jpg"
+   },
+   {
+    "slug": "pine-kick",
+    "t": "Pine Kick",
+    "d": "Hold to coil, let go to kick. How high can Pip climb?",
+    "v2": true
    },
    {
     "slug": "ramp-scamp",

@@ -178,12 +178,15 @@ window.GDL_CATALOG = {
    "id": "games/cosmic-devourer",
    "path": "games/cosmic-devourer.html",
    "collection": "arcade",
-   "title": "COSMIC DEVOURER ARENA",
-   "desc": "Agar-style cell-eating arena.",
+   "title": "Cosmic Devourer",
+   "desc": "Be a newborn black hole: your gravity spins dust into an accretion disk, bigger holes bend you toward their horizon, and the dying core sun is the last meal before it goes supernova.",
    "genre": [
-    ".io"
+    ".io",
+    "Arcade",
+    "Action"
    ],
    "controls": [
+    "touch",
     "mouse",
     "keyboard"
    ],
@@ -815,6 +818,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--slithergar.jpg"
   },
   {
@@ -2532,23 +2537,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--cakewalk.jpg"
   },
   {
-   "id": "PhoneGameLab2/castle-craft",
-   "path": "PhoneGameLab2/games/castle-craft/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Castle Craft",
-   "desc": "Sandbox: place blocks to build your toy castle.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 15,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--castle-craft.jpg"
-  },
-  {
    "id": "PhoneGameLab2/cats-and-cans",
    "path": "PhoneGameLab2/games/cats-and-cans/index.html",
    "collection": "PhoneGameLab2",
@@ -2564,6 +2552,22 @@ window.GDL_CATALOG = {
    "n": 16,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--cats-and-cans.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/clatter-castle",
+   "path": "PhoneGameLab2/games/clatter-castle/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Clatter Castle",
+   "desc": "Build what the pals ask for. Mind the wobble!",
+   "genre": [
+    "Creative"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true
   },
   {
    "id": "PhoneGameLab2/connect",
@@ -3262,16 +3266,17 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab2/pine-kick",
    "path": "PhoneGameLab2/games/pine-kick/index.html",
    "collection": "PhoneGameLab2",
-   "title": "Climber Tom",
-   "desc": "Tap to jump to the other wall. Avoid spikes.",
+   "title": "Pine Kick",
+   "desc": "Hold to coil, let go to kick. How high can Pip climb?",
    "genre": [
-    "Minigame"
+    "Skill"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
-   "v2": false
+   "v2": true
   },
   {
    "id": "PhoneGameLab2/planet-hop",
@@ -3726,16 +3731,18 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab2/sweet-circuit",
    "path": "PhoneGameLab2/games/sweet-circuit/index.html",
    "collection": "PhoneGameLab2",
-   "title": "Candy Connect",
-   "desc": "Drag through 3+ matching candies (horizontal/vertical/diagonal neighbours).",
+   "title": "Sweet Circuit",
+   "desc": "Wire up the sweets. Loop them to zap what's inside!",
    "genre": [
-    "Minigame"
+    "Puzzle"
    ],
    "controls": [
     "touch",
     "mouse"
    ],
-   "v2": false
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/tap-tap",

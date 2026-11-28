@@ -88,7 +88,7 @@ This pass:
 
 ## Test results
 - **Automated-gameplay** `node tools/run-tests.js slithergar` → pass, 3 consecutive runs on the final build
-  (≈35–40 s each, identical results: the test steps the simulation itself and waits one frame after each touch move
+  (≈40 s each, identical results: the test steps the simulation itself and waits one frame after each touch move
   because Chromium delivers touch moves rAF-aligned). 390×844 mobile context with real CDP touch:
   tap DIG IN → a touch drag turns the noodle → greens raise LONG and score → meat raises FAT and radius →
   a second finger on DASH sprints ×1.6 and drops fat crumbs, releasing stops it → two-finger GULP converts 30 % of
