@@ -4,13 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 44,
-    "slug": "make-a-kite",
-    "t": "Make a Kite",
-    "d": "Decorate a kite, then fly it through the wind.",
-    "thumb": "../thumbs/PhoneGameLab2--make-a-kite.jpg"
-   },
-   {
     "n": 45,
     "slug": "marble-mix-up",
     "t": "Marble Mix Up",
@@ -261,11 +254,6 @@ window.LAB_GAMES = [
     "t": "Wire Ball",
     "d": "Drag a ring along a wire without touching it.",
     "thumb": "../thumbs/PhoneGameLab2--wire-ball.jpg"
-   },
-   {
-    "slug": "chip-off",
-    "t": "Ice Smash",
-    "d": "Tap ice blocks to shatter. Limited taps."
    }
   ]
  },
@@ -279,6 +267,14 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--bedtime-stacks.jpg"
+   },
+   {
+    "slug": "chip-off",
+    "t": "Chip Off",
+    "d": "Carve the ice sculpture. One clever chip drops a whole slab!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--chip-off.jpg"
    },
    {
     "slug": "fish-fizz",
@@ -317,7 +313,8 @@ window.LAB_GAMES = [
     "t": "Snap Album",
     "d": "Piece Olli's photos back together before the sun sets.",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--snap-album.jpg"
    },
    {
     "slug": "stew-patch",
@@ -361,7 +358,8 @@ window.LAB_GAMES = [
     "t": "Gobblepot",
     "d": "Bun's magic pot gobbles the mess. Small things first!",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--gobblepot.jpg"
    },
    {
     "slug": "gulp-and-float",
@@ -485,7 +483,8 @@ window.LAB_GAMES = [
     "t": "Lickety Scoop",
     "d": "Hold to scoop, let go on the ring. Stack it, don't topple it!",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--lickety-scoop.jpg"
    },
    {
     "slug": "peekaboo-park",
@@ -524,13 +523,16 @@ window.LAB_GAMES = [
     "t": "Snack Tank",
     "d": "Fussy fish, sinking snacks. Drop it where they'll be!",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--snack-tank.jpg"
    },
    {
     "slug": "sprout-sling",
     "t": "Sprout Sling",
     "d": "Sling seeds, regrow the jungle — then bounce off what you grew.",
-    "v2": true
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--sprout-sling.jpg"
    },
    {
     "slug": "topping-toss",
@@ -562,6 +564,14 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--clatter-castle.jpg"
    },
    {
+    "slug": "kite-works",
+    "t": "Kite Works",
+    "d": "Build Bolt a kite for today's wind, then fly it through the lanes.",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--kite-works.jpg"
+   },
+   {
     "slug": "party-hopper",
     "t": "Party Hopper",
     "d": "Eight parties, one impatient fox. Dress Pip before he dashes off!",
@@ -587,7 +597,8 @@ window.LAB_GAMES = [
     "t": "Skip Jam",
     "d": "Pip and Bun turn the rope. Keep Momo skipping to the beat.",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--skip-jam.jpg"
    },
    {
     "slug": "strum-corner",

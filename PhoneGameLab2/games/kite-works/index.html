@@ -1,0 +1,246 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Kite Works</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* KITE WORKS — Bolt the robot builds a kite every morning for whatever the sky is doing, then flies it.
+ * Core idea kept: make a kite, then fly it through the wind. Creative + skill, and the design MATTERS:
+ *   WORKSHOP: read today's forecast (Calm / Breezy / Gusty), pick a shape (Diamond: light, lifty, wobbly, fragile ·
+ *   Delta: balanced · Box: heavy, rock-steady, unbreakable), a tail (longer = steadier but heavier) and paint it (colour +
+ *   pattern; the kite you paint is the kite you fly). Live stat bars show Lift / Steady / Tough / Weight.
+ *   FLIGHT (75 s): the sky is stacked WIND LANES you can see (streaks; blue = strong; grey = storm). Hold and slide to
+ *   pull the kite to an altitude — but it only climbs where the wind gives it more lift than its weight, and it sinks in
+ *   lanes too weak for it. Storm lanes over-strain a fragile kite (strain meter → SNAP, lose a patch); gusts shake a kite
+ *   with little steadiness; gulls cross at altitude. Collect stars, thread ribbon rings (chain ×5), distance ticks up.
+ *   So a light diamond owns a calm day and a box kite laughs at a gusty one — the forecast changes every run.
+ * Pals: Bolt builds (wrench, advice bubble) and runs below holding the string; Pip, Nori and Momo cheer from the hill. */
+let demo = false;
+Lab.init({
+  title: "Kite Works", tagline: "Build Bolt a kite for today's wind, then fly it through the lanes.", category: "Creative", kicker: "Pocket Pals",
+  howto: ["Build a kite to suit the forecast", "Hold and slide to steer it up and down", "Ride strong lanes, dodge storms"],
+  theme: { bg: "#a8dcf5", bg2: "#f1f9e4", fg: "#253049", muted: "#55607a", accent: "#ffb52e", accent2: "#3fb8d8", light: true },
+  orient: "any", music: { style: "dream", key: "A", vol: .32 }, restart: start, attract,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, rand = Lab.rand, INK = Pals.ink;
+const SHAPES = [{ n: "Diamond", lift: 1.15, weight: .45, steady: .3, tough: .9, resp: 1.25 }, { n: "Delta", lift: 1, weight: .5, steady: .5, tough: 1.2, resp: 1 }, { n: "Box", lift: .86, weight: .68, steady: .78, tough: 1.75, resp: .8 }];
+const TAILS = [{ n: "Short", w: 0, s: 0, bows: 3 }, { n: "Medium", w: .08, s: .18, bows: 5 }, { n: "Long", w: .16, s: .34, bows: 8 }];
+const COLS = ["#ffcf3f", "#4cc9f0", "#ff6f61", "#9b7bff", "#5fd3a0"], PATS = ["Plain", "Stripes", "Dots", "Stars"];
+const FORE = [{ n: "Calm", scene: "golden", ws: [.35, .55, .7, .85], good: 1.15, tip: "Calm day! Go light and lifty.", gust: .6 },
+  { n: "Breezy", scene: "meadow", ws: [.6, .85, 1.05, 1.3, 1.6], good: 1.2, tip: "Nice breeze. Anything flies!", gust: 1 },
+  { n: "Gusty", scene: "meadow", ws: [.85, 1.25, 1.55, 1.9, 2.2], good: 1.3, tip: "Gusty! Build it tough and steady.", gust: 1.5 }];
+const FLIGHT = 75;
+let S, wide, P, kx, skyTop, groundY, bgs = {};
+let design, fore, phase, btns, clock, wx, speed, segs, items, kite, patches, strain, score, stars, rings, chain, bestChain, dist, time, inv, target, bubble, snaps, cheer, lanesOverride;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function D() { const sh = SHAPES[design.shape], tl = TAILS[design.tail]; return { lift: sh.lift, weight: sh.weight + tl.w, steady: Math.min(.95, sh.steady + tl.s), tough: sh.tough, resp: sh.resp * (1 - tl.w) }; }
+function layout() {
+  P = Lab.play; wide = P.w > P.h * 1.1; S = Math.min(P.w / 390, P.h / 700, 1.5); if (wide) S = Math.min(P.w / 760, P.h / 360, 1.5);
+  skyTop = P.y + 58 * S; groundY = P.y + P.h - (wide ? 40 : 84) * S; kx = P.x + P.w * (wide ? .6 : .62);
+}
+Lab.onResize(() => { if (design) { layout(); bgs = {}; } });
+const altY = a => groundY - 26 * S - a * (groundY - 26 * S - skyTop), yAlt = y => clamp((groundY - 26 * S - y) / (groundY - 26 * S - skyTop), 0, 1);
+function sky(k) {
+  return bgs[k] = bgs[k] || Lab.sprite("kw_" + k + Lab.W + "x" + Lab.H, Lab.W + 80, Lab.H + 80, g => { g.translate(40, 40); Pals.backdrop(g, Lab.W, Lab.H, 2, { scene: FORE[k].scene, ground: (groundY + 10 * S) / Lab.H });
+    if (k === 2) { g.fillStyle = "rgba(90,100,130,.18)"; g.fillRect(-40, -40, Lab.W + 80, Lab.H + 80); } });
+}
+
+/* ---------- kite art ---------- */
+function shapePath(c, sh, s) {
+  c.beginPath();
+  if (sh === 0) { c.moveTo(0, -s); c.lineTo(s * .66, -s * .18); c.lineTo(0, s); c.lineTo(-s * .66, -s * .18); }
+  else if (sh === 1) { c.moveTo(0, -s * .85); c.lineTo(s, s * .45); c.quadraticCurveTo(0, s * .25, -s, s * .45); }
+  else { c.rect(-s * .42, -s, s * .84, s * .62); c.rect(-s * .42, s * .2, s * .84, s * .62); }
+  c.closePath();
+}
+function drawKite(c, x, y, s, d, ang, t, tailWave) {
+  const col = COLS[d.col], dark = Lab.color.shade(col, -.3), sh = d.shape;
+  c.save(); c.translate(x, y); c.rotate(ang || 0);
+  // tail
+  const tl = TAILS[d.tail], n = tl.bows, ty0 = sh === 1 ? s * .35 : sh === 2 ? s * .82 : s; let px = 0, py = ty0;
+  c.strokeStyle = "rgba(43,35,64,.55)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(0, ty0);
+  const pts = []; for (let i = 1; i <= n; i++) { const yy = ty0 + i * s * .38, xx = Math.sin(t * 6 + i * .9 + (tailWave || 0)) * s * .14 * (1 + i * .12) - i * s * .05; c.lineTo(xx, yy); pts.push([xx, yy]); } c.stroke();
+  pts.forEach(([bx, by], i) => { c.fillStyle = i % 2 ? "#fff" : col; c.beginPath(); c.moveTo(bx, by); c.lineTo(bx - s * .13, by - s * .07); c.lineTo(bx - s * .13, by + s * .07); c.closePath(); c.moveTo(bx, by); c.lineTo(bx + s * .13, by - s * .07); c.lineTo(bx + s * .13, by + s * .07); c.closePath(); c.fill(); });
+  // sail + pattern
+  shapePath(c, sh, s); c.fillStyle = col; c.fill();
+  c.save(); shapePath(c, sh, s); c.clip(); c.fillStyle = "rgba(255,255,255,.75)";
+  if (d.pat === 1) for (let i = -4; i <= 4; i++) { c.save(); c.rotate(-.6); c.fillRect(-s * 2, i * s * .36, s * 4, s * .14); c.restore(); }
+  else if (d.pat === 2) for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) { c.beginPath(); c.arc(i * s * .3 + (j % 2) * s * .15, j * s * .3, s * .07, 0, TAU); c.fill(); }
+  else if (d.pat === 3) for (const [sx, sy] of [[0, -s * .45], [-s * .3, 0], [s * .3, 0], [0, s * .45]]) draw.star(c, sx, sy, s * .14, "rgba(255,255,255,.85)");
+  c.fillStyle = "rgba(255,255,255,.18)"; c.fillRect(-s * 2, -s * 2, s * 2, s * 4); c.restore();
+  shapePath(c, sh, s); c.strokeStyle = dark; c.lineWidth = Math.max(1.5, s * .05); c.lineJoin = "round"; c.stroke();
+  c.strokeStyle = "rgba(120,80,40,.8)"; c.lineWidth = Math.max(1.2, s * .035); c.beginPath();
+  if (sh === 0) { c.moveTo(0, -s); c.lineTo(0, s); c.moveTo(-s * .66, -s * .18); c.lineTo(s * .66, -s * .18); }
+  else if (sh === 1) { c.moveTo(0, -s * .85); c.lineTo(0, s * .32); c.moveTo(-s * .6, s * .2); c.lineTo(s * .6, s * .2); }
+  else { c.moveTo(-s * .42, -s); c.lineTo(-s * .42, s * .82); c.moveTo(s * .42, -s); c.lineTo(s * .42, s * .82); c.moveTo(-s * .42, -s * .1); c.lineTo(s * .42, -s * .1); }
+  c.stroke(); c.restore();
+}
+
+/* ---------- workshop ---------- */
+function shopButtons() {
+  btns = []; const add = (x, y, w, h, label, act, sel, col) => btns.push({ x, y, w, h, label, act, sel, col });
+  let x0, w0, rows;
+  if (wide) { x0 = P.x + P.w * .47; w0 = P.x + P.w - 14 * S - x0; rows = [P.y + P.h * .43, P.y + P.h * .57, P.y + P.h * .71, P.y + P.h * .87]; }
+  else { x0 = P.x + 16 * S; w0 = P.w - 32 * S; rows = [P.y + P.h * .625, P.y + P.h * .715, P.y + P.h * .805, P.y + P.h * .915]; }
+  const bh = Math.min(40 * S, (rows[1] - rows[0]) * .62), lab = 62 * S, bx = x0 + lab, bw = w0 - lab;
+  SHAPES.forEach((s, i) => add(bx + i * bw / 3 + 3, rows[0] - bh / 2, bw / 3 - 6, bh, s.n, () => { design.shape = i; }, design.shape === i));
+  TAILS.forEach((s, i) => add(bx + i * bw / 3 + 3, rows[1] - bh / 2, bw / 3 - 6, bh, s.n, () => { design.tail = i; }, design.tail === i));
+  const cw = bw * .68 / 5; COLS.forEach((c, i) => add(bx + i * cw + 3, rows[2] - bh / 2, cw - 6, bh, "", () => { design.col = i; }, design.col === i, c));
+  add(bx + bw * .68 + 3, rows[2] - bh / 2, bw * .32 - 6, bh, PATS[design.pat], () => { design.pat = (design.pat + 1) % PATS.length; }, false);
+  add(x0 + w0 * .2, rows[3] - bh * .65, w0 * .6, bh * 1.3, "Fly!", () => launch(), true, "#ffb52e");
+  return { x0, rows, lab };
+}
+function renderShop(t) {
+  const c = Lab.ctx; c.drawImage(sky(fore), -40, -40, Lab.W + 80, Lab.H + 80);
+  const g = shopButtons(), pcx = wide ? P.x + P.w * .22 : P.x + P.w * .66, pcy = wide ? P.y + P.h * .42 : P.y + P.h * .22, ks = (wide ? 62 : 68) * S;
+  // hill + Bolt with wrench
+  draw.shadow(c, pcx, pcy + ks * 3.3, ks * 1.2, ks * .2, .12);
+  drawKite(c, pcx, pcy + Math.sin(t * 1.6) * 4 * S, ks, design, Math.sin(t * 1.2) * .06, t);
+  const bs = (wide ? 70 : 76) * S, bxp = wide ? pcx - ks * 1.7 : P.x + P.w * .17, byp = wide ? P.y + P.h * .78 : pcy + ks * 1.75;
+  const a = Pals.draw(c, "bolt", bxp, byp, bs, { t, mood: "happy", arms: "hold", look: [.6, -.4] });
+  c.save(); c.translate(a.handR[0], a.handR[1]); c.rotate(Math.sin(t * 3) * .3 - .5); draw.rect(c, -3 * S, -18 * S, 6 * S, 22 * S, 3 * S, "#9aa6c8"); draw.circle(c, 0, -20 * S, 7 * S, "#9aa6c8"); draw.circle(c, 0, -23 * S, 3.5 * S, "#ffffff"); c.restore();
+  const f = FORE[fore], bw2 = Math.min(230 * S, P.w * (wide ? .3 : .46)), bpx = wide ? clamp(bxp + bw2 * .3, P.x + bw2 / 2 + 6, P.x + P.w * .45 - bw2 / 2) : P.x + 8 * S + bw2 / 2, bpy = byp - bs * (wide ? 1.05 : 1.25);
+  Pals.bubble(c, bpx, bpy, bw2, (wide ? 44 : 52) * S, { tailX: a.head[0] + 6, tailY: a.head[1] + 4 }); if (wide) draw.text(c, f.tip, bpx, bpy, { size: 13 * S, color: INK, weight: 600 }); else { const w2 = f.tip.split(". "), l1 = w2[0] + (w2.length > 1 ? "." : ""), l2 = w2.slice(1).join(". "); draw.text(c, l1, bpx, bpy - 8 * S, { size: 13 * S, color: INK, weight: 600 }); draw.text(c, l2, bpx, bpy + 9 * S, { size: 13 * S, color: INK, weight: 600 }); }
+  // workbench panel
+  const top = wide ? P.y + P.h * .06 : P.y + P.h * .43, pl = wide ? g.x0 - 8 * S : P.x + 8 * S, pw = wide ? P.x + P.w - 6 * S - pl : P.w - 16 * S, ph = P.y + P.h - 6 * S - top;
+  draw.rect(c, pl, top, pw, ph, 18 * S, "rgba(255,250,240,.9)", "rgba(120,90,60,.35)", 2);
+  draw.text(c, "Today: " + f.n, pl + pw / 2, top + 20 * S, { size: 17 * S, color: "#253049", weight: 700 });
+  for (let i = 0; i < 4; i++) { const w = f.ws[Math.min(i, f.ws.length - 1)] / 2.2; draw.rect(c, pl + pw / 2 + 52 * S + i * 10 * S, top + 26 * S - w * 18 * S, 6 * S, w * 18 * S, 2, fore === 2 ? "#7b86a8" : "#3fb8d8"); }
+  const d = D(), stats = [["Lift", d.lift / 1.2], ["Steady", d.steady], ["Tough", d.tough / 1.8], ["Weight", d.weight / .9]], sy0 = top + 46 * S, sh2 = wide ? (g.rows[0] - sy0 - 24 * S) / 4 : 21 * S;
+  stats.forEach(([n, v], i) => { const y = sy0 + i * sh2; draw.text(c, n, pl + 16 * S, y, { size: 13 * S, color: "#55607a", align: "left", weight: 600 }); const bx2 = pl + 84 * S, bw3 = pw - 100 * S;
+    draw.rect(c, bx2, y - 5 * S, bw3, 10 * S, 5 * S, "rgba(37,48,73,.1)"); draw.rect(c, bx2, y - 5 * S, Math.max(10 * S, bw3 * clamp(v, 0, 1)), 10 * S, 5 * S, ["#3fb8d8", "#5fd3a0", "#ff9f43", "#9b7bff"][i]); });
+  ["Shape", "Tail", "Paint"].forEach((n, i) => draw.text(c, n, g.x0, g.rows[i], { size: 14 * S, color: "#253049", align: "left", weight: 700 }));
+  for (const b of btns) {
+    if (b.col && b.label === "") { draw.rect(c, b.x, b.y, b.w, b.h, 10 * S, b.col, b.sel ? INK : "rgba(255,255,255,.9)", b.sel ? 3 : 2); continue; }
+    const fly = b.label === "Fly!"; draw.rect(c, b.x, b.y + 3, b.w, b.h, 12 * S, fly ? "#d98a14" : "rgba(37,48,73,.15)");
+    draw.rect(c, b.x, b.y, b.w, b.h, 12 * S, fly ? "#ffb52e" : b.sel ? "#253049" : "#ffffff", fly ? null : "rgba(37,48,73,.25)", 1.5);
+    draw.text(c, b.label, b.x + b.w / 2, b.y + b.h / 2 + 1, { size: (fly ? 20 : 14) * S, color: fly ? "#ffffff" : b.sel ? "#ffffff" : "#253049", weight: 700 });
+  }
+}
+
+/* ---------- flight ---------- */
+function laneSet(x0) {
+  const f = FORE[fore], n = Lab.randInt(3, 4), cut = [0]; for (let i = 1; i < n; i++) cut.push(i / n + rand(-.06, .06)); cut.push(1.08);
+  const lanes = []; const prog = clamp(clock / FLIGHT, 0, 1), good = Lab.randInt(0, n - 1);
+  for (let i = 0; i < n; i++) { let w = i === good ? f.good + rand(-.05, .1) : Lab.choose(f.ws) * (1 + prog * .15); if (i === n - 1 && Lab.chance((.3 + prog * .4) * (fore === 0 ? .35 : 1)) && i !== good) w = Math.max(w, 1.8 + prog * .4); lanes.push({ a0: cut[i], a1: cut[i + 1], w }); }
+  return { x0, x1: x0 + rand(520, 760) * S, lanes };
+}
+function genAhead() {
+  while (segs[segs.length - 1].x1 < wx + Lab.W * 1.6) {
+    const last = segs[segs.length - 1], sg = laneSet(last.x1); segs.push(sg); const prog = clamp(clock / FLIGHT, 0, 1);
+    const fine = sg.lanes.filter(l => l.w > .75 && l.w < 1.7), L = fine.length ? Lab.choose(fine) : sg.lanes[0], am = (L.a0 + Math.min(1, L.a1)) / 2, sx = sg.x0 + rand(60, 200) * S;
+    for (let i = 0; i < 4; i++) items.push({ x: sx + i * 46 * S, a: am + Math.sin(i * .9) * .04, kind: "star" });
+    const L2 = Lab.choose(sg.lanes); items.push({ x: sg.x0 + (sg.x1 - sg.x0) * .72, a: clamp((L2.a0 + Math.min(1, L2.a1)) / 2, .12, .92), kind: "ring" });
+    if (clock > 10 && Lab.chance(.35 + prog * .4)) { const a = rand(.2, .85); for (let i = 0; i < Lab.randInt(1, 2 + Math.floor(prog * 2)); i++) items.push({ x: sg.x0 + (sg.x1 - sg.x0) * rand(.3, .9) + i * 40 * S, a: a + i * .05, kind: "bird", ph: rand(0, TAU) }); }
+  }
+  while (segs.length > 2 && segs[1].x1 < wx - Lab.W) segs.shift();
+  items = items.filter(it => !it.gone && it.x > wx - Lab.W);
+}
+function windAt(a, x) { if (lanesOverride != null) return lanesOverride; for (const sg of segs) if (x >= sg.x0 && x < sg.x1) { for (const l of sg.lanes) if (a >= l.a0 && a < l.a1) return l.w; return sg.lanes[sg.lanes.length - 1].w; } return 1; }
+function launch() {
+  phase = "fly"; Lab.store.set("design", design); clock = 0; wx = 0; speed = 150 * S; segs = [{ x0: -Lab.W * 2, x1: Lab.W * .5, lanes: [{ a0: 0, a1: 1.1, w: FORE[fore].good }] }]; items = [];
+  kite = { a: .4, va: 0, wob: 0, spin: 0, aOff: 0 }; patches = 3; strain = 0; score = 0; stars = 0; rings = 0; chain = 0; bestChain = 0; dist = 0; time = FLIGHT; inv = 0; target = .5; snaps = 0; cheer = 0;
+  genAhead(); if (!demo) { Lab.setScore(0); snd("whoosh"); Lab.banner("Up she goes!", { color: "#3fb8d8", ms: 1000, y: .3 }); Lab.music.intensity(.4); Lab.hint("Hold and slide up or down to steer the kite"); }
+}
+function lose(kind) {
+  patches--; snaps++; inv = 1.8; strain = 0; chain = 0; kite.spin = 1; kite.va = -.25;
+  Lab.shake(6, .3); snd(kind === "snap" ? "snap" : "hurt"); snd("whoosh", { pitch: .6 });
+  if (!demo) { Lab.toast(kind === "snap" ? "Snap! Too much strain" : kind === "bird" ? "Bonk! A gull" : "Bump! Too low", 1100, { y: .26 }); Lab.buzz(50); }
+  if (patches <= 0) { phase = "over"; if (!demo) Lab.after(.7, () => end(false)); }
+}
+function end(timeUp) {
+  phase = "over"; Lab.music.intensity(.2);
+  Lab.gameover({ title: timeUp ? "What a flight!" : "Oops! Kite down", message: SHAPES[design.shape].n + " kite, " + TAILS[design.tail].n.toLowerCase() + " tail, on a " + FORE[fore].n.toLowerCase() + " day.", score, neutral: timeUp,
+    stats: [["Stars", stars], ["Rings (best chain)", rings + " (" + bestChain + ")"], ["Distance", Math.floor(dist) + " m"]] });
+}
+function update(dt) {
+  clock += dt; if (phase !== "fly") return;
+  const d = D(), f = FORE[fore]; wx += speed * dt; speed = (150 + 70 * clamp(clock / FLIGHT, 0, 1)) * S; dist += speed / S * dt / 10; time -= dt; inv = Math.max(0, inv - dt); cheer = Math.max(0, cheer - dt);
+  if (!demo && time <= 0) { time = 0; return end(true); }
+  if (demo) botSteer(); else { const k2 = Lab.input.keys; if (k2.ArrowUp || k2.w) target = clamp(target + dt * .8, 0, 1); if (k2.ArrowDown || k2.s) target = clamp(target - dt * .8, 0, 1); }
+  genAhead(); genPts(dt);
+  const w = windAt(kite.a, wx), net = d.lift * w - d.weight;
+  let up = clamp((target - kite.a) * 4, -1, 1) * d.resp * .55; if (up > 0) up *= clamp(net * 2.4, 0, 1);
+  const sink = net < 0 ? -net * .38 : 0; kite.va = Lab.damp(kite.va, up - sink, 4, dt); kite.a = clamp(kite.a + kite.va * dt, 0, 1);
+  const gust = Math.max(0, w - .9) * f.gust * (1 - d.steady); kite.aOff = Math.sin(clock * 5.3) * gust * .05 + Math.sin(clock * 8.1) * gust * .025; kite.wob = Math.sin(clock * 6.7) * (.08 + gust * .6) + kite.va * .3;
+  kite.spin = Math.max(0, kite.spin - dt * .8);
+  const lim = d.tough + .35; if (w > lim && inv <= 0) { strain += (w - lim) * 1.7 * dt; if (Math.floor(clock * 4) !== Math.floor((clock - dt) * 4)) snd("tick", { pitch: 1 + strain, vol: .35 }); } else strain = Math.max(0, strain - .45 * dt);
+  if (strain >= 1) lose("snap");
+  if (phase === "fly" && kite.a < .03 && inv <= 0) { lose("ground"); kite.a = .35; }
+  // items
+  const ka = kite.a + kite.aOff, ky = altY(ka), R = 26 * S;
+  for (const it of items) {
+    if (it.got || it.gone) continue; if (it.kind === "bird") { it.x -= 70 * S * dt; it.a += Math.sin(clock * 2 + it.ph) * .02 * dt; }
+    const sx = kx + (it.x - wx), sy = altY(it.a);
+    if (it.kind === "ring") { if (sx < kx && !it.done) { it.done = true; if (Math.abs(sy - ky) < 34 * S) { it.got = true; rings++; chain++; bestChain = Math.max(bestChain, chain); const p = 25 * Math.min(5, chain); score += p; if (!demo) { Lab.setScore(score); fx.text(kx, ky - 40 * S, (chain > 1 ? "Chain ×" + Math.min(5, chain) + "  " : "") + "+" + p, { color: "#e0533f", size: 18 * S }); fx.burst(kx, ky, { n: 14, colors: ["#ff6f61", "#ffd54a", "#fff"], speed: 160, life: .5 }); } if (!demo) Lab.audio.combo(chain + 2); cheer = 1; } else { chain = 0; } } continue; }
+    if (Math.hypot(sx - kx, sy - ky) < R + (it.kind === "bird" ? 12 * S : 10 * S)) {
+      if (it.kind === "star") { it.got = true; stars++; score += 10; if (!demo) { Lab.setScore(score); fx.burst(sx, sy, { n: 8, colors: ["#ffd54a", "#fff"], speed: 110, life: .35, shape: "star" }); } snd("coin", { pitch: 1 + (stars % 8) * .06, vol: .6 }); cheer = .5; }
+      else if (inv <= 0) { it.gone = true; lose("bird"); }
+    }
+  }
+  const dm = Math.floor(dist / 10); if (dm !== kite.dm) { kite.dm = dm; if (!demo && dm > 0) { score += 1; Lab.setScore(score); } }
+  if (!demo) Lab.music.intensity(clamp(.35 + strain * .5 + (w > 1.6 ? .2 : 0), 0, 1));
+}
+let wpts = [];
+function genPts(dt) { // wind streak particles (visual)
+  while (wpts.length < 46) wpts.push({ x: rand(P.x, P.x + P.w + 80), a: rand(0, 1), l: rand(16, 46) });
+  for (const p of wpts) { const w = windAt(p.a, wx + (p.x - kx)); p.w = w; p.x -= (60 + w * 260) * S * dt; if (p.x < P.x - 60) { p.x = P.x + P.w + rand(0, 60); p.a = rand(0, 1); } }
+}
+function botSteer() { const ahead = items.filter(it => it.kind !== "bird" && !it.got && it.x > wx + 10 && it.x < wx + 400 * S); if (ahead.length) target = ahead[0].a; else target = .5; for (const it of items) if (it.kind === "bird" && Math.abs(it.x - wx) < 160 * S && Math.abs(it.a - target) < .12) target = clamp(target + (target > .5 ? -.25 : .25), .1, .9); }
+function renderFlight(t) {
+  const c = Lab.ctx; c.drawImage(sky(fore), -40, -40, Lab.W + 80, Lab.H + 80);
+  // lanes
+  for (const sg of segs) { const x0 = kx + (sg.x0 - wx), x1 = kx + (sg.x1 - wx); if (x1 < P.x - 10 || x0 > P.x + P.w + 10) continue;
+    for (const l of sg.lanes) { const y0 = Math.max(P.y + 40 * S, altY(Math.min(1.08, l.a1))), y1 = altY(l.a0); if (l.w < .75) continue;
+      c.fillStyle = l.w >= 1.8 ? "rgba(90,96,130,.28)" : l.w >= 1.4 ? "rgba(70,150,230,.16)" : "rgba(255,255,255,.14)"; c.fillRect(Math.max(P.x - 40, x0), y0, Math.min(P.x + P.w + 40, x1) - Math.max(P.x - 40, x0), y1 - y0);
+      if (l.w >= 1.8) { c.fillStyle = "rgba(110,115,145,.55)"; for (let xx = Math.max(x0, P.x - 40); xx < Math.min(x1, P.x + P.w + 40); xx += 34 * S) { c.beginPath(); c.arc(xx + ((wx * .2) % (34 * S)), y1 - 2 * S, 16 * S, Math.PI, TAU); c.fill(); } } } }
+  c.lineCap = "round"; for (const p of wpts) { if (p.w < .7) continue; c.strokeStyle = p.w >= 1.8 ? "rgba(70,75,110,.5)" : p.w >= 1.4 ? "rgba(40,120,210,.45)" : "rgba(255,255,255,.7)"; c.lineWidth = (p.w >= 1.4 ? 2.5 : 1.8) * S; const y = altY(p.a); c.beginPath(); c.moveTo(p.x, y); c.lineTo(p.x + p.l * S * (.6 + p.w * .4), y); c.stroke(); }
+  // hill + fans
+  const off = (wx * .6) % (120 * S); c.fillStyle = "#7cc36a"; c.fillRect(P.x - 40, groundY, P.w + 80, Lab.H); c.fillStyle = "#6ab35a"; for (let x = P.x - off - 120 * S; x < P.x + P.w + 120 * S; x += 120 * S) { c.beginPath(); c.ellipse(x, groundY + 4 * S, 70 * S, 14 * S, 0, Math.PI, TAU); c.fill(); }
+  c.fillStyle = "#fff"; for (let x = P.x - (wx % (57 * S)); x < P.x + P.w; x += 57 * S) { draw.circle(c, x, groundY + 18 * S, 3 * S, "#ffd1e0"); }
+  const fs = 34 * S; ["pip", "nori", "momo"].forEach((who, i) => { const fxp = P.x + P.w * (wide ? .3 + i * .22 : .38 + i * .2), hop = cheer > 0 ? Math.abs(Math.sin(clock * 9 + i)) * 8 * S : 0; Pals.draw(c, who, fxp, groundY + fs * .2 - hop, fs, { t, mood: inv > 0 ? "scared" : cheer > 0 ? "joy" : "happy", arms: cheer > 0 ? "cheer" : "down", look: [clamp((kx - fxp) / 200, -1, 1), -1] }); });
+  // Bolt + string
+  const bx = P.x + P.w * .13, bs = 54 * S, ka = kite.a + kite.aOff, ky = altY(ka), run = Math.abs(Math.sin(clock * 9)) * 4 * S;
+  const a = Pals.draw(c, "bolt", bx, groundY - bs * .5 + 6 * S - run, bs, { t, mood: inv > 0 ? "scared" : strain > .5 ? "focus" : cheer > 0 ? "joy" : "think", arms: "up", look: [1, -1], squash: run / 40 });
+  const hx = a.handR[0], hy = a.handR[1], kxx = kx + Math.sin(kite.wob) * 6 * S, kyy = ky + 18 * S; c.strokeStyle = "rgba(43,35,64,.6)"; c.lineWidth = 1.4; c.beginPath(); c.moveTo(hx, hy); c.quadraticCurveTo((hx + kxx) / 2, Math.max(hy, kyy) + 40 * S * (1 - strain), kxx, kyy); c.stroke();
+  // items
+  for (const it of items) { if (it.got || it.gone) continue; const sx = kx + (it.x - wx), sy = altY(it.a); if (sx < P.x - 40 || sx > P.x + P.w + 40) continue;
+    if (it.kind === "star") draw.star(c, sx, sy + Math.sin(clock * 3 + it.x) * 3 * S, 10 * S, "#ffd54a");
+    else if (it.kind === "ring") { c.strokeStyle = it.done ? "rgba(255,111,97,.3)" : "#ff6f61"; c.lineWidth = 5 * S; c.beginPath(); c.ellipse(sx, sy, 12 * S, 34 * S, 0, 0, TAU); c.stroke(); c.strokeStyle = "rgba(255,255,255,.7)"; c.lineWidth = 2 * S; c.beginPath(); c.ellipse(sx - 2 * S, sy, 9 * S, 30 * S, 0, -1.8, -.6); c.stroke(); }
+    else { const fl = Math.sin(clock * 12 + it.ph); c.fillStyle = "#fff"; c.beginPath(); c.ellipse(sx, sy, 13 * S, 8 * S, 0, 0, TAU); c.fill(); c.strokeStyle = "#8a93ad"; c.lineWidth = 3 * S; c.beginPath(); c.moveTo(sx - 16 * S, sy - fl * 9 * S); c.quadraticCurveTo(sx - 6 * S, sy - 12 * S, sx, sy - 3 * S); c.quadraticCurveTo(sx + 6 * S, sy - 12 * S, sx + 16 * S, sy - fl * 9 * S); c.stroke(); c.fillStyle = "#ff9f43"; c.beginPath(); c.moveTo(sx - 13 * S, sy - 1); c.lineTo(sx - 20 * S, sy + 2 * S); c.lineTo(sx - 13 * S, sy + 3 * S); c.fill(); draw.circle(c, sx - 8 * S, sy - 2 * S, 1.6 * S, INK); } }
+  // kite
+  c.globalAlpha = inv > 0 && Math.floor(clock * 12) % 2 ? .5 : 1; drawKite(c, kxx, ky, 31 * S, design, kite.wob + kite.spin * 9, clock, 0); c.globalAlpha = 1;
+  if (Lab.input.down && !demo) { const ty = altY(target); c.strokeStyle = "rgba(37,48,73,.3)"; c.setLineDash([4, 6]); c.beginPath(); c.moveTo(kx + 40 * S, ty); c.lineTo(kx + 90 * S, ty); c.stroke(); c.setLineDash([]); }
+  // HUD
+  const hy2 = P.y + 18 * S; for (let i = 0; i < 3; i++) { c.save(); c.translate(P.x + 20 * S + i * 24 * S, hy2); c.rotate(.0); shapePath(c, 0, 9 * S); c.fillStyle = i < patches ? COLS[design.col] : "rgba(37,48,73,.15)"; c.fill(); c.restore(); }
+  draw.text(c, Math.ceil(time) + "s", P.x + P.w - 14 * S, hy2, { size: 16 * S, color: time < 10 ? "#d0442c" : "#253049", align: "right", weight: 700 });
+  const sw = 90 * S, sx2 = P.x + P.w / 2 - sw / 2; if (strain > .02) { draw.rect(c, sx2, hy2 - 5 * S, sw, 10 * S, 5 * S, "rgba(37,48,73,.15)"); draw.rect(c, sx2, hy2 - 5 * S, Math.max(10 * S, sw * clamp(strain, 0, 1)), 10 * S, 5 * S, strain > .6 ? "#e0533f" : "#ff9f43"); draw.text(c, "STRAIN", P.x + P.w / 2, hy2 + 16 * S, { size: 11 * S, color: "#a0412f", weight: 700 }); }
+  draw.text(c, Math.floor(dist) + " m" + (chain > 1 ? "  ·  ring chain ×" + Math.min(5, chain) : ""), P.x + 14 * S, hy2 + 22 * S, { size: 12 * S, color: "#55607a", align: "left", weight: 600 });
+}
+
+/* ---------- loop ---------- */
+function attract(dt, t) { if (!demo || !design) { demo = true; layout(); design = { shape: 1, tail: 1, col: 0, pat: 1 }; fore = 1; launch(); } if (phase === "over" || time < -5) launch(); update(dt); renderFlight(t); }
+function start() {
+  demo = false; layout(); const sv = Lab.store.get("design"); design = sv && sv.shape != null ? Object.assign({ shape: 1, tail: 1, col: 0, pat: 1 }, sv) : { shape: 1, tail: 1, col: 0, pat: 1 };
+  fore = Lab.randInt(0, 2); phase = "shop"; clock = 0; score = 0; Lab.setScore(0); Lab.music.intensity(.15); lanesOverride = null; wpts = [];
+  Lab.input.onDown = [(x, y) => {
+    if (phase === "shop") { shopButtons(); for (const b of btns) if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { b.act(); snd(b.label === "Fly!" ? "whoosh" : "click", { pitch: 1 + Math.random() * .2 }); return; } return; }
+    if (phase === "fly") target = yAlt(y);
+  }];
+  Lab.input.onMove = [(x, y) => { if (phase === "fly" && Lab.input.down) target = yAlt(y); }];
+  Lab.input.onKey = [k => { if (phase === "shop" && (k === "Enter" || k === " ")) launch(); }];
+  Lab.expose({
+    get phase() { return phase; }, get score() { return score; }, get patches() { return patches; }, get strain() { return strain; }, get alt() { return kite ? kite.a : 0; }, get time() { return time; },
+    get stars() { return stars; }, get rings() { return rings; }, get design() { return Object.assign({}, design); }, get stats() { return D(); }, get forecast() { return FORE[fore].n; },
+    buttons() { shopButtons(); return btns.map(b => ({ label: b.label, x: b.x + b.w / 2, y: b.y + b.h / 2, sel: b.sel, col: !!b.col })); },
+    altToY(a) { return altY(a); }, setWind(w) { lanesOverride = w; }, setTime(s) { time = s; }, setForecast(i) { fore = i; },
+    nextStar() { const s = items.filter(it => it.kind === "star" && !it.got && it.x > wx + 40 * S).sort((p, q) => p.x - q.x)[0]; return s ? { a: s.a, dx: s.x - wx } : null; },
+    clearBirds() { for (const it of items) if (it.kind === "bird") it.gone = true; },
+  });
+  Lab.loop(frame);
+}
+function frame(dt, t) { if (phase === "shop") { clock += dt; renderShop(t); return; } if (phase === "fly") update(dt); renderFlight(t); }
+Lab.boot();
+})();
+</script></body></html>

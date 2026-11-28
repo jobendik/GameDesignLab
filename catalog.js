@@ -746,6 +746,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--pitch-26.jpg"
   },
   {
@@ -1013,15 +1015,20 @@ window.GDL_CATALOG = {
    "id": "games/the-grid-war",
    "path": "games/the-grid-war.html",
    "collection": "arcade",
-   "title": "THE GRID WAR",
-   "desc": "Territory-capture grid war.",
+   "title": "The Grid War — Supply Lines",
+   "desc": "Drag lines of cyan signal out of your core, slice the red static",
    "genre": [
-    ".io"
+    "Strategy",
+    "Arcade",
+    "Action"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--the-grid-war.jpg"
   },
   {
@@ -2634,16 +2641,20 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab2/chip-off",
    "path": "PhoneGameLab2/games/chip-off/index.html",
    "collection": "PhoneGameLab2",
-   "title": "Ice Smash",
-   "desc": "Tap ice blocks to shatter. Limited taps.",
+   "title": "Chip Off",
+   "desc": "Carve the ice sculpture. One clever chip drops a whole slab!",
    "genre": [
-    "Minigame"
+    "Puzzle"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
-   "v2": false
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--chip-off.jpg"
   },
   {
    "id": "PhoneGameLab2/clatter-castle",
@@ -2774,7 +2785,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--gobblepot.jpg"
   },
   {
    "id": "PhoneGameLab2/gulp-and-float",
@@ -2871,6 +2883,25 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--jampoline.jpg"
   },
   {
+   "id": "PhoneGameLab2/kite-works",
+   "path": "PhoneGameLab2/games/kite-works/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Kite Works",
+   "desc": "Build Bolt a kite for today's wind, then fly it through the lanes.",
+   "genre": [
+    "Creative"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--kite-works.jpg"
+  },
+  {
    "id": "PhoneGameLab2/lantern-lane",
    "path": "PhoneGameLab2/games/lantern-lane/index.html",
    "collection": "PhoneGameLab2",
@@ -2905,7 +2936,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--lickety-scoop.jpg"
   },
   {
    "id": "PhoneGameLab2/lilypad-lunch",
@@ -2925,23 +2957,6 @@ window.GDL_CATALOG = {
    "score": 8,
    "status": "transformed",
    "thumb": "thumbs/PhoneGameLab2--lilypad-lunch.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/make-a-kite",
-   "path": "PhoneGameLab2/games/make-a-kite/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Make a Kite",
-   "desc": "Decorate a kite, then fly it through the wind.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 44,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--make-a-kite.jpg"
   },
   {
    "id": "PhoneGameLab2/marble-mix-up",
@@ -3350,7 +3365,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--skip-jam.jpg"
   },
   {
    "id": "PhoneGameLab2/sky-high",
@@ -3487,7 +3503,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--snack-tank.jpg"
   },
   {
    "id": "PhoneGameLab2/snake-trails",
@@ -3539,7 +3556,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--snap-album.jpg"
   },
   {
    "id": "PhoneGameLab2/snappy-frog",
@@ -3657,7 +3675,10 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--sprout-sling.jpg"
   },
   {
    "id": "PhoneGameLab2/stew-patch",

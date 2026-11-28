@@ -1,27 +1,275 @@
-<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Chip Off</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
 </head><body><script>
-Lab.init({title:"Ice Smash", instructions:"Tap ice blocks to shatter. Limited taps.", restart:start});
-let grid,N,taps,score;
-function start(){N=6;grid=Array.from({length:N},()=>Array.from({length:N},()=>1));taps=15;score=0;Lab.setScore(0);
-  Lab.input.onTap=[(x,y)=>{const s=size(),o=off();const c=Math.floor((x-o.x)/s),r=Math.floor((y-o.y)/s);
-    if(r<0||r>=N||c<0||c>=N||!grid[r][c])return;
-    // crack 3x3 around
-    let popped=0;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){const rr=r+dr,cc=c+dc;if(grid[rr]&&grid[rr][cc]){grid[rr][cc]=0;popped++;}}
-    score+=popped;Lab.setScore(score);Lab.beep(800,.05);taps--;
-    if(grid.every(row=>row.every(v=>!v))){Lab.win("Cleared! Score: "+score);return;}
-    if(taps<=0)Lab.gameover({title:"No taps left",message:"Score: "+score});
-  }];
-  Lab.loop(()=>draw());
+(function(){ "use strict";
+/* CHIP OFF — the Winter Fair ice-sculpture contest. Pip the fox has a mallet, a block of ice, a chalk plan and three
+ * judges (Olli, Nori, Bolt) who hold up score cards.
+ * Core idea kept: tap ice blocks to smash them, with a limited number of taps.
+ * The twist is GRAVITY: Pip has scored the chalk line, so spare ice is only held up by other spare ice standing on the
+ *   stand. Chip a cell and any spare ice no longer connected down to the stand breaks off and falls as one chunk. So you don't chip the spare ice away cell by cell —
+ *   you find the necks: one clever chip can drop a whole slab. Chip the wrong neck and part of the sculpture goes too.
+ *   Press to preview exactly what will fall (red = sculpture you would lose); let go to chip, slide off to cancel.
+ * Chisels are limited (a little more than a greedy carver needs); the judges score the result: lost sculpture and
+ *   leftover ice cost marks. Under 6 costs a snowflake; three gone and the contest is over.
+ * Frozen sweets in the spare ice pay a bonus if they fall in a chunk (Pip catches them) but break if chipped directly.
+ * Later: hard blue ice (two hits), trickier shapes with holes and overhangs, shorter clocks.
+ * Identity: twilight winter fair — lilac sky, string lights, snow, glassy cyan ice with a pink chalk plan; brisk "march". */
+let demo = false;
+Lab.init({
+  title: "Chip Off", tagline: "Carve the ice sculpture. One clever chip drops a whole slab!", category: "Puzzle", kicker: "Pocket Pals",
+  howto: ["Tap spare ice to chip it (hold to preview)", "Cut-off spare ice falls away", "Keep the pink-chalk sculpture whole"],
+  theme: { bg: "#3d3a72", bg2: "#8f86c9", fg: "#ffffff", muted: "#d8d2f2", accent: "#ff8fc7", accent2: "#7fe0ff" },
+  orient: "any", music: { style: "march", key: "D", vol: .3 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const COLS = 7, ROWS = 9, D4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const SHAPES = [
+  { n: "Heart", g: [".......", ".##.##.", ".#####.", ".#####.", "..###..", "...#...", "...#...", "..###..", "..###.."] },
+  { n: "Pine Tree", g: ["...#...", "..###..", ".#####.", "..###..", ".#####.", "...#...", "...#...", "..###..", "..###.."] },
+  { n: "Mushroom", g: [".......", "..###..", ".#####.", ".#####.", "...#...", "...#...", "..###..", "..###..", ".#####."] },
+  { n: "Fox Head", g: [".......", ".#...#.", ".##.##.", ".#####.", ".#####.", "..###..", "...#...", "...#...", "..###.."] },
+  { n: "Snowman", g: ["...#...", "..###..", "..###..", "...#...", ".#####.", ".#####.", "..###..", ".#####.", ".#####."] },
+  { n: "Fish", g: [".......", "..#..#.", ".###.#.", ".#####.", ".###.#.", "..##.#.", "...#...", "...#...", "..###.."] },
+  { n: "Duck", g: [".......", "..##...", ".###...", "..##...", "..####.", ".#####.", "..###..", "...#...", "..###.."] },
+  { n: "Rocket", g: ["...#...", "..###..", "..###..", "..###..", ".#####.", ".#####.", ".#.#.#.", "...#...", "..###.."] }];
+let S, cell, gx, gy, wide, bgS, judgeBox;
+let grid, plinth, shapeI, shape, chisels, budget, tLeft, tMax, phase, phaseT, hearts, round, score, chunks, falling, press, pip, judges, cards, told, bubble, scars, sweets, bestChunk, clock, over, kb;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function say(txt, dur) { if (!demo) bubble = { txt, t: 0, dur: dur || 2.4 }; }
+function once(id, txt, dur) { if (!told[id]) { told[id] = 1; say(txt, dur); } }
+const inb = (r, c) => r >= 0 && r < ROWS && c >= 0 && c < COLS;
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15; S = clamp(Math.min(P.w / 390, P.h / 720), .6, 1.5);
+  if (!wide) { const top = 92 * S, bot = 96 * S; cell = Math.floor(Math.min((P.w - 40) / COLS, (P.h - top - bot) / ROWS)); gx = P.x + (P.w - cell * COLS) / 2; gy = P.y + top + (P.h - top - bot - cell * ROWS) * .4; judgeBox = { x: P.x + 10, y: P.y + 8, w: P.w - 20, h: top - 18 * S }; }
+  else { cell = Math.floor(Math.min((P.h - 70 * S) / ROWS, P.w * .4 / COLS)); gx = P.x + P.w * .5 - cell * COLS / 2; gy = P.y + 10 * S; const jw = Math.min(gx - P.x - 24, 230 * S); judgeBox = { x: P.x + 10, y: P.y + 10, w: jw, h: P.h * .5 }; }
+  bgS = null; Lab.sprite.clear("co:");
 }
-function size(){return Math.min(Lab.W,Lab.H-260)/N;}
-function off(){const s=size();return {x:(Lab.W-s*N)/2,y:180};}
-function draw(){const c=Lab.ctx;c.fillStyle="#0c3050";c.fillRect(0,0,Lab.W,Lab.H);
-  c.fillStyle="#fff";c.font="14px sans-serif";c.textAlign="left";c.fillText("Taps: "+taps,12,Lab.H-12);
-  const s=size(),o=off();
-  for(let r=0;r<N;r++)for(let col=0;col<N;col++){if(!grid[r][col])continue;
-    c.fillStyle="#bff";c.fillRect(o.x+col*s+2,o.y+r*s+2,s-4,s-4);
-    c.strokeStyle="#9df";c.strokeRect(o.x+col*s+2,o.y+r*s+2,s-4,s-4);}
+Lab.onResize(() => layout());
+
+/* ---------------- ice logic ---------------- */
+function build(sh, opt) {
+  opt = opt || {}; const g = []; plinth = [];
+  for (let r = 0; r < ROWS; r++) { g.push([]); for (let c = 0; c < COLS; c++) g[r].push({ shape: sh.g[r][c] === "#", hp: 1, gem: false, crack: 0, ph: rand(0, TAU) }); }
+  for (let c = 0; c < COLS; c++) plinth.push(c);
+  const extra = []; for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (!g[r][c].shape) extra.push([r, c]);
+  const nHard = opt.hard != null ? opt.hard : round >= 2 ? Math.min(8, (round - 1) * 2) : 0, nGem = opt.gems != null ? opt.gems : Math.min(3, 1 + (round / 3 | 0));
+  Lab.shuffle(extra); extra.slice(0, nHard).forEach(([r, c]) => g[r][c].hp = 2); extra.slice(nHard, nHard + nGem).forEach(([r, c]) => g[r][c].gem = true);
+  return g;
 }
-start();
+function supported(g) { // ice held up from the stand — the chalk line is scored, so spare ice only holds spare ice
+  const ok = Array.from({ length: ROWS }, () => Array(COLS).fill(false)), q = [];
+  for (const c of plinth) if (g[ROWS - 1][c]) { ok[ROWS - 1][c] = true; q.push([ROWS - 1, c]); }
+  for (let i = 0; i < q.length; i++) { const me = g[q[i][0]][q[i][1]].shape; for (const [dr, dc] of D4) { const r = q[i][0] + dr, c = q[i][1] + dc; if (inb(r, c) && g[r][c] && !ok[r][c] && g[r][c].shape === me) { ok[r][c] = true; q.push([r, c]); } } }
+  return ok;
+}
+function outcome(g, r, c) { // what one chip at (r,c) does: {chip, falls:[[r,c]…], lostShape, extraGone}
+  const x = g[r][c]; if (!x) return null;
+  if (x.hp > 1) return { crackOnly: true, falls: [], lost: 0, gone: 0 };
+  const save = g[r][c]; g[r][c] = null; const ok = supported(g), falls = []; let lost = save.shape ? 1 : 0, gone = save.shape ? 0 : 1;
+  for (let rr = 0; rr < ROWS; rr++) for (let cc = 0; cc < COLS; cc++) if (g[rr][cc] && !ok[rr][cc]) { falls.push([rr, cc]); if (g[rr][cc].shape) lost++; else gone++; }
+  g[r][c] = save; return { falls, lost, gone };
+}
+function greedy(g0) { // chisels a careful carver would need (sets the budget)
+  const g = g0.map(row => row.map(x => x && { shape: x.shape, hp: x.hp })); let taps = 0;
+  for (let guard = 0; guard < 80; guard++) {
+    let best = null, bs = -1e9;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { const x = g[r][c]; if (!x || x.shape) continue; const o = outcome(g, r, c); const v = (o.gone - o.lost * 100) / x.hp; if (v > bs) { bs = v; best = [r, c, o]; } }
+    if (!best) break; const [r, c, o] = best; taps += g[r][c].hp; g[r][c] = null; for (const [rr, cc] of o.falls) g[rr][cc] = null;
+  }
+  return taps;
+}
+function extraLeft() { let n = 0; for (const row of grid) for (const x of row) if (x && !x.shape) n++; return n; }
+function shapeLost() { let n = 0; for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (shape.g[r][c] === "#" && !grid[r][c]) n++; return n; }
+function newSculpture() {
+  shapeI = round < SHAPES.length ? round : Lab.randInt(2, SHAPES.length - 1); shape = SHAPES[shapeI]; grid = build(shape);
+  budget = greedy(grid) + (round < 2 ? 3 : 2); chisels = budget; tMax = Math.max(28, 45 - round * 2); tLeft = tMax; phase = "carve"; phaseT = 0; scars = 0; press = null; cards = null; bgS = null;
+}
+function reset() {
+  hearts = 3; round = 0; score = 0; chunks = 0; sweets = 0; bestChunk = 0; falling = []; told = {}; bubble = null; clock = 0; over = false; kb = { r: 4, c: 3, on: false };
+  pip = { side: 1, swing: 0, joy: 0, sad: 0, hop: 0, x: 0 }; judges = { wow: 0, gasp: 0 }; newSculpture();
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0); Lab.music.intensity(.25);
+  Lab.input.onDown = [(x, y) => { kb.on = false; const h = hit(x, y); press = h ? { r: h[0], c: h[1] } : null; }];
+  Lab.input.onMove = [(x, y) => { if (!Lab.input.down || !press) return; const h = hit(x, y); press = h ? { r: h[0], c: h[1] } : { off: true }; }];
+  Lab.input.onUp = [() => { if (press && !press.off) chip(press.r, press.c); press = null; }];
+  Lab.input.onKey = [(k) => { const m = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] }[k]; if (m) { kb.on = true; kb.r = clamp(kb.r + m[0], 0, ROWS - 1); kb.c = clamp(kb.c + m[1], 0, COLS - 1); } if ((k === " " || k === "Enter") && kb.on) chip(kb.r, kb.c); }];
+  Lab.banner(shape.name || shape.n, { color: "#ff8fc7", ms: 1300, y: .5 });
+  Lab.after(.5, () => once("hi", "Chip the spare ice! Hold to see what falls", 3));
+  Lab.loop(frame);
+}
+function attract(dt, t) {
+  if (!grid || !demo) { demo = true; layout(); reset(); }
+  clock += dt; phaseT += dt;
+  if (phase === "carve" && phaseT > .9) { phaseT = 0; let best = null, bs = -1e9; for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { const x = grid[r][c]; if (!x || x.shape) continue; const o = outcome(grid, r, c); const v = o.gone - o.lost * 100; if (v > bs) { bs = v; best = [r, c]; } } if (best) chip(best[0], best[1]); else { round = (round + 1) % 4; newSculpture(); } }
+  update(dt); render(t);
+}
+function hit(x, y) { const c = Math.floor((x - gx) / cell), r = Math.floor((y - gy) / cell); return inb(r, c) && grid[r][c] ? [r, c] : null; }
+const cx = c => gx + (c + .5) * cell, cy = r => gy + (r + .5) * cell;
+
+/* ---------------- chipping ---------------- */
+function chip(r, c) {
+  if (phase !== "carve" || over || !inb(r, c) || !grid[r][c] || chisels <= 0) return false;
+  const x = grid[r][c]; chisels--; pip.swing = 1; pip.side = wide ? (c >= COLS / 2 ? 1 : -1) : (cx(c) < pip.x ? 1 : -1); pip.tx = cx(c) + (c >= COLS / 2 ? 1 : -1) * cell * .9; pip.hop = .3;
+  if (x.hp > 1) { x.hp = 1; x.crack = 1; snd("knock", { pitch: 1.3 }); fx.burst(cx(c), cy(r), { n: 6, color: "#cfefff", speed: 90 * S, life: .35, size: 3 * S, shape: "shard" }); Lab.shake(2, .08); once("hard", "Hard ice takes two hits!", 2); afterChip(); return true; }
+  const o = outcome(grid, r, c); grid[r][c] = null;
+  snd("glass", { pitch: 1.2 + (ROWS - r) * .04, vol: .7 }); fx.burst(cx(c), cy(r), { n: 10, colors: ["#e8f8ff", "#9fdcff", "#ffffff"], speed: 150 * S, life: .5, size: 3.5 * S, shape: "shard", gravity: 500 });
+  if (x.shape) { scars++; judges.gasp = 1.2; pip.sad = 1; snd("error"); Lab.shake(4, .2); if (!demo) { fx.text(cx(c), cy(r), "Oops!", { color: "#ff6f91", size: 18 * S }); say("Oops — that was the sculpture!", 1.8); } }
+  else if (x.gem && !demo) fx.text(cx(c), cy(r), "crunch…", { color: "#d8d2f2", size: 13 * S });
+  if (o.falls.length) drop(o.falls);
+  afterChip(); return true;
+}
+function drop(cells) { // break off unsupported ice as rigid chunks
+  const seen = new Set(), key = (r, c) => r * COLS + c, set = new Set(cells.map(([r, c]) => key(r, c)));
+  for (const [r0, c0] of cells) {
+    if (seen.has(key(r0, c0))) continue; const comp = [[r0, c0]]; seen.add(key(r0, c0));
+    for (let i = 0; i < comp.length; i++) for (const [dr, dc] of D4) { const r = comp[i][0] + dr, c = comp[i][1] + dc, k = key(r, c); if (inb(r, c) && set.has(k) && !seen.has(k)) { seen.add(k); comp.push([r, c]); } }
+    const parts = comp.map(([r, c]) => ({ r, c, x: grid[r][c] })); comp.forEach(([r, c]) => grid[r][c] = null);
+    let mx = 0, my = 0; parts.forEach(p => { mx += cx(p.c); my += cy(p.r); }); mx /= parts.length; my /= parts.length;
+    const lost = parts.filter(p => p.x.shape).length, gems = parts.filter(p => p.x.gem).length, n = parts.length - lost;
+    falling.push({ parts, mx, my, vy: -40 * S, dy: 0, rot: 0, vr: rand(-1.2, 1.2) * (parts.length > 3 ? .5 : 1), t: 0, landed: false });
+    if (n > 0) { chunks++; bestChunk = Math.max(bestChunk, n); const pts = n * 5 * (n >= 5 ? 2 : 1); if (!demo) { score += pts; Lab.setScore(score); fx.text(mx, my, (n >= 5 ? "Timber! " : "") + "+" + pts, { color: "#ffffff", size: (14 + Math.min(10, n)) * S }); } if (n >= 5) { judges.wow = 1.2; pip.joy = 1; once("timber", "Whoa! Big chunks are the best", 2); } }
+    if (gems && !demo) { sweets += gems; score += gems * 40; Lab.setScore(score); Lab.after(.6, () => { snd("coin", { pitch: 1.2 }); fx.text(mx, my + 60 * S, "Sweet! +" + 40 * gems, { color: "#ffd24a", size: 18 * S }); }); }
+    if (lost) { scars += lost; judges.gasp = 1.2; pip.sad = 1.2; if (!demo) { fx.text(mx, my - 20 * S, "Nooo!", { color: "#ff6f91", size: 20 * S }); say("Part of the sculpture fell off!", 2); } }
+  }
+  snd("whoosh", { vol: .5 });
+}
+function afterChip() {
+  if (!demo) Lab.bumpScore(); if (extraLeft() === 0 || chisels <= 0) { phase = "judge"; phaseT = 0; if (!demo && chisels <= 0 && extraLeft() > 0) say("Out of chisels!", 1.6); }
+}
+function judge() {
+  const lost = shapeLost(), extra = extraLeft(), q = clamp(10 - lost * 1.5 - extra * .6, 0, 10), qs = [q - .4, q, q + .3].map(v => clamp(Math.round(v), 0, 10));
+  cards = { vals: qs, t: 0 }; const avg = (qs[0] + qs[1] + qs[2]) / 3, pts = Math.round(avg * 20) + chisels * 10 + Math.round(tLeft) * 2;
+  score += pts; Lab.setScore(score); Lab.bumpScore();
+  if (avg >= 9.5) { snd("win"); fx.confetti && Lab.fx.confetti(); pip.joy = 2; } else if (avg >= 6) { snd("levelup"); pip.joy = 1.5; } else { snd("lose"); pip.sad = 2; hearts--; }
+  Lab.toast(`${shape.n}: ${qs.join(" · ")}  +${pts}` + (avg < 6 ? "  — a snowflake melts" : ""), 1800, { y: .25 });
+}
+function update(dt) {
+  clock += dt; bubble && (bubble.t += dt, bubble.t > bubble.dur && (bubble = null));
+  pip.swing = Math.max(0, pip.swing - dt * 4); pip.joy = Math.max(0, pip.joy - dt); pip.sad = Math.max(0, pip.sad - dt); pip.hop = Math.max(0, pip.hop - dt); pip.x = Lab.damp(pip.x || pipHome(), pipHome(), 10, dt);
+  judges.wow = Math.max(0, judges.wow - dt); judges.gasp = Math.max(0, judges.gasp - dt);
+  const floor = gy + ROWS * cell + 26 * S;
+  for (let i = falling.length - 1; i >= 0; i--) {
+    const f = falling[i]; f.t += dt;
+    if (!f.landed) { f.vy += 1400 * S * dt; f.dy += f.vy * dt; f.rot += f.vr * dt; const low = Math.max(...f.parts.map(p => cy(p.r))) + cell / 2 + f.dy;
+      if (low >= floor) { f.landed = true; f.t = 0; const n = f.parts.length; snd(n >= 5 ? "boom" : "crunch", { pitch: 1.3 - Math.min(n, 10) * .05, vol: .8 }); Lab.shake(Math.min(9, 2 + n * .5), .2); if (n >= 6) Lab.hitstop(.05);
+        f.parts.forEach(p => fx.burst(cx(p.c), floor - 6, { n: 4, colors: p.x.shape ? ["#ffc3dc", "#ffffff"] : ["#d6f3ff", "#ffffff"], speed: 160 * S, angle: -Math.PI / 2, spread: 2.4, life: .6, size: 3.5 * S, shape: "shard", gravity: 700 })); } }
+    else if (f.t > .25) falling.splice(i, 1);
+  }
+  if (phase === "carve" && !demo) {
+    tLeft -= dt; Lab.music.intensity(clamp(.25 + (1 - tLeft / tMax) * .6, 0, 1));
+    if (tLeft < 6 && Math.ceil(tLeft) !== Math.ceil(tLeft + dt)) snd("tick", { pitch: 1.5 });
+    if (tLeft <= 0) { tLeft = 0; phase = "judge"; phaseT = 0; say("Time's up!", 1.4); }
+  } else if (phase === "judge") {
+    phaseT += dt; if (phaseT > .6 && !cards && falling.length === 0 && !demo) judge();
+    if (cards) { cards.t += dt; if (cards.t > 2.2 && !demo) { if (hearts <= 0) { end(); return; } round++; newSculpture(); Lab.banner(shape.n, { color: "#ff8fc7", ms: 1300, y: .5 }); if (round === 2) Lab.after(.8, () => once("blue", "Blue ice is hard — two hits", 2.4)); } }
+    if (demo && phaseT > 1.2) { round = (round + 1) % 4; newSculpture(); }
+  }
+}
+function end() {
+  over = true; Lab.gameover({ title: "The ice melted!", message: `Pip carved ${round + 1} sculpture${round ? "s" : ""} at the Winter Fair.`, score,
+    stats: [["Sculptures", round + 1], ["Biggest chunk", bestChunk + " blocks"], ["Sweets caught", sweets]] });
+}
+function frame(dt) { if (!over) update(dt); render(clock); }
+
+/* ---------------- art ---------------- */
+function bakeBg() {
+  bgS = Lab.sprite("co:bg", Lab.W + 80, Lab.H + 80, (g) => {
+    g.translate(40, 40); draw.vgrad(g, -40, -40, Lab.W + 80, Lab.H + 80, ["#36326a", "#7b6fb8", "#e7b6d6"]);
+    const rng = Lab.rng(3); g.fillStyle = "#fff"; for (let i = 0; i < 40; i++) { g.globalAlpha = .3 + rng() * .5; g.beginPath(); g.arc(rng() * Lab.W, rng() * Lab.H * .45, rng() * 1.6 + .4, 0, TAU); g.fill(); } g.globalAlpha = 1;
+    const fl = gy + ROWS * cell + 26 * S; g.fillStyle = "#6d63a8"; for (let i = 0; i < 6; i++) { const x = (i / 5) * Lab.W; g.beginPath(); g.moveTo(x - 60, fl); g.lineTo(x, fl - 70 * S - (i % 2) * 30 * S); g.lineTo(x + 60, fl); g.fill(); }
+    draw.vgrad(g, -40, fl, Lab.W + 80, Lab.H - fl + 40, ["#f4f1ff", "#d9d3f2"]); g.fillStyle = "#c9c1ea"; for (let i = 0; i < 20; i++) { g.beginPath(); g.ellipse(rng() * Lab.W, fl + 10 + rng() * (Lab.H - fl), 20 * S, 3 * S, 0, 0, TAU); g.fill(); }
+    // plinth
+    const p0 = Math.min(...plinth), p1 = Math.max(...plinth), px = gx + p0 * cell - 6 * S, pw = (p1 - p0 + 1) * cell + 12 * S;
+    draw.rect(g, px, gy + ROWS * cell, pw, 26 * S + 4, 4 * S, "#8e86b8"); draw.rect(g, px - 6 * S, fl - 6 * S, pw + 12 * S, 10 * S, 4 * S, "#7a72a6");
+    g.fillStyle = "rgba(255,255,255,.25)"; g.fillRect(px + 4, gy + ROWS * cell + 3, pw - 8, 3);
+  });
+}
+function iceSprite(kind) { // 0 spare, 1 sculpture, 2 hard spare
+  return Lab.sprite("co:" + kind + ":" + cell, cell, cell, (g, w) => {
+    const pad = 1.5, col = kind === 1 ? ["#ffffff", "#dff6ff"] : kind === 2 ? ["#7fb2e6", "#4f86c9"] : ["#c9ecff", "#9fd3f2"];
+    const gr = g.createLinearGradient(0, 0, w, w); gr.addColorStop(0, col[0]); gr.addColorStop(1, col[1]); g.fillStyle = gr; draw.rr(g, pad, pad, w - pad * 2, w - pad * 2, w * .14); g.fill();
+    g.strokeStyle = "rgba(255,255,255,.75)"; g.lineWidth = Math.max(1.5, w * .05); g.beginPath(); g.moveTo(w * .2, w * .7); g.lineTo(w * .2, w * .25); g.lineTo(w * .62, w * .2); g.stroke();
+    g.strokeStyle = kind === 1 ? "rgba(255,143,199,.25)" : "rgba(60,110,160,.22)"; g.lineWidth = 1; g.beginPath(); g.moveTo(w * .55, w * .45); g.lineTo(w * .78, w * .7); g.moveTo(w * .62, w * .55); g.lineTo(w * .5, w * .8); g.stroke();
+  });
+}
+function drawCellAt(c, x, r, col, px, py) {
+  const k = x.shape ? 1 : x.hp > 1 ? 2 : 0, s = iceSprite(k); c.drawImage(s, px - cell / 2, py - cell / 2, cell, cell);
+  if (x.crack) { c.strokeStyle = "rgba(40,60,110,.6)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(px - cell * .3, py - cell * .25); c.lineTo(px, py); c.lineTo(px + cell * .25, py - cell * .1); c.moveTo(px, py); c.lineTo(px - cell * .05, py + cell * .3); c.stroke(); }
+  if (x.gem) { c.save(); c.translate(px, py); c.rotate(.5); draw.rect(c, -cell * .2, -cell * .11, cell * .4, cell * .22, cell * .1, "#ff6f91"); c.fillStyle = "#fff"; c.fillRect(-cell * .06, -cell * .11, cell * .06, cell * .22); c.fillStyle = "#ffd24a"; c.beginPath(); c.moveTo(-cell * .2, 0); c.lineTo(-cell * .32, -cell * .1); c.lineTo(-cell * .32, cell * .1); c.fill(); c.beginPath(); c.moveTo(cell * .2, 0); c.lineTo(cell * .32, -cell * .1); c.lineTo(cell * .32, cell * .1); c.fill(); c.restore(); }
+}
+function drawGrid(c, t) {
+  const pv = press && !press.off && grid[press.r] && grid[press.r][press.c] ? outcome(grid, press.r, press.c) : null, fallSet = new Set(pv && pv.falls ? pv.falls.map(([r, cc]) => r * COLS + cc) : []);
+  for (let r = 0; r < ROWS; r++) for (let col = 0; col < COLS; col++) {
+    const x = grid[r][col]; if (!x) continue; const px = cx(col), py = cy(r), f = fallSet.has(r * COLS + col), me = pv && press.r === r && press.c === col;
+    const jig = f || me ? Math.sin(t * 40 + x.ph) * 1.2 : 0; drawCellAt(c, x, r, col, px + jig, py);
+    if (f || me) { c.fillStyle = x.shape ? "rgba(255,70,110,.45)" : me ? "rgba(255,255,255,.35)" : "rgba(255,214,90,.42)"; draw.rr(c, px - cell / 2 + 2, py - cell / 2 + 2, cell - 4, cell - 4, cell * .14); c.fill(); }
+  }
+  // chalk plan: outline of the sculpture
+  c.save(); c.strokeStyle = "#ff6fae"; c.lineWidth = Math.max(2, cell * .07); c.setLineDash([cell * .18, cell * .12]); c.lineCap = "round"; c.beginPath();
+  for (let r = 0; r < ROWS; r++) for (let col = 0; col < COLS; col++) { if (shape.g[r][col] !== "#") continue; const x0 = gx + col * cell, y0 = gy + r * cell, is = (rr, cc) => inb(rr, cc) && shape.g[rr][cc] === "#";
+    if (!is(r - 1, col)) { c.moveTo(x0, y0); c.lineTo(x0 + cell, y0); } if (!is(r + 1, col) && r < ROWS - 1) { c.moveTo(x0, y0 + cell); c.lineTo(x0 + cell, y0 + cell); } if (!is(r, col - 1)) { c.moveTo(x0, y0); c.lineTo(x0, y0 + cell); } if (!is(r, col + 1)) { c.moveTo(x0 + cell, y0); c.lineTo(x0 + cell, y0 + cell); } }
+  c.stroke(); c.restore();
+  if (pv && pv.lost && !pv.crackOnly) draw.text(c, "−" + pv.lost + " sculpture!", cx(press.c), gy - 12 * S, { size: 14 * S, color: "#ff6f91", weight: 800 });
+  else if (pv && pv.falls && pv.falls.length) draw.text(c, pv.gone + " blocks fall", cx(press.c), gy - 12 * S, { size: 13 * S, color: "#fff", weight: 800 });
+  if (kb.on && phase === "carve") { c.strokeStyle = "#ffd24a"; c.lineWidth = 3; c.strokeRect(gx + kb.c * cell + 2, gy + kb.r * cell + 2, cell - 4, cell - 4); }
+  for (const f of falling) { // chunks in the air
+    c.save(); c.translate(f.mx, f.my + f.dy); c.rotate(f.rot); c.globalAlpha = f.landed ? 1 - f.t / .25 : 1;
+    for (const p of f.parts) drawCellAt(c, p.x, p.r, p.c, cx(p.c) - f.mx, cy(p.r) - f.my); c.restore();
+  }
+}
+const pipSize = () => wide ? Math.min(70 * S, cell * 1.6) : Math.min(60 * S, (Lab.play.y + Lab.play.h - (gy + ROWS * cell + 26 * S)) * .62);
+function pipHome() { return wide ? (pip.side > 0 ? gx + COLS * cell + pipSize() * .55 : gx - pipSize() * .55) : clamp(pip.tx == null ? gx + COLS * cell * .8 : pip.tx, Lab.play.x + 30 * S, Lab.play.x + Lab.play.w - 30 * S); }
+function drawPip(c, t) {
+  const fl = gy + ROWS * cell + 26 * S, size = pipSize(), x = pip.x, y = (wide ? fl - size / 2 : fl + size * .62) - Math.sin(pip.hop / .3 * Math.PI) * 10 * S;
+  const mood = pip.sad > 0 ? "sad" : pip.joy > 0 ? "joy" : judges.wow > 0 ? "wow" : press ? "think" : tLeft < 6 && phase === "carve" ? "scared" : "happy";
+  const a = Pals.draw(c, "pip", x, y, size, { t, mood, flip: pip.side > 0, arms: pip.joy > 0 ? "cheer" : "hold", look: [-pip.side * .8, -.4], squash: pip.swing * .12 });
+  const h = pip.side > 0 ? a.handL : a.handR, ang = -pip.side * (.3 + 1.4 * Math.sin(pip.swing * Math.PI)); // mallet swings toward the block
+  c.save(); c.translate(h[0], h[1]); c.rotate(ang); c.strokeStyle = "#8a5a2f"; c.lineWidth = 3 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, -size * .45); c.stroke();
+  draw.rect(c, -size * .14, -size * .58, size * .28, size * .16, 4 * S, "#c98a54"); c.restore();
+}
+function drawJudges(c, t) {
+  const b = judgeBox, who = ["olli", "nori", "bolt"], n = 3, sz = Math.min(b.h * .62, (b.w / n) * .55, 52 * S);
+  const tableY = wide ? b.y + sz * 1.3 : b.y + b.h - 6 * S;
+  for (let i = 0; i < n; i++) {
+    const x = b.x + b.w * (wide ? .2 + i * .3 : .13 + i * .17), y = tableY - sz * .3, card = cards && cards.t > .2 + i * .25 ? cards.vals[i] : null;
+    const mood = card != null ? (card >= 9 ? "joy" : card >= 6 ? "happy" : "sad") : judges.gasp > 0 ? "scared" : judges.wow > 0 ? "wow" : "think";
+    const a = Pals.draw(c, who[i], x, y, sz, { t: t + i, mood, arms: card != null ? "up" : "down", clipY: sz * .3, look: [clamp((cx(3) - x) / 200, -1, 1), .5] });
+    if (card != null) { const k = ease.outBack(clamp((cards.t - .2 - i * .25) / .3, 0, 1)), w = sz * .62; c.save(); c.translate(x, a.head[1] - w * .45); c.scale(k, k); draw.rect(c, -w / 2, -w * .5, w, w * .9, 4 * S, "#fffdf7", INK, 1.5); draw.text(c, String(card), 0, -w * .05, { size: w * .6, color: card >= 6 ? INK : "#e0406a", weight: 800 }); c.restore(); }
+  }
+  draw.rect(c, b.x, tableY, wide ? b.w : b.w * .56, 8 * S, 3 * S, "#b07a4f");
+  // plan thumbnail, chisels, clock
+  const ix = wide ? b.x + 10 * S : b.x + b.w * .6, iy = wide ? tableY + 22 * S : b.y + 4 * S, tw = wide ? b.w - 20 * S : b.w * .4;
+  draw.text(c, shape.n, ix + tw / 2, iy + 8 * S, { size: 14 * S, color: "#fff", weight: 800 });
+  draw.text(c, `Chisels ${chisels}/${budget}`, ix + tw / 2, iy + 28 * S, { size: 12 * S, color: chisels <= 2 ? "#ffd24a" : "#efeaff", weight: 700 });
+  const bw = tw - 10 * S; draw.rect(c, ix + 5 * S, iy + 42 * S, bw, 8 * S, 4 * S, "rgba(255,255,255,.25)"); draw.rect(c, ix + 5 * S, iy + 42 * S, Math.max(8 * S, bw * clamp(tLeft / tMax, 0, 1)), 8 * S, 4 * S, tLeft < 6 ? "#ff6f91" : "#7fe0ff");
+  for (let i = 0; i < 3; i++) draw.star(c, ix + tw / 2 + (i - 1) * 18 * S, iy + 62 * S, 7 * S, i < hearts ? "#bfeaff" : "rgba(255,255,255,.18)", 6, .45);
+}
+function drawBubble(c) {
+  if (!bubble) return; const k = ease.outBack(clamp(bubble.t / .2, 0, 1)) * clamp((bubble.dur - bubble.t) / .25, 0, 1); if (k <= 0) return;
+  const fs = 13 * S; c.font = Lab.font(fs, 700); const w = c.measureText(bubble.txt).width + 22, h = fs * 2.1, P = Lab.play, fl = gy + ROWS * cell + 26 * S;
+  const px = pip.x, side = px > P.x + P.w / 2 ? -1 : 1, x = clamp(px + side * (w / 2 + pipSize() * .55), P.x + w / 2 + 4, P.x + P.w - w / 2 - 4), y = wide ? fl + 34 * S : fl + pipSize() * .4;
+  c.save(); c.translate(x, y); c.scale(k, k); Pals.bubble(c, 0, 0, w, h, { tailX: px - x, tailY: wide ? -h / 2 - 12 * S : 0, lineWidth: 2 }); draw.text(c, bubble.txt, 0, 1, { size: fs, color: INK, weight: 700 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx; if (!bgS) bakeBg(); c.drawImage(bgS, -40, -40, bgS.w, bgS.h);
+  for (let i = 0; i < 14; i++) { const x = Lab.play.x + (i + .5) / 14 * Lab.play.w, y = Lab.play.y + 4 + Math.sin(i * 1.3) * 3; draw.glow(c, x, y + 6, 12, ["#ffd24a", "#ff8fc7", "#7fe0ff"][i % 3], .5 + .3 * Math.sin(t * 3 + i)); draw.circle(c, x, y + 6, 3, ["#ffe58a", "#ffc3dc", "#c9f3ff"][i % 3]); }
+  drawJudges(c, t); drawGrid(c, t); drawPip(c, t); drawBubble(c);
+  c.fillStyle = "rgba(255,255,255,.8)"; for (let i = 0; i < 24; i++) { const x = ((i * 53 + t * 18 * (1 + i % 3)) % (Lab.W + 20)) - 10, y = ((i * 97 + t * 30 * (1 + i % 2)) % (Lab.H + 20)) - 10; c.beginPath(); c.arc(x, y, 1.2 + (i % 3) * .6, 0, TAU); c.fill(); }
+}
+
+Lab.expose({
+  get score() { return score; }, get hearts() { return hearts; }, get round() { return round; }, get chisels() { return chisels; }, get budget() { return budget; }, get phase() { return phase; },
+  get time() { return tLeft; }, get chunks() { return chunks; }, get sweets() { return sweets; }, get shape() { return shape.n; }, get cards() { return cards && cards.vals; },
+  grid() { return grid.map(row => row.map(x => x ? (x.shape ? 1 : x.hp > 1 ? 2 : 0) : -1)); }, xy(r, c) { return [cx(c), cy(r)]; }, chip(r, c) { return chip(r, c); },
+  preview(r, c) { const o = outcome(grid, r, c); return o && { falls: o.falls.length, lost: o.lost, gone: o.gone }; }, get falling() { return falling.length; },
+  load(i, opt) { round = opt && opt.round != null ? opt.round : round; shape = SHAPES[i]; grid = build(shape, opt); budget = greedy(grid) + 2; chisels = opt && opt.chisels || budget; tMax = tLeft = 40; phase = "carve"; cards = null; bgS = null; },
+  gem(r, c) { grid[r][c].gem = true; }, setTime(s) { tLeft = s; }, get press() { return press && !press.off ? [press.r, press.c] : null; },
+});
+Lab.boot();
+})();
 </script></body></html>
