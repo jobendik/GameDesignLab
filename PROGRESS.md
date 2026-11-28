@@ -33,7 +33,7 @@ Live state of the project. Update at the end of every batch. (Counts: `node tool
 `ls PhoneGameLab2/games | xargs -n4`
 
 **Standalone** (brief: `docs/briefs/standalone-game-brief.md`), related games paired so they get differentiated:
-S7 brink-edge-rush + brink-reactor ·
+
 S11 arcanum-pinball + pinball-wizard-3d · S12 neon-pinball-rush + neon-pin-climb · S13 bounce-dungeon + spire ·
 S14 chomp-chain-rush + maze-munch-rush · S15 pitch-26 + pocket-football · S16 the-grid-war + the-global-dig ·
 S17 swarm-logic + neon-survivor-overdrive · S20 painted-wilds (solo) · S21 lysarkivet (solo) · S22 neon-ash (solo) ·
