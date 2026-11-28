@@ -1,0 +1,282 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Lickety Scoop</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* LICKETY SCOOP — Momo the frog runs the ice-cream window on the pier. The pals queue for cones: "a big chocolate,
+ * a medium strawberry, a small mint on top".
+ * Core idea kept: serve each customer the flavours they ordered before they lose patience.
+ * The verb is SCOOPING TO SIZE (vs. Lantern Noodles' tap-the-trays bowls and Pop & Pour's swipe-the-fruit layers):
+ *   press a tub and hold — the scoop rolls up bigger while you hold — and let go when it fills the dashed ring. Every
+ *   flavour scoops at its own speed (hard chocolate is slow, soft mint races). Perfect / good / sloppy sizes pay
+ *   differently. Scoops stack: a scoop that comes out BIGGER than the one under it (past the red ring) topples the
+ *   whole cone. Hold too long and it bursts. Momo — always hungry — happily gulps every mistake, which costs time.
+ * Hearts: three walk-outs close the window. Perfect cones build a streak multiplier.
+ * Later: chocolate, then mint, then blueberry tubs open; three- and four-scoop towers; cherries on top; busier queues.
+ * Identity: seaside kiosk — mint-and-cream awning, wooden counter, frosty tub freezer; bouncy "bounce" music. */
+let demo = false;
+Lab.init({
+  title: "Lickety Scoop", tagline: "Hold to scoop, let go on the ring. Stack it, don't topple it!", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Hold a tub to scoop, let go on the ring", "Build the cone in the order shown", "Bigger than the scoop below? Topple!"],
+  theme: { bg: "#bfeee0", bg2: "#fff4e0", fg: "#3a2f4d", muted: "#6b6478", accent: "#ff6f91", accent2: "#3fbf9a", light: true },
+  orient: "any", music: { style: "bounce", key: "C", vol: .34 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const FL = [{ n: "Vanilla", c: "#fff0c2", d: "#e9cf86", t: 1.45 }, { n: "Strawberry", c: "#ff9fbd", d: "#e66b93", t: 1.3 }, { n: "Chocolate", c: "#9a6444", d: "#6b4028", t: 1.85 },
+  { n: "Mint", c: "#9ff0cf", d: "#4fc49c", t: .95 }, { n: "Blueberry", c: "#aab6ff", d: "#6f7fe6", t: 1.15 }];
+const SIZES = [{ k: "S", v: .5 }, { k: "M", v: .72 }, { k: "L", v: .94 }], BURST = 1.13, TIP = .08;
+const PALS = [{ id: "pip", pat: 15 }, { id: "bun", pat: 22 }, { id: "nori", pat: 19 }, { id: "olli", pat: 28 }, { id: "bolt", pat: 21 }];
+let S, R, wide, L, bgS;
+let line, stack, falling, hold, hearts, level, served, score, streak, bestStreak, perfects, clock, over, momo, told, bubble, cherryOn, spawnT, gulps;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function say(txt, dur) { if (!demo) bubble = { txt, t: 0, dur: dur || 2.4 }; }
+function once(id, txt, dur) { if (!told[id]) { told[id] = 1; say(txt, dur); } }
+const flavours = () => Math.min(5, level + 1), cur = () => line[0] && line[0].state === "wait" ? line[0] : null;
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15; S = clamp(Math.min(P.w / 390, P.h / 720), .6, 1.45); L = {};
+  const ch = wide ? .53 : .56; L.counter = P.y + P.h * ch;
+  L.cust = { x: P.x + P.w * (wide ? .12 : .2), s: (wide ? 62 : 78) * S }; L.cust.y = L.counter - L.cust.s * .32;
+  L.card = { x: P.x + 10, y: P.y + 28 * S, w: Math.min(P.w * (wide ? .36 : .56), 300 * S), h: Math.min(P.h * (wide ? .3 : .26), 200 * S) };
+  if (wide) { L.card.x = P.x + P.w * .2; L.card.y = P.y + 22 * S; }
+  L.cone = { x: P.x + P.w * (wide ? .55 : .64), y: L.counter }; L.momo = { x: P.x + P.w * (wide ? .78 : .86), s: (wide ? 60 : 74) * S }; L.momo.y = L.counter - 2 * S;
+  const th = Math.min(P.h * (wide ? .36 : .22), 160 * S), ty = P.y + P.h - th - 8, gw = (P.w - 24) / 5; L.tubs = FL.map((f, i) => ({ x: P.x + 12 + i * gw + 3, y: ty, w: gw - 6, h: th }));
+  R = Math.min(30 * S, (L.counter - P.y) / 8.2);
+  const t = L.tubs[0]; const cr = Math.min(20 * S, R * .8); L.cherry = { x: L.cone.x - R * 2.6, y: L.counter - cr - 4 * S, r: cr }; L.HR = Math.min(R * 1.7, (t.y - L.counter) * .36);
+  bgS = null;
+}
+Lab.onResize(() => layout());
+
+/* ---------------- orders ---------------- */
+function makeOrder() {
+  const n = level <= 1 ? Lab.randInt(1, 2) : level <= 3 ? Lab.randInt(2, 3) : level <= 5 ? Lab.randInt(2, 4) : Lab.randInt(3, 4);
+  const sz = []; for (let i = 0; i < n; i++) sz.push(Lab.randInt(level <= 1 ? 1 : 0, 2)); sz.sort((a, b) => b - a);
+  return { scoops: sz.map(s => ({ f: Lab.randInt(0, flavours() - 1), s })), cherry: level >= 4 && Lab.chance(.45) };
+}
+function addCustomer() {
+  const used = line.map(c => c.who), pool = PALS.filter(p => !used.includes(p.id)), p = Lab.choose(pool.length ? pool : PALS);
+  const max = p.pat * Math.max(.6, 1 - (level - 1) * .06) * (1 + .12 * 2);
+  line.push({ who: p.id, max, pat: max, order: makeOrder(), state: "walk", x: -60 * S, mood: 0, leaveT: 0 });
+}
+function reset() {
+  line = []; stack = []; falling = []; hold = null; hearts = 3; level = 1; served = 0; score = 0; streak = 0; bestStreak = 0; perfects = 0; gulps = 0;
+  clock = 0; over = false; told = {}; bubble = null; cherryOn = false; spawnT = 0;
+  momo = { gulp: 0, joy: 0, scare: 0, look: [0, 0] }; addCustomer(); line[0].x = L.cust.x * .6;
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0); Lab.music.intensity(.25);
+  Lab.input.onDown = [(x, y) => press(x, y)];
+  Lab.input.onUp = [() => release()];
+  Lab.input.onKey = [(k) => { const i = "12345".indexOf(k); if (i >= 0 && i < flavours() && !hold) startScoop(i, k); if (k === "c" || k === "C") addCherry(); }];
+  Lab.after(.6, () => once("hi", "Hold a tub, let go on the ring!", 3));
+  Lab.loop(frame);
+}
+function attract(dt, t) {
+  if (!line || !demo) { demo = true; layout(); reset(); level = 4; }
+  clock += dt; const c = cur();
+  if (c && !hold && stack.length < c.order.scoops.length && Lab.chance(dt * 1.5)) startScoop(c.order.scoops[stack.length].f);
+  if (hold && hold.size >= SIZES[c ? c.order.scoops[Math.min(stack.length, c.order.scoops.length - 1)].s : 1].v) release();
+  if (c && stack.length >= c.order.scoops.length && c.order.cherry && !cherryOn) addCherry();
+  update(dt); render(t);
+}
+
+/* ---------------- scooping ---------------- */
+function tubAt(x, y) { for (let i = 0; i < flavours(); i++) { const t = L.tubs[i]; if (x > t.x - 4 && x < t.x + t.w + 4 && y > t.y - 30 * S && y < t.y + t.h + 4) return i; } return -1; }
+function press(x, y) {
+  if (over) return; if (Math.hypot(x - L.cherry.x, y - L.cherry.y) < L.cherry.r + 12 * S && level >= 4) { addCherry(); return; }
+  const i = tubAt(x, y); if (i >= 0 && !hold) startScoop(i);
+}
+function startScoop(i, key) { hold = { f: i, size: .12, t: 0, key }; snd("slide", { pitch: 1.4 - FL[i].t * .3, vol: .5 }); }
+function target() { const c = cur(); if (!c || stack.length >= c.order.scoops.length) return null; return c.order.scoops[stack.length]; }
+function limit() { return stack.length ? Math.min(BURST, stack[stack.length - 1].size + TIP) : BURST; }
+function release() {
+  if (!hold) return; const h = hold; hold = null; const c = cur(), want = target();
+  if (!c || !want) { gulp(h, "Nobody ordered that!"); return; }
+  if (want.f !== h.f) { gulp(h, "Wrong flavour — yum!"); if (c) c.pat = Math.max(0, c.pat - 2); return; }
+  const top = stack[stack.length - 1];
+  const sc = { f: h.f, size: h.size, land: 0, x: L.cone.x, grade: 0 };
+  const err = Math.abs(h.size - SIZES[want.s].v); sc.grade = err <= .05 ? 3 : err <= .12 ? 2 : 1;
+  stack.push(sc); snd("pop", { pitch: 1.5 - h.size * .6 }); snd("land", { vol: .4 });
+  if (top && h.size > top.size + TIP) { topple(); return; }
+  const pts = [0, 5, 15, 30][sc.grade], lab = ["", "Sloppy", "Good", "Perfect!"][sc.grade];
+  if (!demo) { score += pts; Lab.setScore(score); fx.text(L.cone.x + R * 1.6, coneTop() - scoopY(stack.length - 1), lab + " +" + pts, { color: sc.grade === 3 ? "#ff6f91" : sc.grade === 2 ? "#2f9a7c" : "#6b6478", size: (13 + sc.grade * 2) * S }); }
+  if (sc.grade === 3) { snd("chime", { pitch: 1 + stack.length * .12 }); perfects++; }
+  if (stack.length === c.order.scoops.length && (!c.order.cherry || cherryOn)) serve();
+  else if (stack.length === c.order.scoops.length && c.order.cherry) once("cherry", "Cherry on top! Tap the jar", 2.4);
+}
+function addCherry() {
+  const c = cur(); if (!c || !c.order.cherry || cherryOn || stack.length < c.order.scoops.length) { if (c && !demo) snd("error", { vol: .4 }); return; }
+  cherryOn = true; snd("pop", { pitch: 1.8 }); serve();
+}
+function gulp(h, txt) {
+  streak = 0; gulps++; momo.gulp = .9; snd("crunch", { pitch: 1.2 }); snd("hurt", { vol: .4, pitch: 1.5 });
+  falling.push({ f: h.f, size: h.size, x: L.tubs[h.f].x + L.tubs[h.f].w / 2, y: L.tubs[h.f].y - 20 * S, tx: L.momo.x, ty: L.momo.y - L.momo.s * .25, t: 0, gulp: true });
+  if (!demo) { say(txt, 1.6); fx.text(L.momo.x, L.momo.y - L.momo.s, "Gulp!", { color: "#36a873", size: 18 * S }); }
+}
+function topple() {
+  streak = 0; momo.scare = 1.2; snd("whoosh"); Lab.shake(5, .25); const dir = Lab.chance(.5) ? 1 : -1, ct = coneTop();
+  stack.forEach((s, i) => falling.push({ f: s.f, size: s.size, x: L.cone.x, y: ct - scoopY(i), vx: dir * rand(90, 220) * S, vy: -rand(60, 180) * S, t: 0, rot: 0 }));
+  stack = []; cherryOn = false; const c = cur(); if (c) c.pat = Math.max(0, c.pat - 3);
+  if (!demo) { Lab.after(.5, () => snd("splash", { vol: .5 })); say("Toppled! Smaller on top…", 2); fx.text(L.cone.x, ct - 60 * S, "Topple!", { color: "#e0406a", size: 22 * S }); }
+}
+function serve() {
+  const c = cur(); if (!c) return; const all = stack.every(s => s.grade === 3), base = stack.reduce((a, s) => a + [0, 5, 15, 30][s.grade], 0);
+  streak = all ? streak + 1 : 0; bestStreak = Math.max(bestStreak, streak); const m = 1 + Math.min(streak, 4) * .5;
+  const tip = Math.round(20 * c.pat / c.max) + stack.length * 10 + (c.order.cherry ? 15 : 0), pts = Math.round(tip * m) + (all ? 40 : 0);
+  if (!demo) { score += pts; Lab.setScore(score); Lab.bumpScore(); fx.text(Math.max(L.cust.x, Lab.play.x + 100 * S), L.cust.y - L.cust.s * .9, (all ? "Perfect cone! " : "Thanks! ") + "+" + pts, { color: "#ff6f91", size: 19 * S }); }
+  snd("coin", { pitch: 1 + Math.min(streak, 6) * .08 }); if (all && !demo) { Lab.audio.combo(1 + streak); fx.burst(L.cone.x, coneTop() - 40 * S, { n: 18, colors: ["#ff6f91", "#fff0c2", "#9ff0cf", "#aab6ff"], speed: 180 * S, life: .7, size: 4 * S, shape: "star" }); }
+  c.state = "served"; c.leaveT = 0; c.cone = stack.map(s => ({ f: s.f, size: s.size })); c.cherryOn = cherryOn; momo.joy = 1.2; stack = []; cherryOn = false; served++;
+  if (served % 4 === 0 && !demo) { level++; Lab.banner("Busier pier! " + (level <= 5 ? FL[level].n + " tub open" : "Day " + level), { color: "#3fbf9a", ms: 1500, y: .5 }); snd("levelup"); if (level === 4) Lab.after(1.2, () => once("ch4", "Some pals want a cherry on top!", 2.6)); }
+  if (served === 2) Lab.after(.8, () => once("stack", "Each scoop no bigger than the one below!", 2.8));
+}
+function update(dt) {
+  clock += dt; bubble && (bubble.t += dt, bubble.t > bubble.dur && (bubble = null));
+  momo.gulp = Math.max(0, momo.gulp - dt); momo.joy = Math.max(0, momo.joy - dt); momo.scare = Math.max(0, momo.scare - dt);
+  if (hold && hold.key && !Lab.input.keys[hold.key]) release();
+  if (hold) { hold.t += dt; hold.size += dt / FL[hold.f].t; if (hold.size >= BURST) { const h = hold; hold = null; Lab.shake(3, .15); fx.burst(L.tubs[h.f].x + L.tubs[h.f].w / 2, L.tubs[h.f].y - 20 * S, { n: 14, color: FL[h.f].c, speed: 160 * S, life: .5, size: 4 * S }); gulp(h, "Too much! Momo's helping"); } }
+  for (const s of stack) s.land = Math.min(1, s.land + dt / .22);
+  for (let i = falling.length - 1; i >= 0; i--) { const f = falling[i]; f.t += dt; if (f.gulp) { if (f.t > .45) falling.splice(i, 1); } else { f.vy += 900 * S * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.rot += dt * 6 * Math.sign(f.vx); if (f.y > Lab.H + 60) falling.splice(i, 1); } }
+  // queue: walk in, wait, leave
+  spawnT -= dt; if (!demo && line.filter(c => c.state !== "served" && c.state !== "gone").length < Math.min(3, 1 + Math.ceil(level / 2)) && spawnT <= 0) { addCustomer(); spawnT = Math.max(3, 8 - level); }
+  if (demo && line.length < 2) addCustomer();
+  let slot = 0, worst = 1;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c.state === "served" || c.state === "gone") { c.leaveT += dt; c.x += (c.state === "served" ? 160 : -160) * S * dt * (c.leaveT > .5 ? 1 : 0); continue; }
+    const tx = L.cust.x - slot * 46 * S; c.x = Lab.damp(c.x, tx, 4, dt); if (c.state === "walk" && Math.abs(c.x - tx) < 4) c.state = slot === 0 ? "wait" : "queue";
+    if (slot === 0 && c.state === "queue") c.state = "wait";
+    c.pat -= dt * (slot === 0 ? 1 : .5) * (demo ? .2 : 1); worst = Math.min(worst, c.pat / c.max);
+    if (c.pat <= 0 && !demo) { c.state = "gone"; c.leaveT = 0; hearts--; streak = 0; if (slot === 0) { stack.forEach((s, k) => falling.push({ f: s.f, size: s.size, x: L.cone.x, y: coneTop() - scoopY(k), vx: rand(-80, 80) * S, vy: -100 * S, t: 0, rot: 0 })); stack = []; cherryOn = false; }
+      snd("lose", { vol: .5 }); Lab.flash("#ff6a5a", .15, .15); say(Lab.choose(["Oh no, they left!", "Come back!"]), 1.6); momo.scare = 1;
+      if (hearts <= 0) { end(); return; } continue; }
+    slot++;
+  }
+  for (let i = line.length - 1; i >= 0; i--) if ((line[i].state === "served" || line[i].state === "gone") && line[i].leaveT > 3) line.splice(i, 1);
+  if (demo && line[0] && line[0].state === "served" && line.length < 3) addCustomer();
+  if (!demo) Lab.music.intensity(clamp(.2 + (1 - worst) * .6 + level * .03, 0, 1));
+}
+function end() {
+  over = true; hold = null; Lab.gameover({ title: "Window closed!", message: `Momo served ${served} cone${served === 1 ? "" : "s"} today.`, score,
+    stats: [["Cones served", served], ["Perfect scoops", perfects], ["Best perfect streak", bestStreak]] });
+}
+function frame(dt) { if (!over) update(dt); render(clock); }
+
+/* ---------------- art ---------------- */
+const coneTop = () => L.counter - 46 * S, scoopY = i => { let y = 0; for (let k = 0; k <= i; k++) y += (k ? (stack[k - 1] ? stack[k - 1].size : .7) * R * .72 : 0) + (stack[k] ? stack[k].size : .7) * R * .58; return y; };
+function bakeBg() {
+  bgS = Lab.sprite("lsbg", Lab.W + 80, Lab.H + 80, (g) => {
+    g.translate(40, 40); draw.vgrad(g, -40, -40, Lab.W + 80, Lab.H + 80, ["#bfeee0", "#e9fbf3"]);
+    const P = Lab.play, hz = P.y + (L.counter - P.y) * .66; draw.vgrad(g, -40, P.y - 10, Lab.W + 80, hz - P.y + 10, ["#a9e2fb", "#e8f8ff"]);
+    draw.glow(g, P.x + P.w * .8, P.y + (hz - P.y) * .35, 70 * S, "#fff3b0", .9); draw.circle(g, P.x + P.w * .8, P.y + (hz - P.y) * .35, 22 * S, "#fff6c8");
+    g.fillStyle = "#fff"; for (const [cx, cy, k] of [[.18, .3, 1], [.5, .18, .8], [.92, .55, .7]]) { const x = P.x + P.w * cx, y = P.y + (hz - P.y) * cy; for (let i = 0; i < 3; i++) { g.beginPath(); g.arc(x + (i - 1) * 16 * S * k, y - (i === 1 ? 6 * S : 0), 13 * S * k, 0, TAU); g.fill(); } }
+    draw.vgrad(g, -40, hz, Lab.W + 80, L.counter - hz, ["#4fc0dc", "#2f97c4"]); g.strokeStyle = "rgba(255,255,255,.5)"; g.lineWidth = 2;
+    for (let i = 0; i < 14; i++) { const x = P.x + ((i * 71) % P.w), y = hz + 8 + ((i * 37) % Math.max(10, L.counter - hz - 16)); g.beginPath(); g.arc(x, y, 6 * S, Math.PI * 1.1, Math.PI * 1.9); g.stroke(); }
+    const bx = P.x + P.w * .38, by = hz - 2; g.fillStyle = "#fff"; g.beginPath(); g.moveTo(bx, by - 26 * S); g.lineTo(bx + 16 * S, by - 4 * S); g.lineTo(bx, by - 4 * S); g.fill(); g.fillStyle = "#ff8f7a"; g.beginPath(); g.moveTo(bx - 14 * S, by - 3 * S); g.lineTo(bx + 20 * S, by - 3 * S); g.lineTo(bx + 14 * S, by + 3 * S); g.lineTo(bx - 9 * S, by + 3 * S); g.fill();
+    g.fillStyle = "#c98d5a"; g.fillRect(-40, P.y + 14 * S, 22 + 40, L.counter - P.y); g.fillRect(Lab.W - 22, P.y + 14 * S, 62, L.counter - P.y);
+    for (let x = -40, i = 0; x < Lab.W + 40; x += 34 * S, i++) { g.fillStyle = i % 2 ? "#ffffff" : "#7fdcc0"; g.beginPath(); g.moveTo(x, P.y - 4); g.lineTo(x + 34 * S, P.y - 4); g.lineTo(x + 34 * S, P.y + 18 * S); g.arc(x + 17 * S, P.y + 18 * S, 17 * S, 0, Math.PI); g.fill(); }
+    draw.vgrad(g, -40, L.counter, Lab.W + 80, Lab.H - L.counter + 40, ["#d9a873", "#b9844f"]);
+    g.fillStyle = "#e8bb86"; g.fillRect(-40, L.counter - 6 * S, Lab.W + 80, 14 * S); g.fillStyle = "rgba(90,50,20,.18)"; for (let y = L.counter + 30 * S; y < Lab.H; y += 26 * S) g.fillRect(-40, y, Lab.W + 80, 2);
+    for (const t of L.tubs) { draw.rect(g, t.x - 3, t.y - 3, t.w + 6, t.h + 6, 12 * S, "#e6f6ff"); draw.rect(g, t.x, t.y, t.w, t.h, 10 * S, "#c9e9f7"); }
+  });
+}
+function scoopShape(c, f, x, y, r, sq) {
+  const F = FL[f]; c.save(); c.translate(x, y); c.scale(1 + (sq || 0) * .2, 1 - (sq || 0) * .2);
+  c.fillStyle = F.d; c.beginPath(); for (let i = 0; i <= 12; i++) { const a = Math.PI * (i / 12), rr = r * (1.02 + (i % 2) * .08); c.lineTo(Math.cos(a) * rr, r * .3 + Math.sin(a) * rr * .45); } c.fill();
+  c.fillStyle = F.c; c.beginPath(); c.arc(0, 0, r, 0, TAU); c.fill(); c.fillStyle = "rgba(255,255,255,.45)"; c.beginPath(); c.ellipse(-r * .35, -r * .4, r * .32, r * .18, -.5, 0, TAU); c.fill();
+  if (f === 2 || f === 3) { c.fillStyle = f === 2 ? "#5a341f" : "#3a5a3f"; for (let i = 0; i < 5; i++) { const a = i * 2.4, d = r * .55; c.fillRect(Math.cos(a) * d, Math.sin(a) * d * .8, r * .14, r * .1); } }
+  c.restore();
+}
+function drawCone(c, x, y, h) {
+  c.fillStyle = "#e0a35a"; c.beginPath(); c.moveTo(x - R * .72, y - h); c.lineTo(x + R * .72, y - h); c.lineTo(x, y); c.closePath(); c.fill();
+  c.save(); c.clip(); c.strokeStyle = "#b9783a"; c.lineWidth = 1.5 * S; for (let k = -4; k < 5; k++) { c.beginPath(); c.moveTo(x + k * 9 * S, y - h); c.lineTo(x + k * 9 * S + h * .6, y); c.moveTo(x + k * 9 * S, y - h); c.lineTo(x + k * 9 * S - h * .6, y); c.stroke(); } c.restore();
+  draw.rect(c, x - R * .8, y - h - 4 * S, R * 1.6, 7 * S, 3 * S, "#d08a44");
+}
+function drawStack(c, t) {
+  const x = L.cone.x, ct = coneTop(); draw.rect(c, x - 22 * S, L.counter - 14 * S, 44 * S, 14 * S, 5 * S, "#8fb8c8"); drawCone(c, x, L.counter - 8 * S, 46 * S - 8 * S);
+  const want = target(), wob = momo.scare > 0 ? Math.sin(t * 30) * .04 : 0;
+  stack.forEach((s, i) => { const y = ct - scoopY(i) - (1 - ease.outBounce(s.land)) * 60 * S; scoopShape(c, s.f, x + Math.sin(t * 2 + i) * i * .4 * S, y, s.size * R, s.land < 1 ? 0 : 0); });
+  if (cherryOn) { const y = ct - scoopY(stack.length - 1) - stack[stack.length - 1].size * R - 4 * S; draw.circle(c, x, y, 6 * S, "#e2334f"); c.strokeStyle = "#4f8a3a"; c.lineWidth = 1.5 * S; c.beginPath(); c.moveTo(x, y - 5 * S); c.quadraticCurveTo(x + 3 * S, y - 12 * S, x + 7 * S, y - 13 * S); c.stroke(); }
+  if (want && !demo) { // ghost of the next scoop on the cone
+    const n = stack.length, y = ct - (n ? scoopY(n - 1) + stack[n - 1].size * R * .72 + SIZES[want.s].v * R * .58 : SIZES[want.s].v * R * .58);
+    c.save(); c.setLineDash([4 * S, 4 * S]); c.strokeStyle = "rgba(58,47,77,.35)"; c.lineWidth = 2; c.beginPath(); c.arc(x, y, SIZES[want.s].v * R, 0, TAU); c.stroke(); c.restore(); }
+  if (L.cherry && level >= 4) { const p = L.cherry, need = cur() && cur().order.cherry && !cherryOn, pulse = need && stack.length >= cur().order.scoops.length ? 1 + Math.sin(t * 8) * .08 : 1;
+    draw.circle(c, p.x, p.y, p.r * pulse, "rgba(255,255,255,.9)", need ? "#e2334f" : "rgba(58,47,77,.2)", 2.5); for (let k = 0; k < 3; k++) draw.circle(c, p.x + (k - 1) * p.r * .38, p.y + (k % 2) * p.r * .2, p.r * .24, "#e2334f");
+    draw.text(c, "cherry", p.x, p.y + p.r + 9 * S, { size: 10 * S, color: "#6b6478", weight: 700 }); }
+}
+function drawTubs(c, t) {
+  for (let i = 0; i < 5; i++) {
+    const tb = L.tubs[i], F = FL[i], open = i < flavours(), cx = tb.x + tb.w / 2, ih = Math.min(tb.h * .72, tb.w * 1.1);
+    if (!open) { draw.rect(c, tb.x + 4, tb.y + 4, tb.w - 8, tb.h - 8, 8 * S, "#b3d3e2"); draw.text(c, "soon", cx, tb.y + tb.h / 2, { size: 12 * S, color: "#6d8fa0", weight: 700 }); continue; }
+    draw.rect(c, tb.x + 5, tb.y + tb.h - ih - 6, tb.w - 10, ih, 9 * S, "#f6fbff"); draw.rect(c, tb.x + 8, tb.y + tb.h - ih - 2, tb.w - 16, ih * .55, 8 * S, F.c);
+    c.fillStyle = F.d; for (let k = 0; k < 3; k++) { c.beginPath(); c.ellipse(tb.x + tb.w * (.3 + k * .2), tb.y + tb.h - ih * .72, tb.w * .12, ih * .08, 0, 0, TAU); c.fill(); }
+    const pressed = hold && hold.f === i; draw.text(c, F.n, cx, tb.y + tb.h - 12 * S, { size: Math.min(12 * S, tb.w / 6.2), color: INK, weight: 700 });
+    draw.text(c, String(i + 1), tb.x + 12 * S, tb.y + 13 * S, { size: 10 * S, color: "#6d8fa0", weight: 700 });
+    if (pressed) draw.rect(c, tb.x, tb.y, tb.w, tb.h, 10 * S, null, "#ff6f91", 3);
+  }
+  if (hold) { // the growing scoop above its tub, with the target ring and the topple limit
+    const tb = L.tubs[hold.f], cx = clamp(tb.x + tb.w / 2, Lab.play.x + L.HR * 1.3, Lab.play.x + Lab.play.w - L.HR * 1.3), cy = tb.y - L.HR * 1.2 + 4 * S, want = target();
+    c.strokeStyle = "#9aa0b0"; c.lineWidth = 4 * S; c.beginPath(); c.moveTo(cx + L.HR * .6, cy + L.HR * .3); c.lineTo(cx + L.HR * 1.3, cy + L.HR * 1.1); c.stroke();
+    scoopShape(c, hold.f, cx, cy, hold.size * L.HR, Math.sin(hold.t * 14) * .3);
+    if (want) { const ok = Math.abs(hold.size - SIZES[want.s].v) <= .05; c.save(); c.setLineDash([5 * S, 4 * S]); c.strokeStyle = ok ? "#2fbf7c" : INK; c.lineWidth = 2.5 * S; c.beginPath(); c.arc(cx, cy, SIZES[want.s].v * L.HR, 0, TAU); c.stroke(); c.restore(); }
+    const lim = limit(); if (lim < BURST) { c.strokeStyle = "rgba(226,51,79,.7)"; c.lineWidth = 2 * S; c.beginPath(); c.arc(cx, cy, lim * L.HR, 0, TAU); c.stroke(); }
+  }
+}
+function drawCard(c, t) {
+  const cu = cur(), k = L.card; if (!cu) return; const P = Pals.cast[cu.who];
+  const tx = clamp(L.cust.x, k.x + 20 * S, k.x + k.w - 20 * S); c.fillStyle = "#fffdf7"; c.strokeStyle = "rgba(58,47,77,.18)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(tx - 10 * S, k.y + k.h - 2); c.lineTo(L.cust.x, k.y + k.h + 12 * S); c.lineTo(tx + 10 * S, k.y + k.h - 2); c.fill(); c.stroke();
+  draw.rect(c, k.x, k.y, k.w, k.h, 14 * S, "#fffdf7", "rgba(58,47,77,.18)", 1.5);
+  draw.text(c, P.name + "'s order", k.x + k.w / 2, k.y + 14 * S, { size: 13 * S, color: INK, weight: 800 });
+  const pf = cu.pat / cu.max; draw.rect(c, k.x + 12 * S, k.y + k.h - 14 * S, k.w - 24 * S, 7 * S, 4 * S, "#eee6dc"); draw.rect(c, k.x + 12 * S, k.y + k.h - 14 * S, Math.max(7 * S, (k.w - 24 * S) * pf), 7 * S, 4 * S, pf < .3 ? "#ff6a5a" : pf < .6 ? "#ffb02e" : "#3fbf9a");
+  const sc = cu.order.scoops, n = sc.length, rr = Math.min(21 * S, (k.h - 60 * S) / (n * 1.35 + .6)), x = k.x + k.w * .3, base = k.y + k.h - 24 * S;
+  c.fillStyle = "#e0a35a"; c.beginPath(); c.moveTo(x - rr * .7, base - rr * 1.5); c.lineTo(x + rr * .7, base - rr * 1.5); c.lineTo(x, base); c.fill();
+  let y = base - rr * 1.5;
+  sc.forEach((s, i) => { const r = SIZES[s.s].v * rr * 1.1; y -= r * .9; const done = i < stack.length; scoopShape(c, s.f, x, y, r, 0);
+    draw.text(c, SIZES[s.s].k, x, y + 1, { size: r * .9, color: INK, weight: 800 });
+    draw.text(c, (done ? "✓ " : i === stack.length ? "› " : "  ") + FL[s.f].n, x + rr * 1.5, y, { size: Math.min(11 * S, k.w / 11), color: done ? "#2f9a7c" : i === stack.length ? INK : "#8a8496", weight: done || i === stack.length ? 800 : 600, align: "left" });
+    y -= r * .55; });
+  if (cu.order.cherry) { draw.circle(c, x, y - 4 * S, 5 * S, "#e2334f"); }
+}
+function drawCustomers(c, t) {
+  for (let i = line.length - 1; i >= 0; i--) {
+    const cu = line[i], front = cu === cur(), s = L.cust.s * (front || cu.state === "served" ? 1 : .8), pf = cu.pat / cu.max;
+    const mood = cu.state === "served" ? "joy" : cu.state === "gone" ? "angry" : pf < .25 ? "angry" : pf < .5 ? "sad" : front && hold ? "think" : "happy";
+    const bob = cu.state === "walk" || cu.leaveT > .5 ? Math.abs(Math.sin(clock * 10)) * 5 * S : 0;
+    const a = Pals.draw(c, cu.who, cu.x, L.cust.y - bob, s, { t: clock + i, mood, alpha: front || cu.state === "served" ? 1 : .9, arms: cu.state === "served" ? "hold" : "down", look: front ? [.6, .4] : [1, 0], flip: cu.state === "gone", hot: pf < .3 && cu.state === "wait" ? .6 : 0, clipY: L.counter - L.cust.y - 3 * S });
+    if (cu.state === "served" && cu.cone) { const h = a.handR; let y = h[1] - 18 * S; c.fillStyle = "#e0a35a"; c.beginPath(); c.moveTo(h[0] - 7 * S, y); c.lineTo(h[0] + 7 * S, y); c.lineTo(h[0], h[1] + 4 * S); c.fill(); cu.cone.forEach(sc => { const r = sc.size * R * .45; y -= r * .8; scoopShape(c, sc.f, h[0], y, r, 0); y -= r * .4; }); }
+  }
+}
+function drawMomo(c, t) {
+  const m = L.momo, mood = momo.gulp > 0 ? "joy" : momo.scare > 0 ? "scared" : momo.joy > 0 ? "joy" : hold ? "think" : "happy";
+  let look = [.6, .2]; if (hold) { const tb = L.tubs[hold.f]; look = [clamp((tb.x + tb.w / 2 - m.x) / 120, -1, 1), 1]; }
+  Pals.draw(c, "momo", m.x, m.y - m.s * .32, m.s, { t, mood, look, arms: momo.joy > 0 ? "cheer" : hold ? "hold" : "down", talk: momo.gulp > .4 ? 1 : bubble && bubble.t < .5 ? .5 : 0, squash: momo.gulp > 0 ? Math.sin(momo.gulp * 10) * .12 : 0, clipY: m.s * .3 });
+}
+function drawBubble(c) {
+  if (!bubble) return; const k = ease.outBack(clamp(bubble.t / .2, 0, 1)) * clamp((bubble.dur - bubble.t) / .25, 0, 1); if (k <= 0) return;
+  const fs = 13 * S; c.font = Lab.font(fs, 700); const w = c.measureText(bubble.txt).width + 22, h = fs * 2.1, P = Lab.play;
+  const x = clamp(L.momo.x + w * .3, P.x + w / 2 + 4, P.x + P.w - w / 2 - 4), y = L.momo.y - L.momo.s * 1.25 - h / 2;
+  c.save(); c.translate(x, y); c.scale(k, k); Pals.bubble(c, 0, 0, w, h, { tailX: L.momo.x - x, tailY: h / 2 + 10 * S, lineWidth: 2 }); draw.text(c, bubble.txt, 0, 1, { size: fs, color: INK, weight: 700 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx; if (!bgS) bakeBg(); c.drawImage(bgS, -40, -40, bgS.w, bgS.h);
+  drawCustomers(c, t); drawCard(c, t);
+  c.fillStyle = "#e8bb86"; c.fillRect(Lab.play.x - 10, L.counter - 6 * S, Lab.play.w + 20, 8 * S);
+  drawMomo(c, t); drawStack(c, t); drawTubs(c, t);
+  for (const f of falling) { if (f.gulp) { const k = ease.inQuad(clamp(f.t / .45, 0, 1)); scoopShape(c, f.f, lerp(f.x, f.tx, k), lerp(f.y, f.ty, k) - Math.sin(k * Math.PI) * 50 * S, f.size * R * (1 - k * .7), 0); } else { c.save(); c.translate(f.x, f.y); c.rotate(f.rot); scoopShape(c, f.f, 0, 0, f.size * R, 0); c.restore(); } }
+  for (let i = 0; i < 3; i++) draw.heart(c, Lab.play.x + Lab.play.w - 18 * S - i * 20 * S, L.counter + 14 * S, 8 * S, i < hearts ? "#ff5a7a" : "rgba(58,47,77,.18)");
+  draw.text(c, `Cones ${served}` + (streak > 1 ? `  ·  perfect ×${streak}` : ""), Lab.play.x + 14 * S, L.counter + 14 * S, { size: 12 * S, color: "#5c3a1e", weight: 800, align: "left" });
+  drawBubble(c);
+}
+
+Lab.expose({
+  get score() { return score; }, get hearts() { return hearts; }, get level() { return level; }, get served() { return served; }, get streak() { return streak; }, get gulps() { return gulps; },
+  get stack() { return stack.map(s => ({ f: s.f, size: s.size, grade: s.grade })); }, get holding() { return hold && { f: hold.f, size: hold.size }; },
+  get order() { const c = cur(); return c && { who: c.who, scoops: c.order.scoops.map(s => ({ f: s.f, s: s.s, v: SIZES[s.s].v })), cherry: c.order.cherry, pat: c.pat }; },
+  tub(i) { const t = L.tubs[i]; return { x: t.x + t.w / 2, y: t.y + t.h / 2 }; }, get rate() { return FL.map(f => f.t); }, get cherry() { return L.cherry; },
+  setOrder(sc, cherry) { const c = cur(); c.order = { scoops: sc.map(([f, s]) => ({ f, s })), cherry: !!cherry }; stack = []; cherryOn = false; }, setPat(p) { cur().pat = p; },
+  setLevel(n) { level = n; }, line() { return line.map(c => c.state); },
+});
+Lab.boot();
+})();
+</script></body></html>

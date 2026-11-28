@@ -1,0 +1,306 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Sprout Sling</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* SPROUT SLING — a storm flattened the jungle clearing. Pip has a leaf slingshot and a bag of seeds: sling each seed
+ * into a soil mound that wants it, and the jungle grows back on the spot.
+ * Core idea kept: aim and shoot in a jungle. Cozy: no weapons, no targets to hurt — you are planting.
+ * Made it a different game from Bun Voyage (lob to a moving basket) and Tin Topple (cannon vs. forts):
+ *   - WHAT YOU PLANT BECOMES TERRAIN. A palm grows springy fronds (seeds bounce off them), a bloom grows a trampoline cup
+ *     (seeds spring high), a fruit tree grows a leafy crown and hangs fruit you can collect on later shots. So the order you
+ *     plant in matters: a palm in front of a far mound can block it — or be the bank shot that reaches it.
+ *   - Seeds come in three kinds (current + next shown); a mound only takes its own kind.
+ *   - Bullseye (dead centre of the mound) refunds the seed; a plant reached by bouncing off something you grew is a TRICK (×2).
+ * Run: one seed bag (10). Regrow every mound in a clearing for +3 seeds and the next clearing: branch nests up high,
+ * a canopy overhang, wind (drifting leaves show it), a rock pillar, a sloth swinging on a vine. Out of seeds → run over.
+ * Pals: Pip slings; Olli moves into each palm, Momo lounges in each bloom, Bun picks under each fruit tree. */
+let demo = false;
+Lab.init({
+  title: "Sprout Sling", tagline: "Sling seeds, regrow the jungle — then bounce off what you grew.", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Drag back anywhere, let go to sling", "Each mound takes only its own seed", "What you grow becomes bounce pads"],
+  theme: { bg: "#bfe3a8", bg2: "#f2f7d9", fg: "#24402c", muted: "#4f6b52", accent: "#ff8a3d", accent2: "#3fae6a", light: true },
+  orient: "any", music: { style: "chill", key: "F", vol: .32 }, restart: start, attract,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, rand = Lab.rand, INK = Pals.ink;
+const G = 900, SR = 9, MR = 30, STEP = 1 / 120;
+const TY = [{ n: "palm", c: "#5cbf4a", d: "#2f7d32" }, { n: "bloom", c: "#ff7eb6", d: "#c2457e" }, { n: "fruit", c: "#ffb52e", d: "#c77700" }];
+let k, ox, oy, WW, WH, S, bgSpr;
+let L, pts, anchor, stumpTop, mounds, ledges, rects, segs, circles, plants, fruits, sloth, wind, leaves;
+let seeds, score, queue, seed, aim, phase, clock, planted, bulls, tricks, fruitN, pip, clearT, uid, kbAim, msg;
+
+const X = x => ox + x * k, Y = y => oy + y * k;
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function fit() { const P = Lab.play; k = Math.min(P.w / WW, P.h / WH); ox = P.x + (P.w - WW * k) / 2; oy = P.y + (P.h - WH * k) / 2; S = Math.min(P.w / 390, P.h / 700, 1.5); if (P.w > P.h * 1.1) S = Math.min(P.w / 760, P.h / 360, 1.5); bgSpr = null; }
+Lab.onResize(() => { if (WW) fit(); });
+function gy(x) { const i = clamp(Math.floor((x + 40) / 80), 0, pts.length - 2), a = pts[i], b = pts[i + 1], t = clamp((x - a[0]) / (b[0] - a[0]), 0, 1); return a[1] + (b[1] - a[1]) * t; }
+
+/* ---------- clearings ---------- */
+function genClearing() {
+  const P = Lab.play, tall = P.h > P.w * 1.2, k0 = Math.min(P.w / (tall ? 470 : 560), P.h / 520); WW = P.w / k0; WH = P.h / k0; fit(); uid++;
+  const base = WH * (tall ? .74 : .84); pts = [];
+  for (let x = -40; x <= WW + 120; x += 80) pts.push([x, x < 170 ? base : base + Math.sin(x * .011 + L * 1.7) * 16 + rand(-8, 8)]);
+  stumpTop = base - 46; anchor = { x: 112, y: stumpTop - 58 };
+  mounds = []; ledges = []; rects = []; plants = []; fruits = []; sloth = null; wind = 0;
+  const x0 = L >= 4 ? anchor.x + 150 : WW * .31, span = WW * .95 - x0, n = Math.min([2, 3, 4, 4, 5][L - 1] || 6, Math.floor(span / 92)), perm = Lab.shuffle([0, 1, 2]);
+  let branchAt = L >= 2 ? Lab.randInt(0, n - 1) : -1;
+  for (let i = 0; i < n; i++) {
+    const x = x0 + span * (i + .5) / n + rand(-10, 10), type = i < 3 ? perm[i] : Lab.randInt(0, 2);
+    let y = gy(x);
+    if (i === branchAt || L >= 3 && i !== n - 1 && Lab.chance(.35)) { y = gy(x) - rand(WH * .2, WH * (L >= 4 ? .46 : .36)); ledges.push({ x: x - 56, y, w: 112, h: 16, tx: x + (i % 2 ? 1 : -1) * 70 }); }
+    mounds.push({ x, y, type, planted: false, grow: 0, ping: 0 });
+  }
+  if (L >= 3) rects.push({ x: WW * rand(.4, .62), y: -40, w: WW * .2, h: WH * rand(.28, .34) + 40, tag: "leaf", e: .25, f: .6 });
+  if (L >= 4) { const x = anchor.x + 62, h = WH * rand(.18, .26); rects.push({ x, y: gy(x) - h, w: 40, h: h + 40, tag: "rock", e: .4, f: .8 }); }
+  if (L >= 5) sloth = { px: WW * rand(.5, .72), py: -10, len: WH * .34, amp: .55, per: 3.2, r: 30, x: 0, y: 0 };
+  if (L >= 3) wind = (Lab.chance(.5) ? 1 : -1) * Math.min(40 + L * 18, 170);
+  leaves = Array.from({ length: wind ? 10 : 4 }, () => ({ x: rand(0, WW), y: rand(0, WH * .7), r: rand(0, TAU), v: rand(.6, 1.2) }));
+  rebuild(); queue = [pickType(), pickType()]; fixQueue(); bgSpr = null;
+}
+function rebuild() {
+  segs = []; circles = [];
+  for (let i = 0; i < pts.length - 1; i++) segs.push({ a: pts[i], b: pts[i + 1], e: .35, f: .72, tag: "ground" });
+  for (const l of ledges) { segs.push({ a: [l.x, l.y], b: [l.x + l.w, l.y], e: .3, f: .7, tag: "branch" }); segs.push({ a: [l.x, l.y + l.h], b: [l.x + l.w, l.y + l.h], e: .3, f: .7, tag: "wood" }); }
+  segs.push({ a: [anchor.x - 70, stumpTop], b: [anchor.x + 8, stumpTop], e: .3, f: .7, tag: "wood" });
+  for (const p of plants) {
+    if (p.type === 0) { segs.push({ a: [p.x, p.y], b: [p.x + p.lean * 20, p.y - 150], e: .3, f: .8, tag: "trunk" }); const tx = p.x + p.lean * 20, ty = p.y - 150; segs.push({ a: [tx - 82, ty + 26], b: [tx, ty], e: .88, f: .95, tag: "frond", p }); segs.push({ a: [tx, ty], b: [tx + 82, ty + 26], e: .88, f: .95, tag: "frond", p }); }
+    else if (p.type === 1) { segs.push({ a: [p.x, p.y], b: [p.x, p.y - 96], e: .3, f: .8, tag: "trunk" }); segs.push({ a: [p.x - 42, p.y - 100], b: [p.x + 42, p.y - 100], e: 1, f: 1, tag: "cup", p }); }
+    else { segs.push({ a: [p.x, p.y], b: [p.x, p.y - 100], e: .3, f: .8, tag: "trunk" }); circles.push({ x: p.x, y: p.y - 138, r: 54, e: .35, tag: "crown", p }); }
+  }
+}
+function openTypes() { return [0, 1, 2].filter(t => mounds.some(m => !m.planted && m.type === t)); }
+function pickType() { const o = openTypes(); return o.length ? Lab.choose(o) : 0; }
+function fixQueue() { const o = openTypes(); if (!o.length) return; for (let i = 0; i < queue.length; i++) if (!o.includes(queue[i])) queue[i] = Lab.choose(o); }
+
+/* ---------- physics (shared by play, the aim guide and the solver) ---------- */
+function slothPos(t) { if (!sloth) return null; const a = Math.sin(t / sloth.per * TAU) * sloth.amp; return [sloth.px + Math.sin(a) * sloth.len, sloth.py + Math.cos(a) * sloth.len]; }
+function collideSeg(sd, a, b, e, f) {
+  const abx = b[0] - a[0], aby = b[1] - a[1], t = clamp(((sd.x - a[0]) * abx + (sd.y - a[1]) * aby) / (abx * abx + aby * aby), 0, 1), qx = a[0] + abx * t, qy = a[1] + aby * t;
+  return resolve(sd, qx, qy, e, f);
+}
+function resolve(sd, qx, qy, e, f) {
+  let dx = sd.x - qx, dy = sd.y - qy; const d = Math.hypot(dx, dy); if (d >= SR || d === 0) return false;
+  dx /= d; dy /= d; sd.x = qx + dx * SR; sd.y = qy + dy * SR; const vn = sd.vx * dx + sd.vy * dy;
+  if (vn < 0) { const tx = sd.vx - vn * dx, ty = sd.vy - vn * dy; sd.vx = tx * f - vn * e * dx; sd.vy = ty * f - vn * e * dy; }
+  sd.nx = dx; sd.ny = dy; return true;
+}
+function mountAt(sd, slack) { for (const m of mounds) if (!m.planted && Math.abs(sd.x - m.x) < MR * slack && Math.abs(sd.y + SR - m.y) < 26) return m; return null; }
+/* one fixed step; returns an event {k:'plant'|'wrong'|'fizzle'|'lost'|'bounce'|'fruit', ...} or null */
+function stepSeed(sd, t, sim) {
+  sd.vx += wind * STEP; sd.vy += G * STEP; sd.x += sd.vx * STEP; sd.y += sd.vy * STEP; sd.age += STEP;
+  if (sd.x < -120 || sd.x > WW + 120 || sd.y > WH + 80) return { k: "lost" };
+  let hit = null;
+  for (const s of segs) { if (Math.max(s.a[0], s.b[0]) < sd.x - 20 || Math.min(s.a[0], s.b[0]) > sd.x + 20) continue;
+    const vy0 = sd.vy, sp = Math.hypot(sd.vx, sd.vy); if (collideSeg(sd, s.a, s.b, s.e, s.f)) { hit = s;
+      if (s.tag === "cup") { sd.vy = Math.min(sd.vy, -Math.max(620, Math.abs(vy0) * 1.05)); sd.trick = true; }
+      if (s.tag === "frond") sd.trick = true;
+      if ((s.tag === "ground" || s.tag === "branch") && sd.ny < -.5) { const m = mountAt(sd, 1); if (m) { if (m.type === sd.type) return { k: "plant", m, bull: Math.abs(sd.x - m.x) < MR * .38 }; if (!sd.wrong) { sd.wrong = true; return { k: "wrong", m, sp }; } } }
+      if (sp > 160) return { k: "bounce", tag: s.tag, sp, p: s.p }; } }
+  for (const r of rects) { const qx = clamp(sd.x, r.x, r.x + r.w), qy = clamp(sd.y, r.y, r.y + r.h); const sp = Math.hypot(sd.vx, sd.vy); if (resolve(sd, qx, qy, r.e, r.f)) { hit = r; if (sp > 160) return { k: "bounce", tag: r.tag, sp }; } }
+  for (const c of circles) { const dx = sd.x - c.x, dy = sd.y - c.y, d = Math.hypot(dx, dy); if (d < c.r + SR && d > 0) { const sp = Math.hypot(sd.vx, sd.vy), nx = dx / d, ny = dy / d, vn = sd.vx * nx + sd.vy * ny;
+    sd.x = c.x + nx * (c.r + SR); sd.y = c.y + ny * (c.r + SR); if (vn < 0) { sd.vx -= (1 + c.e) * vn * nx; sd.vy -= (1 + c.e) * vn * ny; } sd.nx = nx; sd.ny = ny; sd.trick = true; hit = c; if (sp > 160) return { k: "bounce", tag: c.tag, sp, p: c.p }; } }
+  const sp2 = slothPos(t + sd.age); if (sp2) { const dx = sd.x - sp2[0], dy = sd.y - sp2[1], d = Math.hypot(dx, dy); if (d < sloth.r + SR && d > 0) { const vn = (sd.vx * dx + sd.vy * dy) / d; sd.x = sp2[0] + dx / d * (sloth.r + SR); sd.y = sp2[1] + dy / d * (sloth.r + SR); if (vn < 0) { sd.vx -= 1.8 * vn * dx / d; sd.vy -= 1.8 * vn * dy / d; } return { k: "bounce", tag: "sloth", sp: 300 }; } }
+  if (!sim) for (const fr of fruits) if (!fr.got && Math.hypot(sd.x - fr.x, sd.y - fr.y) < SR + 16) { fr.got = true; return { k: "fruit", fr }; }
+  const speed = Math.hypot(sd.vx, sd.vy);
+  if (hit && speed < 70) { sd.rest += STEP; if (sd.rest > .2) { const m = mountAt(sd, 1.35); if (m && m.type === sd.type) return { k: "plant", m, bull: false }; return { k: "fizzle" }; } } else sd.rest = 0;
+  if (sd.age > 12) return { k: "fizzle" };
+  return null;
+}
+function newSeed(vx, vy, type) { return { x: anchor.x, y: anchor.y, vx, vy, type, age: 0, rest: 0, trick: false, wrong: false, nx: 0, ny: 0, trail: [] }; }
+const vmax = () => Math.sqrt(Math.max(WW * 1.05, WH * 1.25) * G), maxPull = () => 110 * S;
+function launchV(pdx, pdy) { const len = Math.hypot(pdx, pdy), m = Math.min(len, maxPull()), v = m / maxPull() * vmax(); return len < 1 ? [0, 0] : [pdx / len * v, pdy / len * v]; }
+function solve(mi, tries) { // test/attract helper: search a launch that plants mound mi (same physics, wind and sloth timing)
+  const m = mounds[mi]; let best = null;
+  for (let i = 0; i < (tries || 700); i++) {
+    const ang = rand(-1.45, -.05), v = rand(.25, 1) * vmax(), sd = newSeed(Math.cos(ang) * v, Math.sin(ang) * v, m.type);
+    for (let n = 0; n < 1500; n++) { const ev = stepSeed(sd, clock, true); if (!ev || ev.k === "bounce" || ev.k === "wrong") continue;
+      if (ev.k === "plant" && ev.m === m) { const sc = Math.abs(sd.x - m.x) + sd.age * 20; if (!best || sc < best.sc) best = { vx: Math.cos(ang) * v, vy: Math.sin(ang) * v, sc }; } break; }
+  }
+  return best;
+}
+
+/* ---------- actions ---------- */
+function fire(vx, vy) {
+  if (phase !== "aim" || seeds <= 0) return false;
+  seeds--; seed = newSeed(vx, vy, queue.shift()); seed.t0 = clock; queue.push(pickType()); fixQueue(); phase = "fly"; aim = null;
+  pip.mood = "wow"; pip.moodT = .5; pip.sq = .2; snd("whoosh", { pitch: .8 + Math.hypot(vx, vy) / vmax() * .6 }); snd("snap", { vol: .5 });
+  return true;
+}
+function land(ev) {
+  const sd = seed; seed = null; phase = "aim";
+  if (ev.k === "plant") {
+    const m = ev.m; m.planted = true; planted++; let pts2 = 100 + (ev.bull ? 50 : 0); if (sd.trick) { pts2 *= 2; tricks++; } if (ev.bull) { bulls++; seeds++; }
+    score += pts2; plants.push({ x: m.x, y: m.y, type: m.type, grow: 0, lean: rand(-.4, .4), bob: 0, m }); m.grow = 0;
+    if (!demo) { Lab.setScore(score); fx.text(X(m.x), Y(m.y - 60), (sd.trick ? "Trick! " : ev.bull ? "Bullseye! " : "") + "+" + pts2, { color: sd.trick ? "#ff8a3d" : TY[m.type].d, size: (sd.trick || ev.bull ? 20 : 17) * S });
+      fx.burst(X(m.x), Y(m.y), { n: 18, colors: [TY[m.type].c, "#fff6c9", "#8bd35e"], speed: 170, life: .6, size: 3.5, angle: -Math.PI / 2, spread: 1.6 }); if (ev.bull) fx.text(X(m.x), Y(m.y - 95), "+1 seed", { color: "#3fae6a", size: 14 * S }); }
+    snd("pop", { pitch: .8 + m.type * .2 }); snd("chime", { pitch: 1 + planted * .03, vol: .6 }); if (!demo) Lab.audio.combo(Math.min(12, planted)); pip.mood = "joy"; pip.moodT = 1;
+    if (mounds.every(q => q.planted)) { phase = "clear"; clearT = 2.4; const b = 150 * L; score += b; seeds += 3;
+      if (!demo) { Lab.setScore(score); Lab.bumpScore(); Lab.banner("Clearing " + L + " regrown!", { color: "#2f7d32", ms: 1500, y: .22 }); Lab.toast("+" + b + "  ·  +3 seeds", 1300, { y: .32 }); Lab.sfx("levelup"); Lab.music.intensity(Math.min(1, .2 + L * .15)); } pip.mood = "joy"; pip.moodT = 2.4; }
+    else fixQueue();
+  } else {
+    pip.mood = "sad"; pip.moodT = .8; snd("drop", { pitch: .7, vol: .5 });
+    if (!demo) fx.puff(X(clamp(sd.x, 0, WW)), Y(clamp(sd.y, 0, WH)), { n: 6, color: "rgba(120,90,60,.5)" });
+    if (!demo && ev.k === "fizzle") fx.text(X(sd.x), Y(sd.y - 30), "No sprout", { color: "#6b5a4a", size: 14 * S });
+  }
+  if (phase === "aim" && seeds <= 0) { phase = "over"; if (!demo) Lab.after(.6, end); }
+}
+function end() {
+  Lab.gameover({ title: "Out of seeds!", message: L > 1 ? "Pip regrew " + (L - 1) + " clearing" + (L > 2 ? "s" : "") + " of jungle." : "Pip planted " + planted + " — the jungle will be back.", score, neutral: true,
+    stats: [["Plants grown", planted], ["Bullseyes", bulls], ["Trick shots", tricks]] });
+}
+
+/* ---------- update ---------- */
+function update(dt) {
+  clock += dt; pip.moodT -= dt; pip.sq = Lab.damp(pip.sq, 0, 8, dt); if (pip.moodT <= 0) pip.mood = aim ? "think" : "happy";
+  for (const p of plants) p.grow = Math.min(1, p.grow + dt * 1.6);
+  for (const m of mounds) m.ping += dt;
+  for (const l of leaves) { l.x += (wind * .5 + 12) * l.v * dt; l.y += 18 * l.v * dt; l.r += dt * 2; if (l.x > WW + 20) l.x = -20; if (l.x < -20) l.x = WW + 20; if (l.y > WH * .8) { l.y = -10; l.x = rand(0, WW); } }
+  if (sloth) { const p = slothPos(clock); sloth.x = p[0]; sloth.y = p[1]; }
+  if (phase === "fly" && seed) {
+    for (let acc = dt; acc > 1e-6 && seed; acc -= STEP) {
+      const ev = stepSeed(seed, seed.t0, false); if (!ev) continue;
+      if (ev.k === "bounce") { if (ev.tag === "frond" || ev.tag === "cup") { snd("boing", { pitch: ev.tag === "cup" ? 1.3 : 1 }); if (ev.p) ev.p.bob = 1; } else if (ev.tag === "crown") { if (ev.p) ev.p.bob = .6; snd("knock", { pitch: .7, vol: .5 }); } else if (ev.tag === "sloth") snd("boing", { pitch: .7 }); else snd("knock", { vol: Math.min(.7, ev.sp / 900), pitch: ev.tag === "leaf" || ev.tag === "crown" ? .7 : 1.1 }); continue; }
+      if (ev.k === "wrong") { if (!demo) fx.text(X(ev.m.x), Y(ev.m.y - 40), "Wants " + TY[ev.m.type].n + "!", { color: TY[ev.m.type].d, size: 15 * S }); snd("error", { vol: .4 }); continue; }
+      if (ev.k === "fruit") { fruitN++; score += 25; if (!demo) { Lab.setScore(score); fx.text(X(ev.fr.x), Y(ev.fr.y - 20), "+25", { color: "#c77700", size: 15 * S }); } snd("coin", { pitch: 1.2 }); continue; }
+      land(ev);
+    }
+    if (seed) { seed.trail.push([seed.x, seed.y]); if (seed.trail.length > 14) seed.trail.shift(); }
+  }
+  for (const p of plants) p.bob = Math.max(0, p.bob - dt * 2.5);
+  if (phase === "clear") { clearT -= dt; if (clearT <= 0) { L++; genClearing(); phase = "aim"; if (!demo) Lab.banner("Clearing " + L, { color: "#ff8a3d", ms: 1000, y: .22 }); if (!demo && (L === 3 || L === 4 || L === 5)) Lab.toast(L === 3 ? "Wind! Watch the leaves" : L === 4 ? "A rock in the way" : "Mind the sloth!", 1600, { y: .32 }); } }
+}
+
+/* ---------- render ---------- */
+function bake() {
+  const W = Lab.W, H = Lab.H;
+  return Lab.sprite("ss_bg" + uid + "_" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40); draw.vgrad(g, -40, -40, W + 80, H + 80, ["#bfe8d9", "#e9f6c8", "#d6efb0"]);
+    const R = Lab.rng(uid * 7 + 3);
+    g.fillStyle = "rgba(255,250,210,.35)"; for (let i = 0; i < 3; i++) { const x = X(WW * (.2 + i * .3)); g.beginPath(); g.moveTo(x, -40); g.lineTo(x + 60 * S, -40); g.lineTo(x + 200 * S, H); g.lineTo(x + 90 * S, H); g.fill(); }
+    for (let layer = 0; layer < 3; layer++) { g.fillStyle = ["#a7d79a", "#86c27b", "#6aad63"][layer]; const by2 = WH * (.55 + layer * .1);
+      g.beginPath(); g.moveTo(X(-60), Y(WH + 50)); for (let x = -60; x <= WW + 60; x += 30) g.lineTo(X(x), Y(by2 - Math.abs(Math.sin(x * .02 + layer * 2 + uid)) * WH * .12 - R() * 10)); g.lineTo(X(WW + 60), Y(WH + 50)); g.fill();
+      for (let i = 0; i < 4; i++) { const tx = R() * WW, th = WH * (.25 + R() * .2); g.fillRect(X(tx) - 5 * k, Y(by2 - th), 10 * k, th * k); g.beginPath(); g.arc(X(tx), Y(by2 - th), 46 * k, 0, TAU); g.fill(); } }
+    // vines from the top
+    g.strokeStyle = "rgba(60,120,60,.45)"; g.lineWidth = 3 * k; for (let i = 0; i < 6; i++) { const x = X(R() * WW), l = (60 + R() * 140) * k; g.beginPath(); g.moveTo(x, oy - 40); g.quadraticCurveTo(x + 14 * k, oy + l * .5, x, oy + l); g.stroke(); g.fillStyle = "#5aa95a"; g.beginPath(); g.ellipse(x, oy + l, 7 * k, 4 * k, .5, 0, TAU); g.fill(); }
+    // tree trunks that hold the branch nests
+    for (const l of ledges) { const tx = l.tx, top = l.y - 60; g.fillStyle = "#8a5a3b"; g.fillRect(X(tx) - 14 * k, Y(top), 28 * k, (gy(tx) - top + 10) * k); g.fillStyle = "#4f9a4b"; g.beginPath(); g.arc(X(tx), Y(top), 52 * k, 0, TAU); g.arc(X(tx - 40), Y(top + 18), 36 * k, 0, TAU); g.arc(X(tx + 40), Y(top + 18), 36 * k, 0, TAU); g.fill();
+      g.strokeStyle = "#8a5a3b"; g.lineWidth = 9 * k; g.beginPath(); g.moveTo(X(tx), Y(l.y + 20)); g.lineTo(X(l.x + l.w / 2), Y(l.y + l.h / 2)); g.stroke(); }
+    // ground
+    g.fillStyle = "#7a5233"; g.beginPath(); g.moveTo(X(-60), Y(WH + 60)); for (const p of pts) g.lineTo(X(p[0]), Y(p[1])); g.lineTo(X(WW + 120), Y(WH + 60)); g.closePath(); g.fill();
+    g.fillStyle = "#9b6b43"; for (let i = 0; i < 40; i++) { const x = R() * WW; g.beginPath(); g.ellipse(X(x), Y(gy(x) + 20 + R() * WH * .1), (4 + R() * 6) * k, 3 * k, 0, 0, TAU); g.fill(); }
+    g.strokeStyle = "#5fae4a"; g.lineWidth = 7 * k; g.lineJoin = "round"; g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke();
+    g.fillStyle = "#4f9d3e"; for (let x = 0; x < WW; x += 14) { const yy = gy(x); g.beginPath(); g.moveTo(X(x - 4), Y(yy)); g.lineTo(X(x), Y(yy - 8 - R() * 8)); g.lineTo(X(x + 4), Y(yy)); g.fill(); }
+    // big foreground jungle leaves in the corners
+    const leaf = (x, y, len, ang, col) => { g.save(); g.translate(x, y); g.rotate(ang); g.fillStyle = col; g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(len * .5, -len * .32, len, 0); g.quadraticCurveTo(len * .5, len * .32, 0, 0); g.fill(); g.strokeStyle = "rgba(255,255,255,.25)"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, 0); g.lineTo(len * .95, 0); g.stroke(); g.restore(); };
+    const lw = Math.min(W, H) * .32; leaf(-30, -10, lw, .5, "#2f7d32"); leaf(-30, -10, lw * .85, .95, "#3f8f3a"); leaf(W + 30, -10, lw, Math.PI - .5, "#2f7d32"); leaf(W + 30, -10, lw * .8, Math.PI - 1, "#57a94a");
+    leaf(W + 30, H + 10, lw * .9, Math.PI + .5, "#2f7d32"); leaf(-30, H + 10, lw * .7, -.6, "#3f8f3a");
+    // stump
+    g.fillStyle = "#8a5a3b"; draw.rr(g, X(anchor.x - 70), Y(stumpTop), 78 * k, (gy(70) - stumpTop + 10) * k, 6 * k); g.fill(); g.fillStyle = "#c99a68"; g.beginPath(); g.ellipse(X(anchor.x - 31), Y(stumpTop), 39 * k, 8 * k, 0, 0, TAU); g.fill(); g.strokeStyle = "#a87a4e"; g.lineWidth = 1.5; g.beginPath(); g.ellipse(X(anchor.x - 31), Y(stumpTop), 22 * k, 4 * k, 0, 0, TAU); g.stroke();
+  });
+}
+function drawPlant(c, p, t) {
+  const gk = Lab.ease.outBack(p.grow), x = X(p.x), y = Y(p.y), bob = Math.sin(p.bob * 14) * p.bob * 6 * k;
+  if (p.type === 0) {
+    const tx = X(p.x + p.lean * 20 * gk), ty = Y(p.y - 150 * gk) + bob; c.strokeStyle = "#9a6a43"; c.lineWidth = 12 * k * gk; c.lineCap = "round"; c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + p.lean * 30 * k, (y + ty) / 2, tx, ty); c.stroke();
+    if (p.grow > .6) Pals.draw(c, "olli", tx, ty - 30 * k, 42 * k, { t, mood: p.bob > .2 ? "wow" : "sleepy", shadow: false });
+    c.fillStyle = "#3f9a3a"; for (const s of [-1, 1]) for (let j = 0; j < 3; j++) { c.save(); c.translate(tx, ty); c.rotate(s * (.25 + j * .3) + (s < 0 ? Math.PI : 0) + Math.sin(t * 2 + j) * .04); c.beginPath(); c.ellipse(46 * k * gk, 0, 46 * k * gk, 10 * k * gk, s * .25 * (s < 0 ? -1 : 1), 0, TAU); c.fill(); c.restore(); }
+    c.fillStyle = "#57b947"; c.beginPath(); c.ellipse(tx - 40 * k * gk, ty + 12 * k * gk, 44 * k * gk, 9 * k * gk, .3, 0, TAU); c.ellipse(tx + 40 * k * gk, ty + 12 * k * gk, 44 * k * gk, 9 * k * gk, -.3, 0, TAU); c.fill();
+  } else if (p.type === 1) {
+    const ty = Y(p.y - 100 * gk) + bob; c.strokeStyle = "#4f9a3e"; c.lineWidth = 7 * k * gk; c.beginPath(); c.moveTo(x, y); c.lineTo(x, ty); c.stroke();
+    c.fillStyle = "#5cbf4a"; c.beginPath(); c.ellipse(x - 16 * k * gk, Y(p.y - 45 * gk), 18 * k * gk, 7 * k * gk, -.5, 0, TAU); c.fill();
+    if (p.grow > .6) Pals.draw(c, "momo", x, ty - 20 * k, 40 * k, { t, mood: p.bob > .2 ? "joy" : "happy", arms: p.bob > .2 ? "up" : "down", shadow: false, squash: p.bob * .3 });
+    for (let i = 0; i < 6; i++) { const a = Math.PI + i / 5 * Math.PI; c.fillStyle = i % 2 ? "#ff7eb6" : "#ff9ccb"; c.beginPath(); c.ellipse(x + Math.cos(a) * 30 * k * gk, ty + Math.sin(a) * 6 * k * gk + 4 * k, 18 * k * gk, 10 * k * gk, a, 0, TAU); c.fill(); }
+    c.fillStyle = "#c2457e"; c.beginPath(); c.ellipse(x, ty + 2 * k, 42 * k * gk, 7 * k * gk, 0, 0, Math.PI); c.fill();
+  } else {
+    const cy = Y(p.y - 138 * gk) + bob; c.strokeStyle = "#8a5a3b"; c.lineWidth = 13 * k * gk; c.beginPath(); c.moveTo(x, y); c.lineTo(x, cy + 30 * k); c.stroke();
+    if (p.grow > .6) { const a = Pals.draw(c, "bun", x + 34 * k, y - 22 * k, 44 * k, { t, mood: "happy", arms: "hold", shadow: false }); draw.circle(c, a.handL[0], a.handL[1], 6 * k, "#ffb52e"); }
+    c.fillStyle = "#3f8f3a"; c.beginPath(); c.arc(x, cy, 54 * k * gk, 0, TAU); c.fill(); c.fillStyle = "#57b947"; c.beginPath(); c.arc(x - 16 * k * gk, cy - 14 * k * gk, 30 * k * gk, 0, TAU); c.fill();
+  }
+}
+function render(t) {
+  const c = Lab.ctx; if (!bgSpr) bgSpr = bake(); c.drawImage(bgSpr, -40, -40, bgSpr.w, bgSpr.h);
+  for (const r of rects) { if (r.tag === "leaf") { const n = Math.max(3, Math.round(r.w / 40)), rw = r.w / n; c.fillStyle = "#2f7d32"; draw.rr(c, X(r.x + 6), Y(r.y), (r.w - 12) * k, (r.h - 16) * k, 24 * k); c.fill();
+      for (let i = 0; i < n; i++) { const cx2 = X(r.x + rw * (i + .5)), wob = Math.sin(clock * 1.5 + i) * 2 * k; c.fillStyle = i % 2 ? "#3f8f3a" : "#4fa046"; c.beginPath(); c.arc(cx2, Y(r.y + r.h - 22) + wob, rw * .62 * k, 0, TAU); c.fill();
+        c.fillStyle = "#5cbf4a"; c.beginPath(); c.ellipse(cx2 - rw * .15 * k, Y(r.y + r.h - 30) + wob, rw * .22 * k, rw * .12 * k, -.4, 0, TAU); c.fill(); c.strokeStyle = "#3f7d32"; c.lineWidth = 2; c.beginPath(); c.moveTo(cx2, Y(r.y + r.h - 8)); c.quadraticCurveTo(cx2 + 6 * k, Y(r.y + r.h + 14), cx2, Y(r.y + r.h + 26 + i % 3 * 12)); c.stroke(); } }
+    else { draw.rect(c, X(r.x), Y(r.y), r.w * k, r.h * k, 10 * k, "#8f8a9e"); c.fillStyle = "#a9a4b8"; c.fillRect(X(r.x + 6), Y(r.y + 6), 10 * k, (r.h - 20) * k); } }
+  for (const l of ledges) { draw.rect(c, X(l.x), Y(l.y), l.w * k, l.h * k, 7 * k, "#9a6a43"); c.fillStyle = "#5fae4a"; c.fillRect(X(l.x + 4), Y(l.y) - 2, (l.w - 8) * k, 4 * k); }
+  for (const m of mounds) if (!m.planted) {
+    const x = X(m.x), y = Y(m.y), ty = TY[m.type], pulse = 1 + Math.sin(m.ping * 4) * .05, hot = seed ? 0 : queue[0] === m.type ? 1 : 0;
+    if (hot) { c.fillStyle = Lab.color.alpha(ty.c, .22 + .1 * Math.sin(clock * 5)); c.beginPath(); c.ellipse(x, y - 6 * k, MR * 1.25 * k, 16 * k, 0, 0, TAU); c.fill(); }
+    c.fillStyle = "#5a3b22"; c.beginPath(); c.ellipse(x, y, MR * k * pulse, 12 * k, 0, Math.PI, TAU); c.fill(); c.fillStyle = "#6e4a2c"; c.beginPath(); c.ellipse(x, y - 2 * k, MR * .6 * k, 6 * k, 0, Math.PI, TAU); c.fill();
+    c.strokeStyle = "#9a6a43"; c.lineWidth = 3 * k; c.beginPath(); c.moveTo(x + MR * .75 * k, y); c.lineTo(x + MR * .75 * k, y - 34 * k); c.stroke();
+    draw.circle(c, x + MR * .75 * k, y - 40 * k, 11 * k, "#fff6e0", ty.d, 2 * k); seedIcon(c, x + MR * .75 * k, y - 40 * k, 7 * k, m.type);
+  }
+  for (const p of plants) drawPlant(c, p, t);
+  for (const fr of fruits) if (!fr.got) { const fx2 = X(fr.x), fy = Y(fr.y + Math.sin(clock * 2 + fr.x) * 2); c.fillStyle = "#57b947"; c.beginPath(); c.ellipse(fx2 + 6 * k, fy - 11 * k, 7 * k, 3.5 * k, -.5, 0, TAU); c.fill(); draw.circle(c, fx2, fy, 10 * k, "#ffb52e", "#c77700", 2); }
+  if (sloth) { const px = X(sloth.px), py = Y(sloth.py); c.strokeStyle = "#4f8a3a"; c.lineWidth = 4 * k; c.beginPath(); c.moveTo(px, py); c.lineTo(X(sloth.x), Y(sloth.y)); c.stroke();
+    draw.circle(c, X(sloth.x), Y(sloth.y), sloth.r * k, "#b08a6a"); draw.circle(c, X(sloth.x), Y(sloth.y) + 4 * k, sloth.r * .62 * k, "#e9d2b4"); c.fillStyle = INK; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(X(sloth.x) + s * 9 * k, Y(sloth.y) + 1 * k, 6 * k, 3 * k, s * .4, 0, TAU); c.fill(); }
+    c.strokeStyle = INK; c.lineWidth = 2; c.beginPath(); c.arc(X(sloth.x), Y(sloth.y) + 9 * k, 5 * k, .2, Math.PI - .2); c.stroke(); }
+  for (const l of leaves) { c.save(); c.translate(X(l.x), Y(l.y)); c.rotate(l.r); c.fillStyle = "rgba(90,170,80,.75)"; c.beginPath(); c.ellipse(0, 0, 7 * k, 3.5 * k, 0, 0, TAU); c.fill(); c.restore(); }
+  // Pip + slingshot
+  const ax = X(anchor.x), ay = Y(anchor.y), pull = aim ? clampPull(aim.dx, aim.dy) : [0, 0], px = ax - pull[0], py = ay - pull[1];
+  const lk = aim ? [clamp(-aim.dx / 80, -1, 1), clamp(-aim.dy / 80, -1, 1)] : seed ? [clamp((X(seed.x) - ax) / 200, -1, 1), clamp((Y(seed.y) - ay) / 200, -1, 1)] : [1, 0];
+  const ps = 70 * k; Pals.draw(c, "pip", X(anchor.x - 48), Y(stumpTop) - ps * .5, ps, { t, mood: pip.mood, look: lk, arms: aim ? "hold" : pip.mood === "joy" ? "cheer" : "down", squash: pip.sq });
+  c.strokeStyle = "#7a4a2a"; c.lineWidth = 7 * k; c.lineCap = "round"; c.beginPath(); c.moveTo(ax, Y(stumpTop)); c.lineTo(ax, ay + 18 * k); c.lineTo(ax - 14 * k, ay - 8 * k); c.moveTo(ax, ay + 18 * k); c.lineTo(ax + 14 * k, ay - 8 * k); c.stroke();
+  c.strokeStyle = "#5aa95a"; c.lineWidth = 3.5 * k; c.beginPath(); c.moveTo(ax - 14 * k, ay - 8 * k); c.lineTo(px, py); c.lineTo(ax + 14 * k, ay - 8 * k); c.stroke();
+  if (phase === "aim" || phase === "clear") { if (seeds > 0 && phase === "aim") seedIcon(c, px, py, SR * k * 1.2, queue[0]); }
+  if (aim) { // short guide: only the first part of the arc
+    const v = launchV(pull[0], pull[1]), sd = newSeed(v[0], v[1], queue[0]); c.fillStyle = Lab.color.alpha(TY[queue[0]].d, .75);
+    for (let i = 1; i <= 9; i++) { for (let n = 0; n < 4; n++) { sd.vx += wind * STEP; sd.vy += G * STEP; sd.x += sd.vx * STEP; sd.y += sd.vy * STEP; } draw.circle(c, X(sd.x), Y(sd.y), (4 - i * .25) * k, null); c.fill(); }
+    draw.text(c, Math.round(Math.hypot(pull[0], pull[1]) / maxPull() * 100) + "%", ax, ay - 46 * k, { size: 13 * S, color: "#24402c", weight: 700 });
+  }
+  if (seed) { c.fillStyle = Lab.color.alpha(TY[seed.type].c, .35); seed.trail.forEach((p, i) => { c.beginPath(); c.arc(X(p[0]), Y(p[1]), SR * k * i / seed.trail.length, 0, TAU); c.fill(); });
+    seedIcon(c, X(seed.x), Y(seed.y), SR * k * 1.2, seed.type, seed.age * 9); if (seed.y < 0) { draw.circle(c, X(seed.x), Lab.play.y + 10, 5, TY[seed.type].d); } }
+  // HUD: seed bag + next + wind
+  const P = Lab.play, hx = P.x + 14 * S, hy = P.y + 20 * S;
+  draw.rect(c, hx - 6 * S, hy - 15 * S, 150 * S, 30 * S, 15 * S, "rgba(255,255,255,.7)"); seedIcon(c, hx + 10 * S, hy, 9 * S, queue[0]);
+  draw.text(c, "× " + seeds, hx + 26 * S, hy + 1, { size: 16 * S, color: seeds <= 2 ? "#d0442c" : "#24402c", align: "left", weight: 700 });
+  draw.text(c, "next", hx + 80 * S, hy + 1, { size: 12 * S, color: "#4f6b52", align: "left", weight: 600 }); seedIcon(c, hx + 124 * S, hy, 7 * S, queue[1]);
+  draw.text(c, "Clearing " + L + "  ·  " + mounds.filter(m => m.planted).length + "/" + mounds.length, P.x + P.w - 14 * S, hy + 1, { size: 14 * S, color: "#24402c", align: "right", weight: 700 });
+  if (wind) { const wx = P.x + P.w - 50 * S, wy = hy + 26 * S, d = Math.sign(wind), m = Math.abs(wind) / 170; draw.text(c, "wind", wx - 50 * S, wy, { size: 12 * S, color: "#4f6b52", weight: 600 }); c.strokeStyle = "#4f6b52"; c.lineWidth = 3; c.beginPath(); c.moveTo(wx - d * 14 * S, wy); c.lineTo(wx + d * (14 + 20 * m) * S, wy); c.lineTo(wx + d * (8 + 20 * m) * S, wy - 5 * S); c.moveTo(wx + d * (14 + 20 * m) * S, wy); c.lineTo(wx + d * (8 + 20 * m) * S, wy + 5 * S); c.stroke(); }
+  if (msg && !demo) draw.text(c, msg, P.x + P.w / 2, P.y + P.h - 22 * S, { size: 14 * S, color: "#24402c", weight: 600 });
+}
+function seedIcon(c, x, y, r, type, rot) {
+  const ty = TY[type]; c.save(); c.translate(x, y); c.rotate(rot || -.4); c.fillStyle = ty.c; c.beginPath(); c.ellipse(0, 0, r, r * .72, 0, 0, TAU); c.fill(); c.strokeStyle = ty.d; c.lineWidth = Math.max(1.2, r * .18); c.stroke();
+  c.fillStyle = "rgba(255,255,255,.55)"; c.beginPath(); c.ellipse(-r * .3, -r * .25, r * .3, r * .16, -.3, 0, TAU); c.fill(); c.strokeStyle = ty.d; c.beginPath(); c.moveTo(r * .2, -r * .5); c.quadraticCurveTo(r * .6, -r * 1.1, r * .9, -r * .9); c.stroke(); c.restore();
+}
+function clampPull(dx, dy) { const l = Math.hypot(dx, dy), m = Math.min(l, maxPull()); return l < 1 ? [0, 0] : [dx / l * m, dy / l * m]; }
+
+/* ---------- loop ---------- */
+function resetRun() { L = 1; uid = uid || 0; seeds = 10; score = 0; planted = 0; bulls = 0; tricks = 0; fruitN = 0; clock = 0; seed = null; aim = null; phase = "aim"; pip = { mood: "happy", moodT: 0, sq: 0 }; clearT = 0; kbAim = null; msg = "Drag back anywhere, let go to sling"; genClearing(); }
+function plantFruits() { for (const p of plants) if (p.type === 2 && !p.fruited && p.grow >= 1) { p.fruited = true; for (let i = 0; i < 3; i++) { const a = -Math.PI / 2 + (i - 1) * .9; fruits.push({ x: p.x + Math.cos(a) * 70, y: p.y - 138 + Math.sin(a) * 70, got: false }); } } }
+let demoT = 0;
+function attract(dt, t) {
+  if (!demo || !WW) { demo = true; resetRun(); } update(dt); plantFruits(); if (plants.length !== segs.__n) { rebuild(); segs.__n = plants.length; }
+  demoT -= dt; if (phase === "aim" && demoT <= 0) { const o = mounds.map((m, i) => i).filter(i => !mounds[i].planted && mounds[i].type === queue[0]); const sol = o.length ? solve(Lab.choose(o), 200) : null; if (sol) fire(sol.vx * rand(.99, 1.01), sol.vy); demoT = 1; }
+  if (seeds <= 0 && phase !== "fly") resetRun();
+  render(t);
+}
+function start() {
+  demo = false; resetRun(); Lab.setScore(0); Lab.music.intensity(.2);
+  Lab.input.onDown = [(x, y) => { if (phase !== "aim" || seeds <= 0) return; aim = { sx: x, sy: y, dx: 0, dy: 0 }; msg = null; snd("tick", { pitch: 1.4, vol: .4 }); }];
+  Lab.input.onMove = [(x, y) => { if (!aim) return; const old = Math.hypot(aim.dx, aim.dy); aim.dx = aim.sx - x; aim.dy = aim.sy - y; const nw = Math.min(Math.hypot(aim.dx, aim.dy), maxPull()); if (Math.floor(nw / 22) !== Math.floor(Math.min(old, maxPull()) / 22)) snd("tick", { pitch: .8 + nw / maxPull() * .8, vol: .25 }); }];
+  Lab.input.onUp = [() => { if (!aim) return; const p = clampPull(aim.dx, aim.dy); aim = null; if (Math.hypot(p[0], p[1]) < 14 * S) return; const v = launchV(p[0], p[1]); fire(v[0], v[1]); }];
+  Lab.input.onKey = [key => {
+    if (phase !== "aim") return; if (!aim) aim = { sx: 0, sy: 0, dx: maxPull() * .45, dy: -maxPull() * .45 };
+    const a = Math.atan2(-aim.dy, aim.dx), m = Math.hypot(aim.dx, aim.dy);
+    const na = key === "ArrowUp" ? a + .05 : key === "ArrowDown" ? a - .05 : a, nm = clamp(key === "ArrowRight" ? m + 4 : key === "ArrowLeft" ? m - 4 : m, 10, maxPull());
+    aim.dx = Math.cos(na) * nm; aim.dy = -Math.sin(na) * nm; msg = null;
+    if (key === " " || key === "Enter") { const v = launchV(aim.dx, aim.dy); aim = null; fire(v[0], v[1]); }
+  }];
+  Lab.expose({
+    get score() { return score; }, get seeds() { return seeds; }, get level() { return L; }, get phase() { return phase; }, get planted() { return planted; }, get flying() { return !!seed; },
+    get queue() { return queue.slice(); }, get plants() { return plants.length; }, get fruits() { return fruits.filter(f => !f.got).length; }, get tricks() { return tricks; }, get bulls() { return bulls; },
+    mounds() { return mounds.map(m => ({ x: m.x, y: m.y, type: m.type, planted: m.planted, sx: X(m.x), sy: Y(m.y) })); },
+    solve(i) { return solve(i, 900); }, fire(vx, vy) { return fire(vx, vy); },
+    dragFor(vx, vy) { const v = Math.hypot(vx, vy), m = v / vmax() * maxPull(); return [vx / v * m, vy / v * m]; }, anchor() { return [X(anchor.x), Y(anchor.y)]; },
+    setSeeds(n) { seeds = n; }, plantsXY() { return plants.map(p => [p.x, p.y, p.type]); }, get seedInfo() { return seed ? { trick: seed.trick, vy: seed.vy, y: seed.y } : null; },
+    dropSeed(x, y) { if (phase !== "aim") return false; seed = newSeed(0, 0, queue[0]); seed.x = x; seed.y = y; seed.t0 = clock; phase = "fly"; return true; }, setQueue(a) { queue = a.slice(); }, nextLevel() { for (const m of mounds) m.planted = true; phase = "clear"; clearT = .01; }, setLevel(n) { L = n; genClearing(); phase = "aim"; },
+  });
+  Lab.loop(frame);
+}
+function frame(dt, t) { if (phase !== "over") { update(dt); plantFruits(); if (plants.length !== segs.__n) { rebuild(); segs.__n = plants.length; } } render(t); }
+Lab.boot();
+})();
+</script></body></html>

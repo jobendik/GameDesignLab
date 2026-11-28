@@ -4,27 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 39,
-    "slug": "ice-cream-shop",
-    "t": "Ice Cream Shop",
-    "d": "Serve the right ice cream to impatient customers.",
-    "thumb": "../thumbs/PhoneGameLab2--ice-cream-shop.jpg"
-   },
-   {
-    "n": 40,
-    "slug": "ice-smash",
-    "t": "Ice Smash",
-    "d": "Tap to shatter all the ice before moves run out.",
-    "thumb": "../thumbs/PhoneGameLab2--ice-smash.jpg"
-   },
-   {
-    "n": 43,
-    "slug": "jungle-shot",
-    "t": "Jungle Shot",
-    "d": "Slingshot projectiles at jungle targets.",
-    "thumb": "../thumbs/PhoneGameLab2--jungle-shot.jpg"
-   },
-   {
     "n": 44,
     "slug": "make-a-kite",
     "t": "Make a Kite",
@@ -284,14 +263,9 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--wire-ball.jpg"
    },
    {
-    "slug": "snack-tank",
-    "t": "Hungry Fish",
-    "d": "Drag the fish to the food past the rocks."
-   },
-   {
-    "slug": "skip-jam",
-    "t": "Jump",
-    "d": "Tap to jump platforms. Time it right!"
+    "slug": "chip-off",
+    "t": "Ice Smash",
+    "d": "Tap ice blocks to shatter. Limited taps."
    }
   ]
  },
@@ -507,6 +481,13 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--jampoline.jpg"
    },
    {
+    "slug": "lickety-scoop",
+    "t": "Lickety Scoop",
+    "d": "Hold to scoop, let go on the ring. Stack it, don't topple it!",
+    "v2": true,
+    "score": 7
+   },
+   {
     "slug": "peekaboo-park",
     "t": "Peekaboo Park",
     "d": "Ready or not! Spot the tells. Find every pal!",
@@ -537,6 +518,19 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 7,
     "thumb": "../thumbs/PhoneGameLab2--say-cheese.jpg"
+   },
+   {
+    "slug": "snack-tank",
+    "t": "Snack Tank",
+    "d": "Fussy fish, sinking snacks. Drop it where they'll be!",
+    "v2": true,
+    "score": 7
+   },
+   {
+    "slug": "sprout-sling",
+    "t": "Sprout Sling",
+    "d": "Sling seeds, regrow the jungle — then bounce off what you grew.",
+    "v2": true
    },
    {
     "slug": "topping-toss",
@@ -587,6 +581,13 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 7,
     "thumb": "../thumbs/PhoneGameLab2--echo-jam.jpg"
+   },
+   {
+    "slug": "skip-jam",
+    "t": "Skip Jam",
+    "d": "Pip and Bun turn the rope. Keep Momo skipping to the beat.",
+    "v2": true,
+    "score": 7
    },
    {
     "slug": "strum-corner",

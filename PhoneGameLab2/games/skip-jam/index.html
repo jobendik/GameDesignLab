@@ -1,26 +1,205 @@
-<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Skip Jam</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
 </head><body><script>
-Lab.init({title:"Jump", instructions:"Tap to jump platforms. Time it right!", restart:start});
-let hero,plats,scroll,score;
-function start(){hero={x:80,y:Lab.H-150,vy:0,onGround:false};plats=[{x:0,y:Lab.H-110,w:200}];
-  for(let i=1;i<6;i++)plats.push({x:plats[i-1].x+plats[i-1].w+Lab.rand(60,140),y:Lab.H-110+Lab.rand(-40,40),w:Lab.rand(80,160)});
-  scroll=0;score=0;Lab.setScore(0);
-  Lab.input.onTap=[()=>{if(hero.onGround){hero.vy=-460;hero.onGround=false;Lab.beep(700,.05);}}];
-  Lab.loop((dt)=>{hero.vy+=900*dt;hero.y+=hero.vy*dt;scroll+=120*dt;
-    for(const p of plats)p.x-=120*dt;
-    hero.onGround=false;
-    for(const p of plats){if(hero.x>p.x&&hero.x<p.x+p.w && hero.y>=p.y-2 && hero.y<=p.y+10 && hero.vy>=0){hero.y=p.y;hero.vy=0;hero.onGround=true;}}
-    while(plats[plats.length-1].x<Lab.W){const last=plats[plats.length-1];plats.push({x:last.x+last.w+Lab.rand(60,160),y:Lab.H-110+Lab.rand(-50,50),w:Lab.rand(80,160)});}
-    plats=plats.filter(p=>p.x+p.w>-20);
-    score=Math.floor(scroll/30);Lab.setScore(score);
-    if(hero.y>Lab.H){Lab.gameover({title:"Fell!",message:"Score: "+score});return;}
-    draw();
+(function(){ "use strict";
+/* SKIP JAM — playground skipping rope. Pip and Bun turn the rope, Momo the frog skips in the middle.
+ * Core idea kept: jump over obstacles. Made it a different game from the runners (Frostfoot), the pad-hoppers (Hover Hop)
+ * and the wall-kickers (Pine Kick): nothing scrolls, there is nowhere to go — the obstacle is ONE rope sweeping round
+ * and round, and the game is RHYTHM. The rope itself is the band: every pass thumps a kick + bass note, every clean
+ * skip adds a melody note that climbs with the streak, hi-hats join at speed.
+ *   - Tap = a hop (time it so Momo's feet are high when the rope sweeps under: Perfect / Good / Close).
+ *   - Hold = a big jump (variable height). Needed for DOUBLE-UNDERS: Pip shouts "Double!" one turn ahead, the rope glows
+ *     gold and whips round twice under one jump. Also for flies — Momo is always hungry; a fly above her head is a snack.
+ *   - Every 10 skips the turners speed up; every 40 Bun picks up a second rope: DOUBLE DUTCH, two ropes alternating,
+ *     twice the beat, for 14 passes. Three hearts; a tangle costs one, then the turners count you back in.
+ * Score: Perfect 3 / Good 2 / Close 1, × streak multiplier (up to ×4); double-under +10×, fly +5×.
+ * Identity: sunny playground mat with chalk doodles; skies move meadow → golden → candy dusk as the tempo climbs. */
+let demo = false;
+Lab.init({
+  title: "Skip Jam", tagline: "Pip and Bun turn the rope. Keep Momo skipping to the beat.", category: "Music", kicker: "Pocket Pals",
+  howto: ["Tap to hop as the rope sweeps under", "Hold for a big jump (double-unders, flies)", "Three tangles and you're out"],
+  theme: { bg: "#9fd8f0", bg2: "#e8f7d8", fg: "#2f2a45", muted: "#5c5878", accent: "#ff6f61", accent2: "#3fb8a8", light: true },
+  orient: "any", restart: start, attract,
+});
+const { draw, fx } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, rand = Lab.rand, INK = Pals.ink;
+const LV = [1.1, .96, .86, .78, .71, .66, .61, .57, .54, .52], CLEAR = .03, FAST = .36;
+const ROOTS = [48, 43, 45, 41], MEL = [72, 74, 76, 79, 81, 84, 86, 88], SCN = ["meadow", "golden", "candy"];
+let S, wide, ground, s, cx, lx, rx, ts, topH, bgs, fans;
+let clock, phase, ropes, mo, hearts, score, skips, streak, bestStreak, doubles, flies, lv, dbl, dd, ddNext, ddAt, ddIv, dblCount, fly, call, countT, countN, tripT, bot, passN, lastPassT, shoutT;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function tone(o) { if (!demo) Lab.audio.tone(o); }
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.1; S = Math.min(P.w / 390, P.h / 700, 1.6); if (wide) S = Math.min(P.w / 760, P.h / 360, 1.6);
+  ground = P.y + P.h * (wide ? .86 : .66); s = Math.min(P.h * (wide ? .22 : .165), P.w * .24); cx = P.x + P.w / 2; ts = s * 1.08;
+  const spread = Math.min(P.w * .37, s * (wide ? 3.1 : 2.5)); lx = cx - spread; rx = cx + spread; topH = Math.min(s * 2.15, ground - P.y - 40 * S);
+  bgs = [];
+  const fy = wide ? ground - s * .32 : ground + (P.y + P.h - ground) * .55, fs = s * (wide ? .55 : .72);
+  fans = wide ? [{ who: "olli", x: P.x + Math.max(30 * S, (lx - ts * .7 - P.x) * .45), y: fy, s: fs }, { who: "nori", x: P.x + P.w - Math.max(30 * S, (lx - ts * .7 - P.x) * .45), y: fy, s: fs }]
+    : [{ who: "olli", x: P.x + P.w * .24, y: fy, s: fs }, { who: "nori", x: P.x + P.w * .76, y: fy, s: fs }];
+}
+function bg(k) {
+  const W = Lab.W, H = Lab.H;
+  return Lab.sprite("sj_bg" + k + "_" + W + "x" + H + "_" + Math.round(ground), W + 80, H + 80, g => {
+    g.translate(40, 40); Pals.backdrop(g, W, H, 3, { scene: SCN[k], ground: (ground + s * .1) / H });
+    const mw = (rx - lx) + ts * 2.2, my = ground - s * .05;
+    g.fillStyle = "rgba(0,0,0,.08)"; g.beginPath(); g.ellipse(cx, my + s * .18, mw / 2 + 6, s * .34, 0, 0, TAU); g.fill();
+    g.fillStyle = ["#e9a97a", "#e8906a", "#c98bd6"][k]; g.beginPath(); g.ellipse(cx, my + s * .12, mw / 2, s * .3, 0, 0, TAU); g.fill();
+    g.fillStyle = ["#f3c29a", "#f4ad86", "#dcaae6"][k]; g.beginPath(); g.ellipse(cx, my + s * .08, mw / 2 - 8, s * .25, 0, 0, TAU); g.fill();
+    g.strokeStyle = "rgba(255,255,255,.75)"; g.lineWidth = 2.5; g.setLineDash([7, 6]); g.beginPath(); g.ellipse(cx, my + s * .08, s * .55, s * .12, 0, 0, TAU); g.stroke(); g.setLineDash([]);
+    g.fillStyle = "rgba(255,255,255,.6)"; draw.star(g, cx - mw * .32, my + s * .1, s * .07, "rgba(255,255,255,.65)"); draw.heart(g, cx + mw * .33, my + s * .1, s * .06, "rgba(255,255,255,.65)");
+    const R = Lab.rng(4 + k); for (let i = 0; i < 26; i++) { const x = R() * W, y = ground + s * .45 + R() * (H - ground); g.fillStyle = "rgba(40,110,40,.25)"; g.fillRect(x, y, 2, -6 - R() * 6); }
   });
 }
-function draw(){const c=Lab.ctx;c.fillStyle="#2a384a";c.fillRect(0,0,Lab.W,Lab.H);
-  for(const p of plats){c.fillStyle="#5f8";c.fillRect(p.x,p.y,p.w,12);}
-  c.fillStyle="#fc5";c.fillRect(hero.x-12,hero.y-24,24,24);
+Lab.onResize(() => { if (mo) layout(); });
+
+/* ---------- run state ---------- */
+function reset() {
+  clock = 0; hearts = 3; score = 0; skips = 0; streak = 0; bestStreak = 0; doubles = 0; flies = 0; lv = 0; dbl = null; dd = null; ddNext = false; ddAt = 40; ddIv = .7;
+  dblCount = Lab.randInt(4, 6); fly = null; call = null; bot = demo ? { hold: false } : null; passN = 0; lastPassT = -9; shoutT = 0;
+  mo = { y: 0, vy: 0, grounded: true, holding: false, holdT: 0, buffer: 0, sq: 0, jid: 0, tongue: 0, mood: "happy", moodT: 0, peak: 0 };
+  beginCount();
 }
-start();
+function beginCount() { phase = "count"; countT = 0; countN = 0; ropes = [{ prev: null, next: null, col: "#ff6f61", half: false }]; mo.y = 0; mo.vy = 0; mo.grounded = true; mo.buffer = 0; }
+function baseIv() { return LV[Math.min(lv, LV.length - 1)]; }
+const mult = () => 1 + Math.min(3, Math.floor(streak / 10));
+function say(who, txt, dur) { call = { who, txt, t: 0, dur: dur || 1 }; }
+function phOf(r) { return r.prev == null ? 0 : TAU * clamp((clock - r.prev) / (r.next - r.prev), 0, 1); }
+
+/* ---------- input ---------- */
+function press() {
+  if (phase === "over") return false;
+  if (mo.grounded) { mo.grounded = false; mo.vy = 3.2; mo.holding = true; mo.holdT = 0; mo.jid++; mo.peak = 0; mo.sq = -.2; snd("jump", { pitch: 1.1, vol: .45 }); return true; }
+  mo.buffer = .13; return false;
+}
+function holdingInput() { const k = Lab.input.keys; return bot ? bot.hold : Lab.input.down || k[" "] || k.Space || k.ArrowUp || k.w || k.KeyW; }
+
+/* ---------- the rope ---------- */
+function onPass(r) {
+  const T = r.next; passN++;
+  if (mo.y < CLEAR) { trip(); return; }
+  const q = mo.y >= .22 ? 2 : mo.y >= .1 ? 1 : 0; skips++; streak++; bestStreak = Math.max(bestStreak, streak); lastPassT = clock;
+  const pts = (q + 1) * mult(); score += pts; if (!demo) Lab.setScore(score);
+  if (!demo) { fx.text(cx + (passN % 2 ? 1 : -1) * s * .9, ground - s * 1.25, ["Close!", "Good", "Perfect!"][q], { color: ["#8a7f9a", "#3fb8a8", "#ff6f61"][q], size: (q === 2 ? 20 : 16) * S }); fx.puff(cx - s * .55, ground, { n: 4, color: "rgba(255,255,255,.7)" }); fx.puff(cx + s * .55, ground, { n: 4, color: "rgba(255,255,255,.7)" }); }
+  // the groove: kick + bass on every pass, melody on clean skips
+  const root = ROOTS[Math.floor(skips / 4) % 4]; tone({ f: 120, f2: 48, type: "sine", dur: .14, vol: .5 }); tone({ f: Lab.audio.noteFreq(root), type: "triangle", dur: .22, vol: .22, lp: 900 });
+  if (q >= 1) tone({ f: Lab.audio.noteFreq(MEL[(streak - 1) % 8] + (q === 2 ? 0 : -12)), type: q === 2 ? "triangle" : "sine", dur: .16, vol: .17 });
+  if (q === 2) mo.mood = "joy", mo.moodT = .4;
+  if (streak % 10 === 0) { if (!demo) Lab.toast("Streak " + streak + "  ×" + mult(), 900, { y: .2 }); snd("star", { vol: .5 }); }
+  if (streak % 25 === 0 && hearts < 3) { hearts++; if (!demo) Lab.toast("+1 heart", 900, { y: .26 }); snd("powerup", { vol: .5 }); }
+  const nl = Math.min(LV.length - 1, Math.floor(skips / 10)); if (nl > lv) { lv = nl; if (!dd) { say("pip", "Faster!", 1.1); if (!demo) Lab.banner("Speed " + (lv + 1), { color: "#ff6f61", ms: 900, y: .2 }); snd("whistle", { vol: .5, pitch: 1.2 }); } }
+  r.prev = T;
+  if (r !== ropes[0]) { r.next = T + 2 * ddIv; return; }
+  if (dd) {
+    if (--dd.left <= 0) { ropes.length = 1; dd = null; r.next = T + baseIv(); say("bun", "Phew! One rope!", 1.2); if (!demo) Lab.toast("Double Dutch cleared! +" + 20 * mult(), 1200, { y: .3 }); score += 20 * mult(); if (!demo) Lab.setScore(score); snd("levelup"); }
+    else r.next = T + 2 * ddIv;
+    return;
+  }
+  if (dbl) {
+    if (dbl.st === "armed") { dbl.st = "fast"; dbl.jid = mo.jid; r.next = T + FAST; return; }
+    const ok = dbl.jid === mo.jid; dbl = null; r.next = T + baseIv();
+    if (ok) { doubles++; const b = 10 * mult(); score += b; if (!demo) { Lab.setScore(score); Lab.bumpScore(); fx.text(cx, ground - s * 1.9, "Double-under! +" + b, { color: "#e6a100", size: 20 * S }); fx.burst(cx, ground - s * .1, { n: 16, colors: ["#ffd54a", "#fff"], speed: 200, shape: "star", life: .5 }); } snd("levelup", { vol: .6 }); mo.mood = "wow"; mo.moodT = .8; }
+    return;
+  }
+  r.next = T + baseIv();
+  if (ddNext) {
+    ddNext = false; dd = { left: 14 }; ddIv = Math.max(.56, baseIv() * .85); r.next = T + 2 * ddIv; ropes.push({ prev: T - ddIv, next: T + ddIv, col: "#3fb8a8", half: false }); fly = null;
+    if (!demo) Lab.banner("Double Dutch!", { color: "#3fb8a8", ms: 1100, y: .2 }); snd("whoosh");
+  } else if (skips >= ddAt) { ddAt += 40; ddNext = true; say("bun", "Two ropes now!", 1.2); snd("warn", { vol: .4 }); }
+  else if (skips >= 14 && --dblCount <= 0) { dbl = { st: "armed" }; dblCount = Lab.randInt(5, 8); say("pip", "Double! Hold!", baseIv()); snd("whistle", { vol: .6 }); fly = null; }
+  else if (!fly && skips >= 6 && Lab.chance(.22)) fly = { t: 0, life: baseIv() * 3, h: .62, gone: 0 };
+}
+function trip() {
+  hearts--; streak = 0; phase = "trip"; tripT = 1.4; dbl = null; dd = null; ddNext = false; fly = null; ropes.length = 1; ropes[0].prev = null;
+  mo.mood = "dizzy"; mo.moodT = 1.4; mo.sq = .3; Lab.shake(7, .3); snd("hurt"); snd("thud"); if (!demo) Lab.buzz(60);
+  if (hearts > 0) say("bun", ["Oopsie!", "Tangled!", "Uh-oh!"][hearts % 3], 1.2);
+}
+function end() {
+  phase = "over"; Lab.gameover({ title: "Tangled up!", message: skips >= 40 ? "Momo skipped " + skips + " times. The whole playground cheered!" : "Momo skipped " + skips + " times.", score,
+    stats: [["Skips", skips], ["Best streak", bestStreak], ["Double-unders", doubles]] });
+}
+
+/* ---------- update ---------- */
+function update(dt) {
+  clock += dt;
+  if (bot && phase === "turn") botThink();
+  // Momo
+  if (!mo.grounded) {
+    if (mo.holding && !holdingInput()) mo.holding = false;
+    const g = mo.holding && mo.holdT < .22 ? 5 : 16; mo.holdT += dt; mo.vy -= g * dt; mo.y += mo.vy * dt; mo.peak = Math.max(mo.peak, mo.y);
+    if (mo.y <= 0) { mo.y = 0; mo.vy = 0; mo.grounded = true; mo.sq = .22 + mo.peak * .2; snd("land", { vol: .25 }); if (mo.buffer > 0 && phase === "turn") press(); }
+  }
+  mo.buffer = Math.max(0, mo.buffer - dt); mo.sq = Lab.damp(mo.sq, 0, 10, dt); mo.tongue = Math.max(0, mo.tongue - dt); mo.moodT -= dt;
+  if (call) { call.t += dt; if (call.t > call.dur) call = null; }
+  if (phase === "count") {
+    countT += dt; const step = .55;
+    if (countT > (countN + 1) * step) { countN++; if (countN <= 3) { say("bun", "" + (4 - countN), step * .9); snd("tick", { pitch: 1 + countN * .1 }); tone({ f: 1800, dur: .05, vol: .12, type: "square" }); }
+      else { say("pip", "Skip!", .8); phase = "turn"; ropes[0].prev = clock; ropes[0].next = clock + baseIv() * 1.15; snd("whoosh", { vol: .5 }); } }
+  } else if (phase === "turn") {
+    for (const r of ropes.slice()) { while (phase === "turn" && r.prev != null && clock >= r.next) onPass(r);
+      const half = phOf(r) > Math.PI; if (half && !r.half && lv >= 2 && r === ropes[0]) tone({ f: 6000, dur: .03, vol: .05, type: "square" }); r.half = half; }
+    if (fly) { fly.t += dt; if (fly.t > fly.life) fly = null; else if (Math.abs(mo.y - fly.h) < .14) { flies++; const b = 5 * mult(); score += b; if (!demo) { Lab.setScore(score); fx.text(cx + s * .4, ground - s * 1.6, "Gulp! +" + b, { color: "#3e9b47", size: 17 * S }); } snd("pop", { pitch: 1.3 }); mo.tongue = .18; mo.mood = "joy"; mo.moodT = .6; fly = null; } }
+  } else if (phase === "trip") { tripT -= dt; if (tripT <= 0) { if (hearts <= 0) { if (demo) reset(); else return end(); } else beginCount(); } }
+  if (mo.moodT <= 0) mo.mood = phase === "count" ? "focus" : dbl ? "focus" : hearts === 1 ? "think" : "happy";
+}
+function botThink() { // attract-mode skipper (also used by tests): hop so the next pass meets Momo near the apex
+  let nx = Infinity; for (const r of ropes) nx = Math.min(nx, r.next); const until = nx - clock, big = dbl && dbl.st === "armed" || fly && fly.t < fly.life - .6;
+  if (mo.grounded && until < (big ? .1 : .2) && until > 0) { bot.hold = !!big; press(); }
+  if (!mo.grounded && mo.holdT > .25) bot.hold = false;
+}
+
+/* ---------- render ---------- */
+function ropeAt(r, ph, front, hl, hr) {
+  const c = Lab.ctx, rr = s * .1, eL = [hl[0] + Math.sin(ph) * rr * .4, hl[1] + Math.cos(ph) * rr], eR = [hr[0] - Math.sin(ph) * rr * .4, hr[1] + Math.cos(ph) * rr];
+  const mid = ground - (1 - Math.cos(ph)) / 2 * topH, cy = 2 * mid - (eL[1] + eR[1]) / 2;
+  const fast = r.next && r.prev != null && r.next - r.prev < .5, col = dbl && dbl.st === "fast" && r === ropes[0] ? "#ffbf1f" : r.col;
+  if (r.prev != null) { const tp = ph - .35; const m2 = ground - (1 - Math.cos(tp)) / 2 * topH; c.strokeStyle = Lab.color.alpha(col, fast ? .28 : .16); c.lineWidth = (front ? 7 : 4) * S; c.beginPath(); c.moveTo(eL[0], eL[1]); c.quadraticCurveTo(cx, 2 * m2 - (eL[1] + eR[1]) / 2, eR[0], eR[1]); c.stroke(); }
+  c.strokeStyle = front ? col : Lab.color.shade(col, -.25); c.lineWidth = (front ? 4.5 : 3) * S; c.lineCap = "round"; c.beginPath(); c.moveTo(eL[0], eL[1]); c.quadraticCurveTo(cx, cy, eR[0], eR[1]); c.stroke();
+  for (const e of [eL, eR]) { draw.rect(Lab.ctx, e[0] - 3 * S, e[1] - 7 * S, 6 * S, 14 * S, 3 * S, "#b5784a"); }
+}
+function render(t) {
+  const c = Lab.ctx, k = Math.min(2, Math.floor(lv / 3)); bgs[k] = bgs[k] || bg(k); c.drawImage(bgs[k], -40, -40, bgs[k].w, bgs[k].h);
+  const P = Lab.play, my = ground - s * .5 - mo.y * s;
+  draw.shadow(c, cx, ground + s * .06, s * .42 * (1 - mo.y * .4), s * .1, .22 * (1 - mo.y * .5));
+  for (const f of fans) { const hop = streak >= 10 && phase === "turn" ? Math.abs(Math.sin(clock * 5 + f.x)) * f.s * .12 : 0;
+    Pals.draw(c, f.who, f.x, f.y - f.s * .5 - hop, f.s, { t, mood: phase === "trip" ? "sad" : dbl || dd ? "wow" : streak >= 5 ? "joy" : "happy", arms: streak >= 10 && phase === "turn" ? "cheer" : "down", look: [(cx - f.x) / 300, -.2] }); }
+  const sway = Math.sin(clock * 6) * .04, cheer = phase === "trip" ? "sad" : dbl ? "wow" : streak >= 10 ? "joy" : "happy";
+  const aL = Pals.draw(c, "pip", lx, ground - ts * .5, ts, { t, mood: call && call.who === "pip" ? "joy" : cheer, arms: "hold", tilt: sway, look: [1, 0], talk: call && call.who === "pip" ? .6 : 0 });
+  const aR = Pals.draw(c, "bun", rx, ground - ts * .5, ts, { t, mood: phase === "trip" ? "scared" : cheer, arms: "hold", tilt: -sway, look: [-1, 0], talk: call && call.who === "bun" ? .6 : 0 });
+  const hl = aL.handR, hr = aR.handL, phs = ropes.map(phOf);
+  ropes.forEach((r, i) => { if (phs[i] < Math.PI) ropeAt(r, phs[i], false, hl, hr); });
+  if (fly) { const fy = ground - s * .55 - fly.h * s - s * .2, fx2 = cx + s * .35 + Math.sin(clock * 9) * s * .12; c.fillStyle = "rgba(255,255,255,.8)"; c.beginPath(); c.ellipse(fx2 - 4, fy - 5, 6, 3.5, -.5 + Math.sin(clock * 60) * .4, 0, TAU); c.ellipse(fx2 + 4, fy - 5, 6, 3.5, .5 - Math.sin(clock * 60) * .4, 0, TAU); c.fill(); draw.circle(c, fx2, fy, 4.5 * S, INK); }
+  const arms = !mo.grounded ? (mo.peak > .4 ? "cheer" : "up") : phase === "trip" ? "down" : "down";
+  const am = Pals.draw(c, "momo", cx, my, s, { t, mood: phase === "trip" ? "dizzy" : mo.mood, arms, shadow: false, squash: mo.grounded ? mo.sq : Lab.clamp(-mo.vy * .04, -.18, .1), tilt: phase === "trip" ? .3 : 0, look: fly ? [.6, -.6] : [0, .3] });
+  if (mo.tongue > 0) { const m = am.mouth; c.strokeStyle = "#ff7d9c"; c.lineWidth = 4 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(m[0], m[1]); c.lineTo(m[0] + s * .4 * (mo.tongue / .18), m[1] - s * .2 * (mo.tongue / .18)); c.stroke(); }
+  ropes.forEach((r, i) => { if (phs[i] >= Math.PI) ropeAt(r, phs[i], true, hl, hr); });
+  // speech
+  if (call) { const a = call.who === "pip" ? aL : aR, bw = Math.max(56 * S, call.txt.length * 9.5 * S + 18 * S), bxp = clamp(a.head[0] + (call.who === "pip" ? 1 : -1) * bw * .35, P.x + bw / 2 + 4, P.x + P.w - bw / 2 - 4), byp = a.head[1] - 30 * S;
+    Pals.bubble(c, bxp, byp, bw, 34 * S, { tailX: a.head[0], tailY: a.head[1] - 4 }); draw.text(c, call.txt, bxp, byp, { size: 16 * S, color: INK, weight: 700 }); }
+  // HUD: hearts, streak, speed
+  for (let i = 0; i < 3; i++) draw.heart(c, P.x + 22 * S + i * 26 * S, P.y + 22 * S, 9 * S, i < hearts ? "#ff6f61" : "rgba(47,42,69,.18)");
+  draw.text(c, "Skips " + skips, P.x + 14 * S, P.y + 50 * S, { size: 15 * S, color: "#2f2a45", align: "left", weight: 700 });
+  if (streak >= 2) draw.text(c, "Streak " + streak + (mult() > 1 ? "  ×" + mult() : ""), P.x + P.w - 14 * S, P.y + 22 * S, { size: 15 * S, color: mult() > 1 ? "#e0533f" : "#2f2a45", align: "right", weight: 700 });
+  draw.text(c, dd ? "Double Dutch · " + dd.left : "Speed " + (lv + 1), P.x + P.w - 14 * S, P.y + 46 * S, { size: 13 * S, color: "#5c5878", align: "right", weight: 600 });
+  if (phase === "count" && skips === 0 && hearts === 3 && !demo) draw.text(c, "Tap as the rope swings down in front", cx, ground + s * .62, { size: 14 * S, color: "#2f2a45", weight: 600 });
+}
+function attract(dt, t) { if (!demo || !mo) { demo = true; layout(); reset(); } update(dt); render(t); }
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0);
+  Lab.input.onDown = [() => { if (phase !== "over" && !bot) press(); }];
+  Lab.input.onKey = [k => { if ((k === " " || k === "ArrowUp" || k === "w") && !bot) press(); }];
+  Lab.expose({
+    get score() { return score; }, get hearts() { return hearts; }, get skips() { return skips; }, get streak() { return streak; }, get phase() { return phase; }, get lv() { return lv; },
+    get doubles() { return doubles; }, get dd() { return !!dd; }, get ropes() { return ropes.length; }, get dbl() { return dbl ? dbl.st : null; }, get y() { return mo.y; }, get grounded() { return mo.grounded; },
+    untilPass() { let nx = Infinity; for (const r of ropes) if (r.prev != null) nx = Math.min(nx, r.next); return phase === "turn" ? nx - clock : null; },
+    waitPass(lead) { return new Promise(res => { const f = () => { const u = this.untilPass(); if (u != null && u < lead && u > 0) res(u); else requestAnimationFrame(f); }; f(); }); },
+    bot(on) { bot = on ? { hold: false } : null; }, setSkips(n) { skips = n; lv = Math.min(LV.length - 1, Math.floor(n / 10)); }, armDouble() { dblCount = 1; skips = Math.max(skips, 14); }, armDD() { ddAt = skips; },
+  });
+  Lab.loop(frame);
+}
+function frame(dt, t) { if (phase !== "over") update(dt); render(t); }
+Lab.boot();
+})();
 </script></body></html>

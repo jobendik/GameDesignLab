@@ -162,6 +162,8 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--chomp-chain-rush.jpg"
   },
   {
@@ -389,16 +391,20 @@ window.GDL_CATALOG = {
    "id": "games/maze-munch-rush",
    "path": "games/maze-munch-rush.html",
    "collection": "arcade",
-   "title": "Maze Munch Rush — Mobile Arcade Prototype",
-   "desc": "Mobile maze munch rush with improved controls.",
+   "title": "Vault Runner",
+   "desc": "A cat burglar sprints through procedurally built vaults: grab the keycards, flip gate switches to cut off a scent-tracking hound, an interceptor and a searchlight sweeper, then escape before the alarm closes in.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Action",
+    "Stealth"
    ],
    "controls": [
     "touch",
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--maze-munch-rush.jpg"
   },
   {
@@ -729,10 +735,11 @@ window.GDL_CATALOG = {
    "id": "games/pitch-26",
    "path": "games/pitch-26.html",
    "collection": "arcade",
-   "title": "PITCH 26 — Football",
-   "desc": "Football arcade game on Pitch 26.",
+   "title": "Floodlight Fives",
+   "desc": "Five-a-side cage football under the floodlights: pass, press and shoot your way through a three-round knockout cup.",
    "genre": [
-    "Casual"
+    "Sports",
+    "Arcade"
    ],
    "controls": [
     "touch",
@@ -2624,6 +2631,21 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--cheeky-brush.jpg"
   },
   {
+   "id": "PhoneGameLab2/chip-off",
+   "path": "PhoneGameLab2/games/chip-off/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Ice Smash",
+   "desc": "Tap ice blocks to shatter. Limited taps.",
+   "genre": [
+    "Minigame"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": false
+  },
+  {
    "id": "PhoneGameLab2/clatter-castle",
    "path": "PhoneGameLab2/games/clatter-castle/index.html",
    "collection": "PhoneGameLab2",
@@ -2812,23 +2834,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--huddle-up.jpg"
   },
   {
-   "id": "PhoneGameLab2/ice-cream-shop",
-   "path": "PhoneGameLab2/games/ice-cream-shop/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Ice Cream Shop",
-   "desc": "Serve the right ice cream to impatient customers.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 39,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--ice-cream-shop.jpg"
-  },
-  {
    "id": "PhoneGameLab2/ice-dunk",
    "path": "PhoneGameLab2/games/ice-dunk/index.html",
    "collection": "PhoneGameLab2",
@@ -2846,23 +2851,6 @@ window.GDL_CATALOG = {
    "score": 8,
    "status": "transformed",
    "thumb": "thumbs/PhoneGameLab2--ice-dunk.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/ice-smash",
-   "path": "PhoneGameLab2/games/ice-smash/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Ice Smash",
-   "desc": "Tap to shatter all the ice before moves run out.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 40,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--ice-smash.jpg"
   },
   {
    "id": "PhoneGameLab2/jampoline",
@@ -2883,23 +2871,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--jampoline.jpg"
   },
   {
-   "id": "PhoneGameLab2/jungle-shot",
-   "path": "PhoneGameLab2/games/jungle-shot/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Jungle Shot",
-   "desc": "Slingshot projectiles at jungle targets.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 43,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--jungle-shot.jpg"
-  },
-  {
    "id": "PhoneGameLab2/lantern-lane",
    "path": "PhoneGameLab2/games/lantern-lane/index.html",
    "collection": "PhoneGameLab2",
@@ -2917,6 +2888,24 @@ window.GDL_CATALOG = {
    "score": 7,
    "status": "transformed",
    "thumb": "thumbs/PhoneGameLab2--lantern-lane.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/lickety-scoop",
+   "path": "PhoneGameLab2/games/lickety-scoop/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Lickety Scoop",
+   "desc": "Hold to scoop, let go on the ring. Stack it, don't topple it!",
+   "genre": [
+    "Skill"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/lilypad-lunch",
@@ -3349,16 +3338,19 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab2/skip-jam",
    "path": "PhoneGameLab2/games/skip-jam/index.html",
    "collection": "PhoneGameLab2",
-   "title": "Jump",
-   "desc": "Tap to jump platforms. Time it right!",
+   "title": "Skip Jam",
+   "desc": "Pip and Bun turn the rope. Keep Momo skipping to the beat.",
    "genre": [
-    "Minigame"
+    "Music"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
-   "v2": false
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/sky-high",
@@ -3483,16 +3475,19 @@ window.GDL_CATALOG = {
    "id": "PhoneGameLab2/snack-tank",
    "path": "PhoneGameLab2/games/snack-tank/index.html",
    "collection": "PhoneGameLab2",
-   "title": "Hungry Fish",
-   "desc": "Drag the fish to the food past the rocks.",
+   "title": "Snack Tank",
+   "desc": "Fussy fish, sinking snacks. Drop it where they'll be!",
    "genre": [
-    "Minigame"
+    "Skill"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
-   "v2": false
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/snake-trails",
@@ -3647,6 +3642,22 @@ window.GDL_CATALOG = {
    "n": 70,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--spray-paint.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/sprout-sling",
+   "path": "PhoneGameLab2/games/sprout-sling/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Sprout Sling",
+   "desc": "Sling seeds, regrow the jungle — then bounce off what you grew.",
+   "genre": [
+    "Skill"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true
   },
   {
    "id": "PhoneGameLab2/stew-patch",
