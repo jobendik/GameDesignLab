@@ -1,22 +1,287 @@
-<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Snack Tank</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
 </head><body><script>
-Lab.init({title:"Hungry Fish", instructions:"Drag the fish to the food past the rocks.", restart:start});
-let fish,food,rocks,level;
-function start(){level=level||1;
-  fish={x:60,y:Lab.H/2,r:18};food={x:Lab.W-60,y:Lab.rand(200,Lab.H-100),r:18};
-  rocks=[];for(let i=0;i<3+level;i++)rocks.push({x:Lab.rand(120,Lab.W-120),y:Lab.rand(200,Lab.H-80),r:Lab.rand(24,40)});
-  Lab.setScore(level);
-  Lab.input.onMove=[(x,y)=>{if(Lab.input.down){fish.x=x;fish.y=y;
-    for(const r of rocks)if(Lab.dist(fish.x,fish.y,r.x,r.y)<fish.r+r.r){Lab.gameover({title:"Bonk!",message:"Level: "+level});return;}
-    if(Lab.dist(fish.x,fish.y,food.x,food.y)<fish.r+food.r){level++;Lab.beep(1000,.1);start();}
-  }}];
-  Lab.loop(()=>draw());
+(function(){ "use strict";
+/* SNACK TANK — Bolt the robot runs the aquarium at the pet shop. Every fish is fussy: Redfins only eat pellets,
+ * Sunnies only flakes, Leafies only algae wafers, Blushes only shrimp. Bolt rolls along the rim with the snack jar.
+ * Core idea kept: get the food to the hungry fish.  The verb is new (vs. Top Frog's eat-to-grow, Fin Focus's photos,
+ *   Reef Relief's claw, Fish Fizz's bubbles): you are the FEEDER. Tap the water to drop the snack Bolt is holding;
+ *   it SINKS — pellets plunge, flakes flutter, wafers glide sideways, shrimp sink steadily — and the fish keep swimming,
+ *   so you lead your drop. The wrong fish will not eat it: it bumps it away (sometimes into the right fish's path).
+ * Each fish has a hunger ring; fed three snacks it is grown and swims off to the big pond, and a new baby arrives.
+ *   A fish whose ring runs out sulks on the sand: one of three hearts. A streak of clean feeds raises the multiplier.
+ * Later tanks: more fish and kinds, faster hunger, a greedy PUFFER that gulps any snack (route around it),
+ *   a BUBBLER that lifts snacks, then night lights.
+ * Identity: a glass tank on a cream shop wall — turquoise water, kelp, sand, a tiny castle; plucky "funk" music. */
+let demo = false;
+Lab.init({
+  title: "Snack Tank", tagline: "Fussy fish, sinking snacks. Drop it where they'll be!", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Tap the water to drop Bolt's snack", "Each fish eats only its own snack", "Lead the swimmers — snacks sink"],
+  theme: { bg: "#3f9cc2", bg2: "#bfeaf0", fg: "#2b2340", muted: "#5d6a7a", accent: "#ff7a59", accent2: "#3ec5ff", light: true },
+  orient: "any", music: { style: "funk", key: "A", vol: .32 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const FOOD = [ // sink speed, sideways glide, wobble
+  { n: "pellet", c: "#e8513f", sink: 150, glide: 0, wob: 0 }, { n: "flake", c: "#f2b51c", sink: 46, glide: 0, wob: 34 },
+  { n: "wafer", c: "#3fae6a", sink: 78, glide: 38, wob: 0 }, { n: "shrimp", c: "#ff7fae", sink: 104, glide: 0, wob: 10 }];
+const FISH = [{ n: "Redfin", c: "#ff6b5e", b: "#ffd2c4", sp: 62 }, { n: "Sunny", c: "#ffc93c", b: "#fff1c4", sp: 48 },
+  { n: "Leafy", c: "#4fc98a", b: "#d5f7e2", sp: 54 }, { n: "Blush", c: "#ff8fc7", b: "#ffe0ef", sp: 72 }];
+let S, T, wide, bgS;
+let fish, foods, queue, bolt, hearts, level, served, snacks, streak, bestStreak, score, wasted, cool, clock, over, puffer, bub, kbX, nextId, told, bubble, spawnQ;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function say(txt, dur) { if (!demo) bubble = { txt, t: 0, dur: dur || 2.6 }; }
+function once(id, txt, dur) { if (!told[id]) { told[id] = 1; say(txt, dur); } }
+const kinds = () => Math.min(4, level + 1), maxFish = () => Math.min(5, level + 2), need = () => level >= 4 ? 4 : 3;
+const hungerTime = () => Math.max(11, 24 - level * 2.2), mult = () => Math.min(5, 1 + (streak / 2 | 0));
+
+function layout() {
+  const P = Lab.play, o = T; wide = P.w > P.h * 1.2; S = clamp(Math.min(P.w / 390, P.h / 700), .7, 1.5);
+  const top = P.y + (wide ? 50 : 58) * S + 62 * S;
+  T = { x: P.x + 12, w: P.w - 24, y: top, bot: P.y + P.h - 14 };
+  T.h = T.bot - T.y; T.sand = T.bot - 26 * S;
+  if (o && fish) { const m = q => { q.x = T.x + (q.x - o.x) / o.w * T.w; q.y = T.y + (q.y - o.y) / o.h * T.h; }; fish.forEach(f => { m(f); f.lane = T.y + (f.lane - o.y) / o.h * T.h; }); foods.forEach(m); bolt.x = clamp(bolt.x, T.x + 20, T.x + T.w - 20); bolt.tx = bolt.x; if (bub) bub.x = T.x + (bub.x - o.x) / o.w * T.w; }
+  bgS = null;
 }
-function draw(){const c=Lab.ctx;c.fillStyle="#0a3a55";c.fillRect(0,0,Lab.W,Lab.H);
-  for(const r of rocks){c.fillStyle="#555";c.beginPath();c.arc(r.x,r.y,r.r,0,Lab.TAU);c.fill();}
-  c.fillStyle="#f55";c.beginPath();c.arc(food.x,food.y,food.r,0,Lab.TAU);c.fill();
-  c.fillStyle="#fc5";c.beginPath();c.ellipse(fish.x,fish.y,fish.r,fish.r*0.7,0,0,Lab.TAU);c.fill();
+Lab.onResize(() => layout());
+
+/* ---------------- fish ---------------- */
+function laneY() { for (let i = 0; i < 12; i++) { const y = rand(T.y + T.h * .2, T.sand - 30 * S); if (fish.every(f => Math.abs(f.lane - y) > 34 * S)) return y; } return rand(T.y + T.h * .2, T.sand - 30 * S); }
+function newFish(sp, fromSide) {
+  const dir = Lab.chance(.5) ? 1 : -1, lane = laneY();
+  const f = { id: nextId++, sp, x: fromSide ? (dir > 0 ? T.x - 30 * S : T.x + T.w + 30 * S) : rand(T.x + 40 * S, T.x + T.w - 40 * S), y: lane, lane, dir, face: dir,
+    speed: FISH[sp].sp * S * rand(.85, 1.15) * (1 + level * .06), hunger: .75, fed: 0, state: "swim", st: 0, ph: rand(0, TAU), chomp: 0, bleh: 0, joy: 0, chase: null };
+  fish.push(f); return f;
 }
-start();
+function pickSpecies() { // prefer kinds not yet in the tank
+  const k = kinds(), have = fish.filter(f => f.state !== "leave").map(f => f.sp), miss = []; for (let i = 0; i < k; i++) if (!have.includes(i)) miss.push(i);
+  return miss.length ? Lab.choose(miss) : Lab.randInt(0, k - 1);
+}
+function refillQueue() {
+  while (queue.length < 3) {
+    const live = fish.filter(f => f.state !== "leave"), w = [];
+    for (const f of live) w.push([f.sp, 1 + (1 - f.hunger) * 3]);
+    if (!w.length || Lab.chance(.2)) { queue.push(Lab.randInt(0, kinds() - 1)); continue; }
+    let tot = w.reduce((s, a) => s + a[1], 0), r = rand(0, tot), pick = w[0][0]; for (const [sp, x] of w) { r -= x; if (r <= 0) { pick = sp; break; } }
+    if (queue.length && queue[queue.length - 1] === pick && Lab.chance(.5)) pick = Lab.randInt(0, kinds() - 1);
+    queue.push(pick);
+  }
+}
+function reset() {
+  fish = []; foods = []; queue = []; hearts = 3; level = 1; served = 0; snacks = 0; streak = 0; bestStreak = 0; score = 0; wasted = 0; cool = 0; clock = 0; over = false;
+  puffer = null; bub = null; kbX = null; nextId = 1; told = {}; bubble = null; spawnQ = [];
+  bolt = { x: T.x + T.w / 2, tx: T.x + T.w / 2, throwT: 0, joy: 0, sad: 0, face: 1 };
+  for (let i = 0; i < maxFish(); i++) newFish(i % kinds(), false); refillQueue();
+}
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0); Lab.music.intensity(.2);
+  Lab.input.onDown = [(x, y) => { if (y > T.y - 50 * S) drop(x); }];
+  Lab.input.onKey = [(k) => { if (k === " " || k === "Space" || k === "ArrowDown" || k === "Enter") drop(kbX == null ? bolt.x : kbX); }];
+  Lab.after(.5, () => once("hi", "Tap the water to drop a snack!", 3));
+  Lab.loop(frame);
+}
+function attract(dt, t) {
+  if (!fish || !demo) { demo = true; layout(); reset(); level = 3; fish = []; for (let i = 0; i < 4; i++) newFish(i, false); }
+  clock += dt; if (cool <= 0 && Lab.chance(dt * .8)) { const f = Lab.choose(fish); if (f && queue[0] === f.sp) drop(f.x + f.dir * f.speed * .8); else if (f) drop(rand(T.x + 30, T.x + T.w - 30)); }
+  update(dt, t); render(t);
+}
+
+/* ---------------- rules ---------------- */
+function drop(x) {
+  if (over || cool > 0) return; x = clamp(x, T.x + 10 * S, T.x + T.w - 10 * S);
+  const type = queue.shift(); refillQueue(); cool = .3; bolt.tx = x; bolt.throwT = .25; bolt.face = x > bolt.x ? 1 : -1;
+  foods.push({ type, x, y: T.y + 4 * S, vx: 0, vy: FOOD[type].sink * S * .6, t: 0, rot: rand(0, TAU), floor: 0, nudged: 0, gd: Lab.chance(.5) ? 1 : -1 });
+  snd("drop", { pitch: 1.3 - type * .1, vol: .6 }); fx.burst(x, T.y + 2, { n: 5, color: "#ffffff", speed: 60 * S, angle: -Math.PI / 2, spread: 1.6, life: .35, size: 2.5 * S, gravity: 300 });
+}
+function feed(f, fd) {
+  fd.dead = true; f.fed++; f.hunger = Math.min(1, f.hunger + .55); f.chomp = .3; f.joy = .8; snacks++; streak++; bestStreak = Math.max(bestStreak, streak);
+  const m = mult(), pts = 10 * m * (fd.nudged ? 2 : 1); if (!demo) { score += pts; Lab.setScore(score); }
+  if (!demo) fx.text(f.x, f.y - 26 * S, (fd.nudged ? "Bank! " : "") + "+" + pts, { color: FISH[f.sp].c, size: (15 + m * 2) * S, outline: "rgba(43,35,64,.5)" });
+  snd("bubble", { pitch: .9 + Math.min(streak, 12) * .06 }); if (m > 1 && streak % 2 === 0) Lab.audio.combo(m);
+  fx.burst(f.x + f.face * 12 * S, f.y, { n: 6, colors: ["#ffffff", FOOD[fd.type].c], speed: 70 * S, life: .4, size: 3 * S, shape: "circle" });
+  if (f.state === "sulk") { f.state = "swim"; f.st = 0; }
+  if (f.fed >= need()) { f.state = "grown"; f.st = 0; snd("chime"); bolt.joy = 1.2; graduate(f); }
+  if (streak === 4) once("streak", "Nice streak! Snacks pay more", 2.4);
+}
+function graduate(f) {
+  served++; const pts = 50 * level; if (!demo) { score += pts; Lab.setScore(score); Lab.bumpScore(); fx.text(f.x, f.y - 44 * S, "Grown! +" + pts, { color: "#2b9a5a", size: 20 * S }); }
+  spawnQ.push(1.6);
+  if (served % 4 === 0 && !demo) { level++; levelUp(); }
+}
+function levelUp() {
+  Lab.banner("Tank " + level, { color: "#3ec5ff", ms: 1300, y: .32 }); snd("levelup");
+  if (level === 2) Lab.after(1, () => once("k3", "New fish: Leafy loves algae wafers!", 2.6));
+  if (level === 3) Lab.after(1, () => once("k4", "Blush only eats shrimp!", 2.4));
+  if (level === 4 && !puffer) { puffer = { x: T.x + T.w / 2, y: T.y + T.h * .5, dir: 1, puff: 0, ph: 0 }; Lab.after(1, () => once("puff", "Uh-oh, a greedy puffer! Drop around him", 3)); }
+  if (level === 5 && !bub) { bub = { x: T.x + T.w * (Lab.chance(.5) ? .3 : .7) }; Lab.after(1, () => once("bub", "The bubbler lifts snacks!", 2.6)); }
+  if (level === 6) Lab.after(1, () => once("night", "Night lights on!", 2));
+  const n = maxFish() - fish.filter(f => f.state !== "leave").length - spawnQ.length; for (let i = 0; i < n; i++) spawnQ.push(.6 + i * .7);
+}
+function waste(fd) {
+  if (fd.floor) return; fd.floor = 2.4; wasted++;
+  if (streak >= 3 && !demo) fx.text(fd.x, fd.y - 16 * S, "streak lost", { color: "#5d6a7a", size: 13 * S }); streak = 0; snd("thud", { pitch: 1.6, vol: .35 });
+}
+function update(dt, t) {
+  clock += dt; cool -= dt; bubble && (bubble.t += dt, bubble.t > bubble.dur && (bubble = null));
+  bolt.x = Lab.damp(bolt.x, bolt.tx, 22, dt); bolt.throwT = Math.max(0, bolt.throwT - dt); bolt.joy = Math.max(0, bolt.joy - dt); bolt.sad = Math.max(0, bolt.sad - dt);
+  if (!demo) { const ax = Lab.input.axisX(); if (ax) { kbX = clamp((kbX == null ? bolt.x : kbX) + ax * 300 * S * dt, T.x + 10, T.x + T.w - 10); bolt.tx = kbX; } }
+  for (let i = spawnQ.length - 1; i >= 0; i--) { spawnQ[i] -= dt; if (spawnQ[i] <= 0) { spawnQ.splice(i, 1); if (fish.filter(f => f.state !== "leave").length < maxFish()) { newFish(pickSpecies(), true); refillQueue(); } } }
+  const hd = dt / hungerTime(); let worst = 1;
+  for (let i = fish.length - 1; i >= 0; i--) {
+    const f = fish[i]; f.st += dt; f.chomp = Math.max(0, f.chomp - dt); f.bleh = Math.max(0, f.bleh - dt); f.joy = Math.max(0, f.joy - dt);
+    if (f.state === "grown") { f.y = Lab.damp(f.y, f.lane - 10 * S, 3, dt); if (f.st > 1.1) { f.state = "leave"; f.dir = f.x < T.x + T.w / 2 ? -1 : 1; } }
+    else if (f.state === "leave") { f.x += f.dir * f.speed * 3 * dt; if (f.x < T.x - 60 * S || f.x > T.x + T.w + 60 * S) fish.splice(i, 1); f.face = f.dir; continue; }
+    else if (f.state === "sulk") { f.y = Lab.damp(f.y, T.sand - 8 * S, 3, dt); if (f.st > 3) { f.state = "swim"; f.hunger = .6; f.st = 0; } }
+    else {
+      f.hunger -= hd * (demo ? .3 : 1); worst = Math.min(worst, f.hunger);
+      if (f.hunger <= 0 && !demo) { f.state = "sulk"; f.st = 0; f.hunger = 0; hearts--; streak = 0; bolt.sad = 1.5; snd("hurt"); Lab.shake(4, .2); Lab.flash("#ff6a5a", .15, .18);
+        fx.text(f.x, f.y - 30 * S, "Hangry!", { color: "#e0403a", size: 20 * S }); say(Lab.choose(["Oh no, too slow!", "Sorry, " + FISH[f.sp].n + "!"]), 1.8);
+        if (hearts <= 0) { end(); return; } continue; }
+      // swim, and nose toward a matching snack that is close
+      let tgt = null, bd = 1e9; for (const fd of foods) if (!fd.dead && !fd.floor && fd.type === f.sp) { const dx = fd.x - f.x, dy = fd.y - f.y; if (Math.abs(dx) < 120 * S && dy > -90 * S && dy < 70 * S) { const d = Math.hypot(dx, dy); if (d < bd) { bd = d; tgt = fd; } } }
+      if (tgt) { f.dir = tgt.x > f.x ? 1 : -1; f.x += f.dir * f.speed * 1.7 * dt * clamp(Math.abs(tgt.x - f.x) / (20 * S), .2, 1); f.y = Lab.damp(f.y, tgt.y, 3.5, dt); }
+      else { f.x += f.dir * f.speed * dt; f.y = Lab.damp(f.y, f.lane + Math.sin(clock * 1.3 + f.ph) * 8 * S, 2, dt); }
+      if (f.x < T.x + 26 * S) f.dir = 1; if (f.x > T.x + T.w - 26 * S) f.dir = -1;
+    }
+    f.face = Lab.damp(f.face, f.dir, 9, dt);
+  }
+  // puffer: slow, gulps any snack it touches
+  if (puffer) { puffer.puff = Math.max(0, puffer.puff - dt * .5); puffer.x += puffer.dir * 30 * S * dt; if (puffer.x < T.x + 50 * S) puffer.dir = 1; if (puffer.x > T.x + T.w - 50 * S) puffer.dir = -1; puffer.y = T.y + T.h * (.45 + .12 * Math.sin(clock * .5)); }
+  for (let i = foods.length - 1; i >= 0; i--) {
+    const fd = foods[i], F = FOOD[fd.type]; fd.t += dt; if (fd.dead) { foods.splice(i, 1); continue; }
+    if (fd.floor) { fd.floor -= dt; if (fd.floor <= 0) foods.splice(i, 1); continue; }
+    fd.vy = Lab.damp(fd.vy, F.sink * S, 2.5, dt); fd.vx = Lab.damp(fd.vx, F.glide * S * fd.gd, 1.6, dt);
+    if (bub && Math.abs(fd.x - bub.x) < 22 * S) { fd.vy -= 520 * S * dt; fd.vx += (fd.x > bub.x ? 1 : -1) * 90 * S * dt; }
+    fd.x += (fd.vx + Math.sin(fd.t * 5) * F.wob * S) * dt; fd.y += fd.vy * dt; fd.rot += dt * (fd.type === 1 ? 4 : 1);
+    if (fd.x < T.x + 6) { fd.x = T.x + 6; fd.vx = Math.abs(fd.vx); fd.gd = 1; } if (fd.x > T.x + T.w - 6) { fd.x = T.x + T.w - 6; fd.vx = -Math.abs(fd.vx); fd.gd = -1; }
+    if (fd.y < T.y + 4) { fd.y = T.y + 4; fd.vy = Math.max(fd.vy, 0); }
+    if (fd.y >= T.sand) { fd.y = T.sand; waste(fd); continue; }
+    if (puffer && Math.hypot(fd.x - puffer.x, fd.y - puffer.y) < (24 + puffer.puff * 14) * S) { fd.dead = true; puffer.puff = 1; streak = 0; wasted++; snd("boing", { pitch: .7 }); if (!demo) fx.text(puffer.x, puffer.y - 30 * S, "Gulp!", { color: "#b07a2a", size: 16 * S }); continue; }
+    for (const f of fish) {
+      if (f.state === "grown" || f.state === "leave") continue;
+      const L = fishLen(f), dx = fd.x - f.x, dy = fd.y - f.y;
+      if (Math.abs(dx) < L * .58 && Math.abs(dy) < L * .38) {
+        if (f.sp === fd.type) { feed(f, fd); break; }
+        if (fd.nudged <= 0) { fd.nudged = 1; fd.vx = (dx >= 0 ? 1 : -1) * 150 * S; fd.gd = dx >= 0 ? 1 : -1; fd.vy = -50 * S; f.bleh = .7; snd("knock", { pitch: 1.4, vol: .4 }); if (!demo) once("bleh", FISH[f.sp].n + " won't eat that!", 2); }
+      }
+    }
+  }
+  if (!demo) Lab.music.intensity(clamp(.25 + (1 - worst) * .55 + (level - 1) * .05, 0, 1));
+  if (!demo && worst < .25 && Math.floor(clock * 2) !== Math.floor((clock - dt) * 2)) snd("tick", { pitch: .8, vol: .4 });
+}
+function end() {
+  over = true; Lab.gameover({ title: "Oops, hangry tank!", message: `Bolt raised ${served} fish in ${level === 1 ? "the first tank" : level + " tanks"}.`, score,
+    stats: [["Fish grown", served], ["Snacks served", snacks], ["Best streak", bestStreak]] });
+}
+function frame(dt, t) { if (!over) update(dt, t); render(clock); }
+
+/* ---------------- art ---------------- */
+const fishLen = f => (38 + f.fed * 5) * S;
+function bakeBg() {
+  bgS = Lab.sprite("stbg", Lab.W + 80, Lab.H + 80, (g) => {
+    g.translate(40, 40); draw.vgrad(g, -40, -40, Lab.W + 80, Lab.H + 80, ["#fbf1df", "#f3e2c6"]);
+    g.fillStyle = "rgba(200,160,120,.18)"; for (let x = -40; x < Lab.W + 40; x += 28 * S) g.fillRect(x, -40, 12 * S, Lab.H + 80);
+    draw.rect(g, T.x - 8, T.y - 14 * S, T.w + 16, T.bot - T.y + 22 * S, 14 * S, "#8a6a52"); // cabinet frame
+    const wg = g.createLinearGradient(0, T.y, 0, T.bot); wg.addColorStop(0, "#9fe3ee"); wg.addColorStop(.55, "#53b6d2"); wg.addColorStop(1, "#2f86ad"); g.fillStyle = wg; g.fillRect(T.x, T.y, T.w, T.bot - T.y);
+    g.globalAlpha = .12; g.fillStyle = "#fff"; for (let i = 0; i < 5; i++) { const x = T.x + T.w * (.1 + i * .22); g.beginPath(); g.moveTo(x, T.y); g.lineTo(x + 30 * S, T.y); g.lineTo(x + 90 * S, T.bot); g.lineTo(x + 40 * S, T.bot); g.fill(); } g.globalAlpha = 1;
+    // sand + pebbles + castle
+    g.fillStyle = "#f2d9a2"; g.beginPath(); g.moveTo(T.x, T.sand + 4 * S); for (let x = 0; x <= T.w; x += 20) g.lineTo(T.x + x, T.sand + Math.sin(x * .05) * 4 * S); g.lineTo(T.x + T.w, T.bot); g.lineTo(T.x, T.bot); g.fill();
+    const rng = Lab.rng(5); for (let i = 0; i < T.w / 9; i++) { g.fillStyle = ["#d9b97a", "#c7a3e0", "#f7a6a6", "#e6c88e"][i % 4]; g.beginPath(); g.ellipse(T.x + rng() * T.w, T.sand + 8 * S + rng() * 14 * S, 3 * S, 2 * S, 0, 0, TAU); g.fill(); }
+    const cx = T.x + T.w * .82, cy = T.sand + 4 * S, cw = 34 * S; g.fillStyle = "#c98f6a"; g.fillRect(cx - cw / 2, cy - cw * 1.1, cw, cw * 1.1); g.fillRect(cx - cw * .75, cy - cw * .7, cw * .35, cw * .7); g.fillRect(cx + cw * .4, cy - cw * .7, cw * .35, cw * .7);
+    g.fillStyle = "#a8714f"; for (let i = 0; i < 3; i++) g.fillRect(cx - cw / 2 + i * cw * .38, cy - cw * 1.25, cw * .22, cw * .17); g.fillStyle = "#2f5f7a"; g.beginPath(); g.arc(cx, cy - cw * .22, cw * .18, Math.PI, 0); g.lineTo(cx + cw * .18, cy); g.lineTo(cx - cw * .18, cy); g.fill();
+    // rim / lid where Bolt rolls
+    draw.rect(g, T.x - 14, T.y - 16 * S, T.w + 28, 12 * S, 6 * S, "#6b4f3d"); g.fillStyle = "rgba(255,255,255,.35)"; g.fillRect(T.x, T.y, T.w, 2);
+  });
+}
+function drawKelp(c, t) {
+  for (let i = 0; i < 6; i++) { const x = T.x + T.w * (.06 + i * .17 + (i % 2) * .04), h = T.h * (.28 + (i % 3) * .1), sway = Math.sin(t * .9 + i) * 10 * S;
+    const col = i % 2 ? "#3aa36a" : "#2f8c5c"; c.strokeStyle = col; c.lineWidth = 6 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(x, T.sand + 6 * S); c.quadraticCurveTo(x + sway, T.sand - h * .5, x + sway * 1.6, T.sand - h); c.stroke();
+    c.fillStyle = col; for (let k = 1; k < 6; k++) { const q = k / 6, lx = x + sway * 1.6 * q * q, ly = T.sand - h * q, d = k % 2 ? 1 : -1; c.beginPath(); c.ellipse(lx + d * 8 * S, ly, 10 * S, 4 * S, d * -.5 + Math.sin(t + k) * .1, 0, TAU); c.fill(); } }
+}
+function foodIcon(c, type, x, y, s, rot) {
+  const col = FOOD[type].c; c.save(); c.translate(x, y); c.rotate(rot || 0);
+  if (type === 0) { draw.circle(c, 0, 0, s * .55, col); draw.circle(c, -s * .18, -s * .18, s * .16, "#ffffff88"); }
+  else if (type === 1) { c.fillStyle = col; c.beginPath(); c.moveTo(-s * .7, -s * .2); c.lineTo(s * .4, -s * .5); c.lineTo(s * .7, s * .25); c.lineTo(-s * .3, s * .45); c.closePath(); c.fill(); c.fillStyle = "#fff6"; c.fillRect(-s * .3, -s * .15, s * .5, s * .12); }
+  else if (type === 2) { c.fillStyle = col; c.beginPath(); c.ellipse(0, 0, s * .7, s * .38, 0, 0, TAU); c.fill(); c.strokeStyle = "#2a7a4a"; c.lineWidth = Math.max(1, s * .1); c.beginPath(); c.ellipse(0, 0, s * .4, s * .18, 0, 0, TAU); c.stroke(); }
+  else { c.strokeStyle = col; c.lineWidth = s * .42; c.lineCap = "round"; c.beginPath(); c.arc(0, 0, s * .42, Math.PI * .1, Math.PI * 1.25); c.stroke(); draw.circle(c, s * .38, s * .14, s * .1, INK); }
+  c.restore();
+}
+function drawFish(c, f, t) {
+  const L = fishLen(f), sp = FISH[f.sp], fl = f.face, sulk = f.state === "sulk", wag = Math.sin(t * (sulk ? 3 : 9) + f.ph) * .25;
+  c.save(); c.translate(f.x, f.y + (f.state === "grown" ? Math.sin(f.st * 10) * 3 : 0)); c.rotate(sulk ? .35 * Math.sign(fl || 1) : f.bleh ? Math.sin(f.bleh * 30) * .12 : 0); c.scale(fl, 1);
+  c.fillStyle = Lab.color.shade(sp.c, -.15); c.save(); c.translate(-L * .42, 0); c.rotate(wag); c.beginPath(); c.moveTo(0, 0); c.lineTo(-L * .38, -L * .3); c.lineTo(-L * .3, 0); c.lineTo(-L * .38, L * .3); c.closePath(); c.fill(); c.restore();
+  c.beginPath(); c.moveTo(-L * .1, -L * .28); c.quadraticCurveTo(L * .05, -L * .52, L * .2, -L * .26); c.fill();
+  c.fillStyle = sulk ? Lab.color.mix(sp.c, "#9aa0b0", .5) : sp.c; c.beginPath(); c.ellipse(0, 0, L * .5, L * .32, 0, 0, TAU); c.fill();
+  c.fillStyle = sp.b; c.beginPath(); c.ellipse(L * .05, L * .12, L * .32, L * .15, 0, 0, TAU); c.fill();
+  c.strokeStyle = Lab.color.shade(sp.c, -.2); c.lineWidth = 2 * S; c.beginPath(); c.arc(-L * .12, 0, L * .2, -1, 1); c.stroke();
+  const ex = L * .26, ey = -L * .07; draw.circle(c, ex, ey, L * .1, "#fff"); draw.circle(c, ex + L * .025, ey + (sulk ? .02 * L : 0), L * .055, INK);
+  if (sulk || f.bleh) { c.strokeStyle = INK; c.lineWidth = 1.6 * S; c.beginPath(); c.moveTo(ex - L * .1, ey - L * .16); c.lineTo(ex + L * .08, ey - L * (sulk ? .1 : .19)); c.stroke(); }
+  draw.circle(c, L * .2, L * .08, L * .05, "rgba(255,120,140,.55)");
+  c.fillStyle = INK; if (f.chomp > 0) { c.beginPath(); c.arc(L * .47, L * .04, L * .08, 0, TAU); c.fill(); } else { c.beginPath(); c.arc(L * .44, L * .06, L * .04, 0, Math.PI); c.fill(); }
+  c.restore();
+  if (f.state === "swim" || sulk) { // thought bubble: wanted snack + hunger ring + tummy pips
+    const bx = f.x, by = f.y - L * .55 - 20 * S, r = 13 * S, low = f.hunger < .3, jit = low ? Math.sin(t * 30) * 1.5 : 0;
+    draw.circle(c, bx + jit, by, r, "rgba(255,255,255,.92)"); draw.circle(c, bx - 3 * S, by + r + 3 * S, 2.6 * S, "rgba(255,255,255,.85)");
+    c.strokeStyle = low ? "#ff5a4a" : f.hunger < .55 ? "#ffb02e" : "#3fbf6a"; c.lineWidth = 3 * S; c.beginPath(); c.arc(bx + jit, by, r + 1.5 * S, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(f.hunger, 0, 1)); c.stroke();
+    foodIcon(c, f.sp, bx + jit, by, 13 * S, 0);
+    for (let i = 0; i < need(); i++) draw.circle(c, bx + (i - (need() - 1) / 2) * 7 * S, by - r - 6 * S, 2.4 * S, i < f.fed ? "#ffffff" : "rgba(255,255,255,.35)");
+  }
+}
+function drawPuffer(c, t) {
+  const p = puffer, r = (20 + p.puff * 14) * S; c.save(); c.translate(p.x, p.y); c.scale(p.dir, 1);
+  c.fillStyle = "#d9a85a"; for (let i = 0; i < 14; i++) { const a = i / 14 * TAU; c.beginPath(); c.moveTo(Math.cos(a - .12) * r * .95, Math.sin(a - .12) * r * .95); c.lineTo(Math.cos(a) * r * 1.25, Math.sin(a) * r * 1.25); c.lineTo(Math.cos(a + .12) * r * .95, Math.sin(a + .12) * r * .95); c.fill(); }
+  draw.circle(c, 0, 0, r, "#f0c77a"); c.fillStyle = "#fff3d6"; c.beginPath(); c.ellipse(0, r * .35, r * .7, r * .45, 0, 0, TAU); c.fill();
+  draw.circle(c, r * .4, -r * .2, r * .2, "#fff"); draw.circle(c, r * .45, -r * .2, r * .1, INK); draw.circle(c, r * .85, r * .1, r * .12, "#c2603a"); c.restore();
+}
+function drawBolt(c, t) {
+  const size = 44 * S, x = bolt.x, y = T.y - 16 * S - size / 2, th = bolt.throwT > 0;
+  const mood = bolt.sad > 0 ? "sad" : bolt.joy > 0 ? "joy" : th ? "focus" : fish.some(f => f.state === "swim" && f.hunger < .3) ? "scared" : "happy";
+  let look = [0, .8]; if (foods.length) { const fd = foods[foods.length - 1]; look = [clamp((fd.x - x) / 100, -1, 1), 1]; }
+  const a = Pals.draw(c, "bolt", x, y, size, { t, mood, look, arms: bolt.joy > 0 ? "cheer" : th ? "up" : "hold", tilt: clamp((bolt.tx - bolt.x) / (300 * S), -.2, .2), squash: th ? .08 : 0, flip: bolt.face < 0, talk: bubble && bubble.t < .5 ? .6 : 0 });
+  draw.circle(c, x, T.y - 10 * S, 5 * S, "#3e3a4f"); // rail wheel
+  if (queue.length && !th) { const h = a.handR; draw.circle(c, h[0], h[1] - 6 * S, 11 * S, "rgba(255,255,255,.85)", "rgba(43,35,64,.25)", 1.5); foodIcon(c, queue[0], h[0], h[1] - 6 * S, 14 * S, 0); }
+  if (kbX != null && !demo) { c.strokeStyle = "rgba(255,255,255,.6)"; c.setLineDash([4 * S, 6 * S]); c.lineWidth = 2; c.beginPath(); c.moveTo(kbX, T.y + 4); c.lineTo(kbX, T.sand); c.stroke(); c.setLineDash([]); }
+}
+function drawPanel(c) {
+  const P = Lab.play, h = 44 * S, y = P.y + 6 * S; draw.rect(c, P.x + 10, y, P.w - 20, h, 14 * S, "rgba(255,252,245,.95)", "rgba(43,35,64,.12)", 1.5);
+  draw.text(c, "Next", P.x + 24 * S, y + h / 2, { size: 12 * S, color: "#5d6a7a", weight: 700, align: "left" });
+  for (let i = 1; i < 3; i++) { const x = P.x + 50 * S + i * 28 * S; draw.circle(c, x, y + h / 2, 12 * S, "#eef6f8"); foodIcon(c, queue[i], x, y + h / 2, (i === 1 ? 15 : 12) * S, 0); }
+  draw.text(c, `Tank ${level}`, P.x + P.w / 2 + 6 * S, y + h * .36, { size: 14 * S, color: INK, weight: 800 });
+  draw.text(c, `${served % 4}/4 grown`, P.x + P.w / 2 + 6 * S, y + h * .72, { size: 11 * S, color: "#5d6a7a", weight: 600 });
+  const m = mult(); if (m > 1) draw.text(c, "×" + m, P.x + P.w * .68, y + h / 2 + 1, { size: 18 * S, color: "#ff7a59", weight: 800 });
+  for (let i = 0; i < 3; i++) draw.heart(c, P.x + P.w - 30 * S - i * 22 * S, y + h / 2, 9 * S, i < hearts ? "#ff5a7a" : "rgba(43,35,64,.15)");
+}
+function drawBubble(c) {
+  if (!bubble) return; const k = ease.outBack(clamp(bubble.t / .2, 0, 1)) * clamp((bubble.dur - bubble.t) / .25, 0, 1); if (k <= 0) return;
+  const fs = 14 * S; c.font = Lab.font(fs, 700); const w = c.measureText(bubble.txt).width + 24, h = fs * 2.1;
+  const x = clamp(bolt.x, T.x + w / 2, T.x + T.w - w / 2), y = T.y + h / 2 + 14 * S;
+  c.save(); c.translate(x, y); c.scale(k, k); Pals.bubble(c, 0, 0, w, h, { tailX: bolt.x - x, tailY: -h / 2 - 12 * S, lineWidth: 2 }); draw.text(c, bubble.txt, 0, 1, { size: fs, color: INK, weight: 700 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx; if (!bgS) bakeBg(); c.drawImage(bgS, -40, -40, bgS.w, bgS.h);
+  c.save(); c.beginPath(); c.rect(T.x, T.y, T.w, T.bot - T.y); c.clip();
+  drawKelp(c, t);
+  c.fillStyle = "rgba(255,255,255,.5)"; for (let i = 0; i < 10; i++) { const x = T.x + ((i * 97) % T.w), p = ((t * .25 + i * .137) % 1); draw.circle(c, x + Math.sin(t * 2 + i) * 4, T.sand - p * (T.sand - T.y), (1.5 + (i % 3)) * S); c.fill(); }
+  if (bub) { c.fillStyle = "rgba(255,255,255,.65)"; for (let i = 0; i < 14; i++) { const p = (t * .8 + i / 14) % 1; draw.circle(c, bub.x + Math.sin(t * 6 + i) * 8 * S, T.sand - p * (T.sand - T.y), (2 + (i % 3)) * S); c.fill(); } draw.rect(c, bub.x - 10 * S, T.sand - 6 * S, 20 * S, 10 * S, 4 * S, "#6b7a8a"); }
+  for (const fd of foods) { c.globalAlpha = fd.floor ? clamp(fd.floor / 1, 0, 1) * .7 : 1; foodIcon(c, fd.type, fd.x, fd.y, 12 * S, fd.rot * (fd.type === 0 ? 0 : 1)); } c.globalAlpha = 1;
+  if (puffer) drawPuffer(c, t);
+  for (const f of fish) drawFish(c, f, t);
+  if (level >= 6) { c.fillStyle = "rgba(20,24,70,.32)"; c.fillRect(T.x, T.y, T.w, T.bot - T.y); for (const f of fish) draw.glow(c, f.x, f.y, 40 * S, FISH[f.sp].c, .35); }
+  c.restore();
+  c.fillStyle = "rgba(255,255,255,.45)"; c.fillRect(T.x, T.y - 1, T.w, 2);
+  drawBolt(c, t); drawPanel(c); drawBubble(c);
+}
+
+Lab.expose({
+  get score() { return score; }, get hearts() { return hearts; }, get level() { return level; }, get served() { return served; }, get snacks() { return snacks; },
+  get streak() { return streak; }, get mult() { return mult(); }, get wasted() { return wasted; }, get queue() { return queue.slice(); }, get tank() { return T; },
+  fish() { return fish.map(f => ({ id: f.id, sp: f.sp, x: f.x, y: f.y, hunger: f.hunger, fed: f.fed, state: f.state })); }, foods() { return foods.map(f => ({ type: f.type, x: f.x, y: f.y })); },
+  only(list) { fish = []; foods = []; list.forEach(([sp, x, y]) => { const f = newFish(sp, false); f.x = x; f.y = f.lane = y; f.speed = 0; f.hunger = 1; }); },
+  setQueue(q) { queue = q.slice(); refillQueue(); }, setHunger(i, h) { fish[i].hunger = h; }, setServed(n) { served = n; }, setLevel(n) { level = n; levelUp(); },
+  get puffer() { return !!puffer; }, drop(x) { drop(x); },
+});
+Lab.boot();
+})();
 </script></body></html>
