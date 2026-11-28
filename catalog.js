@@ -2558,7 +2558,10 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--bumpy-bus.jpg"
   },
   {
    "id": "PhoneGameLab2/bun-voyage",
@@ -2731,6 +2734,22 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--flutterbun.jpg"
   },
   {
+   "id": "PhoneGameLab2/gobblepot",
+   "path": "PhoneGameLab2/games/gobblepot/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Gobblepot",
+   "desc": "Bun's magic pot gobbles the mess. Small things first!",
+   "genre": [
+    "Arcade"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true
+  },
+  {
    "id": "PhoneGameLab2/gulp-and-float",
    "path": "PhoneGameLab2/games/gulp-and-float/index.html",
    "collection": "PhoneGameLab2",
@@ -2748,23 +2767,6 @@ window.GDL_CATALOG = {
    "score": 8,
    "status": "transformed",
    "thumb": "thumbs/PhoneGameLab2--gulp-and-float.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/hole-chase",
-   "path": "PhoneGameLab2/games/hole-chase/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Hole Chase",
-   "desc": "Move a black hole to swallow objects and grow.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 37,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--hole-chase.jpg"
   },
   {
    "id": "PhoneGameLab2/hover-hop",
@@ -2801,7 +2803,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--huddle-up.jpg"
   },
   {
    "id": "PhoneGameLab2/hungry-fish",
@@ -3385,7 +3388,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--say-cheese.jpg"
   },
   {
    "id": "PhoneGameLab2/sky-high",
@@ -3677,7 +3681,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--strum-corner.jpg"
   },
   {
    "id": "PhoneGameLab2/sub-adventure",

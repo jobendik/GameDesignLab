@@ -53,7 +53,7 @@ const ld = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) 
 const sv = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } };
 let best = +ld(BEST_KEY) || 0, bestFloor = +ld(FLOOR_KEY) || 0, muted = Q.get('mute') === '1' || ld(MUTE_KEY) === true;
 
-const W = 400, FH = 560, VH = 700, TICK = 1 / 120, SUB = 8, DT = TICK / SUB, G = 1500, BR = 9, VMAX = 2600, START_TIME = 35;
+const W = 400, FH = 560, VH = 700, TICK = 1 / 120, SUB = 8, DT = TICK / SUB, G = 1500, BR = 9, VMAX = 2600, START_TIME = 45;
 const TAU = Math.PI * 2, clamp = (v, a, b) => v < a ? a : v > b ? b : v, hyp = Math.hypot;
 function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const fxr = mulberry(SEED ^ 0x5bd1e995), FR = (a, b) => a + fxr() * (b - a);
@@ -72,7 +72,7 @@ function buildFloor(k) {
   // shell: outer walls, lane inner walls + caps + one-way lids (to the floor above), slopes
   seg(16, -10, 16, FH + 10, 5, { kind: 'wall' }); seg(384, -10, 384, FH + 10, 5, { kind: 'wall' });
   seg(100, 380, 58, 446, 4, { kind: 'lane' }); seg(58, 446, 58, 600, 4, { kind: 'lane' }); seg(300, 380, 342, 446, 4, { kind: 'lane' }); seg(342, 446, 342, 600, 4, { kind: 'lane' });
-  seg(16, 742, 66, 802, 5, { kind: 'cap', e: .3 }); seg(384, 742, 334, 802, 5, { kind: 'cap', e: .3 });
+  seg(16, 742, 80, 806, 5, { kind: 'cap', e: .3 }); seg(384, 742, 320, 806, 5, { kind: 'cap', e: .3 }); seg(16, 836, 80, 806, 5, { kind: 'cap', e: .3 }); seg(384, 836, 320, 806, 5, { kind: 'cap', e: .3 });
   const lids = [seg(16, 742, 52, 732, 4, { kind: 'lid', ow: true, e: .2 }), seg(384, 742, 348, 732, 4, { kind: 'lid', ow: true, e: .2 })];
   seg(58, 160, 99, 78, 4, { kind: 'slope', e: .3 }); seg(342, 160, 301, 78, 4, { kind: 'slope', e: .3 });
   if (k === 0) { seg(16, 182, 52, 172, 4, { kind: 'lid' }); seg(384, 182, 348, 172, 4, { kind: 'lid' }); seg(58, 0, 58, 170, 4, { kind: 'lane' }); seg(342, 0, 342, 170, 4, { kind: 'lane' }); seg(16, 0, 58, 0, 4, { kind: 'wall' }); seg(342, 0, 384, 0, 4, { kind: 'wall' }); }
@@ -95,7 +95,9 @@ function buildFloor(k) {
   }
   // three charge targets + a time crystal in free spots
   const free = (x, v, m) => F.circ.every(c => hyp(c.x - x, c.y - Y(k, v)) > c.r + m) && F.dyn.every(d => hyp((d.cx) - x, d.cy - Y(k, v)) > (d.R || d.len / 2 || 40) + m - 10) && !(v > 340 && (x < 110 || x > 290));
-  for (let n = 0, t = 0; n < 3 && t < 200; t++) { const x = R(80, 320), v = R(190, 500); if (free(x, v, 30) && F.targets.every(q => hyp(q.x - x, q.y - Y(k, v)) > 50)) { const c = circ(x, v, 8, 'target', { lit: true }); F.targets.push(c); n++; } }
+  const lineD = (x, v, x1, v1, x2, v2) => { const dx = x2 - x1, dv = v2 - v1, t = clamp(((x - x1) * dx + (v - v1) * dv) / (dx * dx + dv * dv), 0, 1); return hyp(x - x1 - dx * t, v - v1 - dv * t); };
+  const corridor = (x, v) => k < 3 && (lineD(x, v, 150, 50, 330, 600) < 34 || lineD(x, v, 250, 50, 70, 600) < 34);
+  for (let n = 0, t = 0; n < 3 && t < 300; t++) { const x = R(80, 320), v = R(190, 500); if (free(x, v, 30) && !corridor(x, v) && F.targets.every(q => hyp(q.x - x, q.y - Y(k, v)) > 50)) { const c = circ(x, v, 8, 'target', { lit: true }); F.targets.push(c); n++; } }
   for (let t = 0; t < 100; t++) { const x = R(80, 320), v = R(200, 520); if (free(x, v, 26) && F.targets.every(q => hyp(q.x - x, q.y - Y(k, v)) > 40)) { F.items.push({ x, y: Y(k, v), r: 10, got: false, ph: r() * TAU }); break; } }
   F.bonus = Math.max(4, 8 - Math.floor(k / 4));
   return F;
@@ -482,7 +484,7 @@ function drawHud(T) {
   if (heldL || heldR) { ctx.fillStyle = 'rgba(255,210,90,.06)'; if (heldL) ctx.fillRect(0, h - 120, w / 2, 120); if (heldR) ctx.fillRect(w / 2, h - 120, w / 2, 120); }
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   if (BN) { const q = BN.t / BN.dur, a = q < .15 ? q / .15 : q > .8 ? (1 - q) / .2 : 1, y = h * .3;
-    ctx.globalAlpha = a * .85; ctx.fillStyle = '#060817'; ctx.fillRect(0, y - 30, w, 58); ctx.globalAlpha = a; ctx.fillStyle = BN.col; ctx.fillRect(0, y - 30, w, 2); ctx.fillRect(0, y + 26, w, 2);
+    const bx = ox / dpr, bw = W * sc / dpr; ctx.globalAlpha = a * .85; ctx.fillStyle = '#060817'; ctx.fillRect(bx, y - 30, bw, 58); ctx.globalAlpha = a; ctx.fillStyle = BN.col; ctx.fillRect(bx, y - 30, bw, 2); ctx.fillRect(bx, y + 26, bw, 2);
     ctx.font = '400 26px Bungee,sans-serif'; ctx.fillText(BN.a, w / 2, y - 6); ctx.fillStyle = '#c8d4f2'; ctx.font = '700 14px Rajdhani,sans-serif'; ctx.fillText(BN.b, w / 2, y + 15); ctx.globalAlpha = 1; }
   if (ox / dpr >= 150) {
     ctx.textAlign = 'left'; const rx = (ox + W * sc) / dpr + 18; let y = 110;
@@ -524,7 +526,7 @@ window.__gdl = {
   cheat(o) { if (!S) return; if (o.time != null) S.time = o.time; if (o.floor != null) { floorAt(o.floor + 3); S.maxFloor = S.cur = o.floor; } if (o.lanes) for (const F of S.floors) F.lane = [true, true]; },
   start(n) { if (n != null) runN = n - 1; newRun(); },
   Y, FH, BR,
-  geom(k) { const F = S && floorAt(k); return F ? { segs: F.segs.map(w => [w.x1, w.y1, w.x2, w.y2, w.r, w.ow ? 1 : 0, w.kind]), circ: F.circ.map(c => [c.x, c.y, c.r, c.kind]), dyn: F.dyn.length } : null; },
+  geom(k) { const F = S && floorAt(k); return F ? { lane: F.lane.slice(), segs: F.segs.map(w => [w.x1, w.y1, w.x2, w.y2, w.r, w.ow ? 1 : 0, w.kind]), circ: F.circ.map(c => [c.x, c.y, c.r, c.kind]), dyn: F.dyn.length } : null; },
 };
 if (AUTOSTART) newRun(); else showMenu();
 requestAnimationFrame(frame);

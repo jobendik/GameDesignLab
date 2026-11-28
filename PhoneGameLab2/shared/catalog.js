@@ -4,13 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 37,
-    "slug": "hole-chase",
-    "t": "Hole Chase",
-    "d": "Move a black hole to swallow objects and grow.",
-    "thumb": "../thumbs/PhoneGameLab2--hole-chase.jpg"
-   },
-   {
     "n": 38,
     "slug": "hungry-fish",
     "t": "Hungry Fish",
@@ -337,7 +330,8 @@ window.LAB_GAMES = [
     "t": "Huddle Up",
     "d": "Tap two twins. If they can reach each other, they hug!",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--huddle-up.jpg"
    },
    {
     "slug": "lantern-lane",
@@ -380,7 +374,9 @@ window.LAB_GAMES = [
     "slug": "bumpy-bus",
     "t": "Bumpy Bus",
     "d": "Pick up your pals. Don't bounce them off the roof!",
-    "v2": true
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--bumpy-bus.jpg"
    },
    {
     "slug": "cakewalk",
@@ -389,6 +385,12 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--cakewalk.jpg"
+   },
+   {
+    "slug": "gobblepot",
+    "t": "Gobblepot",
+    "d": "Bun's magic pot gobbles the mess. Small things first!",
+    "v2": true
    },
    {
     "slug": "gulp-and-float",
@@ -536,7 +538,8 @@ window.LAB_GAMES = [
     "t": "Say Cheese",
     "d": "One pal is spoiling the group photo. Find them before the flash!",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--say-cheese.jpg"
    },
    {
     "slug": "topping-toss",
@@ -593,7 +596,8 @@ window.LAB_GAMES = [
     "t": "Strum Corner",
     "d": "Strum down, strum up, let it ring. Draw a crowd!",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--strum-corner.jpg"
    }
   ]
  },

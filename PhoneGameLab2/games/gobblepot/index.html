@@ -1,0 +1,328 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Gobblepot</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* GOBBLEPOT — a storm has blown everybody's clutter into Bun's garden. Bun's magic pot opens a swirling mouth in the
+ * lawn; Bun rides its rim and steers it around, and it gobbles anything small enough to fit — growing as it eats.
+ * Core idea kept: a hole that swallows smaller things and grows.
+ * The twist is ORDER: every gobble is a rung on the TIDY LADDER. Gobble something the same size or bigger than the last
+ *   thing and the ladder holds; a size step UP raises the multiplier (×2 … ×8); gobble anything smaller and it falls
+ *   back to ×1. A big pot sweeping over leaves wrecks its own ladder — so the skill is clearing the small stuff first,
+ *   then climbing acorn → apple → flowerpot → bucket → gnome → wheelbarrow → bench in one clean run.
+ *   Each garden must reach its TIDY goal before the sun sets (by value, so the big pieces matter).
+ * Later gardens: Bun's tulip beds (gobbling a tulip costs time and the ladder), gusts that blow fresh leaves across the
+ *   lawn, Momo napping on a picnic blanket (too big to gobble until you're huge — then he's spat out, cross), all mixed.
+ * Identity: striped spring lawn in a hedge frame, lavender magic swirl with an orbiting sparkle rim, toy clutter. */
+let demo = false;
+Lab.init({
+  title: "Gobblepot", tagline: "Bun's magic pot gobbles the mess. Small things first!", category: "Arcade", kicker: "Pocket Pals",
+  howto: ["Drag anywhere to steer the magic pot", "It gobbles anything smaller than its mouth", "Each bigger gobble climbs the ×bonus"],
+  theme: { bg: "#8fcf86", bg2: "#dff2b8", fg: "#3a2f4d", muted: "#6b6478", accent: "#8f6cf0", accent2: "#ff8fb8", light: true },
+  orient: "any", music: { style: "bounce", key: "F", vol: .34 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const KINDS = [{ n: "leaf", r: 7, v: 1 }, { n: "acorn", r: 9.5, v: 2 }, { n: "apple", r: 12.5, v: 3 }, { n: "flowerpot", r: 16, v: 5 },
+  { n: "bucket", r: 20, v: 8 }, { n: "gnome", r: 25, v: 12 }, { n: "barrow", r: 31, v: 18 }, { n: "bench", r: 39, v: 26 }];
+const GARDENS = [
+  { name: "Front Lawn", goal: .6, time: 35, counts: [16, 11, 8, 6, 4, 3, 2, 1] },
+  { name: "Tulip Walk", goal: .64, time: 35, counts: [16, 12, 8, 6, 5, 3, 2, 1], beds: 3 },
+  { name: "Windy Orchard", goal: .66, time: 36, counts: [13, 12, 9, 7, 5, 3, 2, 1], beds: 2, wind: true },
+  { name: "Momo's Nap", goal: .68, time: 36, counts: [16, 12, 9, 7, 5, 4, 2, 1], beds: 2, nap: true }];
+const MORE = ["Back Yard", "Allotment", "Village Green", "Castle Lawn"], R0 = 21, FLR = 7.5, NAPR = 27;
+function spec(n) {
+  if (n < GARDENS.length) return GARDENS[n]; const k = n - GARDENS.length + 1, f = 1 + .08 * k;
+  return { name: MORE[(k - 1) % 4] + (k > 4 ? " " + (1 + (k - 1) / 4 | 0) : ""), goal: Math.min(.8, .68 + .02 * k), time: Math.max(30, 36 - k),
+    counts: GARDENS[3].counts.map(c => Math.round(c * f)), beds: 3, wind: true, nap: k % 2 === 0 };
+}
+let S, U, G, panel, wide, bg;
+let items, pot, gIdx, sp, tLeft, eatV, totV, chainLast, mult, bestMult, score, lost, gobbled, phase, phaseT, wind, nap, bun, bubble, told, clock, kb, goalHit, sparkT;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function say(txt, dur) { if (!demo) bubble = { txt, t: 0, dur: dur || 2.6 }; }
+function once(id, txt, dur) { if (!told[id]) { told[id] = 1; say(txt, dur); } }
+const pr = () => pot.ru * U, irOf = it => (it.flower ? FLR : it.pal ? NAPR : KINDS[it.t].r) * U;
+
+function layout() {
+  const P = Lab.play, oG = G, oU = U; wide = P.w > P.h * 1.2; S = clamp(Math.min(P.w / 390, P.h / 700), .72, 1.5);
+  if (wide) { const pw = Math.min(200 * S, P.w * .27); panel = { x: P.x + 10, y: P.y + 12, w: pw, h: P.h - 24 }; G = { x: P.x + pw + 22, y: P.y + 12, w: P.w - pw - 34, h: P.h - 24 }; }
+  else { const ph = 70 * S; panel = { x: P.x + 10, y: P.y + 12, w: P.w - 20, h: ph }; G = { x: P.x + 12, y: panel.y + ph + 12, w: P.w - 24, h: P.h - ph - 36 }; }
+  U = clamp(Math.sqrt(G.w * G.h / 222000), .62, 1.7);
+  if (oG && items) { // keep the garden where it was, relative to the new lawn
+    const m = o => { o.x = G.x + (o.x - oG.x) / oG.w * G.w; o.y = G.y + (o.y - oG.y) / oG.h * G.h; };
+    items.forEach(m); m(pot); pot.tx = pot.x; pot.ty = pot.y; if (nap) m(nap);
+  }
+  Lab.sprite.clear("gp"); bg = null;
+}
+Lab.onResize(() => layout());
+
+/* ---------------- garden ---------------- */
+function free(x, y, r, pad) {
+  for (const o of items) if (Math.hypot(o.x - x, o.y - y) < r + irOf(o) + pad) return false;
+  if (nap && Math.hypot(nap.x - x, nap.y - y) < r + NAPR * U + pad) return false;
+  return true;
+}
+function place(r, avoidStart) {
+  for (let i = 0; i < 40; i++) {
+    const x = rand(G.x + r + 4, G.x + G.w - r - 4), y = rand(G.y + r + 4, G.y + G.h - r - 4);
+    if (avoidStart && Math.hypot(x - pot.x, y - pot.y) < 70 * U + r) continue;
+    if (free(x, y, r, 3 * U)) return [x, y];
+  }
+  return null;
+}
+function mkItem(t, x, y) { return { t, x, y, rot: rand(-.6, .6), var: Lab.randInt(0, 2), wob: 0, vx: 0, vy: 0, fall: null, ph: rand(0, TAU) }; }
+function buildGarden(n) {
+  sp = spec(n); items = []; nap = null;
+  pot = { x: G.x + G.w / 2, y: G.y + G.h * .55, tx: 0, ty: 0, ru: R0, rv: R0, pulse: 0, vx: 0, vy: 0, spin: 0 }; pot.tx = pot.x; pot.ty = pot.y;
+  if (sp.nap) { const p = place(NAPR * U, true) || [G.x + G.w * .2, G.y + G.h * .2]; nap = { x: p[0], y: p[1], pal: true, hop: 0, cross: 0 }; }
+  for (let b = 0; b < (sp.beds || 0); b++) {
+    const c = place(26 * U, true); if (!c) continue;
+    for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + rand(-.3, .3), d = i ? 15 * U : 0, x = c[0] + Math.cos(a) * d * (i ? 1 : 0), y = c[1] + Math.sin(a) * d * .8; items.push({ flower: true, x: i ? x : c[0], y: i ? y : c[1], bed: b, col: b % 3, ph: rand(0, TAU), fall: null, wob: 0, vx: 0, vy: 0 }); }
+  }
+  const A = clamp(G.w * G.h / (U * U * 222000), .8, 1.6);
+  for (let t = 7; t >= 0; t--) for (let i = 0; i < Math.round(sp.counts[t] * A); i++) { const p = place(KINDS[t].r * U, t >= 1); if (p) items.push(mkItem(t, p[0], p[1])); }
+  totV = items.reduce((s, o) => s + (o.flower ? 0 : KINDS[o.t].v), 0); eatV = 0; chainLast = -1; mult = 1; goalHit = false;
+  tLeft = sp.time; phase = "play"; phaseT = 0; wind = sp.wind ? { t: 6, state: 0, dir: 1 } : null;
+}
+function reset() {
+  gIdx = 0; score = 0; lost = 0; gobbled = 0; bestMult = 1; clock = 0; told = {}; bubble = null; kb = false; sparkT = 0;
+  bun = { sq: 0, joy: 0, wow: 0, sad: 0, face: 1, hop: 0 }; buildGarden(0);
+}
+const tidy = () => totV ? eatV / totV : 0;
+
+function start() {
+  demo = false; layout(); reset(); Lab.setScore(0); Lab.music.intensity(.25);
+  Lab.input.onMove = [(x, y, dx, dy) => { if (Lab.input.down && phase === "play") { kb = false; pot.tx += dx * 1.15; pot.ty += dy * 1.15; } }];
+  Lab.input.onDown = [() => { if (bubble && bubble.t > .6) bubble.t = Math.max(bubble.t, bubble.dur - .3); }];
+  Lab.banner(sp.name, { color: "#8f6cf0", ms: 1300, y: .3 });
+  Lab.after(.4, () => once("drag", "Drag anywhere to steer my pot!", 3));
+  Lab.loop(frame);
+}
+function attract(dt, t) {
+  if (!items || !demo) { demo = true; layout(); reset(); }
+  clock += dt; pot.tx = G.x + G.w * (.5 + .32 * Math.sin(t * .37)); pot.ty = G.y + G.h * (.5 + .3 * Math.sin(t * .53 + 1));
+  if (tLeft < 8 || !items.some(o => !o.flower && !o.fall)) buildGarden(0);
+  update(dt); render(t);
+}
+
+/* ---------------- rules ---------------- */
+function gobble(it) {
+  const r = irOf(it); it.fall = { t: 0, x0: it.x, y0: it.y };
+  if (it.flower) { // Bun's tulips!
+    lost++; tLeft = Math.max(.5, tLeft - 3); mult = 1; chainLast = -1; bun.sad = 1.4; snd("error"); Lab.shake(3, .15);
+    if (!demo) { fx.text(it.x, it.y - 14, "−3s", { color: "#e0406a", size: 18 * S }); say(Lab.choose(["Not my tulips!", "Eek, my flowers!", "Mind the beds!"]), 1.8); }
+    return;
+  }
+  const k = KINDS[it.t]; let up = false;
+  if (chainLast < 0 || it.t >= chainLast) { if (chainLast >= 0 && it.t > chainLast) { mult = Math.min(8, mult + 1); up = true; } chainLast = it.t; }
+  else { if (mult >= 3 && !demo) fx.text(pot.x, pot.y - pr() - 30 * S, "ladder ×" + mult + " ends", { color: "#6b6478", size: 14 * S }); mult = 1; chainLast = it.t; snd("tick", { pitch: .6 }); if (!demo) once("break", "Smaller breaks the ladder!", 2.4); }
+  bestMult = Math.max(bestMult, mult);
+  const pts = k.v * mult; eatV += k.v; gobbled++;
+  if (!demo) { score += pts; Lab.setScore(score); if (pts >= 20) Lab.bumpScore(); fx.text(it.x, it.y - r, "+" + pts, { color: mult > 1 ? "#8f6cf0" : "#3a2f4d", size: (13 + Math.min(10, it.t * 1.6)) * S }); }
+  pot.ru = Math.sqrt(pot.ru * pot.ru + .3 * k.r * k.r); pot.pulse = Math.min(1, .35 + it.t * .1);
+  snd("pop", { pitch: 1.6 - it.t * .13, vol: .8 }); if (up) { if (!demo) Lab.audio.combo(mult); if (mult === 2) once("up", "Bigger! The ladder climbs ×2", 2.4); }
+  if (it.t >= 5) { snd("thud", { pitch: 1.1 - (it.t - 5) * .12 }); Lab.shake(2 + it.t * .5, .18); bun.wow = 1; } else bun.joy = Math.max(bun.joy, mult >= 4 ? .8 : 0);
+  if (mult >= 5 && up) bun.joy = 1.2;
+  fx.burst(pot.x, pot.y, { n: 6 + it.t, colors: ["#d9c9ff", "#ffffff", "#ff8fb8"], speed: 90 * S, life: .5, size: 3 * S, shape: "star" });
+  if (!goalHit && tidy() >= sp.goal && !demo) { goalHit = true; snd("unlock"); Lab.banner("Tidy enough! Keep going", { color: "#3fae5c", ms: 1100, y: .22 }); }
+  if (!items.some(o => !o.flower && !o.fall && o !== it)) { phase = "judge"; phaseT = 0; }
+}
+function spitNap() {
+  tLeft = Math.max(.5, tLeft - 4); mult = 1; chainLast = -1; nap.hop = 1; nap.cross = 2.2; bun.sad = 1.2; snd("boing"); Lab.shake(4, .2);
+  const p = place(NAPR * U, true) || [G.x + G.w * .15, G.y + G.h * .15]; nap.fx = nap.x; nap.fy = nap.y; nap.x = p[0]; nap.y = p[1];
+  if (!demo) { fx.text(pot.x, pot.y - pr(), "Hey! −4s", { color: "#2a8a5a", size: 18 * S }); say("Sorry Momo!", 1.6); }
+}
+function update(dt) {
+  clock += dt; bubble && (bubble.t += dt, bubble.t > bubble.dur && (bubble = null));
+  for (const k of ["joy", "wow", "sad"]) bun[k] = Math.max(0, bun[k] - dt);
+  if (phase === "judge") { phaseT += dt; if (phaseT > 1.6 && !demo) endGarden(); return; }
+  if (!demo) {
+    tLeft -= dt; Lab.music.intensity(.25 + .6 * clamp(1 - tLeft / sp.time, 0, 1));
+    if (tLeft < 5.5 && Math.ceil(tLeft) !== Math.ceil(tLeft + dt)) snd("tick", { pitch: 1.6 - tLeft * .1 });
+    if (tLeft <= 0) { tLeft = 0; phase = "judge"; phaseT = 0; }
+    const ax = Lab.input.axisX(), ay = Lab.input.axisY(); if (ax || ay) { kb = true; pot.tx += ax * 250 * S * dt; pot.ty += ay * 250 * S * dt; }
+  } else tLeft -= dt;
+  const r = pr(), m = r * .35;
+  pot.tx = clamp(pot.tx, G.x + m, G.x + G.w - m); pot.ty = clamp(pot.ty, G.y + m, G.y + G.h - m);
+  const ox = pot.x, oy = pot.y; pot.x = Lab.damp(pot.x, pot.tx, 16, dt); pot.y = Lab.damp(pot.y, pot.ty, 16, dt);
+  pot.vx = Lab.damp(pot.vx, (pot.x - ox) / Math.max(dt, 1e-3), 10, dt); pot.vy = Lab.damp(pot.vy, (pot.y - oy) / Math.max(dt, 1e-3), 10, dt);
+  pot.rv = Lab.damp(pot.rv, pot.ru, 7, dt); pot.pulse = Math.max(0, pot.pulse - dt * 2.4); pot.spin += dt * (1.6 + Math.hypot(pot.vx, pot.vy) / (300 * S));
+  if (Math.abs(pot.vx) > 20) bun.face = pot.vx > 0 ? 1 : -1;
+  // wind gusts: telegraph, then blow the light stuff and drop fresh leaves upwind
+  if (wind) {
+    wind.t -= dt;
+    if (wind.state === 0 && wind.t <= 0) { wind.state = 1; wind.t = 1.2; wind.dir = Lab.chance(.5) ? 1 : -1; snd("whoosh", { vol: .5 }); if (!demo) once("wind", "Wind's up! Fresh leaves!", 2); }
+    else if (wind.state === 1 && wind.t <= 0) { wind.state = 2; wind.t = 2.4; for (let i = 0; i < 4; i++) { const it = mkItem(0, wind.dir > 0 ? G.x + 10 : G.x + G.w - 10, rand(G.y + 20, G.y + G.h - 20)); it.vx = wind.dir * rand(120, 200) * U; items.push(it); totV += 1; } }
+    else if (wind.state === 2) { for (const it of items) if (!it.flower && !it.fall && it.t <= 2) it.vx += wind.dir * (220 - it.t * 60) * U * dt; if (wind.t <= 0) { wind.state = 0; wind.t = rand(6, 8.5); } }
+  }
+  sparkT += dt;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.fall) { it.fall.t += dt / .34; if (it.fall.t >= 1) items.splice(i, 1); continue; }
+    if (it.vx || it.vy) { it.x = clamp(it.x + it.vx * dt, G.x + 6, G.x + G.w - 6); it.y = clamp(it.y + it.vy * dt, G.y + 6, G.y + G.h - 6); it.vx *= Math.pow(.25, dt); it.vy *= Math.pow(.25, dt); if (Math.abs(it.vx) < 1) it.vx = 0; if (Math.abs(it.vy) < 1) it.vy = 0; }
+    it.wob = Math.max(0, it.wob - dt * 3);
+    const ir = irOf(it), d = Math.hypot(it.x - pot.x, it.y - pot.y);
+    if (d > r + ir) continue;
+    if (ir < r * .88) { // small enough: slides toward the mouth, drops when mostly over it
+      if (d < r - ir * .3) { gobble(it); continue; }
+      const k = Math.min(1, dt * 7); it.x = lerp(it.x, pot.x, k * .5); it.y = lerp(it.y, pot.y, k * .5);
+    } else { if (it.wob < .2 && !demo && !it.flower) { snd("knock", { pitch: 1.2 - it.t * .08, vol: .35 }); once("big", "Too big! Gobble more first.", 2.2); } it.wob = 1; }
+  }
+  if (nap) {
+    nap.hop = Math.max(0, nap.hop - dt * 1.4); nap.cross = Math.max(0, nap.cross - dt);
+    const d = Math.hypot(nap.x - pot.x, nap.y - pot.y), nr = NAPR * U;
+    if (nap.hop <= 0 && d < r - nr * .3 && nr < r * .88) spitNap();
+    else if (d < r + nr * .5 && nap.hop <= 0 && !demo) once("nap", "Shh! Don't gobble Momo!", 2.2);
+  }
+}
+function endGarden() {
+  const t = tidy(), kept = items.filter(o => o.flower && !o.fall).length;
+  if (t < sp.goal) {
+    Lab.gameover({ title: "Not tidy enough!", message: `${sp.name}: ${Math.round(t * 100)}% tidy (needed ${Math.round(sp.goal * 100)}%)`, score,
+      stats: [["Gardens tidied", gIdx], ["Things gobbled", gobbled], ["Best ladder", "×" + bestMult]] });
+    phase = "over"; return;
+  }
+  const bonus = Math.round((t - sp.goal) * 400) + kept * 10 + Math.round(tLeft * 8);
+  score += bonus; Lab.setScore(score); Lab.bumpScore(); snd("levelup");
+  Lab.toast(`${Math.round(t * 100)}% tidy · +${bonus}` + (kept ? ` (${kept} tulips safe)` : ""), 1600, { y: .3 });
+  gIdx++; buildGarden(gIdx); bun.joy = 1.6; Lab.after(.25, () => Lab.banner(sp.name, { color: "#8f6cf0", ms: 1300, y: .42 }));
+  if (sp.beds && !told.beds) Lab.after(.9, () => once("beds", "Mind my tulip beds!", 2.4));
+}
+function frame(dt, t) { if (phase !== "over") update(dt); render(clock); }
+
+/* ---------------- art ---------------- */
+function bakeBg() {
+  bg = Lab.sprite("gpbg", Lab.W + 80, Lab.H + 80, (g) => {
+    g.translate(40, 40); draw.vgrad(g, -40, -40, Lab.W + 80, Lab.H + 80, ["#bfe39a", "#9fd27f"]);
+    const rng = Lab.rng(11); g.fillStyle = "rgba(60,120,60,.12)"; for (let i = 0; i < 90; i++) { g.beginPath(); g.arc(rng() * Lab.W, rng() * Lab.H, 2 + rng() * 5, 0, TAU); g.fill(); }
+    // hedge frame
+    draw.rect(g, G.x - 9, G.y - 9, G.w + 18, G.h + 18, 22 * S, "#4f9a52"); g.fillStyle = "#5fae5d";
+    for (let x = G.x; x < G.x + G.w; x += 16) { g.beginPath(); g.arc(x, G.y - 6, 8, 0, TAU); g.arc(x + 8, G.y + G.h + 6, 8, 0, TAU); g.fill(); }
+    for (let y = G.y; y < G.y + G.h; y += 16) { g.beginPath(); g.arc(G.x - 6, y, 8, 0, TAU); g.arc(G.x + G.w + 6, y + 8, 8, 0, TAU); g.fill(); }
+    g.save(); draw.rr(g, G.x, G.y, G.w, G.h, 16 * S); g.clip(); g.fillStyle = "#93d36f"; g.fillRect(G.x, G.y, G.w, G.h);
+    const sw = 34 * U; for (let i = 0, x = G.x - G.h; x < G.x + G.w; x += sw, i++) if (i % 2) { g.fillStyle = "#a2dc7c"; g.beginPath(); g.moveTo(x, G.y + G.h); g.lineTo(x + sw, G.y + G.h); g.lineTo(x + sw + G.h * .5, G.y); g.lineTo(x + G.h * .5, G.y); g.fill(); }
+    g.strokeStyle = "rgba(50,120,50,.35)"; g.lineWidth = 1.4; for (let i = 0; i < G.w * G.h / 1400; i++) { const x = G.x + rng() * G.w, y = G.y + rng() * G.h; g.beginPath(); g.moveTo(x - 2, y + 3); g.lineTo(x, y - 2); g.lineTo(x + 2, y + 3); g.stroke(); }
+    g.fillStyle = "#fff6"; for (let i = 0; i < G.w * G.h / 5000; i++) { const x = G.x + rng() * G.w, y = G.y + rng() * G.h; for (let k = 0; k < 5; k++) { g.beginPath(); g.arc(x + Math.cos(k * 1.26) * 2.2, y + Math.sin(k * 1.26) * 2.2, 1.5, 0, TAU); g.fill(); } }
+    g.restore();
+  });
+}
+function art(g, t, r, v) {
+  const K = KINDS[t].n; g.lineCap = g.lineJoin = "round";
+  if (K === "leaf") { const col = ["#f29a3a", "#e8603c", "#f2c94c"][v]; g.fillStyle = col; g.beginPath(); g.moveTo(-r, 0); g.quadraticCurveTo(0, -r * .9, r, 0); g.quadraticCurveTo(0, r * .9, -r, 0); g.fill(); g.strokeStyle = Lab.color.shade(col, -.3); g.lineWidth = 1.2; g.beginPath(); g.moveTo(-r * 1.15, 0); g.lineTo(r * .8, 0); g.stroke(); }
+  else if (K === "acorn") { if (v === 2) { g.fillStyle = "#a9a6b8"; g.beginPath(); g.ellipse(0, 0, r, r * .78, 0, 0, TAU); g.fill(); g.fillStyle = "#cfcde0"; g.beginPath(); g.ellipse(-r * .3, -r * .25, r * .35, r * .22, -.4, 0, TAU); g.fill(); }
+    else { g.fillStyle = "#c98a48"; g.beginPath(); g.ellipse(0, r * .2, r * .72, r * .8, 0, 0, TAU); g.fill(); g.fillStyle = "#7a5230"; g.beginPath(); g.ellipse(0, -r * .35, r * .9, r * .45, 0, 0, TAU); g.fill(); g.strokeStyle = "#5c3c22"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -r * .7); g.lineTo(r * .2, -r); g.stroke(); } }
+  else if (K === "apple") { const col = v === 1 ? "#9ccc3c" : "#e2514c"; g.fillStyle = col; g.beginPath(); g.arc(-r * .3, 0, r * .72, 0, TAU); g.arc(r * .3, 0, r * .72, 0, TAU); g.fill(); g.fillStyle = "#fff5"; g.beginPath(); g.arc(-r * .4, -r * .3, r * .2, 0, TAU); g.fill(); g.strokeStyle = "#6b4426"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -r * .5); g.lineTo(r * .1, -r * .95); g.stroke(); g.fillStyle = "#4fa64a"; g.beginPath(); g.ellipse(r * .35, -r * .85, r * .3, r * .14, -.4, 0, TAU); g.fill(); }
+  else if (K === "flowerpot") { g.fillStyle = "#6e4a2e"; g.beginPath(); g.ellipse(r * .7, 0, r * .45, r * .6, 0, 0, TAU); g.fill(); g.fillStyle = "#d9774a"; g.beginPath(); g.moveTo(-r, -r * .45); g.lineTo(r * .6, -r * .75); g.lineTo(r * .6, r * .75); g.lineTo(-r, r * .45); g.closePath(); g.fill(); g.fillStyle = "#e9925f"; g.fillRect(r * .35, -r * .8, r * .32, r * 1.6); g.fillStyle = "#b85e36"; g.beginPath(); g.ellipse(-r, 0, r * .16, r * .45, 0, 0, TAU); g.fill(); }
+  else if (K === "bucket") { const col = v === 1 ? "#ff9fb4" : "#5b9be8"; g.fillStyle = Lab.color.shade(col, -.2); g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill(); g.fillStyle = col; g.beginPath(); g.arc(0, 0, r * .84, 0, TAU); g.fill(); g.fillStyle = Lab.color.shade(col, -.35); g.beginPath(); g.arc(0, 0, r * .62, 0, TAU); g.fill(); g.strokeStyle = "#e9e6f2"; g.lineWidth = 2.4; g.beginPath(); g.arc(0, r * .1, r * 1.02, Math.PI * 1.1, Math.PI * 1.9); g.stroke(); }
+  else if (K === "gnome") { g.fillStyle = "#4f7fd6"; g.beginPath(); g.ellipse(0, r * .45, r * .62, r * .5, 0, 0, TAU); g.fill(); g.fillStyle = "#ffd9b8"; g.beginPath(); g.arc(0, -r * .02, r * .36, 0, TAU); g.fill(); g.fillStyle = "#fff"; g.beginPath(); g.moveTo(-r * .4, 0); g.quadraticCurveTo(0, r * .9, r * .4, 0); g.fill(); g.fillStyle = "#e2453f"; g.beginPath(); g.moveTo(-r * .45, -r * .2); g.quadraticCurveTo(r * .1, -r * 1.3, r * .5, -r * 1.05); g.lineTo(r * .45, -r * .2); g.closePath(); g.fill(); g.fillStyle = INK; g.beginPath(); g.arc(-r * .13, -r * .05, r * .05, 0, TAU); g.arc(r * .13, -r * .05, r * .05, 0, TAU); g.fill(); g.fillStyle = "#ff8a8a"; g.beginPath(); g.arc(0, r * .06, r * .09, 0, TAU); g.fill(); }
+  else if (K === "barrow") { g.fillStyle = "#3e3a4f"; g.beginPath(); g.arc(-r * .78, 0, r * .28, 0, TAU); g.fill(); g.strokeStyle = "#a07850"; g.lineWidth = r * .09; g.beginPath(); g.moveTo(r * .3, -r * .45); g.lineTo(r * 1.05, -r * .55); g.moveTo(r * .3, r * .45); g.lineTo(r * 1.05, r * .55); g.stroke(); g.fillStyle = "#3fa36a"; draw.rr(g, -r * .7, -r * .62, r * 1.2, r * 1.24, r * .3); g.fill(); g.fillStyle = "#2f7f52"; draw.rr(g, -r * .55, -r * .45, r * .9, r * .9, r * .22); g.fill(); g.fillStyle = "#8a6a3a"; g.beginPath(); g.ellipse(-r * .1, 0, r * .3, r * .25, 0, 0, TAU); g.fill(); }
+  else { g.fillStyle = "#7a5636"; for (const sx of [-1, 1]) for (const sy of [-1, 1]) g.fillRect(sx * r * .78 - r * .07, sy * r * .42 - r * .07, r * .14, r * .14); for (let i = 0; i < 4; i++) { g.fillStyle = i % 2 ? "#c48a54" : "#d29a62"; draw.rr(g, -r, -r * .5 + i * r * .26, r * 2, r * .2, r * .06); g.fill(); } g.strokeStyle = "#8f6038"; g.lineWidth = 1; for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(-r * .9, -r * .4 + i * r * .26); g.lineTo(r * .9, -r * .4 + i * r * .26); g.stroke(); } }
+}
+function itemSprite(t, v, r) {
+  const pad = Math.ceil(r * .5 + 4), sz = Math.ceil(r * 2.3 + pad * 2);
+  return Lab.sprite(`gp:${t}:${v}:${Math.round(r * 4)}`, sz, sz, (g, w, h) => { g.translate(w / 2, h / 2); g.fillStyle = "rgba(30,60,30,.16)"; g.beginPath(); g.ellipse(1.5, r * .3 + 2.5, r * .95, r * .5, 0, 0, TAU); g.fill(); art(g, t, r, v); });
+}
+function holeSprite() { return Lab.sprite("gp:hole", 128, 128, (g) => { const gr = g.createRadialGradient(64, 70, 4, 64, 64, 64); gr.addColorStop(0, "#0e0820"); gr.addColorStop(.6, "#271a4d"); gr.addColorStop(1, "#5a43a0"); g.fillStyle = gr; g.beginPath(); g.arc(64, 64, 64, 0, TAU); g.fill(); }); }
+function drawTulip(c, it, t) {
+  const r = FLR * U, sw = Math.sin(t * 1.6 + it.ph) * .08 + (it.wob ? Math.sin(t * 40) * .1 : 0), col = ["#ff7aa8", "#ffd24a", "#ff6a5a"][it.col];
+  c.save(); c.translate(it.x, it.y + r * .6); c.rotate(sw); c.strokeStyle = "#3f8f45"; c.lineWidth = 2 * U; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, -r * 1.3); c.stroke();
+  c.fillStyle = "#56a85a"; c.beginPath(); c.ellipse(-r * .35, -r * .45, r * .3, r * .13, -.7, 0, TAU); c.fill();
+  c.fillStyle = col; c.beginPath(); c.moveTo(-r * .55, -r * 1.75); c.lineTo(-r * .3, -r * 1.4); c.lineTo(0, -r * 1.8); c.lineTo(r * .3, -r * 1.4); c.lineTo(r * .55, -r * 1.75); c.quadraticCurveTo(r * .6, -r * 1.05, 0, -r * 1.05); c.quadraticCurveTo(-r * .6, -r * 1.05, -r * .55, -r * 1.75); c.fill(); c.restore();
+}
+function drawPot(c, t) {
+  const r = pot.rv * U * (1 + ease.pulse(Math.min(1, pot.pulse)) * .08), x = pot.x, y = pot.y;
+  c.save(); c.fillStyle = "rgba(60,40,110,.25)"; c.beginPath(); c.ellipse(x, y + r * .08, r * 1.08, r * 1.04, 0, 0, TAU); c.fill();
+  c.drawImage(holeSprite(), x - r, y - r, r * 2, r * 2);
+  c.beginPath(); c.arc(x, y, r * .98, 0, TAU); c.clip();
+  for (const it of items) if (it.fall) { // things dropping into the swirl
+    const f = ease.inQuad(clamp(it.fall.t, 0, 1)), ir = irOf(it), px = lerp(it.fall.x0, x, f), py = lerp(it.fall.y0, y, f) + f * ir * .4, k = 1 - f * .8;
+    c.save(); c.translate(px, py); c.rotate((it.rot || 0) + f * 4); c.scale(k, k); c.globalAlpha = 1 - f * .5;
+    if (it.flower) { c.fillStyle = "#ff7aa8"; c.beginPath(); c.arc(0, 0, ir * .6, 0, TAU); c.fill(); } else { const s = itemSprite(it.t, it.var, ir); c.drawImage(s, -s.w / 2, -s.h / 2, s.w, s.h); }
+    c.restore();
+  }
+  c.strokeStyle = "rgba(205,185,255,.33)"; c.lineWidth = Math.max(2, r * .07);
+  for (let k = 0; k < 3; k++) { c.beginPath(); for (let s = 0; s <= 1.001; s += .08) { const a = -pot.spin * 2 + k * TAU / 3 + s * 3.6, rr = r * (.95 - s * .8); s ? c.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr) : c.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); } c.stroke(); }
+  c.restore();
+  c.strokeStyle = "#b9a3ff"; c.lineWidth = 3.5 * S; c.beginPath(); c.arc(x, y, r, 0, TAU); c.stroke(); c.strokeStyle = "#f2ecff"; c.lineWidth = 1.5 * S; c.beginPath(); c.arc(x, y, r + 2.5 * S, 0, TAU); c.stroke();
+  for (let i = 0; i < 7; i++) { const a = t * 1.3 + i * TAU / 7, tw = .5 + .5 * Math.sin(t * 5 + i * 2); c.globalAlpha = .4 + tw * .6; draw.star(c, x + Math.cos(a) * (r + 3 * S), y + Math.sin(a) * (r + 3 * S), (1.6 + tw * 1.6) * S, "#fff"); } c.globalAlpha = 1;
+}
+function render(t) {
+  const c = Lab.ctx; if (!bg) bakeBg(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  for (const it of items) if (it.flower && !it.fall) { c.fillStyle = "rgba(110,74,46,.55)"; c.beginPath(); c.ellipse(it.x, it.y + FLR * U * .6, FLR * U * 1.3, FLR * U * .7, 0, 0, TAU); c.fill(); }
+  drawPot(c, t);
+  if (wind && wind.state > 0) { c.strokeStyle = `rgba(255,255,255,${wind.state === 1 ? .35 : .55})`; c.lineWidth = 2 * S; for (let i = 0; i < 9; i++) { const yy = G.y + (i + .5) / 9 * G.h + Math.sin(t * 3 + i) * 8, xx = G.x + ((t * 300 * wind.dir + i * 137) % G.w + G.w) % G.w; c.beginPath(); c.moveTo(xx, yy); c.quadraticCurveTo(xx + 20 * wind.dir, yy - 5, xx + 46 * wind.dir, yy); c.stroke(); } }
+  const r = pr(), nextOk = chainLast >= 0 ? chainLast + 1 : -1, list = items.filter(o => !o.fall).sort((a, b) => a.y - b.y);
+  for (const it of list) {
+    if (it.flower) { drawTulip(c, it, t); continue; }
+    const ir = irOf(it), s = itemSprite(it.t, it.var, ir), wob = it.wob ? Math.sin(t * 38) * .12 * it.wob : 0, k = 1 + (it.wob ? .04 * it.wob : 0);
+    c.save(); c.translate(it.x, it.y); c.rotate(it.rot + wob); c.scale(k, k); c.drawImage(s, -s.w / 2, -s.h / 2, s.w, s.h); c.restore();
+    if (it.t === nextOk && ir < r * .88 && !demo) { const tw = .5 + .5 * Math.sin(t * 6 + it.ph); draw.star(c, it.x + ir * .7, it.y - ir * .8, (2.5 + tw * 2) * S, `rgba(255,255,255,${.35 + tw * .55})`); }
+  }
+  if (nap) drawNap(c, t);
+  drawBun(c, t); drawPanel(c, t); drawBubble(c);
+}
+function drawNap(c, t) {
+  const nr = NAPR * U, h = nap.hop > 0 ? Math.sin(nap.hop * Math.PI) * 60 * U : 0, x = nap.hop > 0 ? lerp(nap.x, nap.fx, nap.hop) : nap.x, y = (nap.hop > 0 ? lerp(nap.y, nap.fy, nap.hop) : nap.y);
+  if (nap.hop <= 0) { c.save(); c.translate(x, y); c.rotate(-.12); draw.rect(c, -nr * 1.05, -nr * .55, nr * 2.1, nr * 1.25, 6, "#ffd9e4"); c.fillStyle = "rgba(255,110,150,.45)"; for (let i = 0; i < 5; i++) { c.fillRect(-nr * 1.05 + i * nr * .44, -nr * .55, nr * .2, nr * 1.25); c.fillRect(-nr * 1.05, -nr * .55 + i * nr * .27, nr * 2.1, nr * .12); } c.restore(); }
+  Pals.draw(c, "momo", x, y - h, nr * 1.25, { t, mood: nap.cross > 0 ? "angry" : "sleepy", squash: nap.hop <= 0 ? .12 : -.1, arms: nap.cross > 0 ? "up" : "down", shadow: nap.hop <= 0 });
+  if (nap.cross <= 0 && nap.hop <= 0) for (let i = 0; i < 2; i++) { const p = (t * .5 + i * .5) % 1; draw.text(c, "z", x + nr * .6 + p * 14, y - nr * .9 - p * 22, { size: (10 + p * 6) * S, color: `rgba(59,46,90,${1 - p})`, weight: 700 }); }
+}
+function drawBun(c, t) {
+  const r = pot.rv * U, size = 40 * S * clamp(U, .85, 1.2), sp2 = Math.hypot(pot.vx, pot.vy), moving = clamp(sp2 / (260 * S), 0, 1);
+  const hop = Math.abs(Math.sin(clock * 11)) * 5 * S * moving, x = pot.x, y = pot.y - r - size * .44 - hop;
+  const mood = bun.sad > 0 ? "sad" : bun.wow > 0 ? "wow" : bun.joy > 0 ? "joy" : tLeft < 6 && phase === "play" ? "scared" : moving > .3 ? "focus" : "happy";
+  const a = Pals.draw(c, "bun", x, y, size, { t, mood, look: [clamp(pot.vx / 300, -1, 1), clamp(pot.vy / 300 + .3, -1, 1)], tilt: clamp(pot.vx / (900 * S), -.25, .25), squash: pot.pulse * .18 - moving * .05,
+    arms: bun.joy > 0 ? "cheer" : bun.sad > 0 ? "down" : "hold", flip: bun.face < 0, talk: bubble && bubble.t < .5 ? .6 : 0 });
+  const hx = a.handR[0], hy = a.handR[1], wx = hx + bun.face * 8 * S, wy = hy - 14 * S; // wand
+  c.strokeStyle = "#8a5a2f"; c.lineWidth = 2.2 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(hx, hy); c.lineTo(wx, wy); c.stroke();
+  draw.star(c, wx, wy, (4.5 + Math.sin(t * 6) * .8) * S, "#ffd24a");
+}
+function drawBubble(c) {
+  if (!bubble) return; const k = ease.outBack(clamp(bubble.t / .2, 0, 1)) * clamp((bubble.dur - bubble.t) / .25, 0, 1); if (k <= 0) return;
+  const fs = 14 * S; c.font = Lab.font(fs, 700); const w = c.measureText(bubble.txt).width + 24, h = fs * 2.1, r = pot.rv * U;
+  let x = clamp(pot.x, G.x + w / 2, G.x + G.w - w / 2), y = pot.y - r - 40 * S * 1.2 - h / 2 - 10 * S; if (y < G.y + h / 2) y = pot.y + r + h / 2 + 14 * S;
+  c.save(); c.translate(x, y); c.scale(k, k); Pals.bubble(c, 0, 0, w, h, { tailX: pot.x - x, tailY: (y < pot.y ? h / 2 + 10 : -h / 2 - 10), lineWidth: 2 }); draw.text(c, bubble.txt, 0, 1, { size: fs, color: INK, weight: 700 }); c.restore();
+}
+function drawPanel(c, t) {
+  const p = panel; draw.rect(c, p.x, p.y, p.w, p.h, 16 * S, "rgba(255,251,240,.94)", "rgba(58,47,77,.15)", 1.5);
+  const td = tidy(), low = tLeft < 6 && phase === "play", pie = (cx, cy, rad) => {
+    draw.circle(c, cx, cy, rad, "#ffe9b8"); c.fillStyle = low && Math.sin(clock * 12) > 0 ? "#ff6a5a" : "#ffb02e"; c.beginPath(); c.moveTo(cx, cy); c.arc(cx, cy, rad, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(tLeft / sp.time, 0, 1)); c.fill();
+    draw.text(c, Math.ceil(tLeft), cx, cy + 1, { size: rad * .9, color: INK, weight: 800 }); };
+  const bar = (x, y, w, h) => {
+    draw.rect(c, x, y, w, h, h / 2, "#e6e0ee"); if (td > 0) draw.rect(c, x, y, Math.max(h, w * Math.min(1, td)), h, h / 2, td >= sp.goal ? "#4cc06a" : "#b9a3ff");
+    const gx = x + w * sp.goal; c.fillStyle = INK; c.fillRect(gx - 1, y - 3, 2, h + 6);
+    draw.text(c, `Tidy ${Math.round(td * 100)}%`, x, y - h * .62, { size: h * .78, color: INK, weight: 800, align: "left" });
+    draw.text(c, `goal ${Math.round(sp.goal * 100)}%`, x + w, y - h * .62, { size: h * .7, color: td >= sp.goal ? "#2f9a4c" : "#6b6478", weight: 700, align: "right" }); };
+  const ladder = (x, y, cell, cols) => {
+    for (let i = 0; i < 8; i++) { const cx = x + (i % cols) * cell + cell / 2, cy = y + (i / cols | 0) * cell + cell / 2, on = chainLast >= i;
+      draw.circle(c, cx, cy, cell * .44, on ? "#e9e0ff" : "#f2eee6"); if (chainLast === i) { c.strokeStyle = "#8f6cf0"; c.lineWidth = 2; c.beginPath(); c.arc(cx, cy, cell * .44, 0, TAU); c.stroke(); }
+      const s = itemSprite(i, 0, cell * .26); c.globalAlpha = on ? 1 : .45; c.drawImage(s, cx - s.w / 2, cy - s.h / 2 - cell * .02, s.w, s.h); c.globalAlpha = 1; } };
+  if (!wide) {
+    const s = S, x0 = p.x + 12 * s; draw.text(c, sp.name, x0, p.y + 18 * s, { size: 15 * s, color: INK, weight: 800, align: "left" });
+    draw.text(c, `Garden ${gIdx + 1}`, x0, p.y + 35 * s, { size: 11 * s, color: "#6b6478", weight: 600, align: "left" });
+    pie(p.x + p.w - 30 * s, p.y + 26 * s, 19 * s);
+    const bx = p.x + p.w * .42, bw = p.w - (p.x + p.w * .42 - p.x) - 62 * s; bar(bx, p.y + 25 * s, bw, 12 * s);
+    const cell = Math.min(24 * s, (p.w - 96 * s) / 8); ladder(x0 - 4 * s, p.y + p.h - cell - 6 * s, cell, 8);
+    draw.text(c, "×" + mult, x0 + cell * 8 + 10 * s, p.y + p.h - cell / 2 - 5 * s, { size: 20 * s, color: mult > 1 ? "#8f6cf0" : "#9a93a6", weight: 800, align: "left" });
+  } else {
+    const s = Math.min(S, p.h / 330), cx = p.x + p.w / 2; let y = p.y + 22 * s;
+    draw.text(c, sp.name, cx, y, { size: 15 * s, color: INK, weight: 800 }); draw.text(c, `Garden ${gIdx + 1}`, cx, y + 17 * s, { size: 11 * s, color: "#6b6478", weight: 600 });
+    pie(cx, y + 62 * s, 26 * s); bar(p.x + 12 * s, y + 110 * s, p.w - 24 * s, 13 * s);
+    const cell = Math.min(30 * s, (p.w - 20 * s) / 4); ladder(cx - cell * 2, y + 134 * s, cell, 4);
+    draw.text(c, "×" + mult, cx, y + 134 * s + cell * 2 + 22 * s, { size: 24 * s, color: mult > 1 ? "#8f6cf0" : "#9a93a6", weight: 800 });
+  }
+}
+
+Lab.expose({
+  get score() { return score; }, get garden() { return gIdx; }, get time() { return tLeft; }, get tidy() { return tidy(); }, get goal() { return sp.goal; },
+  get mult() { return mult; }, get chainLast() { return chainLast; }, get phase() { return phase; }, get lost() { return lost; }, get gobbled() { return gobbled; },
+  get pot() { return { x: pot.x, y: pot.y, r: pr(), ru: pot.ru }; }, get G() { return G; }, get nap() { return nap && { x: nap.x, y: nap.y, r: NAPR * U }; },
+  items() { return items.filter(o => !o.fall).map(o => ({ t: o.flower ? -1 : o.t, x: o.x, y: o.y, r: irOf(o) })); },
+  clear() { items = []; totV = 0; eatV = 0; nap = null; wind = null; }, spawn(t, x, y) { const it = mkItem(t, x, y); items.push(it); totV += KINDS[t].v; },
+  flower(x, y) { items.push({ flower: true, x, y, col: 0, ph: 0, fall: null, wob: 0, vx: 0, vy: 0 }); }, napAt(x, y) { nap = { x, y, pal: true, hop: 0, cross: 0 }; },
+  setPot(x, y, ru) { pot.x = pot.tx = x; pot.y = pot.ty = y; if (ru) pot.ru = pot.rv = ru; }, setTime(s) { tLeft = s; }, setTot(v) { totV = v; },
+});
+Lab.boot();
+})();
+</script></body></html>
