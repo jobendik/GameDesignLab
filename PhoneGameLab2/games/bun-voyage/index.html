@@ -1,0 +1,293 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Bun Voyage</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* BUN VOYAGE — Bun's bakery stall sits under the balloon route. Pals drift over in hot-air balloons calling for their
+ * order; Bun lobs the bakes up so they drop into the baskets.
+ * Core idea kept: aim and launch at things flying across the sky.
+ * Made it a different game from Windfletch (draw-back archery at a fixed target):
+ *   - You don't shoot, you LOB: the touch point is the top of the arc (flight time grows with height) and the passenger
+ *     catches the bake as it floats in at its peak. Overshoot and it drops onto the envelope and bounces away; aim low and
+ *     it smacks the basket bottom. So you LEAD a moving, bobbing basket by the lob's hang time.
+ *   - ORDERS: each passenger wants bread, cake or pie (shapes, not just colours). The bake in Bun's paws is fixed, so the
+ *     decision is which balloon to serve with it. Wrong bake = bounced back. A balloon that leaves hungry costs a heart.
+ *   - Wind (from round 2) drifts the lob — the preview arc ignores it, the bunting and arrow show it.
+ *   - Combo ×1…×5 for deliveries in a row, swish bonus for the dead centre, higher baskets pay more.
+ *   Rounds: 2 → 3 bakes, more and faster balloons, double orders (round 3), gusts and goose flocks that knock bakes away (4+).
+ * Identity: sunny pastel morning, striped pink awning, wicker baskets, balloons striped in each passenger's colours.
+ * Bun (gentle, tidy, a little anxious) watches the aim, winds up, cheers, frets and gets flustered as hungry pals drift off. */
+let demo = false;
+Lab.init({
+  title: "Bun Voyage", tagline: "Lob fresh bakes into passing balloons.", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Touch where the lob should peak, let go", "Lob it to a pal who wants that bake", "Tap Bun to swap bakes. Mind the wind!"],
+  theme: { bg: "#8fd6f5", bg2: "#fff2d6", fg: "#4a3160", muted: "#7d6a8f", accent: "#ff7fa8", accent2: "#b9a3ff", light: true },
+  orient: "any", music: { style: "bounce", key: "E", vol: .4 }, restart: start,
+  attract(dt, t) { if (!demo || !balloons) { demo = true; reset(); round = 3; } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, INK = Pals.ink;
+const RIDERS = ["pip", "momo", "nori", "olli", "bolt"], BAKES = ["bread", "cake", "pie"], NAMES = { bread: "bread", cake: "cake", pie: "pie" };
+let swaps, W, H, P, S, G, groundY, bunX, bunY, yTop, yBot, balloons, parcels, birds, clouds, nid, cur, next, cool, aim, aiming, keyAim, buf, wind, windTo, windT, spawnT, birdT,
+  round, quota, delivered, hearts, score, combo, bestCombo, swishes, total, clock, bun, over, roundT, overT;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() {
+  W = Lab.W; H = Lab.H; P = Lab.play; S = clamp(Math.min(W / 390, P.h / (P.w > P.h ? 440 : 680)), .55, 1.5); G = 1500 * S;
+  groundY = P.y + P.h - 34 * S; bunX = P.x + P.w / 2; bunY = groundY - 64 * S;
+  yTop = P.y + 120 * S; yBot = Math.max(yTop + 40 * S, groundY - 250 * S);
+  Lab.sprite.clear("bv");
+}
+Lab.onResize(() => { if (balloons) { const oy = [yTop, yBot]; layout(); for (const b of balloons) b.y0 = lerp(yTop, yBot, clamp((b.y0 - oy[0]) / Math.max(1, oy[1] - oy[0]), 0, 1)); } });
+const hand = () => [bunX + 18 * S, bunY - 26 * S];
+
+/* ---------- state ---------- */
+function reset() {
+  layout(); balloons = []; parcels = []; birds = []; nid = 1; cool = 0; aim = [bunX, yTop + 60 * S]; aiming = false; keyAim = false; buf = 0;
+  wind = 0; windTo = 0; windT = 8; spawnT = .6; birdT = 9; round = 1; quota = 4; delivered = 0; hearts = 3; score = 0; combo = 0; bestCombo = 0; swishes = 0; total = 0; swaps = 0; clock = 0; over = false; roundT = 0; overT = 0;
+  bun = { sq: 0, throwT: 0, joy: 0, sad: 0, hold: 0 };
+  clouds = Array.from({ length: 6 }, (_, i) => ({ x: rand(0, 1), y: rand(.05, .5), s: rand(.6, 1.2), v: rand(.5, 1) }));
+  cur = pick(); next = pick();
+}
+function start() {
+  demo = false; reset(); Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => { if (over) return; if (Math.hypot(x - bunX, y - bunY) < 46 * S || (Math.abs(x - nextX()) < 26 * S && Math.abs(y - (groundY - 42 * S)) < 30 * S)) { swap(); return; } aiming = true; keyAim = false; setAim(x, y); bun.sq = .12; }];
+  Lab.input.onMove = [(x, y) => { if (aiming) setAim(x, y); }];
+  Lab.input.onUp = [(x, y) => { if (!aiming) return; aiming = false; setAim(x, y); if (!lob(aim[0], aim[1])) buf = .3; }];
+  Lab.input.onKey = [k => { if (k === " " || k === "Enter") { if (!lob(aim[0], aim[1])) buf = .3; } else if (k === "x" || k === "X" || k === "Shift") swap(); }];
+  Lab.hint("Touch the top of the lob, let go to throw", {});
+  Lab.expose({
+    get score() { return score; }, get hearts() { return hearts; }, set hearts(v) { hearts = v; }, get round() { return round; }, get delivered() { return delivered; }, get combo() { return combo; }, get total() { return total; },
+    get cur() { return cur; }, get next() { return next; }, get swaps() { return swaps; }, swap: () => swap(), get bun() { return [bunX, bunY]; }, get cool() { return cool; }, get wind() { return wind; }, get quota() { return quota; },
+    balloons: () => balloons.map(b => ({ id: b.id, who: b.who, x: b.x, y: b.y, vx: b.vx, want: b.want.slice(), got: b.got, done: b.done })),
+    parcels: () => parcels.length, aimFor: id => { const b = balloons.find(q => q.id === id); return b ? aimFor(b) : null; },
+    spawn(o) { const b = mkBalloon(o.side || -1); Object.assign(b, o); if (o.y != null) b.y0 = o.y; balloons.push(b); return b.id; }, clearSky() { balloons = []; parcels = []; birds = []; },
+    setCur(t) { cur = t; }, setWind(w) { wind = windTo = w; windT = 999; }, pause(v) { spawnT = v ? 1e9 : 1; birdT = v ? 1e9 : 5; }, lob: (x, y) => lob(x, y), hand,
+  });
+  Lab.loop(frame);
+}
+const nextX = () => bunX + Math.min(P.w - 20, 300 * S) / 2 - 34 * S;
+function swap() { if (over || bun.throwT > 0) return; const t = cur; cur = next; next = t; cool = Math.max(cool, .18); bun.sq = .18; bun.swapT = .3; swaps++; snd("flip", { pitch: 1.2 }); }
+function pick() {
+  const kinds = round >= 3 ? 3 : 2, wanted = [];
+  for (const b of balloons || []) if (!b.done) for (let i = b.got; i < b.want.length; i++) wanted.push(b.want[i]);
+  if (wanted.length && Math.random() < .8) return Lab.choose(wanted);
+  return BAKES[Lab.randInt(0, kinds - 1)];
+}
+function mkBalloon(side) {
+  const kinds = round >= 3 ? 3 : 2, n = round >= 3 && Math.random() < .35 ? 2 : 1, want = [];
+  for (let i = 0; i < n; i++) want.push(BAKES[Lab.randInt(0, kinds - 1)]);
+  const sp = Math.min(130, 34 + round * 9 + rand(0, 18)) * S;
+  return { id: nid++, who: Lab.choose(RIDERS), x: side < 0 ? -60 * S : W + 60 * S, y0: rand(yTop, yBot), y: 0, vx: -side * sp, ph: rand(0, TAU), w: rand(.8, 1.4), A: rand(6, 14) * S,
+    want, got: 0, done: false, rise: 0, joy: 0, sad: 0, no: 0, swayK: 0 };
+}
+function bpos(b, dt) { return [b.x + b.vx * dt, b.y0 + Math.sin(b.ph + (clock + dt) * b.w) * b.A - b.rise]; }
+
+/* ---------- lobbing ---------- */
+function setAim(x, y) { const [, hy] = hand(); aim = [clamp(x, P.x + 8, P.x + P.w - 8), clamp(y, P.y + 24 * S, hy - 70 * S)]; }
+// the touch point is the APEX of the lob: the bake arrives there moving sideways, so the passenger can catch it
+function flightT(ty) { const h = hand()[1] - ty; return Math.sqrt(2 * Math.max(10, h) / G); }
+function launch(tx, ty) { const [hx, hy] = hand(), T = flightT(ty); return { x: hx, y: hy, vx: (tx - hx) / T, vy: -G * T, T }; }
+function lob(tx, ty) {
+  if (over || cool > 0) return false;
+  const l = launch(tx, ty); parcels.push({ x: l.x, y: l.y, vx: l.vx, vy: l.vy, type: cur, rot: 0, vr: rand(-3, 3), bounced: false, age: 0 });
+  cur = next; next = pick(); cool = .42; bun.throwT = .35; bun.sq = -.25; buf = 0; total++;
+  snd("whoosh", { pitch: 1.4 - (hand()[1] - ty) / (900 * S) }); if (!demo) Lab.buzz(6);
+  return true;
+}
+function aimFor(b) { // where to touch so the bake drops into b's basket (used by the attract autopilot and the tests)
+  let tx = b.x, ty = b.y - 13 * S;
+  for (let k = 0; k < 8; k++) { const T = flightT(ty), [fx2, fy] = bpos(b, T); tx = fx2 - .5 * wind * T * T; ty = fy - 13 * S; }
+  return [tx, ty];
+}
+
+/* ---------- update ---------- */
+function tick(dt) {
+  clock += dt; if (!balloons) return;
+  if (demo) demoBrain();
+  cool -= dt; buf -= dt; if (buf > 0 && cool <= 0 && !over) lob(aim[0], aim[1]);
+  bun.sq = Lab.damp(bun.sq, aiming ? .1 : 0, 9, dt); bun.throwT -= dt; bun.joy -= dt; bun.sad -= dt;
+  if (keyAim || Lab.input.axisX() || Lab.input.axisY()) { const ax = Lab.input.axisX(), ay = Lab.input.axisY(); if (ax || ay) { keyAim = true; setAim(aim[0] + ax * 420 * S * dt, aim[1] + ay * 420 * S * dt); } }
+  // wind and gusts
+  if (round >= 2 && (windT -= dt) <= 0) { const m = Math.min(230, 70 + 30 * round) * S; windTo = (Math.random() < .5 ? -1 : 1) * rand(.35, 1) * m; windT = round >= 4 ? rand(5, 8) : 1e9; if (!demo) Lab.toast(windTo > 0 ? "Wind → " : "← Wind", 1100, { y: .22 }); }
+  wind = Lab.damp(wind, windTo, 1.2, dt);
+  for (const c of clouds) { c.x += (wind / (W * 3) + .004 * c.v) * dt; if (c.x > 1.2) c.x = -.2; if (c.x < -.2) c.x = 1.2; }
+  // balloons
+  if (!over && (spawnT -= dt) <= 0) {
+    const live = balloons.filter(b => !b.done).length, max = Math.min(4, 2 + Math.floor(round / 2));
+    if (live < max) { const nb = mkBalloon(Math.random() < .5 ? -1 : 1); balloons.push(nb); const wants = t => balloons.some(q => !q.done && q.want[q.got] === t); if (!wants(cur) && !wants(next)) next = nb.want[0]; }
+    spawnT = Math.max(1.3, 3 - round * .25) + rand(0, .9);
+  }
+  for (const b of balloons) {
+    b.x += b.vx * dt; if (b.done) b.rise += (40 + b.rise * 1.5) * S * dt; [, b.y] = bpos(b, 0); b.joy -= dt; b.sad -= dt; b.no -= dt;
+    const out = b.vx > 0 ? b.x > W + 70 * S : b.x < -70 * S;
+    if ((out || b.y < -160 * S) && !b.gone) { b.gone = true; if (!b.done && !over) hungry(b); }
+  }
+  balloons = balloons.filter(b => !b.gone);
+  // geese (round 4+)
+  if (round >= 4 && !over && (birdT -= dt) <= 0) { birdT = rand(7, 11); const side = Math.random() < .5 ? -1 : 1, y = rand(yBot + 30 * S, groundY - 170 * S); for (let i = 0; i < 3; i++) birds.push({ x: (side < 0 ? -40 - i * 34 : W + 40 + i * 34) * 1, y: y + (i % 2) * 16 * S, vx: -side * 130 * S, flap: rand(0, 6), hit: 0 }); snd("whistle", { pitch: 1.6, vol: .3 }); }
+  for (const g of birds) { g.x += g.vx * dt; g.flap += dt * 10; g.hit -= dt; }
+  birds = birds.filter(g => g.x > -160 && g.x < W + 160);
+  // parcels
+  for (const p of parcels) {
+    const n = 2, h = dt / n;
+    for (let k = 0; k < n && !p.dead; k++) {
+      const py = p.y; p.vy += G * h; p.vx += wind * h; p.x += p.vx * h; p.y += p.vy * h; p.rot += p.vr * h; p.age += h;
+      for (const b of balloons) {
+        if (b.done || p.skip === b.id) continue; const rim = b.y - 13 * S, dx = p.x - b.x, dy = p.y - rim, mouth = 26 * S;
+        if (Math.abs(dx) < mouth && dy > -24 * S && dy < 22 * S) {
+          if (p.vy < -420 * S && dy > 0) { p.vy = 90 * S; p.bounced = true; snd("knock", { pitch: .9, vol: .5 }); } // smacked the basket bottom
+          else { catchIt(p, b, Math.hypot(dx, dy)); break; }
+        }
+        const ex = b.x, ey = b.y - 64 * S, er = 34 * S, pr = 10 * S, d = Math.hypot(p.x - ex, p.y - ey);
+        if (d < er + pr) { const nx = (p.x - ex) / d, ny = (p.y - ey) / d, vn = p.vx * nx + p.vy * ny; p.x = ex + nx * (er + pr); p.y = ey + ny * (er + pr); if (vn < 0) { p.vx -= 1.6 * vn * nx; p.vy -= 1.6 * vn * ny; p.bounced = true; b.swayK = 1; snd("boing", { pitch: 1.3, vol: .6 }); } }
+      }
+      if (p.dead) break;
+      for (const g of birds) if (g.hit <= 0 && Math.hypot(p.x - g.x, p.y - g.y) < 22 * S) { g.hit = .8; p.vx = g.vx * 1.1; p.vy = -180 * S; p.bounced = true; snd("hit", { pitch: 1.6, vol: .6 }); fx.burst(g.x, g.y, { n: 8, colors: ["#fff", "#e8e3d6"], speed: 120, life: .6, size: 3, gravity: 80 }); if (!demo) fx.text(g.x, g.y - 20, "HONK!", { color: "#fff", size: 16 }); }
+      if (p.y > groundY - 6 * S && p.vy > 0) { splat(p); break; }
+      if (p.x < -80 || p.x > W + 80) { p.dead = true; miss(); }
+    }
+  }
+  parcels = parcels.filter(p => !p.dead);
+  // round progress, music, Bun's nerves
+  if (!demo) {
+    if (roundT > 0) roundT -= dt;
+    const urg = balloons.reduce((m, b) => b.done ? m : Math.max(m, b.vx > 0 ? b.x / W : 1 - b.x / W), 0);
+    bun.hot = clamp((urg - .62) / .3, 0, 1); Lab.music.intensity(over ? 0 : clamp(.25 + round * .08 + bun.hot * .35, 0, 1));
+  }
+  if (over) overT += dt;
+}
+function catchIt(p, b, dx) {
+  p.dead = true; const need = b.want[b.got];
+  if (p.type !== need) { // wrong bake: the passenger tosses it back
+    b.no = .9; combo = 0; snd("error", { vol: .6 });
+    parcels.push({ x: b.x, y: b.y - 20 * S, vx: rand(-120, 120) * S, vy: -360 * S, type: p.type, rot: 0, vr: rand(-6, 6), bounced: true, age: .2, skip: b.id });
+    if (!demo) fx.text(b.x, b.y - 110 * S, "Not " + NAMES[p.type] + "!", { color: "#e9475b", size: 18 * S + 4 });
+    bun.sad = .8; return;
+  }
+  b.got++; b.joy = 1.2; combo++; bestCombo = Math.max(bestCombo, combo); delivered++;
+  const swish = !p.bounced && dx < 9 * S, hb = Math.round(10 * clamp(1 - (b.y0 - yTop) / Math.max(1, yBot - yTop), 0, 1)), mult = Math.min(combo, 5);
+  let pts = (10 + hb) * mult + (swish ? 5 : 0); if (swish) swishes++;
+  if (b.got >= b.want.length) { b.done = true; pts += 20 * b.want.length; }
+  if (!demo) {
+    score += pts; Lab.setScore(score); Lab.bumpScore(); bun.joy = combo >= 3 ? 1.2 : .7;
+    Lab.sfx("coin", { pitch: .9 + Math.min(combo, 6) * .08 }); Lab.audio.combo(Math.min(combo, 9), { vol: .18 }); if (swish) Lab.sfx("swish", { pitch: 1.5 });
+    fx.text(b.x, b.y - 110 * S, (swish ? "SWISH! " : "") + "+" + pts + (mult > 1 ? "  ×" + mult : ""), { color: swish ? "#ff7fa8" : "#fff", size: 18 * S + 4 });
+    fx.burst(b.x, b.y - 14 * S, { n: 12 + mult * 2, colors: ["#fff", "#ffd23f", "#ff7fa8"], speed: 160, life: .5, size: 3.5, shape: "star", angle: -Math.PI / 2, spread: 1.6 });
+    if (b.done) Lab.sfx("chime", { pitch: 1.1 });
+    if (delivered >= quota) nextRound();
+  }
+}
+function nextRound() {
+  const bonus = 50 * round; score += bonus; Lab.setScore(score); round++; quota = delivered + 3 + round; roundT = 2;
+  Lab.banner("Round " + round + "  +" + bonus, { color: "#ff7fa8", ms: 1500, y: .3 }); Lab.sfx("levelup");
+  const tip = round === 2 ? "The wind picks up!" : round === 3 ? "Pie on the menu, and double orders!" : round === 4 ? "Geese! Lob around them." : null;
+  if (tip) Lab.toast(tip, 1800, { y: .38 });
+  windT = round >= 2 ? .5 : 1e9; birdT = round === 4 ? 3 : birdT;
+}
+function splat(p) {
+  p.dead = true; fx.burst(p.x, groundY - 4 * S, { n: 10, colors: p.type === "cake" ? ["#ffb3c9", "#fff"] : p.type === "pie" ? ["#c9844a", "#8f3a52"] : ["#e2b277", "#c48a4a"], speed: 140, angle: -Math.PI / 2, spread: 2, life: .5, size: 3.5, gravity: 600 });
+  snd("thud", { pitch: 1.2 }); miss();
+}
+function miss() { if (combo > 1 && !demo) fx.text(bunX, bunY - 70 * S, "combo lost", { color: "#7d6a8f", size: 14 }); combo = 0; bun.sad = .7; }
+function hungry(b) {
+  if (demo) return;
+  hearts--; combo = 0; bun.sad = 1.4; Lab.sfx("hurt", { pitch: 1.2 }); Lab.shake(5, .25); Lab.buzz(30);
+  Lab.toast(Pals.cast[b.who].name + " flew off hungry!", 1300, { y: .22 });
+  if (hearts <= 0 && !over) { over = true; Lab.after(1, () => Lab.gameover({ title: "Oops! Hungry pals", message: "The balloons drifted off without their bakes.", score, stats: [["Deliveries", delivered], ["Best combo", "×" + bestCombo], ["Swishes", swishes]] })); }
+}
+function demoBrain() {
+  if (cool > 0 || parcels.length > 1) return;
+  const cand = balloons.filter(b => !b.done && b.want[b.got] === cur && b.x > 40 && b.x < W - 40);
+  if (!cand.length) { if ((bun.wait = (bun.wait || 0) + 1) > 50) { bun.wait = 0; if (balloons.some(b => !b.done && b.want[b.got] === next)) swap(); else { cur = next; next = pick(); } } return; }
+  const b = cand[0], [tx, ty] = aimFor(b); aim = [tx, ty]; lob(tx + rand(-6, 6) * S, ty);
+}
+
+/* ---------- art ---------- */
+function bakeSprite(type) {
+  const sz = Math.ceil(34 * S);
+  return Lab.sprite("bvk" + type + sz, sz, sz, (g, w) => {
+    const c = w / 2, s = w / 34; g.lineJoin = "round";
+    if (type === "bread") { g.fillStyle = "#c98a4b"; draw.rr(g, c - 13 * s, c - 6 * s, 26 * s, 15 * s, 7 * s); g.fill(); g.fillStyle = "#e2b277"; g.beginPath(); g.ellipse(c, c - 4 * s, 13 * s, 8 * s, 0, Math.PI, TAU); g.fill(); g.strokeStyle = "#a8683a"; g.lineWidth = 1.8 * s; for (let i = -1; i <= 1; i++) { g.beginPath(); g.moveTo(c + i * 6 * s - 3 * s, c - 8 * s); g.lineTo(c + i * 6 * s + 3 * s, c - 3 * s); g.stroke(); } }
+    else if (type === "cake") { g.fillStyle = "#ffb3c9"; draw.rr(g, c - 11 * s, c - 7 * s, 22 * s, 18 * s, 3 * s); g.fill(); g.fillStyle = "#fff"; g.fillRect(c - 2 * s, c - 7 * s, 4 * s, 18 * s); g.fillRect(c - 11 * s, c + 1 * s, 22 * s, 3.5 * s); g.fillStyle = "#e9475b"; g.beginPath(); g.arc(c, c - 10 * s, 3.6 * s, 0, TAU); g.fill(); g.strokeStyle = "#5fb36b"; g.lineWidth = 1.5 * s; g.beginPath(); g.moveTo(c, c - 13 * s); g.lineTo(c + 3 * s, c - 16 * s); g.stroke(); }
+    else { g.fillStyle = "#9aa3b5"; g.beginPath(); g.ellipse(c, c + 4 * s, 14 * s, 6 * s, 0, 0, TAU); g.fill(); g.fillStyle = "#d9964f"; g.beginPath(); g.ellipse(c, c, 13 * s, 7.5 * s, 0, 0, TAU); g.fill(); g.strokeStyle = "#a8592f"; g.lineWidth = 2 * s; for (let i = -1; i <= 1; i++) { g.beginPath(); g.moveTo(c + i * 6 * s - 4 * s, c - 6 * s); g.lineTo(c + i * 6 * s + 4 * s, c + 6 * s); g.stroke(); g.beginPath(); g.moveTo(c - 11 * s, c + i * 3.5 * s); g.lineTo(c + 11 * s, c + i * 3.5 * s); g.stroke(); } g.fillStyle = "#8f3a52"; g.beginPath(); g.arc(c - 3 * s, c - 1 * s, 1.6 * s, 0, TAU); g.arc(c + 4 * s, c + 2 * s, 1.6 * s, 0, TAU); g.fill(); }
+  });
+}
+function envSprite(who) {
+  const r = Math.ceil(34 * S), w = r * 2 + 6, h = Math.ceil(r * 2.5);
+  return Lab.sprite("bve" + who + r, w, h, g => {
+    const col = Pals.cast[who], cx = w / 2, cy = r + 3;
+    g.save(); g.beginPath(); g.moveTo(cx - r * .42, cy + r * 1.15); g.bezierCurveTo(cx - r * 1.25, cy + r * .5, cx - r * 1.15, cy - r, cx, cy - r); g.bezierCurveTo(cx + r * 1.15, cy - r, cx + r * 1.25, cy + r * .5, cx + r * .42, cy + r * 1.15); g.closePath(); g.clip();
+    for (let i = 0; i < 7; i++) { g.fillStyle = i % 2 ? "#fff6e8" : col.body; g.beginPath(); g.ellipse(cx, cy, r * (1.2 - i * .17), r * 1.3, 0, 0, TAU); g.fill(); }
+    g.fillStyle = col.accent; g.fillRect(0, cy + r * .55, w, r * .14);
+    const gr = g.createRadialGradient(cx - r * .4, cy - r * .5, 2, cx, cy, r * 1.3); gr.addColorStop(0, "rgba(255,255,255,.45)"); gr.addColorStop(.5, "rgba(255,255,255,0)"); gr.addColorStop(1, "rgba(40,20,60,.25)"); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    g.restore();
+  });
+}
+function drawBalloon(c, b) {
+  const x = b.x, y = b.y, sw = Math.sin(clock * 1.6 + b.ph) * .04 + (b.no > 0 ? Math.sin(b.no * 30) * .05 : 0), fade = b.done ? clamp(1 - b.rise / (300 * S), 0, 1) : 1;
+  c.save(); c.globalAlpha = fade; c.translate(x, y); c.rotate(sw);
+  const e = envSprite(b.who); c.drawImage(e, -e.w / 2, -64 * S - 34 * S - 3, e.w, e.h);
+  c.strokeStyle = "#8a6a4a"; c.lineWidth = 1.4; c.beginPath(); for (const d of [-1, 1]) { c.moveTo(d * 14 * S, -33 * S); c.lineTo(d * 22 * S, -13 * S); } c.stroke();
+  // passenger peeking over the rim, then the wicker basket in front
+  const mood = b.no > 0 ? "angry" : b.joy > 0 ? "joy" : b.sad > 0 ? "sad" : "happy";
+  Pals.draw(c, b.who, 0, -24 * S, 30 * S, { t: clock + b.ph, mood, clipY: 11 * S, shadow: false, arms: b.joy > 0 ? "cheer" : "down", look: [clamp((bunX - x) / 200, -1, 1), .7] });
+  c.fillStyle = "#b5824d"; draw.rr(c, -24 * S, -13 * S, 48 * S, 26 * S, 6 * S); c.fill();
+  c.strokeStyle = "#8a5a2f"; c.lineWidth = 1.5; for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(-24 * S, -13 * S + i * 6.5 * S); c.lineTo(24 * S, -13 * S + i * 6.5 * S); c.stroke(); }
+  c.fillStyle = "#d9a66a"; draw.rr(c, -26 * S, -15 * S, 52 * S, 5 * S, 2.5 * S); c.fill();
+  for (let i = 0; i < b.got; i++) { const s = bakeSprite(b.want[i]); c.drawImage(s, -14 * S + i * 12 * S - s.w * .35, -24 * S, s.w * .7, s.h * .7); }
+  c.restore();
+  // order bubble: what they still want
+  if (!b.done) {
+    const rest = b.want.slice(b.got), bw = (22 + rest.length * 26) * S, bx = Lab.clamp(x + (b.vx > 0 ? -1 : 1) * 46 * S, bw / 2 + 6, W - bw / 2 - 6), by = y - 92 * S; // keep the order bubble on screen
+    Pals.bubble(c, bx, by, bw, 34 * S, { tailX: x + (b.vx > 0 ? -1 : 1) * 30 * S, tailY: y - 70 * S });
+    rest.forEach((t, i) => { const s = bakeSprite(t); c.drawImage(s, bx - (rest.length - 1) * 13 * S + i * 26 * S - s.w * .4, by - s.h * .4, s.w * .8, s.h * .8); });
+  }
+}
+function drawStall(c) {
+  const sx = bunX, w = Math.min(P.w - 20, 300 * S), y = groundY;
+  c.fillStyle = "#8cc96a"; c.fillRect(-40, y, W + 80, H - y + 40); c.fillStyle = "#a8dd82"; c.fillRect(-40, y, W + 80, 5 * S);
+  c.fillStyle = "#c98f5a"; draw.rr(c, sx - w / 2, y - 34 * S, w, 34 * S, 6 * S); c.fill(); c.fillStyle = "#e7b57c"; draw.rr(c, sx - w / 2 - 6 * S, y - 40 * S, w + 12 * S, 10 * S, 5 * S); c.fill();
+  // bunting shows the wind
+  const k = clamp(wind / (200 * S), -1, 1);
+  c.strokeStyle = "#8a6a4a"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(sx - w / 2, y - 150 * S); c.quadraticCurveTo(sx, y - 128 * S, sx + w / 2, y - 150 * S); c.stroke();
+  for (let i = 0; i < 9; i++) { const u = (i + .5) / 9, px = sx - w / 2 + u * w, py = y - 150 * S + Math.sin(u * Math.PI) * 11 * S, fl = k * 9 * S + Math.sin(clock * 6 + i) * 2 * S * (.3 + Math.abs(k)); c.fillStyle = ["#ff7fa8", "#ffd23f", "#b9a3ff", "#7fd1ff"][i % 4]; c.beginPath(); c.moveTo(px - 6 * S, py); c.lineTo(px + 6 * S, py); c.lineTo(px + fl, py + 14 * S); c.fill(); }
+  for (const d of [-1, 1]) { c.fillStyle = "#8a6a4a"; c.fillRect(sx + d * w / 2 - 3 * S, y - 150 * S, 6 * S, 112 * S); }
+  // display of bakes on the counter + the next one
+  const nx = sx + w / 2 - 34 * S, ns = bakeSprite(next); c.drawImage(ns, nx - ns.w / 2, y - 58 * S, ns.w, ns.h); draw.text(c, "tap: swap", nx, y - 16 * S, { size: 9 * S + 2, color: "#fff6e8", weight: 800 });
+  const ds = bakeSprite("bread"); c.globalAlpha = .9; c.drawImage(ds, sx - w / 2 + 12 * S, y - 56 * S, ds.w * .8, ds.h * .8); c.globalAlpha = 1;
+}
+function render(t) {
+  const c = Lab.ctx; draw.bg(c, "#8fd6f5", "#fff2d6", "#c6ecfb");
+  draw.glow(c, W * .82, P.y + 60 * S, 120 * S, "#fff6c2", .7); draw.circle(c, W * .82, P.y + 60 * S, 26 * S, "#fff3b0");
+  for (const cl of clouds) { const x = cl.x * W, y = P.y + cl.y * (groundY - P.y), s = cl.s * S; c.fillStyle = "rgba(255,255,255,.85)"; for (const [dx, dy, r] of [[-26, 4, 18], [0, -6, 24], [26, 4, 18]]) { c.beginPath(); c.arc(x + dx * s, y + dy * s, r * s, 0, TAU); c.fill(); } }
+  // village roofs on the horizon
+  c.fillStyle = "#c4e3c8"; c.beginPath(); c.moveTo(-40, groundY); for (let x = -40; x <= W + 40; x += 30) c.lineTo(x, groundY - 70 * S - Math.sin(x * .013) * 22 * S); c.lineTo(W + 40, groundY); c.fill();
+  for (let i = 0; i < 6; i++) { const x = (i + .5) / 6 * W + Math.sin(i * 3) * 20, hh = (26 + (i * 13) % 14) * S, y = groundY - 54 * S; c.fillStyle = "#fff6e8"; c.fillRect(x - 14 * S, y - hh, 28 * S, hh + 54 * S); c.fillStyle = ["#ff9aa8", "#b9a3ff", "#7fd1ff"][i % 3]; c.beginPath(); c.moveTo(x - 18 * S, y - hh); c.lineTo(x, y - hh - 18 * S); c.lineTo(x + 18 * S, y - hh); c.fill(); c.fillStyle = "#ffe39a"; draw.rr(c, x - 5 * S, y - hh + 8 * S, 10 * S, 12 * S, 5 * S); c.fill(); }
+  for (const g of birds) { const f = Math.sin(g.flap) * 8 * S, d = Math.sign(g.vx); c.fillStyle = "#f4efe4"; c.beginPath(); c.ellipse(g.x, g.y, 14 * S, 7 * S, 0, 0, TAU); c.fill(); c.fillStyle = "#e3dccd"; c.beginPath(); c.moveTo(g.x - 6 * S, g.y); c.lineTo(g.x + 2 * S, g.y - 4 * S - f); c.lineTo(g.x + 8 * S, g.y); c.fill(); c.fillStyle = "#ffa62b"; c.beginPath(); c.moveTo(g.x + d * 14 * S, g.y - 3 * S); c.lineTo(g.x + d * 21 * S, g.y - 1 * S); c.lineTo(g.x + d * 14 * S, g.y + 1 * S); c.fill(); draw.circle(c, g.x + d * 10 * S, g.y - 3 * S, 1.6 * S, INK); }
+  for (const b of balloons) drawBalloon(c, b);
+  drawStall(c);
+  // aim preview: arc without wind + landing ring
+  const showAim = !demo && !over && (aiming || keyAim);
+  if (showAim) {
+    const l = launch(aim[0], aim[1]); for (let i = 1; i < 14; i++) { const tt = l.T * i / 14, x = l.x + l.vx * tt, y = l.y + l.vy * tt + .5 * G * tt * tt; c.fillStyle = `rgba(255,255,255,${.25 + .6 * i / 14})`; c.beginPath(); c.arc(x, y, 2.6 * S, 0, TAU); c.fill(); }
+    c.strokeStyle = cool > 0 ? "rgba(255,255,255,.5)" : "#ff7fa8"; c.lineWidth = 3; c.beginPath(); c.arc(aim[0], aim[1], 14 * S, 0, TAU); c.stroke(); c.beginPath(); c.moveTo(aim[0] - 20 * S, aim[1]); c.lineTo(aim[0] - 8 * S, aim[1]); c.moveTo(aim[0] + 8 * S, aim[1]); c.lineTo(aim[0] + 20 * S, aim[1]); c.stroke();
+  }
+  // Bun
+  const thr = bun.throwT > 0, mood = over ? "sad" : bun.sad > 0 ? "sad" : bun.joy > 0 ? "joy" : showAim ? "think" : bun.hot > .3 ? "scared" : "happy";
+  const lk = showAim ? [clamp((aim[0] - bunX) / 150, -1, 1), -1] : parcels.length ? [clamp((parcels[0].x - bunX) / 150, -1, 1), clamp((parcels[0].y - bunY) / 200, -1, 1)] : [0, -.6];
+  const an = Pals.draw(c, "bun", bunX, bunY, 62 * S, { t: clock, mood, look: lk, arms: thr ? "up" : bun.joy > 0 ? "cheer" : "hold", squash: clamp(bun.sq, -.3, .3), hot: bun.hot || 0, tilt: thr ? .12 : 0 });
+  if (!thr && cool <= .25 && !over && an) { const s = bakeSprite(cur), [hx, hy] = an.handR; c.drawImage(s, (an.handL[0] + hx) / 2 - s.w / 2, Math.max(an.handL[1], hy) - s.h * .45, s.w, s.h); }
+  for (const p of parcels) { const s = bakeSprite(p.type); c.save(); c.translate(p.x, p.y); c.rotate(p.rot); c.drawImage(s, -s.w / 2, -s.h / 2, s.w, s.h); c.restore(); }
+  if (demo) return;
+  // HUD: hearts, round progress, wind, combo
+  const hs = Math.max(S, .9), hy = P.y + 18 * hs; for (let i = 0; i < 3; i++) draw.heart(c, P.x + 20 * hs + i * 24 * hs, hy, 9 * hs, i < hearts ? "#ff6b81" : "rgba(74,49,96,.2)");
+  draw.text(c, "Round " + round, P.x + P.w - 14, hy - 6 * hs, { size: 15 * hs + 1, color: "#4a3160", align: "right", weight: 800 });
+  draw.text(c, Math.max(0, quota - delivered) + " to go", P.x + P.w - 14, hy + 12 * hs, { size: 11 * hs + 1, color: "#7d6a8f", align: "right", weight: 700 });
+  if (Math.abs(wind) > 12 * S) { const k = wind / (230 * S), x = W / 2, y = P.y + 58 * S; c.strokeStyle = "#4a3160"; c.globalAlpha = .7; c.lineWidth = 3; c.lineCap = "round"; const n = Math.ceil(Math.abs(k) * 3); for (let i = 0; i < n; i++) { const ox = (i - (n - 1) / 2) * 12 * S * Math.sign(k); c.beginPath(); c.moveTo(x + ox - 5 * S * Math.sign(k), y - 7 * S); c.lineTo(x + ox + 3 * S * Math.sign(k), y); c.lineTo(x + ox - 5 * S * Math.sign(k), y + 7 * S); c.stroke(); } c.globalAlpha = 1; draw.text(c, "WIND", x, y + 17 * S, { size: 10 * S + 1, color: "#4a3160", weight: 800 }); }
+  if (combo > 1) draw.text(c, "combo ×" + Math.min(combo, 5), bunX - 70 * S, bunY - 40 * S, { size: 15 * S + 2, color: "#ff5d8f", weight: 800, stroke: "#fff" });
+}
+function frame(dt, t) { tick(dt); render(t); }
+Lab.boot();
+})();
+</script></body></html>

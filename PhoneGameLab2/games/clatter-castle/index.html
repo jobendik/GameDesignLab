@@ -19,7 +19,7 @@
 let demo = false;
 Lab.init({
   title: "Clatter Castle", tagline: "Build what the pals ask for. Mind the wobble!", category: "Creative", kicker: "Pocket Pals",
-  howto: ["Drag a block from the toy box and let go", "Too much overhang and it all clatters down", "Tap TEST — the pal checks your build in person"],
+  howto: ["Drag a block up from the toy box", "Lean too far and it clatters down", "Tap TEST: the pal tries it out"],
   theme: { bg: "#bfe3ff", bg2: "#fff4dc", fg: "#33304a", muted: "#5f6a80", accent: "#ff8a3d", accent2: "#7fb8ff", light: true },
   orient: "any", music: { style: "chill", key: "C", vol: .32 }, restart: start, attract,
 });
@@ -39,7 +39,7 @@ const sx = x => ox + x * u, sy = y => gy - y * u;
 const snap = x => Math.round(x * 2) / 2;
 function bots(p) { return p.t === "arch" ? [[0, 1, 0], [1, 2, 1], [2, 3, 0]] : [[0, p.w, 0]]; }
 function tops(p) { return TYPES[p.t].slip ? [] : [[0, p.w]]; }
-function ground() { return req && req.river ? [[-20, req.river[0]], [req.river[1], ZW + 20]] : [[-20, ZW + 20]]; }
+function ground() { return req && req.river ? [[-20, req.river[0], 0], [req.river[1], ZW + 20, req.bank || 0]] : [[-20, ZW + 20, 0]]; }
 function mkPiece(t, x, y) { const d = TYPES[t]; return { id: nid++, t, x, y, w: d.w, h: d.h, m: d.m, fy: y, vy: 0, sq: 0, wob: 0, margin: 9 }; }
 
 function layout() {
@@ -58,12 +58,13 @@ function makeReq(n) {
   const kind = n < 3 ? kinds[n] : Lab.choose(kinds.filter(k => k !== last));
   const r = { kind, n, tray: {}, river: null, star: null, sit: [] };
   if (kind === "perch") {
-    r.who = "olli"; const ty = Math.min(7, 2.5 + d * .45), tx = snap(Lab.rand(2.5, ZW - 2.5)); r.star = [tx, snap(ty)];
+    r.who = "olli"; const ty = Math.min(6, 2.5 + d * .4), tx = snap(Lab.rand(2.5, ZW - 2.5)); r.star = [tx, snap(ty)];
     if (d >= 3) { const w = Math.min(3, 1.5 + d * .15); r.river = [snap(tx - w / 2), snap(tx + w / 2)]; }
     r.tray = { block: 2 + (d > 2 ? 1 : 0), brick: 2, pillar: 1 + (d >= 2 ? 1 : 0), plank: d >= 3 ? 1 + (d >= 6 ? 1 : 0) : 1, arch: d >= 5 ? 1 : 0 };
   } else if (kind === "bridge") {
-    r.who = "pip"; const w = Math.min(5, 2.5 + d * .3), c = snap(ZW / 2 + Lab.rand(-.6, .6)); r.river = [snap(c - w / 2), snap(c + w / 2)];
-    r.tray = { plank: 1 + (w > 3.6 ? 1 : 0), block: 3 - (d >= 6 ? 1 : 0), brick: 1 + (w > 3.6 ? 1 : 0), pillar: 1 };
+    r.who = "pip"; const w = d >= 3 ? 3 : 2.5, c = snap(ZW / 2 + Lab.rand(-.6, .6)); r.river = [snap(c - w / 2), snap(c + w / 2)];
+    r.bank = d < 2 ? 0 : d < 5 ? 1 : 2; // the far bank rises: Pip can only climb one block at a time
+    r.tray = { plank: 1 + (d >= 6 ? 1 : 0), block: 3, brick: 1, pillar: 1 + (r.bank >= 2 ? 1 : 0) };
   } else {
     r.who = "bun"; const two = d >= 3, x1 = snap(Lab.rand(1.5, two ? 3.5 : ZW - 1.5));
     r.sit = two ? [{ who: "bun", x: x1 }, { who: "momo", x: snap(Math.min(ZW - 1, x1 + Lab.rand(3, 5))) }] : [{ who: "bun", x: x1 }];
@@ -91,7 +92,7 @@ function restY(t, x) {
   const d = TYPES[t], p = { t, x, w: d.w, h: d.h }; let best = -Infinity, slip = false, over = false;
   for (const [a0, b0, off] of bots(p)) {
     const a = x + a0, b = x + b0;
-    for (const [ga, gb] of ground()) if (Math.min(b, gb) - Math.max(a, ga) > .01 && 0 - off > best) { best = -off; slip = false; }
+    for (const [ga, gb, gh] of ground()) if (Math.min(b, gb) - Math.max(a, ga) > .01 && gh - off > best) { best = gh - off; slip = false; }
     for (const Q of pieces) { if (Math.min(b, Q.x + Q.w) - Math.max(a, Q.x) <= .01) continue; const top = Q.y + Q.h - off; if (top > best + .001) { best = top; slip = !!TYPES[Q.t].slip; } }
   }
   for (const s of sitters) if (Math.min(x + d.w, s.x + .45) - Math.max(x, s.x - .45) > .01 && best < 1.5) over = s;
@@ -101,7 +102,7 @@ function contacts(P) {
   const out = [];
   for (const [a0, b0, off] of bots(P)) {
     const a = P.x + a0, b = P.x + b0, yb = P.y + off;
-    if (Math.abs(yb) < .01) for (const [ga, gb] of ground()) { const lo = Math.max(a, ga), hi = Math.min(b, gb); if (hi - lo > .01) out.push({ q: null, a: lo, b: hi }); }
+    for (const [ga, gb, gh] of ground()) if (Math.abs(yb - gh) < .01) { const lo = Math.max(a, ga), hi = Math.min(b, gb); if (hi - lo > .01) out.push({ q: null, a: lo, b: hi }); }
     for (const Q of pieces) if (Q !== P) for (const [ta, tb] of tops(Q)) if (Math.abs(Q.y + Q.h - yb) < .01) { const lo = Math.max(a, Q.x + ta), hi = Math.min(b, Q.x + tb); if (hi - lo > .01) out.push({ q: Q, a: lo, b: hi }); }
   }
   return out;
@@ -131,7 +132,7 @@ function topple(P) {
 }
 function surf(x, skip) {
   let h = -Infinity, piece = null;
-  for (const [ga, gb] of ground()) if (x > ga && x < gb) { h = 0; }
+  for (const [ga, gb, gh] of ground()) if (x > ga && x < gb) { h = gh; }
   for (const P of pieces) {
     if (P === skip || x <= P.x + .02 || x >= P.x + P.w - .02) continue;
     const top = TYPES[P.t].slip ? P.y + P.h * (1 - Math.abs(x - cmx(P)) / (P.w / 2)) : P.y + P.h; if (top > h) { h = top; piece = P; }
@@ -183,10 +184,10 @@ function finish(ok, why) {
     if (!demo) {
       Lab.setScore(score); Lab.bumpScore(); snd("levelup"); later(.5, () => { Lab.flash("#fff", .25, .7); snd("snap", { pitch: 1.5 }); });
       try { const g = Lab.store.get("gallery") || []; g.push(shot); Lab.store.set("gallery", g.slice(-6)); } catch (e) { }
-      fx.text(Lab.W / 2, sy(4), "+" + gain, { color: "#ff8a3d", size: 26 * U, life: 1.3 });
+      fx.text(Lab.W / 2, (Lab.play.y + gy) / 2 + 70 * U, "+" + gain, { color: "#ff8a3d", size: 26 * U, life: 1.3 });
     }
   } else {
-    hearts--; pal.mood = "sad"; snd("error", { pitch: .9 }); if (!demo) { Lab.toast(why, 1500, { y: .3 }); Lab.buzz(40); }
+    hearts--; pal.mood = "sad"; snd("error", { pitch: .9 }); if (!demo) { Lab.toast(why, 1500, { y: .2 }); Lab.buzz(40); }
   }
   later(2.1, () => {
     if (demo) return;
@@ -212,11 +213,11 @@ function update(dt) {
   for (const P of pieces) { if (P !== (pending && pending.p)) P.wob = Lab.damp(P.wob, P.margin < .2 ? .35 : 0, 6, dt); }
   for (const D of debris) {
     D.vy -= G * dt * .8; D.x += D.vx * dt; D.y += D.vy * dt; D.ang += D.va * dt;
-    const over = !ground().some(([a, b]) => D.x + D.p.w / 2 > a && D.x + D.p.w / 2 < b);
+    const gnd = ground().find(([a, b]) => D.x + D.p.w / 2 > a && D.x + D.p.w / 2 < b), over = !gnd;
     if (D.bonk && !D.hit && D.y < 1.6) { D.hit = true; D.vy = 5; D.va = D.vx * 2; snd("boing", { pitch: 1.2 }); const s = sitters.find(z => z === D.bonk); if (s) { s.sq = .3; s.angry = 1.2; } if (!demo) fx.text(sx(D.bonk.x), sy(2.6), "Bonk!", { color: "#e2553f", size: 18 * U }); }
-    if (D.y < (over ? -1.5 : -.2) && !D.dead) { D.dead = true; const X = sx(D.x + D.p.w / 2);
+    if (D.y < (over ? -1.5 : gnd[2] - .2) && !D.dead) { D.dead = true; const X = sx(D.x + D.p.w / 2);
       if (over) { snd("splash", { pitch: 1.1 }); fx.burst(X, sy(-.2), { n: 14, colors: ["#bfe8ff", "#fff"], speed: 200, angle: -Math.PI / 2, spread: 1.4, life: .5, size: 3 * S, gravity: 700 }); }
-      else { snd("thud", { pitch: .7 }); fx.burst(X, gy, { n: 10, colors: [TYPES[D.p.t].col, "#fff"], speed: 170, angle: -Math.PI / 2, spread: 2.2, life: .45, size: 3.5 * S, gravity: 600, shape: "square" }); } }
+      else { snd("thud", { pitch: .7 }); fx.burst(X, sy(gnd[2]), { n: 10, colors: [TYPES[D.p.t].col, "#fff"], speed: 170, angle: -Math.PI / 2, spread: 2.2, life: .45, size: 3.5 * S, gravity: 600, shape: "square" }); } }
   }
   debris = debris.filter(D => !D.dead);
   for (const s of sitters) { s.sq = Lab.damp(s.sq, 0, 8, dt); s.angry = (s.angry || 0) - dt; }
@@ -240,7 +241,7 @@ function runTest(dt) {
     if (T.fall) { pal.vy -= G * dt * .6; pal.y += pal.vy * dt; pal.mood = "scared"; const fl = surf(pal.x).h; if (fl > -1 && pal.y <= fl) { pal.y = fl; pal.mood = "dizzy"; pal.sq = .3; snd("thud"); return finish(false, "Pip's bridge collapsed!"); } if (pal.y < -1.2 && !T.splash) { T.splash = true; pal.wet = 1; snd("splash", { pitch: .8 }); fx.burst(sx(pal.x), sy(-.3), { n: 20, colors: ["#bfe8ff", "#fff"], speed: 260, angle: -Math.PI / 2, spread: 1.2, life: .6, size: 3.5 * S, gravity: 700 }); finish(false, "Splash! Pip fell in the river."); } return; }
     if (pending || clatters > T.cl0) { T.fall = true; pal.vy = 2; return; }
     const ahead = surf(pal.x + .35), here = surf(pal.x);
-    if (ahead.h - pal.y > 1.05) { pal.mood = "angry"; pal.sq = .2; snd("knock"); return finish(false, "Too high for Pip to climb!"); }
+    if (ahead.h - Math.max(pal.y, here.h) > 1.05) { pal.mood = "angry"; pal.sq = .2; snd("knock"); return finish(false, "Too high for Pip to climb!"); }
     pal.x += 3 * dt; pal.arms = "up"; pal.mood = "joy";
     if (here.h === -Infinity) { T.fall = true; pal.vy = 1; return; }
     if (here.h > pal.y) { pal.y = Math.min(here.h, pal.y + dt * 9); } else if (here.h < pal.y) { pal.vy -= G * dt; pal.y = Math.max(here.h, pal.y + pal.vy * dt); if (pal.y === here.h) pal.vy = 0; } else pal.vy = 0;
@@ -277,7 +278,7 @@ function start() {
     slot(t) { const s = slots.find(z => z.t === t); return s && [s.x + s.w / 2, s.y + s.h / 2]; },
     // pointer x (px) that drops a piece of type t with its left edge at world x
     px(t, x) { return sx(x + TYPES[t].w / 2); }, py(y) { return sy(y); },
-    setJob(kind, o) { req = makeReq(reqN); Object.assign(req, { kind, tray: Object.assign({}, o.tray), river: o.river || null, star: o.star || null, sit: o.sit || [], who: { perch: "olli", bridge: "pip", shelter: "bun" }[kind] }); pieces = []; debris = []; lost = 0; pending = null; extra = null; test = null; verdict = null; sitters = req.sit.map(s => ({ who: s.who, x: s.x, wet: 0, sq: 0 })); pal.who = req.who; pal.x = -.65; pal.y = 0; phase = "build"; sel = ORDER.find(t => req.tray[t]); layoutSlots(); },
+    setJob(kind, o) { req = makeReq(reqN); Object.assign(req, { kind, tray: Object.assign({}, o.tray), river: o.river || null, bank: o.bank || 0, star: o.star || null, sit: o.sit || [], who: { perch: "olli", bridge: "pip", shelter: "bun" }[kind] }); pieces = []; debris = []; lost = 0; pending = null; extra = null; test = null; verdict = null; sitters = req.sit.map(s => ({ who: s.who, x: s.x, wet: 0, sq: 0 })); pal.who = req.who; pal.vis = kind !== "shelter"; pal.x = -.65; pal.y = 0; phase = "build"; sel = ORDER.find(t => req.tray[t]); layoutSlots(); },
   });
   Lab.loop(frame);
 }
@@ -324,11 +325,12 @@ function drawPiece(c, t, X, Ybot, o) {
   c.drawImage(sp, -sp.w / 2, -sp.h + 3, sp.w, sp.h); c.restore();
 }
 function bg() {
-  return Lab.sprite("ccbg" + (req && req.river ? req.river.join() : ""), Lab.W + 80, Lab.H + 80, g => {
+  return Lab.sprite("ccbg" + (req && req.river ? req.river.join() + ":" + (req.bank || 0) : ""), Lab.W + 80, Lab.H + 80, g => {
     g.translate(40, 40); const W = Lab.W, H = Lab.H;
     g.fillStyle = "#a6d98c"; g.beginPath(); g.moveTo(-40, gy); for (let x = -40; x <= W + 40; x += 20) g.lineTo(x, gy - u * (1.2 + .6 * Math.sin(x * .013) + .3 * Math.sin(x * .041))); g.lineTo(W + 40, gy); g.fill();
     draw.vgrad(g, -40, gy, W + 80, H - gy + 40, ["#7ccf6a", "#5fb257", "#8d6a45"]); g.fillStyle = "#9be07f"; g.fillRect(-40, gy - 2, W + 80, 5 * S);
-    if (req && req.river) { const a = sx(req.river[0]), b = sx(req.river[1]); draw.vgrad(g, a, gy - 2, b - a, H - gy + 40, ["#6cc4f5", "#3b8fd9"]); g.fillStyle = "#8d6a45"; g.fillRect(a - 3, gy, 3, H); g.fillRect(b, gy, 3, H); }
+    if (req && req.river) { const a = sx(req.river[0]), b = sx(req.river[1]); draw.vgrad(g, a, gy - 2, b - a, H - gy + 40, ["#6cc4f5", "#3b8fd9"]); g.fillStyle = "#8d6a45"; g.fillRect(a - 3, gy, 3, H); g.fillRect(b, gy, 3, H);
+      if (req.bank) { const top = sy(req.bank); draw.vgrad(g, b, top, W + 40 - b, gy - top + 2, ["#a5774c", "#8d6a45"]); g.fillStyle = "#7ccf6a"; g.fillRect(b, top - 2, W + 40 - b, 7 * S); g.fillStyle = "rgba(0,0,0,.1)"; for (let y = top + u * .5; y < gy; y += u * .5) g.fillRect(b, y, W + 40 - b, 2); } }
     g.strokeStyle = "rgba(255,255,255,.35)"; g.lineWidth = 1; g.setLineDash([3, 5]); g.beginPath(); g.moveTo(sx(0), gy + 4); g.lineTo(sx(0), gy - 3); g.moveTo(sx(ZW), gy + 4); g.lineTo(sx(ZW), gy - 3); g.stroke(); g.setLineDash([]);
     draw.rect(g, Lab.play.x - 40, trayY, Lab.W + 80, Lab.H - trayY + 40, 0, "#f3dcb4"); draw.rect(g, Lab.play.x - 40, trayY, Lab.W + 80, 6 * S, 0, "#d9b98a");
   });
@@ -353,13 +355,14 @@ function render(t) {
   if (pal && pal.vis) { const flap = pal.f ? Math.sin(t * 22) * .08 : 0;
     Pals.draw(c, pal.who, sx(pal.x), sy(pal.y) - .6 * u, 1.2 * u, { t, mood: pal.mood, arms: pal.arms, squash: pal.sq + flap, wet: pal.wet || 0, look: drag ? [clamp((drag.x - sx(pal.x)) / 120, -1, 1), clamp((drag.y - sy(pal.y + 1)) / 120, -1, 1)] : test ? [1, 0] : [.7, -.2] }); }
   // request bubble
-  if (req && phase !== "show" && phase !== "over" && pal) {
+  if (req && (phase === "build" || phase === "intro") && pal) {
     const txt = req.kind === "perch" ? ["Help me sit", "by the star!"] : req.kind === "bridge" ? ["Build me a bridge", "over the river!"] : [req.sit.length > 1 ? "Rain's coming —" : "Rain's coming —", req.sit.length > 1 ? "a roof for us both!" : "a roof for Bun!"];
     const w = 168 * U, h = 50 * U, who = req.kind === "shelter" ? sitters[0] : pal, X = clamp(sx(who.x) + w * .3, Lab.play.x + w / 2 + 6 * S, Lab.play.x + Lab.play.w - w / 2 - 6 * S), Y = Math.max(Lab.play.y + 70 * U, sy((req.kind === "shelter" ? 0 : pal.y) + 2.4) - h / 2 - 22 * S);
     Pals.bubble(c, X, Y, w, h, { tailX: sx(who.x) + 10 * S, tailY: sy(req.kind === "shelter" ? 1.4 : pal.y + 1.5), lineWidth: 2 * S });
     draw.text(c, txt[0], X, Y - h * .2, { size: 13 * U, color: INK, weight: 700 }); draw.text(c, txt[1], X, Y + h * .2, { size: 13 * U, color: INK, weight: 700 });
   }
   if (phase === "show") { draw.text(c, "Gallery", Lab.play.x + Lab.play.w / 2, Lab.play.y + 30 * S, { size: 18 * U, color: "#5f6a80", weight: 700 }); return; }
+  if (phase === "build" && reqN === 0 && !pieces.length && !drag) draw.text(c, "Drag a block up from the toy box", Lab.W / 2, (Lab.play.y + gy) / 2, { size: 16 * U, color: INK, weight: 700, stroke: "rgba(255,255,255,.8)", strokeW: 5 });
   // ghost + landing preview
   const gt = drag ? drag.t : kbT > 0 ? sel : null;
   if (gt && req.tray[gt] && phase === "build") {
@@ -384,8 +387,8 @@ function render(t) {
   }
   for (let i = 0; i < 3; i++) draw.heart(c, Lab.play.x + 18 * U + i * 22 * U, Lab.play.y + 18 * U, 8 * U, i < hearts ? "#ff5d73" : "rgba(51,48,74,.2)");
   draw.text(c, "JOB " + (reqN + 1), Lab.play.x + 18 * U, Lab.play.y + 40 * U, { size: 12 * U, color: "#5f6a80", weight: 700, align: "left" });
-  if (verdict && phase === "result") { const ok = verdict.ok; draw.text(c, ok ? "Lovely!" : "Oops!", Lab.W / 2, sy(6.2), { size: 34 * U, color: ok ? "#ff8a3d" : "#e2553f", weight: 700, stroke: "#fff", strokeW: 6 });
-    if (ok) for (let s = 0; s < 3; s++) { const k = clamp((phaseT - .3 - s * .2) * 4, 0, 1); if (k > 0) draw.star(c, Lab.W / 2 + (s - 1) * 34 * U, sy(6.2) + 34 * U, 14 * U * ease.outBack(k), s < verdict.stars ? "#ffb81f" : "#e5dccb", 5, .5); } }
+  if (verdict && phase === "result") { const ok = verdict.ok, vy = (Lab.play.y + gy) / 2 - 20 * U; draw.text(c, ok ? "Lovely!" : "Oops!", Lab.W / 2, vy, { size: 34 * U, color: ok ? "#ff8a3d" : "#e2553f", weight: 700, stroke: "#fff", strokeW: 6 });
+    if (ok) for (let s = 0; s < 3; s++) { const k = clamp((phaseT - .3 - s * .2) * 4, 0, 1); if (k > 0) draw.star(c, Lab.W / 2 + (s - 1) * 34 * U, vy + 36 * U, 14 * U * ease.outBack(k), s < verdict.stars ? "#ffb81f" : "#e5dccb", 5, .5); } }
 }
 Lab.boot();
 })();

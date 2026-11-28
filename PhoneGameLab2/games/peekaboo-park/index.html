@@ -1,0 +1,269 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Peekaboo Park</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PEEKABOO PARK — hide-and-seek in the park at golden hour. Pip is "it".
+ * Core idea kept from the shell-game prototype: something is hidden under one of several covers; pick the right one.
+ * The verb is new: not tracking a shuffle but READING TELLS. While Pip counts, the pals scurry to bushes, pots,
+ * barrels, reeds, crates and stumps (seen dimly through Pip's paws). Then each hider gives itself away now and then:
+ * a peek over the top, a rustle, a giggle in its own voice. Tap a spot and Pip dashes over to search it.
+ * Wrong spot: −2 s of daylight, and from round 4 a hider next door may get spooked and dash to a new spot.
+ * Later rounds: more pals and spots, dimmer count-ins, shyer peeks, and decoys — wind gusts that rustle every bush
+ * in a sweep, a bird that lands on a spot, a squirrel's tail poking out. Find everyone before dusk.
+ * Identity: striped lawn in warm evening light that deepens to violet as the time runs out; found pals cheer from
+ * the bench at the top. Puzzle music that tightens as daylight drains. Unlike Swindle (follow one prize through a
+ * shuffle), this is an attention/deduction game with several targets, decoys and spatial search cost.            */
+let demo = false;
+Lab.init({
+  title: "Peekaboo Park", tagline: "Ready or not! Spot the tells. Find every pal!", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Watch the pals scurry off to hide", "Peeks, rustles and giggles = a pal!", "Tap a spot to search. Beat dusk!"],
+  theme: { bg: "#bfe39c", bg2: "#fff0c8", fg: "#2f3b2a", muted: "#56664e", accent: "#ff8a3d", accent2: "#8f76e6", light: true },
+  orient: "any", music: { style: "puzzle", key: "F", vol: .34 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, shade = Lab.color.shade, INK = Pals.ink;
+const CAST = ["bun", "momo", "nori", "olli", "bolt"], KINDS = ["bush", "bush", "pot", "barrel", "reeds", "crate", "stump", "bush"];
+const OBJ = { bush: 1.55, pot: 1.35, barrel: 1.5, reeds: 1.65, crate: 1.3, stump: 1.05 };
+let S = 1, U = 1, F = { x: 0, y: 0, w: 1, h: 1 }, R = 30, benchY = 0;
+let round, C, spots, hiders, pip, phase, phaseT, timeLeft, timeMax, score, streak, bestStreak, foundAll, notes, gust, bird, squirrel, timers, tells, demoT, endT, nextWind, nextBird, nextSq, misses;
+
+const snd = (n, o) => { if (!demo) Lab.sfx(n, o); };
+const later = (t, fn) => timers.push({ t, fn });
+const X = nx => F.x + nx * F.w, Y = ny => F.y + ny * F.h, dep = ny => .72 + .4 * ny;
+function layout() {
+  const P = Lab.play; S = Math.min(P.w / 390, P.h / 700); U = Math.max(S, .8);
+  const top = 66 * U; benchY = P.y + 6 * U; F = { x: P.x + 10 * S, y: P.y + top + 30 * U, w: P.w - 20 * S, h: P.h - top - 38 * U };
+  R = Math.min(F.w / 9, F.h / 6.6, 64 * U); Lab.sprite.clear("pk");
+}
+Lab.onResize(() => { if (spots) layout(); });
+
+function cfg(r) {
+  const n = Math.min(5, 1 + Math.ceil(r / 1.5));
+  return { n, spots: Math.min(13, 5 + Math.floor(r * 1.3)), time: 21 + n * 3, tmin: Math.max(1.7, 2.6 - r * .12), tspan: 2 + r * .25, peek: Math.max(.42, 1 - r * .09),
+    dim: Math.min(.86, .5 + r * .06), run: Math.max(.55, 1.15 - r * .09), wind: r >= 3, bird: r >= 4, squirrel: r >= 5, spook: r >= 4 };
+}
+function voice(who, k) { // each pal giggles in its own voice; k = volume scale
+  if (demo) return; const v = .16 * (k || 1);
+  if (who === "bun") [0, .09, .18].forEach((d, i) => Lab.audio.tone({ f: 980 + i * 90, f2: 1250 + i * 90, dur: .07, vol: v, delay: d, type: "triangle" }));
+  else if (who === "momo") [0, .13].forEach(d => Lab.audio.tone({ f: 190, f2: 260, dur: .09, vol: v * 1.2, delay: d, type: "square", lp: 900 }));
+  else if (who === "nori") Lab.audio.tone({ f: 1300, f2: 1800, dur: .14, vol: v, type: "sine" });
+  else if (who === "olli") [0, .2].forEach(d => Lab.audio.tone({ f: 420, f2: 360, dur: .16, vol: v * 1.3, delay: d, type: "sine" }));
+  else if (who === "bolt") [[880, 0], [660, .1], [990, .2]].forEach(([f, d]) => Lab.audio.tone({ f, dur: .06, vol: v * .8, delay: d, type: "square", lp: 2500 }));
+  else Lab.audio.tone({ f: 700, f2: 900, dur: .12, vol: v });
+}
+
+/* ---------- rounds ---------- */
+function makeSpots(n) {
+  const out = [], home = [.5, 1];
+  for (let tries = 0; out.length < n && tries < 1500; tries++) {
+    const nx = Lab.rand(.08, .92), ny = Lab.rand(clamp(R * 1.7 / F.h, .12, .3), .9), px = X(nx), py = Y(ny), md = R * (2.25 - Math.min(1, tries / 1200) * .5);
+    if (Lab.dist(px, py, X(home[0]), Y(home[1])) < R * 2.2) continue;
+    if (out.some(s => Lab.dist(px, py, X(s.nx), Y(s.ny)) < md * (dep(ny) + dep(s.ny)) / 2 * 1.05)) continue;
+    out.push({ nx, ny, kind: KINDS[out.length % KINDS.length], shake: 0, peek: 0, peekA: 1, tail: 0, hit: 0, empty: 0, seed: Lab.rand(0, 9) });
+  }
+  return Lab.shuffle(out);
+}
+function startRound(r) {
+  round = r; C = cfg(r); spots = makeSpots(C.spots);
+  const who = Lab.shuffle(CAST.slice()).slice(0, C.n), free = Lab.shuffle(spots.map((s, i) => i));
+  hiders = who.map((w, i) => ({ who: w, spot: free[i], found: false, tellT: Lab.rand(1.2, 2.6) + i * .5, run: { t: -(.4 + i * 1.2 / C.n) / C.run, sx: Lab.rand(.4, .6), sy: .98 }, pop: -1, seat: -1, dash: null }));
+  pip = { nx: .5, ny: 1, busy: false, t: 0, dur: 0, from: null, to: -1, searchT: 0, queue: null, mood: "happy", moodT: 0, sq: 0 };
+  timeMax = timeLeft = C.time; phase = "count"; phaseT = 0; notes = []; gust = null; bird = null; squirrel = null; misses = 0;
+  nextWind = 4; nextBird = 6; nextSq = 8;
+  if (!demo) [0, .8, 1.6].forEach((d, i) => later(d, () => { snd("tick", { pitch: 1 + i * .15 }); })), later(2.4, () => { snd("whistle", { pitch: 1.3, vol: .6 }); Lab.banner("Ready or not!", { color: "#ff8a3d", ms: 900, y: .45 }); });
+}
+const spotXY = i => { const s = spots[i]; return [X(s.nx), Y(s.ny)]; };
+function hiderAt(i) { return hiders.find(h => !h.found && h.spot === i && !h.dash); }
+
+/* ---------- tells & decoys ---------- */
+function tell(h, kind) {
+  const s = spots[h.spot], r = kind === "peek" ? 0 : kind === "rustle" ? .5 : kind === "sound" ? .9 : Lab.rand(0, 1); tells++;
+  if (r < .45) { s.peek = 1; s.peekA = C.peek * Lab.rand(.85, 1.1); s.peekWho = h.who; }
+  else if (r < .8) { s.shake = 1; leaves(s, 5); snd("swish", { pitch: 1.3 + Lab.rand(0, .3), vol: .35 }); }
+  else { voice(h.who, .9); for (let k = 0; k < 2; k++) notes.push({ x: s.nx + Lab.rand(-.02, .02), y: s.ny, t: -k * .25, who: h.who }); s.shake = Math.max(s.shake, .25); }
+}
+function leaves(s, n) {
+  if (s.kind !== "bush" && s.kind !== "reeds") return; const [x, y] = spotXY(spots.indexOf(s)), d = dep(s.ny);
+  fx.burst(x, y - R * d * OBJ[s.kind] * .7, { n, colors: s.kind === "bush" ? ["#5fae4c", "#8fd06a"] : ["#a7c96a", "#d9e59b"], speed: 90, life: .6, size: 3 * S, gravity: 160, shape: "square" });
+}
+function decoys(dt) {
+  if (C.wind) { nextWind -= dt; if (nextWind <= 0 && !gust) { gust = { t: 0, dir: Lab.chance(.5) ? 1 : -1 }; nextWind = Lab.rand(5, 8); snd("whoosh", { pitch: .6, vol: .5 }); } }
+  if (gust) { const p0 = gust.t / 1.4, front = gust.dir > 0 ? p0 : 1 - p0; gust.t += dt; const p1 = gust.t / 1.4, f1 = gust.dir > 0 ? p1 : 1 - p1;
+    for (const s of spots) if ((s.kind === "bush" || s.kind === "reeds") && (s.nx - front) * (s.nx - f1) <= 0) { s.shake = Math.max(s.shake, .8); leaves(s, 3); }
+    if (gust.t > 1.4) gust = null; }
+  if (C.bird) { nextBird -= dt; if (nextBird <= 0 && !bird) { const i = Lab.randInt(0, spots.length - 1); bird = { i, t: 0, side: Lab.chance(.5) ? 1 : -1 }; nextBird = Lab.rand(6, 10); } }
+  if (bird) { bird.t += dt; if (!bird.land && bird.t > .7) { bird.land = true; spots[bird.i].shake = .7; snd("tick", { pitch: 2.2, vol: .4 }); } if (bird.t > 2.6) bird = null; }
+  if (C.squirrel) { nextSq -= dt; if (nextSq <= 0 && !squirrel) { const emp = spots.map((s, i) => i).filter(i => !hiderAt(i)); if (emp.length) { squirrel = { i: Lab.choose(emp), t: 0 }; spots[squirrel.i].shake = .4; } nextSq = Lab.rand(7, 11); } }
+  if (squirrel) { squirrel.t += dt; if (squirrel.t > 1.1) squirrel = null; }
+}
+
+/* ---------- searching ---------- */
+function pick(x, y) {
+  let best = -1, bd = 1e9;
+  spots.forEach((s, i) => { const [sx, sy] = spotXY(i), d = dep(s.ny), cy = sy - R * d * OBJ[s.kind] * .5, dd = Math.hypot((x - sx) / (R * d * 1.25), (y - cy) / (R * d * OBJ[s.kind] * .8)); if (dd < 1 && dd < bd) { bd = dd; best = i; } });
+  return best;
+}
+function tapAt(x, y) { if (phase !== "play") return; const i = pick(x, y); if (i < 0) return; spots[i].hit = 1; if (pip.busy) { pip.queue = i; return; } go(i); }
+function go(i) {
+  const s = spots[i], tx = s.nx + (s.nx > .5 ? -1 : 1) * .02, ty = s.ny + R * .45 / F.h;
+  pip.busy = true; pip.from = [pip.nx, pip.ny]; pip.dest = [tx, ty]; pip.to = i; pip.t = 0; pip.searchT = 0;
+  pip.dur = clamp(Lab.dist(X(pip.nx), Y(pip.ny), X(tx), Y(ty)) / (F.w * 2.3), .12, .42); snd("whoosh", { pitch: 1.6, vol: .3 });
+}
+function resolve(i) {
+  const h = hiderAt(i), s = spots[i];
+  if (h) found(h); else {
+    timeLeft = Math.max(0, timeLeft - 2); streak = 0; misses++; s.empty = 1; pip.mood = "angry"; pip.moodT = .7;
+    snd("error", { pitch: 1.3, vol: .45 });
+    if (!demo) { const [x, y] = spotXY(i); fx.text(x, y - R * dep(s.ny) * 2, squirrel && squirrel.i === i ? "Just a squirrel!" : bird && bird.i === i ? "Just a bird!" : "Nobody!  −2s", { color: "#7a5a3a", size: 15 * U, life: .9 }); }
+    if (C.spook) { const [x, y] = spotXY(i), near = hiders.filter(z => !z.found && !z.dash && Lab.dist(x, y, ...spotXY(z.spot)) < R * 4.2);
+      if (near.length && Lab.chance(.6)) { const z = Lab.choose(near), emp = spots.map((q, k) => k).filter(k => k !== i && k !== z.spot && !hiderAt(k)); if (emp.length) { z.dash = { from: z.spot, to: Lab.choose(emp), t: 0 }; voice(z.who, .7); } } }
+  }
+  pip.busy = false; if (pip.queue != null) { const q = pip.queue; pip.queue = null; if (phase === "play") go(q); }
+}
+function found(h) {
+  h.found = true; h.pop = 0; streak++; bestStreak = Math.max(bestStreak, streak); foundAll++;
+  const gain = 100 + 20 * (round - 1) + 25 * Math.min(streak - 1, 6) + Math.round(40 * timeLeft / timeMax);
+  score += gain; spots[h.spot].shake = 1; pip.mood = "joy"; pip.moodT = .9; pip.sq = -.2;
+  const [x, y] = spotXY(h.spot);
+  if (!demo) { Lab.setScore(score); Lab.bumpScore(); Lab.audio.combo(streak + 2, { vol: .22 }); voice(h.who, 1.3); Lab.buzz(20);
+    fx.burst(x, y - R * 1.6, { n: 16, colors: [Pals.cast[h.who].body, "#fff", "#ffd166"], speed: 220, life: .6, size: 3.5 * S, gravity: 300, shape: "star" });
+    fx.text(x, y - R * dep(spots[h.spot].ny) * 2.6, "Found " + Pals.cast[h.who].name + "!" + (streak > 1 ? " ×" + streak : ""), { color: "#ff8a3d", size: 17 * U, life: 1 }); }
+  h.seat = hiders.filter(z => z.found).length - 1;
+  if (hiders.every(z => z.found)) {
+    phase = "clear"; phaseT = 0; const bonus = Math.ceil(timeLeft) * 10; score += bonus;
+    if (!demo) { Lab.setScore(score); snd("levelup"); Lab.banner("Everyone found!", { color: "#2f9e5b", ms: 1200, y: .4 }); if (bonus) later(.5, () => Lab.toast("Daylight bonus +" + bonus, 1200, { y: .3 })); }
+    later(2.2, () => startRound(round + 1));
+  }
+}
+function endRun() {
+  phase = "end"; phaseT = 0; pip.mood = "sad"; pip.moodT = 9;
+  hiders.forEach((h, i) => { if (!h.found) { h.laugh = true; later(.15 + i * .2, () => { spots[h.spot].peek = 1.4; spots[h.spot].peekA = 1.25; spots[h.spot].peekWho = h.who; spots[h.spot].hold = true; voice(h.who, 1.2); }); } });
+  later(1.8, () => {
+    if (demo) { startRound(1); return; }
+    Lab.gameover({ title: "Oops!", message: "Dusk fell — the hiders win this time.", score, stats: [["Rounds cleared", round - 1], ["Pals found", foundAll], ["Best streak", bestStreak]] });
+  });
+}
+
+/* ---------- loop ---------- */
+function update(dt) {
+  for (const tm of timers.slice()) { tm.t -= dt; if (tm.t <= 0) { const i = timers.indexOf(tm); if (i >= 0) timers.splice(i, 1); tm.fn(); } }
+  phaseT += dt;
+  if (phase === "count") { for (const h of hiders) h.run.t += dt / C.run; if (phaseT >= 2.6 && hiders.every(h => h.run.t >= 1)) { phase = "play"; phaseT = 0; } }
+  if (phase === "play") {
+    timeLeft -= dt; if (timeLeft <= 0) { timeLeft = 0; endRun(); }
+    for (const h of hiders) if (!h.found && !h.dash) { h.tellT -= dt; if (h.tellT <= 0) { tell(h); h.tellT = C.tmin + Lab.rand(0, C.tspan); } }
+    decoys(dt);
+  }
+  for (const h of hiders) { if (h.pop >= 0) h.pop += dt; if (h.dash) { h.dash.t += dt / .45; if (h.dash.t >= 1) { h.spot = h.dash.to; h.dash = null; h.tellT = Math.max(h.tellT, 1.2); } } }
+  for (const s of spots) { s.shake = Math.max(0, s.shake - dt * 2.2); s.hit = Math.max(0, s.hit - dt * 3); s.empty = Math.max(0, s.empty - dt * 1.2); if (!s.hold) s.peek = Math.max(0, s.peek - dt * 1.4); }
+  for (const n of notes) n.t += dt; notes = notes.filter(n => n.t < 1.2);
+  // Pip
+  pip.moodT -= dt; pip.sq = Lab.damp(pip.sq, 0, 8, dt);
+  if (pip.busy) {
+    if (pip.t < pip.dur) { pip.t += dt; const k = ease.inOutQuad(clamp(pip.t / pip.dur, 0, 1)); pip.nx = lerp(pip.from[0], pip.dest[0], k); pip.ny = lerp(pip.from[1], pip.dest[1], k); if (pip.t >= pip.dur) { pip.sq = .25; snd("thud", { pitch: 1.6, vol: .4 }); } }
+    else { pip.searchT += dt; spots[pip.to].shake = Math.max(spots[pip.to].shake, .5); if (pip.searchT >= .26) resolve(pip.to); }
+  }
+  if (demo) demoTick(dt); else Lab.music.intensity(phase === "play" ? clamp(.25 + (1 - timeLeft / timeMax) * .75, 0, 1) : .3);
+}
+function demoTick(dt) {
+  if (phase !== "play" || pip.busy) return; demoT -= dt; if (demoT > 0) return; demoT = Lab.rand(1.2, 2.2);
+  const left = hiders.filter(h => !h.found && !h.dash); if (!left.length) return; const i = Lab.chance(.75) ? Lab.choose(left).spot : Lab.randInt(0, spots.length - 1); go(i);
+}
+function frame(dt, t) { update(dt); render(t); }
+function resetRun() { layout(); timers = []; score = 0; streak = 0; bestStreak = 0; foundAll = 0; tells = 0; demoT = 2; startRound(1); }
+function attract(dt, t) { if (!spots || !demo) { demo = true; resetRun(); } update(dt); render(t); }
+function start() {
+  demo = false; resetRun(); Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => tapAt(x, y)];
+  Lab.expose({
+    get score() { return score; }, get round() { return round; }, get phase() { return phase; }, get time() { return timeLeft; }, get tells() { return tells; }, get streak() { return streak; },
+    get hiders() { return hiders.map(h => ({ who: h.who, spot: h.spot, found: h.found, moving: !!h.dash })); }, get pipBusy() { return pip.busy; }, get nSpots() { return spots.length; },
+    spot(i) { const [x, y] = spotXY(i), s = spots[i]; return [x, y - R * dep(s.ny) * OBJ[s.kind] * .45]; }, setTime(v) { timeLeft = v; }, setRound(r) { timers = []; startRound(r); }, forceTell(k) { const h = hiders.find(z => !z.found); if (h) tell(h, k); },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- drawing ---------- */
+function lawn() {
+  return Lab.sprite("pklawn", Lab.W + 80, Lab.H + 80, g => {
+    g.translate(40, 40); const W = Lab.W, H = Lab.H, P = Lab.play;
+    draw.vgrad(g, -40, -40, W + 80, H + 80, ["#9fd47e", "#8cc86c"]);
+    const st = 46 * S; for (let i = -2; i * st < W + 80; i++) { g.fillStyle = i % 2 ? "rgba(255,255,255,.07)" : "rgba(0,60,0,.04)"; g.beginPath(); g.moveTo(i * st, -40); g.lineTo(i * st + st, -40); g.lineTo(i * st + st * 1.6, H + 40); g.lineTo(i * st + st * .6, H + 40); g.closePath(); g.fill(); }
+    // hedge wall behind the bench
+    const hy = benchY + 50 * U; draw.vgrad(g, -40, -40, W + 80, P.y + 44, ["#ffd9a8", "#ffefcf"]); draw.rect(g, -40, P.y + 4, W + 80, hy - P.y - 4, 0, "#4f9a48"); g.fillStyle = "#5fae54"; for (let x = -40; x < W + 60; x += 22 * S) { g.beginPath(); g.arc(x, P.y + 6, 14 * S, Math.PI, TAU); g.fill(); } g.fillStyle = "#5fae54"; for (let x = -40; x < W + 60; x += 22 * S) { g.beginPath(); g.arc(x, hy, 16 * S, 0, TAU); g.fill(); }
+    g.fillStyle = "rgba(255,255,255,.12)"; for (let x = -30; x < W + 60; x += 22 * S) { g.beginPath(); g.arc(x - 4 * S, hy - 5 * S, 5 * S, 0, TAU); g.fill(); }
+    // stepping-stone path to Pip's base and a few flowers
+    const rnd = Lab.rng(11); for (let k = 0; k < 6; k++) { const t = k / 5, x = X(.5) + Math.sin(t * 5) * F.w * .08, y = lerp(Y(1.02), Y(.55), t); draw.circle(g, x, y, (12 - k) * S, "rgba(230,220,190,.55)"); }
+    for (let i = 0; i < 40; i++) { const x = F.x + rnd() * F.w, y = F.y + rnd() * F.h, c = ["#ffd1e0", "#fff6b0", "#ffffff", "#d7c6ff"][i % 4]; for (let p = 0; p < 4; p++) draw.circle(g, x + Math.cos(p * 1.57) * 2.5 * S, y + Math.sin(p * 1.57) * 2.5 * S, 2 * S, c); draw.circle(g, x, y, 1.6 * S, "#ffb52e"); }
+    // bench
+    draw.rect(g, P.x + 6 * S, benchY + 24 * U, P.w - 12 * S, 12 * U, 5 * U, "#c98a52", "#9c6236", 2); draw.rect(g, P.x + 6 * S, benchY + 10 * U, P.w - 12 * S, 8 * U, 4 * U, "#d99b62", "#9c6236", 2);
+    for (const fx2 of [.06, .94]) draw.rect(g, P.x + P.w * fx2 - 4 * U, benchY + 34 * U, 8 * U, 14 * U, 2, "#9c6236");
+  });
+}
+function objSprite(kind, d) {
+  const r = R * d, h = r * OBJ[kind], key = "pk" + kind + ":" + Math.round(r);
+  return Lab.sprite(key, r * 3, h + r * .8, g => {
+    g.translate(r * 1.5, h + r * .3); const sh = (x, y, w, hh) => { g.fillStyle = "rgba(30,50,20,.22)"; g.beginPath(); g.ellipse(x, y, w, hh, 0, 0, TAU); g.fill(); };
+    if (kind === "bush") { sh(0, 0, r * 1.15, r * .25); [[-.55, -.5, .62], [.55, -.5, .62], [0, -.85, .72], [-.2, -.35, .6], [.3, -.3, .58]].forEach(([x, y, s]) => draw.circle(g, x * r, y * r * OBJ.bush / 1.2, s * r, "#4fa344", "#3a7f33", 1.5)); [[-.3, -1.05], [.35, -.8], [-.6, -.6]].forEach(([x, y]) => draw.circle(g, x * r, y * r, r * .12, "rgba(255,255,255,.25)")); [[.5, -.6], [-.1, -1.1], [-.7, -.35]].forEach(([x, y]) => draw.circle(g, x * r, y * r, r * .08, "#ff6f91")); }
+    else if (kind === "pot") { sh(0, 0, r * .9, r * .2); g.fillStyle = "#e0794a"; g.beginPath(); g.moveTo(-r * .75, -h * .72); g.lineTo(r * .75, -h * .72); g.lineTo(r * .55, 0); g.lineTo(-r * .55, 0); g.closePath(); g.fill(); g.strokeStyle = "#b85a33"; g.lineWidth = 1.5; g.stroke(); draw.rect(g, -r * .85, -h * .82, r * 1.7, h * .16, 4, "#ec8a59", "#b85a33", 1.5);
+      for (let k = -2; k <= 2; k++) { draw.circle(g, k * r * .3, -h * .95 - Math.abs(k) * -r * .06, r * .2, ["#ff8fb8", "#ffd166", "#b9a3ff", "#ff8fb8", "#ffd166"][k + 2]); draw.circle(g, k * r * .3, -h * .95 + Math.abs(k) * r * .06, r * .07, "#fff6d5"); } }
+    else if (kind === "barrel") { sh(0, 0, r * .85, r * .2); draw.rect(g, -r * .72, -h, r * 1.44, h, r * .25, "#b9773f", "#875226", 1.5); g.strokeStyle = "#5e5a66"; g.lineWidth = r * .1; for (const y of [.2, .78]) { g.beginPath(); g.moveTo(-r * .72, -h * y); g.lineTo(r * .72, -h * y); g.stroke(); } g.strokeStyle = "rgba(0,0,0,.15)"; g.lineWidth = 1; for (const x of [-.35, 0, .35]) { g.beginPath(); g.moveTo(x * r, -h + 3); g.lineTo(x * r, -2); g.stroke(); } draw.rect(g, -r * .6, -h, r * 1.2, r * .14, 3, "#a56632"); }
+    else if (kind === "reeds") { g.fillStyle = "#7cc4e8"; g.beginPath(); g.ellipse(0, -r * .05, r * 1.2, r * .3, 0, 0, TAU); g.fill(); g.strokeStyle = "rgba(255,255,255,.5)"; g.lineWidth = 1.5; g.beginPath(); g.ellipse(-r * .2, -r * .05, r * .5, r * .1, 0, 0, Math.PI); g.stroke();
+      for (let k = 0; k < 13; k++) { const x = (k / 12 - .5) * r * 1.7, hh = h * (.6 + .4 * Math.sin(k * 2.3) ** 2); g.strokeStyle = k % 2 ? "#6f9e3c" : "#8db84a"; g.lineWidth = r * .1; g.lineCap = "round"; g.beginPath(); g.moveTo(x, -r * .05); g.quadraticCurveTo(x + r * .1, -hh * .6, x + r * .05 * (k % 3 - 1), -hh); g.stroke(); if (k % 4 === 1) draw.rect(g, x - r * .06, -hh - r * .05, r * .12, r * .3, r * .06, "#8a5a2f"); } }
+    else if (kind === "crate") { sh(0, 0, r * .9, r * .2); draw.rect(g, -r * .8, -h, r * 1.6, h, 4, "#e3b672", "#a97b3c", 1.5); g.strokeStyle = "#a97b3c"; g.lineWidth = r * .1; g.strokeRect(-r * .68, -h + r * .12, r * 1.36, h - r * .24); g.beginPath(); g.moveTo(-r * .68, -r * .12); g.lineTo(r * .68, -h + r * .12); g.stroke(); }
+    else { sh(0, 0, r * .9, r * .2); draw.rect(g, -r * .7, -h, r * 1.4, h, r * .2, "#9a6a3f", "#6e4826", 1.5); g.fillStyle = "#e6c48f"; g.beginPath(); g.ellipse(0, -h, r * .7, r * .2, 0, 0, TAU); g.fill(); g.strokeStyle = "#b98a55"; g.lineWidth = 1; for (const k of [.45, .25]) { g.beginPath(); g.ellipse(0, -h, r * k, r * k * .28, 0, 0, TAU); g.stroke(); } draw.circle(g, r * .45, -h * .45, r * .12, "#6fae4f"); }
+  });
+}
+function drawSpot(c, s, i, t) {
+  const [x, y] = spotXY(i), d = dep(s.ny), r = R * d, h = r * OBJ[s.kind], sh = s.shake ? Math.sin(t * 46 + s.seed) * s.shake * r * .06 : 0;
+  // a peek: the hider rises behind its cover
+  if (s.peek > 0 && s.peekWho) { const k = Math.min(1, s.peek * 1.6) * s.peekA, ps = r * 1.15, cy = y - h + ps * (.62 - .62 * k);
+    Pals.draw(c, s.peekWho, x + (s.kind === "stump" ? r * .1 : 0), cy, ps, { t, mood: s.hold ? "joy" : "think", look: pip ? [clamp((X(pip.nx) - x) / 150, -1, 1), .3] : [0, 0], shadow: false, clipY: (y - h * .2) - cy, arms: s.hold ? "cheer" : "down" }); }
+  if (squirrel && squirrel.i === i) { const k = Math.sin(clamp(squirrel.t / 1.1, 0, 1) * Math.PI); c.save(); c.translate(x + r * .75, y - h * .3); c.rotate(.5 - k * .6); c.fillStyle = "#b5733d"; c.beginPath(); c.ellipse(r * .25 * k, -r * .35, r * .22, r * .5, .3, 0, TAU); c.fill(); c.fillStyle = "#d9a06b"; c.beginPath(); c.ellipse(r * .3 * k, -r * .55, r * .1, r * .22, .3, 0, TAU); c.fill(); c.restore(); }
+  const sp = objSprite(s.kind, d); c.save(); c.translate(x + sh, y); if (s.shake) c.rotate(Math.sin(t * 40 + s.seed) * s.shake * .04); c.drawImage(sp, -sp.w / 2, -sp.h + r * .3, sp.w, sp.h); c.restore();
+  if (s.hit > 0) { c.strokeStyle = `rgba(255,255,255,${s.hit})`; c.lineWidth = 3 * S; c.beginPath(); c.ellipse(x, y, r * 1.1 * (1.3 - s.hit * .3), r * .3, 0, 0, TAU); c.stroke(); }
+  if (s.empty > 0) { c.globalAlpha = Math.min(1, s.empty); draw.text(c, "?", x, y - h - r * .45, { size: 18 * U, color: "#7a5a3a", weight: 700 }); c.globalAlpha = 1; }
+  if (bird && bird.i === i) { const b = bird, inT = clamp(b.t / .7, 0, 1), outT = clamp((b.t - 1.9) / .7, 0, 1), bx = x + b.side * (1 - inT + outT) * r * 4, by = y - h - r * .15 - (1 - inT) * r * 2.5 - outT * r * 3, flap = inT < 1 || outT > 0 ? Math.sin(t * 40) : 0;
+    c.fillStyle = "#5b7ec9"; c.beginPath(); c.ellipse(bx, by, r * .2, r * .15, 0, 0, TAU); c.fill(); draw.circle(c, bx + b.side * -r * .15, by - r * .1, r * .11, "#5b7ec9"); c.fillStyle = "#ffb52e"; c.beginPath(); c.moveTo(bx - b.side * r * .25, by - r * .1); c.lineTo(bx - b.side * r * .36, by - r * .07); c.lineTo(bx - b.side * r * .25, by - r * .04); c.fill();
+    c.fillStyle = "#4466aa"; c.beginPath(); c.ellipse(bx, by - r * .05 - flap * r * .12, r * .15, r * .06, flap * .6, 0, TAU); c.fill(); }
+}
+function render(t) {
+  const c = Lab.ctx, L = lawn(); c.drawImage(L, -40, -40, L.w, L.h);
+  if (!spots) return;
+  // depth-sorted spots, dashing hiders, Pip
+  const order = spots.map((s, i) => i).sort((a, b) => spots[a].ny - spots[b].ny);
+  for (const i of order) drawSpot(c, spots[i], i, t);
+  for (const h of hiders) if (h.dash) { const [ax, ay] = spotXY(h.dash.from), [bx, by] = spotXY(h.dash.to), k = ease.inOutQuad(clamp(h.dash.t, 0, 1)), px = lerp(ax, bx, k), py = lerp(ay, by, k) - Math.sin(k * Math.PI) * R * .6;
+    c.strokeStyle = "rgba(240,230,200,.8)"; c.lineWidth = 6 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(lerp(ax, bx, Math.max(0, k - .3)), lerp(ay, by, Math.max(0, k - .3))); c.lineTo(px, py); c.stroke();
+    Pals.draw(c, h.who, px, py - R * .5, R * .9, { t, mood: "scared", tilt: (bx > ax ? .3 : -.3), arms: "up" }); }
+  // count-in: the pals scurry to their spots
+  if (phase === "count") for (const h of hiders) { const k = clamp(h.run.t, 0, 1); if (k <= 0 || k >= 1) continue; const [tx, ty] = spotXY(h.spot), x = lerp(X(h.run.sx), tx, ease.inOutSine(k)), y = lerp(Y(h.run.sy), ty, ease.inOutSine(k)) - Math.abs(Math.sin(k * Math.PI * 4)) * R * .25;
+    Pals.draw(c, h.who, x, y - R * .55, R * 1.05 * dep(h.run.sy + (spots[h.spot].ny - h.run.sy) * k), { t, mood: "joy", arms: "up", flip: tx < X(h.run.sx), squash: Math.sin(k * Math.PI * 8) * .08 }); }
+  const px = X(pip.nx), py = Y(pip.ny), ps = R * 1.15 * dep(Math.min(1, pip.ny));
+  const pmood = phase === "end" ? "sad" : pip.moodT > 0 ? pip.mood : phase === "count" ? "sleepy" : pip.busy ? "focus" : timeLeft < 6 ? "scared" : "happy";
+  Pals.draw(c, "pip", px, py - ps * .5, ps, { t, mood: pmood, arms: phase === "count" ? "up" : phase === "clear" || pip.moodT > 0 && pip.mood === "joy" ? "cheer" : pip.busy && pip.t >= pip.dur ? "hold" : "down", squash: pip.sq + (pip.busy && pip.t < pip.dur ? -.1 : 0), flip: pip.dest && pip.dest[0] < pip.nx, look: [0, phase === "count" ? 0 : -.4], hot: timeLeft < 6 && phase === "play" ? .6 : 0 });
+  // notes from giggles
+  for (const n of notes) { if (n.t < 0) continue; const a = 1 - n.t / 1.2, x = X(n.x) + Math.sin(n.t * 6) * 6 * S, y = Y(n.y) - R * 1.4 - n.t * 40 * S; c.globalAlpha = a * .85; c.fillStyle = shade(Pals.cast[n.who].body, -.25); c.beginPath(); c.ellipse(x, y, 4 * S, 3 * S, -.4, 0, TAU); c.fill(); c.fillRect(x + 3 * S, y - 11 * S, 1.6 * S, 11 * S); c.globalAlpha = 1; }
+  // wind streaks
+  if (gust) { const k = gust.t / 1.4, front = gust.dir > 0 ? k : 1 - k; c.strokeStyle = "rgba(255,255,255,.6)"; c.lineWidth = 2 * S; c.lineCap = "round"; for (let i = 0; i < 6; i++) { const y = F.y + F.h * (.15 + i * .14), x = X(front) - gust.dir * i * 12 * S; c.beginPath(); c.moveTo(x - gust.dir * 50 * S, y); c.quadraticCurveTo(x - gust.dir * 20 * S, y - 8 * S, x, y); c.stroke(); } }
+  // dusk
+  const dusk = phase === "count" ? 0 : 1 - timeLeft / timeMax; if (dusk > 0) { c.fillStyle = `rgba(${Math.round(lerp(255, 90, dusk))},${Math.round(lerp(140, 50, dusk))},${Math.round(lerp(60, 150, dusk))},${dusk * .38})`; c.fillRect(-40, -40, Lab.W + 80, Lab.H + 80); }
+  // Pip's paws: the count-in curtain
+  if (phase === "count" || (phase === "play" && phaseT < .35)) { const a = phase === "count" ? C.dim * clamp(phaseT * 4, 0, 1) : C.dim * (1 - phaseT / .35); c.fillStyle = `rgba(40,25,40,${a})`; c.fillRect(-40, -40, Lab.W + 80, Lab.H + 80);
+    if (phase === "count") { const n = Math.min(3, Math.floor(phaseT / .8) + 1); draw.text(c, n + "…", Lab.W / 2, F.y + F.h * .42, { size: 46 * U, color: "#fff4d6", weight: 700 }); draw.text(c, "Pip is counting — peek!", Lab.W / 2, F.y + F.h * .42 + 40 * U, { size: 15 * U, color: "rgba(255,244,214,.85)", weight: 700 }); } }
+  // bench of found pals + daylight bar
+  const P = Lab.play, n = hiders.length, gap = Math.min(64 * U, (P.w - 40 * S) / n);
+  hiders.forEach((h, i) => { const bx = P.x + P.w / 2 + (i - (n - 1) / 2) * gap, by = benchY + 22 * U;
+    if (h.found && h.pop >= 0) { const k = clamp((h.pop - .55) / .5, 0, 1), [sx, sy] = spotXY(h.spot), up = clamp(h.pop / .55, 0, 1), sz = lerp(R * 1.1, 34 * U, ease.inOutCubic(k)), x = lerp(sx, bx, ease.inOutCubic(k)), y = lerp(sy - R * 1.4 - Math.sin(up * Math.PI) * R * .8, by, ease.inOutCubic(k)) - Math.sin(k * Math.PI) * 40 * S;
+      Pals.draw(c, h.who, x, y, sz, { t, mood: "joy", arms: k < 1 ? "up" : "cheer", shadow: k >= 1, squash: k >= 1 ? Math.max(0, .2 - (h.pop - 1.05) * .8) : -.1 }); }
+    else { c.globalAlpha = .55; draw.circle(c, bx, by, 13 * U, "rgba(60,40,30,.25)"); draw.text(c, "?", bx, by + 1, { size: 17 * U, color: "#fff6e0", weight: 700 }); c.globalAlpha = 1; } });
+  const bw = P.w - 40 * S, bx0 = P.x + 20 * S, byy = benchY + 52 * U, f = clamp(timeLeft / timeMax, 0, 1);
+  draw.rect(c, bx0, byy, bw, 10 * U, 5 * U, "rgba(40,50,30,.25)"); if (f > 0) draw.rect(c, bx0, byy, Math.max(10 * U, bw * f), 10 * U, 5 * U, f > .5 ? "#ffd166" : f > .22 ? "#ff9a4a" : "#c46bd6");
+  draw.circle(c, bx0 + bw * f, byy + 5 * U, 8 * U, f > .22 ? "#ffcf3f" : "#e9e2ff", "#fff", 2);
+  draw.text(c, "ROUND " + round, P.x + 14 * S, byy + 22 * U, { size: 11 * U, color: "#2f3b2a", weight: 700, align: "left" });
+  if (phase === "play" && round === 1 && phaseT < 6 && !demo && hiders.every(h => !h.found)) draw.text(c, "Watch for a peek, a rustle or a giggle", Lab.W / 2, F.y + F.h * .06, { size: 14 * U, color: "#2f3b2a", weight: 700, stroke: "rgba(255,255,255,.75)", strokeW: 4 });
+}
+Lab.boot();
+})();
+</script></body></html>

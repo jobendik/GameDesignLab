@@ -12,7 +12,7 @@ module.exports = {
     async function drop(t, x) {
       const s = await game((g, t) => g.slot(t), t), px = await game((g, a) => g.px(a[0], a[1]), [t, x]), py = await game(g => g.py(5));
       await page.mouse.move(s[0], s[1]); await page.mouse.down(); await page.mouse.move(px, py, { steps: 8 }); await page.mouse.up();
-      for (let i = 0; i < 30 && !(await game(g => g.settled)); i++) await wait(60); await wait(700);
+      for (let i = 0; i < 30 && !(await game(g => g.settled)); i++) await wait(60); await wait(450);
     }
     const press = async t => { const s = await game((g, t) => g.slot(t), t); await page.mouse.click(s[0], s[1]); };
     const waitPhase = async (ph, n) => { for (let i = 0; i < (n || 80) && (await game(g => g.phase)) !== ph; i++) await wait(100); return game(g => g.phase); };

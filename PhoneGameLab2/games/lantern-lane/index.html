@@ -1,48 +1,363 @@
-<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Lantern Lane</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
 </head><body><script>
-Lab.init({title:"Connect", instructions:"Drag from one colored dot to its pair, no crossings.", restart:start});
-const N=5;let grid,pairs,paths,active,win;
-function start(){
-  grid=Array.from({length:N},()=>Array(N).fill(-1));
-  pairs=[];const cols=["#f55","#5cf","#fc5","#5f8"];
-  // simple hard-coded puzzle
-  const pts=[[0,0,0,4,0],[1,1,1,3,3],[2,2,0,2,4],[3,3,2,4,2]];
-  for(const [i,r1,c1,r2,c2] of pts){
-    pairs.push({i:cols[i]});grid[r1][c1]=i;grid[r2][c2]=i;}
-  paths=Array.from({length:pairs.length},()=>[]);active=null;win=false;Lab.setScore(0);
-  Lab.input.onDown=[(x,y)=>{const p=hit(x,y);if(p&&grid[p.r][p.c]>=0){active={i:grid[p.r][p.c],pts:[p]};paths[active.i]=[p];}}];
-  Lab.input.onMove=[(x,y)=>{if(!active)return;const p=hit(x,y);if(!p)return;
-    const last=active.pts[active.pts.length-1];
-    if(p.r===last.r&&p.c===last.c)return;
-    if(Math.abs(p.r-last.r)+Math.abs(p.c-last.c)!==1)return;
-    // disallow stepping on other-color cells unless endpoint of same
-    if(grid[p.r][p.c]>=0 && grid[p.r][p.c]!==active.i)return;
-    if(active.pts.some(q=>q.r===p.r&&q.c===p.c))return;
-    // disallow stepping on other paths
-    for(let k=0;k<paths.length;k++)if(k!==active.i)for(const q of paths[k])if(q.r===p.r&&q.c===p.c)return;
-    active.pts.push(p);paths[active.i]=active.pts;
-  }];
-  Lab.input.onUp=[()=>{active=null;checkWin();}];
-  Lab.loop(()=>draw());
+(function(){ "use strict";
+/* LANTERN LANE — after the night fair, Olli the owl walks the pals home. Draw a lantern path from every pal to the house
+ * with their face, then press Walk: EVERYONE STEPS AT THE SAME TIME, one stone per beat.
+ * Core idea kept: drag a path from each coloured dot to its matching partner.
+ * The twist (and why it is not Live Wires or Sweet Circuit): paths MAY cross and share stones — the puzzle is TIME.
+ *   Two pals on one stone on the same beat, or squeezing past each other head-on, BUMP. You fix it with detours and
+ *   with waits (tap a pal: they wait a beat before setting off). A bump costs a lantern and marks the spot.
+ * Levels: 12 nights generated from the night number. The generator walks a real collision-free solution first, then
+ *   only keeps the night if the obvious shortest routes would bump — so every night has a "gotcha" and a way through.
+ * Depth: fireflies off the obvious routes (detour for points), first-try bonus (+1 lantern), tidy-route bonus.
+ * Identity: indigo village night, cobbles, hedges, moon ponds, warm lamps; cottages roofed in each pal's colour with
+ *   the pal's face in the round window that lights up when they get home. Dreamy music; every pal steps on its own note. */
+let demo = false;
+Lab.init({
+  title: "Lantern Lane", tagline: "Walk every pal home at once. No bumps!", category: "Puzzle", kicker: "Pocket Pals",
+  howto: ["Drag from each pal to their own house", "Paths can cross, but never on the same beat", "Tap a pal to wait a beat, then press Walk"],
+  theme: { bg: "#1d1b48", bg2: "#3a2f6b", fg: "#fff4dc", muted: "#c9bfe6", accent: "#ffc857", accent2: "#7fd1ff" },
+  orient: "any", music: { style: "dream", key: "F", vol: .38 }, restart: start,
+  attract(dt, t) { if (!demo || !pals) { demo = true; score = 0; lanterns = 3; startLevel(3); demoGo(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink;
+const IDS = ["pip", "bun", "momo", "nori", "bolt"], DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]], TK = .38, NIGHTS = 12;
+const TIPS = { 1: "Draw a path from each pal\nto the house with their face!", 2: "Paths may cross… but two pals\ncan't stand on one stone!", 3: "Nobody squeezes past head-on.\nPlan around each other!",
+  4: "Tap a pal to make them\nwait a beat before walking.", 5: "Fireflies! Walk through them\nfor bonus points.", 7: "Four pals now. Count the beats\nalong each path.", 10: "Five pals! The whole gang.\nTake your time.", 12: "Last night of the fair.\nYou've got this!" };
+let W, H, P, S, land, tr, DR, DC, cs, gx, gy, hdr, walkBtn, clearBtn, R, C, grid, pals, flies, sol, lvl, phase, phT, wt, sim, lanterns, score, tries, bumpMark, drag, say, sayT, olliMood, olliT,
+  stats, clock, lastStep, nightScore;
+
+const key = q => q[0] * 16 + q[1], same = (a, b) => a && b && a[0] === b[0] && a[1] === b[1];
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+const arr = p => p.wait + p.path.length - 1;
+function posAt(p, t) { if (t > arr(p)) return null; return p.path[clamp(t - p.wait, 0, p.path.length - 1)]; }
+function simulate(plans) {
+  const T = Math.max(0, ...plans.map(arr));
+  for (let t = 1; t <= T; t++) for (let i = 0; i < plans.length; i++) for (let j = i + 1; j < plans.length; j++) {
+    const a1 = posAt(plans[i], t), b1 = posAt(plans[j], t); if (a1 && b1 && same(a1, b1)) return { ok: false, t, i, j, kind: "meet", cell: a1, T };
+    const a0 = posAt(plans[i], t - 1), b0 = posAt(plans[j], t - 1); if (a0 && b0 && a1 && b1 && same(a0, b1) && same(b0, a1)) return { ok: false, t, i, j, kind: "swap", cell: a0, cell2: b0, T };
+  }
+  return { ok: true, T };
 }
-function hit(x,y){const s=size(),o=off();const c=Math.floor((x-o.x)/s),r=Math.floor((y-o.y)/s);if(r<0||r>=N||c<0||c>=N)return null;return {r,c};}
-function size(){return Math.min(Lab.W,Lab.H-260)/N;}
-function off(){const s=size();return {x:(Lab.W-s*N)/2,y:200};}
-function checkWin(){let used=0;for(let i=0;i<paths.length;i++){const p=paths[i];if(p.length<2)return;
-    const ends=[];for(let r=0;r<N;r++)for(let c=0;c<N;c++)if(grid[r][c]===i)ends.push({r,c});
-    const a=p[0],b=p[p.length-1];if(!((a.r===ends[0].r&&a.c===ends[0].c&&b.r===ends[1].r&&b.c===ends[1].c)||(a.r===ends[1].r&&a.c===ends[1].c&&b.r===ends[0].r&&b.c===ends[0].c)))return;
-    used+=p.length;}
-  if(used===N*N){win=true;Lab.win("Solved!");}
+
+/* ---------- level generation: walk a real solution first, keep it only if the obvious routes bump ---------- */
+function inB(r, c) { return r >= 0 && c >= 0 && r < R && c < C; }
+function planPath(g, s, w, L, plans, starts) {
+  const path = [s], used = new Set([key(s)]); let budget = 3000;
+  const ends = plans.map(p => p.path[p.path.length - 1]);
+  function rec() {
+    if (--budget < 0) return false;
+    const t = w + path.length - 1, cur = path[path.length - 1];
+    if (path.length - 1 >= L) return !plans.some(p => p.path.some(q => same(q, cur)));
+    for (const [dr, dc] of Lab.shuffle(DIRS.slice())) {
+      const nx = [cur[0] + dr, cur[1] + dc];
+      if (!inB(nx[0], nx[1]) || g[nx[0]][nx[1]] || used.has(key(nx)) || starts.some(q => same(q, nx)) || ends.some(q => same(q, nx))) continue;
+      if (plans.some(p => same(posAt(p, t + 1), nx) || (same(posAt(p, t), nx) && same(posAt(p, t + 1), cur)))) continue;
+      path.push(nx); used.add(key(nx)); if (rec()) return true; path.pop(); used.delete(key(nx));
+    }
+    return false;
+  }
+  return rec() ? path : null;
 }
-function draw(){const c=Lab.ctx;c.fillStyle="#0c1226";c.fillRect(0,0,Lab.W,Lab.H);
-  const s=size(),o=off();const cols=["#f55","#5cf","#fc5","#5f8"];
-  for(let r=0;r<=N;r++){c.strokeStyle="#222a44";c.beginPath();c.moveTo(o.x,o.y+r*s);c.lineTo(o.x+s*N,o.y+r*s);c.stroke();
-    c.beginPath();c.moveTo(o.x+r*s,o.y);c.lineTo(o.x+r*s,o.y+s*N);c.stroke();}
-  for(let i=0;i<paths.length;i++){c.strokeStyle=cols[i];c.lineWidth=s*0.4;c.beginPath();
-    for(let k=0;k<paths[i].length;k++){const p=paths[i][k];const x=o.x+p.c*s+s/2,y=o.y+p.r*s+s/2;if(k===0)c.moveTo(x,y);else c.lineTo(x,y);}c.stroke();c.lineWidth=1;}
-  for(let r=0;r<N;r++)for(let col=0;col<N;col++){const v=grid[r][col];if(v<0)continue;
-    c.fillStyle=cols[v];c.beginPath();c.arc(o.x+col*s+s/2,o.y+r*s+s/2,s*0.32,0,Lab.TAU);c.fill();}
+function bfs(g, s, goal, houses, i) {
+  const prev = new Map([[key(s), null]]), q = [s];
+  while (q.length) {
+    const cur = q.shift(); if (same(cur, goal)) { const out = []; let k = cur; while (k) { out.unshift(k); k = prev.get(key(k)); } return out; }
+    for (const [dr, dc] of DIRS) { const nx = [cur[0] + dr, cur[1] + dc]; if (!inB(nx[0], nx[1]) || g[nx[0]][nx[1]] || prev.has(key(nx)) || houses.some((h, j) => j !== i && same(h, nx))) continue; prev.set(key(nx), cur); q.push(nx); }
+  }
+  return null;
 }
-start();
+function build(n) {
+  const k = n <= 2 ? 2 : n <= 6 ? 3 : n <= 9 ? 4 : 5;
+  C = Math.min(7, 5 + Math.floor((n - 1) / 4)); R = Math.min(9, 6 + Math.floor((n - 1) / 3));
+  let fallback = null;
+  for (let tries = 0; tries < 600; tries++) {
+    const g = Array.from({ length: R }, () => Array(C).fill(0));
+    let nob = Math.floor(R * C * (.12 + Math.min(.07, n * .007)));
+    while (nob--) g[Lab.randInt(0, R - 1)][Lab.randInt(0, C - 1)] = Lab.choose([1, 1, 2, 3]);
+    const free = []; for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) if (!g[r][c]) free.push([r, c]);
+    if (free.length < k * 5) continue;
+    const starts = Lab.shuffle(free).slice(0, k), plans = []; let ok = true;
+    for (let i = 0; i < k && ok; i++) {
+      const w = n >= 4 && Math.random() < .3 ? 1 + (n >= 8 && Math.random() < .3 ? 1 : 0) : 0;
+      const p = planPath(g, starts[i], w, Lab.randInt(3, Math.min(9, 4 + Math.floor(n / 2))), plans, starts);
+      if (!p) ok = false; else plans.push({ path: p, wait: w });
+    }
+    if (!ok) continue;
+    const houses = plans.map(p => p.path[p.path.length - 1]);
+    const naive = plans.map((p, i) => ({ path: bfs(g, starts[i], houses[i], houses, i), wait: 0 }));
+    if (naive.some(x => !x.path)) continue;
+    const lv = { g, starts, houses, sol: plans, naive: naive.map(x => x.path) };
+    if (n === 1 || !simulate(naive).ok) return lv;
+    fallback = fallback || lv;
+  }
+  return fallback;
+}
+
+/* ---------- level flow ---------- */
+function startLevel(n) {
+  lvl = n; const lv = build(n); grid = lv.g; sol = lv.sol;
+  pals = lv.starts.map((s, i) => ({ id: IDS[i], i, s, h: lv.houses[i], path: [s], wait: 0, home: false, naive: lv.naive[i], x: 0, y: 0, joy: 0, dizzy: 0, look: [0, 0], hop: 0 }));
+  flies = []; const occ = q => pals.some(p => same(p.s, q) || same(p.h, q)), onNaive = q => pals.some(p => p.naive.some(z => same(z, q)));
+  const nf = n >= 5 ? Math.min(3, 1 + Math.floor((n - 3) / 3)) : 0, cand = [];
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) if (!grid[r][c] && !occ([r, c]) && !onNaive([r, c])) cand.push([r, c]);
+  for (const q of Lab.shuffle(cand).slice(0, nf)) flies.push({ r: q[0], c: q[1], got: false, tmp: false, ph: Lab.rand(0, 6) });
+  phase = "plan"; phT = 0; wt = 0; sim = null; tries = 0; bumpMark = null; drag = null; nightScore = 0;
+  layout(); for (const p of pals) { const [x, y] = cxy(p.s); p.x = x; p.y = y; }
+  if (!demo) { Lab.banner("Night " + n, { color: "#ffc857", ms: 1200, y: .3 }); speak(TIPS[n] || Lab.choose(["Everyone home, safe and sound.\nNo bumping!", "Mind the crossings.\nCount the beats!", "Lanterns ready?\nLet's walk them home."]), "think"); }
+}
+function walk() {
+  if (phase !== "plan") return;
+  if (!pals.every(p => same(p.path[p.path.length - 1], p.h))) { snd("error"); speak("Everyone needs a path\nhome before we walk!", "think"); walkBtn.shake = 1; return; }
+  phase = "walk"; wt = 0; lastStep = 0; tries++; sim = simulate(pals); drag = null; bumpMark = null;
+  snd("whistle", { pitch: 1.3, vol: .5 }); if (!demo) Lab.music.intensity(.75); olliMood = "focus";
+}
+function speak(txt, mood) { say = txt; sayT = 0; olliMood = mood || "happy"; olliT = 2.5; }
+function clearPaths() { if (phase !== "plan") return; for (const p of pals) { p.path = [p.s]; p.wait = 0; } bumpMark = null; snd("swish", { pitch: .8 }); }
+function resetWalkers() { for (const p of pals) { p.home = false; const [x, y] = cxy(p.s); p.x = x; p.y = y; p.dizzy = 0; } for (const f of flies) if (f.tmp) { f.got = false; f.tmp = false; } }
+function stepEvents(t) { // things that happen as the beat lands on step t
+  pals.forEach((p, i) => {
+    const q = posAt(p, t), q0 = posAt(p, t - 1); if (!q) return;
+    if (q0 && !same(q, q0)) { p.hop = 1; snd("tap", { pitch: .8 + i * .18, vol: .5 }); }
+    for (const f of flies) if (!f.got && f.r === q[0] && f.c === q[1]) { f.got = true; f.tmp = true; snd("star", { pitch: 1.2 }); const [x, y] = cxy(q); fx.burst(x, y, { n: 12, colors: ["#e8ff8a", "#fff"], speed: 120, life: .5, size: 3, glow: 8 }); }
+    if (t === arr(p) && !p.home) { p.home = true; snd("pop", { pitch: 1 + i * .1 }); Lab.audio.combo(i + 1, { vol: .15 }); const [x, y] = cxy(p.h); fx.burst(x, y - cs * .2, { n: 14, colors: ["#ffc857", "#fff2c2"], speed: 140, life: .6, size: 3, shape: "star" }); }
+  });
+}
+function bump() {
+  const a = pals[sim.i], b = pals[sim.j]; a.dizzy = b.dizzy = 1.6; phase = "bump"; phT = 0; bumpMark = sim.cell;
+  const [x, y] = sim.kind === "swap" ? mid(cxy(sim.cell), cxy(sim.cell2)) : cxy(posAt(a, sim.t));
+  fx.burst(x, y - cs * .2, { n: 16, colors: ["#fff", "#ffe27a", "#ff8fb8"], speed: 220, life: .5, size: 4, shape: "star" });
+  if (demo) return;
+  lanterns--; Lab.shake(7, .3); Lab.hitstop(.08); Lab.buzz(40); Lab.sfx("boing"); Lab.sfx("hit", { pitch: 1.2 }); Lab.music.intensity(.2);
+  speak(Pals.cast[a.id].name + " and " + Pals.cast[b.id].name + " bumped!\n" + (sim.kind === "swap" ? "Head-on — try a detour or a wait." : "Same stone, same beat. Try a wait!"), "dizzy");
+  if (lanterns <= 0) { phase = "over"; Lab.after(1.4, () => Lab.gameover({ title: "Oops! Lanterns out", message: "The pals got muddled on night " + lvl + ".", score, stats: [["Nights cleared", lvl - 1], ["Fireflies", stats.flies], ["First tries", stats.first]] })); }
+}
+function cleared() {
+  phase = "clear"; phT = 0; olliMood = "joy"; if (demo) return;
+  const got = flies.filter(f => f.got).length, steps = pals.reduce((s, p) => s + arr(p), 0), par = sol.reduce((s, p) => s + arr(p), 0);
+  let pts = 100 + 20 * lvl; const lines = [];
+  if (got) { pts += 30 * got; lines.push("fireflies +" + 30 * got); stats.flies += got; }
+  if (tries === 1) { pts += 50; lines.push("first try +50"); stats.first++; if (lanterns < 3) { lanterns++; lines.push("+1 lantern"); } }
+  if (steps <= par) { pts += 40; lines.push("tidy routes +40"); }
+  score += pts; nightScore = pts; Lab.setScore(score); Lab.bumpScore();
+  Lab.sfx("levelup"); Lab.music.intensity(.4); Lab.banner("Everyone's home!  +" + pts, { color: "#ffc857", ms: 1600, y: .3 });
+  speak(lines.length ? "Hoo-ray! " + lines.slice(0, 2).join(", ") + (lines[2] ? ",\n" + lines[2] : "") : "Hoo-ray! Everyone's home!\nOn to the next night.", "joy");
+  Lab.fx.confetti && lvl === NIGHTS && Lab.fx.confetti();
+}
+function demoGo() { pals.forEach((p, i) => { p.path = sol[i].path.slice(); p.wait = sol[i].wait; }); walk(); }
+
+/* ---------- input ---------- */
+function start() {
+  demo = false; score = 0; lanterns = 3; stats = { flies: 0, first: 0 }; clock = 0; Lab.setScore(0);
+  startLevel(1);
+  Lab.input.onDown = [(x, y) => down(x, y)];
+  Lab.input.onMove = [(x, y) => { if (drag && Lab.input.down) move(x, y); }];
+  Lab.input.onUp = [() => up()];
+  Lab.input.onKey = [k => { if (k === "Enter" || k === " ") walk(); else if (k === "r" || k === "R" || k === "Backspace") clearPaths(); }];
+  Lab.hint("Drag from a pal to their house", {});
+  Lab.expose({
+    get level() { return lvl; }, get phase() { return phase; }, get lanterns() { return lanterns; }, get score() { return score; }, get tries() { return tries; },
+    pals: () => pals.map(p => ({ id: p.id, s: p.s, h: p.h, path: p.path.map(q => q.slice()), wait: p.wait, home: p.home, naive: p.naive })),
+    get sol() { return sol.map(p => ({ path: p.path, wait: p.wait })); }, get flies() { return flies.map(f => ({ r: f.r, c: f.c, got: f.got })); }, get bumpMark() { return bumpMark; },
+    cell: (r, c) => cxy([r, c]), get walkBtn() { return [walkBtn.x + walkBtn.w / 2, walkBtn.y + walkBtn.h / 2]; }, get clearBtn() { return [clearBtn.x + clearBtn.w / 2, clearBtn.y + clearBtn.h / 2]; },
+    simulate: () => simulate(pals), get cs() { return cs; }, skipTo(n) { startLevel(n); },
+  });
+  Lab.loop(frame);
+}
+const inR = (b, x, y) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+function down(x, y) {
+  if (phase !== "plan") return;
+  if (inR(walkBtn, x, y)) { walk(); return; }
+  if (inR(clearBtn, x, y)) { clearPaths(); return; }
+  const q = hit(x, y); if (!q) return;
+  const p = pals.find(p => same(p.s, q));
+  if (p) { drag = { p, fresh: true, cell: q }; snd("tick", { pitch: 1.2 }); p.hop = .6; return; }
+  let best = null, bi = -1;
+  for (const o of pals) { const i = o.path.findIndex(z => same(z, q)); if (i > 0 && (!best || same(o.path[o.path.length - 1], q))) { best = o; bi = i; } }
+  if (best) { best.path.length = bi + 1; drag = { p: best, fresh: false, cell: q }; bumpMark = null; snd("tick", { pitch: 1 }); }
+}
+function move(x, y) {
+  const q = hit(x, y); if (!q || same(q, drag.cell)) return;
+  const p = drag.p; drag.cell = q;
+  if (drag.fresh) { drag.fresh = false; p.path = [p.s]; bumpMark = null; }
+  for (let guard = 0; guard < 12; guard++) {
+    const last = p.path[p.path.length - 1]; if (same(last, q)) break;
+    const dr = Math.sign(q[0] - last[0]), dc = Math.sign(q[1] - last[1]);
+    if (dr && dc && Math.abs(q[0] - last[0]) + Math.abs(q[1] - last[1]) === 2 && guard === 0) {
+      // diagonal flick: take the step that is walkable (prefer the one we are moving along most)
+      const a = [last[0] + dr, last[1]], b = [last[0], last[1] + dc]; if (!extend(p, walkable(p, a) ? a : b)) break; continue;
+    }
+    if (dr && dc) break;
+    if (!extend(p, [last[0] + dr, last[1] + dc])) break;
+  }
+}
+function walkable(p, q) { return inB(q[0], q[1]) && !grid[q[0]][q[1]] && !pals.some(o => o !== p && same(o.h, q)); }
+function extend(p, q) {
+  const L = p.path.length;
+  if (L > 1 && same(p.path[L - 2], q)) { p.path.pop(); snd("tick", { pitch: .7 + p.path.length * .04, vol: .5 }); return true; }
+  if (same(p.path[L - 1], p.h)) return false;
+  if (!walkable(p, q) || p.path.some(z => same(z, q))) return false;
+  p.path.push(q); snd("tick", { pitch: .8 + L * .06, vol: .6 });
+  if (same(q, p.h)) { p.joy = 1; snd("chime", { pitch: 1 + p.i * .12 }); const [x, y] = cxy(q); fx.ring(x, y, { r0: cs * .2, r1: cs * .7, color: Pals.cast[p.id].body, width: 3 }); if (!demo && pals.every(o => same(o.path[o.path.length - 1], o.h))) Lab.hint("All set? Press Walk!", {}); }
+  return true;
+}
+function up() {
+  if (drag && drag.fresh && phase === "plan") { const p = drag.p; p.wait = (p.wait + 1) % 4; snd("click"); Lab.audio.note(["C5", "E5", "G5", "C6"][p.wait], { dur: .15, vol: .12 }); p.hop = .8; bumpMark = null; if (p.wait && !demo && !stats.waitTold) { stats.waitTold = true; speak(Pals.cast[p.id].name + " will wait " + p.wait + (p.wait > 1 ? " beats" : " beat") + "\nbefore setting off.", "happy"); } }
+  drag = null;
+}
+
+/* ---------- layout ---------- */
+function layout() {
+  W = Lab.W; H = Lab.H; P = Lab.play; land = P.w > P.h * 1.15; S = clamp(Math.min(P.w / 390, P.h / 700), .62, 1.4);
+  let area;
+  if (!land) {
+    hdr = { x: P.x, y: P.y, w: P.w, h: 116 * S }; const by = P.y + P.h - 66 * S;
+    clearBtn = { x: P.x + 14, y: by, w: 104 * S, h: 50 * S }; walkBtn = { x: P.x + P.w - 14 - 170 * S, y: by, w: 170 * S, h: 50 * S };
+    area = { x: P.x + 10, y: hdr.y + hdr.h + 4, w: P.w - 20, h: by - hdr.y - hdr.h - 14 };
+  } else {
+    const pw = Math.min(310 * S, P.w * .38); hdr = { x: P.x, y: P.y, w: pw, h: 116 * S };
+    walkBtn = { x: P.x + 12, y: P.y + P.h - 60 * S, w: pw - 24, h: 48 * S }; clearBtn = { x: P.x + 12, y: walkBtn.y - 54 * S, w: pw - 24, h: 44 * S };
+    area = { x: P.x + pw + 6, y: P.y + 6, w: P.w - pw - 16, h: P.h - 12 };
+  }
+  walkBtn.shake = 0;
+  tr = !!(land && R > C); DR = tr ? C : R; DC = tr ? R : C;
+  cs = Math.min(area.w / DC, area.h / DR, 100 * S); gx = area.x + (area.w - cs * DC) / 2; gy = area.y + (area.h - cs * DR) / 2;
+  Lab.sprite.clear("llb");
+  if (pals) for (const p of pals) { const q = p.home ? p.h : p.s; const [x, y] = cxy(q); if (phase !== "walk") { p.x = x; p.y = y; } }
+}
+Lab.onResize(() => { if (pals) layout(); });
+function cxy(q) { const r = tr ? q[1] : q[0], c = tr ? q[0] : q[1]; return [gx + (c + .5) * cs, gy + (r + .5) * cs]; }
+function hit(x, y) { const c = Math.floor((x - gx) / cs), r = Math.floor((y - gy) / cs); if (r < 0 || c < 0 || r >= DR || c >= DC) return null; return tr ? [c, r] : [r, c]; }
+const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+
+/* ---------- update ---------- */
+function tick(dt) {
+  clock += dt; phT += dt; olliT -= dt; sayT += dt;
+  if (!pals) return;
+  for (const p of pals) { p.joy -= dt; p.dizzy -= dt; p.hop = Math.max(0, p.hop - dt * 3.5); }
+  if (walkBtn) walkBtn.shake = Math.max(0, walkBtn.shake - dt * 3);
+  if (phase === "walk") {
+    wt += dt; const tt = wt / TK, step = Math.floor(tt);
+    while (lastStep < Math.min(step, sim.ok ? sim.T : sim.t - 1)) { lastStep++; stepEvents(lastStep); }
+    if (!sim.ok && tt >= sim.t - 1 + (sim.kind === "swap" ? .5 : .8)) { placeWalkers(sim.t - 1 + (sim.kind === "swap" ? .5 : .8)); bump(); return; }
+    placeWalkers(tt);
+    if (sim.ok && tt >= sim.T + .5) cleared();
+  } else if (phase === "bump") {
+    if (phT > 1.6 && lanterns > 0) { resetWalkers(); phase = "plan"; if (demo) demoGo(); }
+  } else if (phase === "clear") {
+    if (phT > 1.9) { if (demo) { startLevel(Lab.randInt(2, 7)); demoGo(); } else if (lvl >= NIGHTS) { phase = "over"; Lab.win({ title: "Every pal is home!", message: "Twelve nights, not a single lantern lost for good.", score, stats: [["Nights", NIGHTS], ["Fireflies", stats.flies], ["First tries", stats.first]] }); } else startLevel(lvl + 1); }
+  }
+}
+function placeWalkers(tt) {
+  const k = Math.floor(tt), f = ease.inOutSine(clamp(tt - k, 0, 1));
+  for (const p of pals) {
+    const a = posAt(p, k) || p.h, b = posAt(p, k + 1) || p.h, A = cxy(a), B = cxy(b);
+    p.x = lerp(A[0], B[0], f); p.y = lerp(A[1], B[1], f); if (!same(a, b)) p.look = [Math.sign(B[0] - A[0]), Math.sign(B[1] - A[1])];
+  }
+}
+function frame(dt, t) { tick(dt); render(t); }
+
+/* ---------- art ---------- */
+function boardSprite() {
+  const w = Math.ceil(cs * DC + 16), h = Math.ceil(cs * DR + 16);
+  return Lab.sprite("llb" + lvl + ":" + w + "x" + h + (tr ? "t" : ""), w, h, g => {
+    g.translate(8, 8); const rr = Lab.rng(lvl * 31 + 7);
+    g.fillStyle = "#24314f"; draw.rr(g, -8, -8, w, h, 18); g.fill();
+    g.fillStyle = "#2d4a4a"; draw.rr(g, -4, -4, w - 8, h - 8, 14); g.fill();
+    for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+      const [x, y] = [(tr ? r : c) * cs, (tr ? c : r) * cs], v = grid[r][c];
+      if (v === 2) { g.fillStyle = "#1f3f78"; draw.rr(g, x + 2, y + 2, cs - 4, cs - 4, cs * .35); g.fill(); g.fillStyle = "rgba(255,248,210,.55)"; g.beginPath(); g.ellipse(x + cs * .62, y + cs * .4, cs * .12, cs * .06, 0, 0, TAU); g.fill(); g.strokeStyle = "rgba(160,200,255,.35)"; g.lineWidth = 2; g.beginPath(); g.ellipse(x + cs * .4, y + cs * .62, cs * .2, cs * .06, 0, 0, TAU); g.stroke(); continue; }
+      // cobble stone
+      g.fillStyle = (r + c) % 2 ? "#5d5f8f" : "#56588a"; draw.rr(g, x + 2.5, y + 2.5, cs - 5, cs - 5, cs * .22); g.fill();
+      g.fillStyle = "rgba(255,255,255,.07)"; draw.rr(g, x + 5, y + 4, cs - 10, cs * .25, cs * .12); g.fill();
+      g.fillStyle = "rgba(20,15,50,.25)"; for (let i = 0; i < 2; i++) { g.beginPath(); g.arc(x + cs * (.25 + rr() * .5), y + cs * (.3 + rr() * .5), cs * .03, 0, TAU); g.fill(); }
+      if (v === 1) { // hedge bush
+        for (const [dx, dy, s] of [[.32, .58, .26], [.66, .56, .25], [.5, .38, .28]]) { g.fillStyle = "#2f7a5c"; g.beginPath(); g.arc(x + cs * dx, y + cs * dy, cs * s, 0, TAU); g.fill(); }
+        g.fillStyle = "#4aa47a"; for (const [dx, dy] of [[.42, .32], [.6, .48], [.3, .5]]) { g.beginPath(); g.arc(x + cs * dx, y + cs * dy, cs * .07, 0, TAU); g.fill(); }
+        g.fillStyle = "#ff8fb8"; g.beginPath(); g.arc(x + cs * .62, y + cs * .36, cs * .04, 0, TAU); g.fill();
+      }
+      if (v === 3) { g.fillStyle = "#2b2340"; g.fillRect(x + cs * .46, y + cs * .3, cs * .08, cs * .55); g.fillRect(x + cs * .36, y + cs * .82, cs * .28, cs * .06); g.fillStyle = "#ffd98a"; draw.rr(g, x + cs * .38, y + cs * .12, cs * .24, cs * .22, cs * .05); g.fill(); g.fillStyle = "#2b2340"; g.fillRect(x + cs * .36, y + cs * .1, cs * .28, cs * .04); }
+    }
+  });
+}
+function drawHouse(c, p) {
+  const [x, y] = cxy(p.h), s = cs, col = Pals.cast[p.id], lit = p.home;
+  if (lit) draw.glow(c, x, y, s * .9, "#ffc857", .45);
+  c.fillStyle = "#f3e3c3"; draw.rr(c, x - s * .32, y - s * .12, s * .64, s * .48, s * .06); c.fill();
+  c.fillStyle = col.body; c.beginPath(); c.moveTo(x - s * .42, y - s * .08); c.lineTo(x, y - s * .44); c.lineTo(x + s * .42, y - s * .08); c.closePath(); c.fill();
+  c.fillStyle = col.dark; c.fillRect(x - s * .42, y - s * .1, s * .84, s * .05);
+  c.fillStyle = "#5b3a2a"; draw.rr(c, x + s * .06, y + s * .08, s * .16, s * .28, s * .05); c.fill();
+  // round window with the owner's face: dark until they're home
+  const wx = x - s * .13, wy = y + s * .1, wr = s * .15;
+  c.save(); c.beginPath(); c.arc(wx, wy, wr, 0, TAU); c.fillStyle = lit ? "#ffe39a" : "#2a2f5e"; c.fill(); c.clip();
+  Pals.draw(c, p.id, wx, wy + wr * .7, wr * 2.1, { shadow: false, mood: lit ? "joy" : "sleepy", alpha: lit ? 1 : .55, t: lit ? clock : undefined });
+  c.restore(); c.strokeStyle = INK; c.lineWidth = Math.max(1.5, s * .03); c.beginPath(); c.arc(wx, wy, wr, 0, TAU); c.stroke();
+}
+function drawPath(c, p, k) {
+  if (p.path.length < 2 && !(drag && drag.p === p)) return;
+  const col = Pals.cast[p.id].body, off = (p.i - (k - 1) / 2) * cs * .075, pts = p.path.map(q => { const [x, y] = cxy(q); return [x + off, y + off]; });
+  c.lineCap = "round"; c.lineJoin = "round";
+  c.strokeStyle = "rgba(20,15,50,.45)"; c.lineWidth = cs * .15; c.beginPath(); pts.forEach(([x, y], i) => i ? c.lineTo(x, y + 2) : c.moveTo(x, y + 2)); c.stroke();
+  c.strokeStyle = col; c.lineWidth = cs * .11; c.beginPath(); pts.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.stroke();
+  c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = cs * .035; c.setLineDash([cs * .08, cs * .16]); c.lineDashOffset = -clock * cs * .6; c.beginPath(); pts.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.stroke(); c.setLineDash([]);
+  const e = pts[pts.length - 1]; if (!same(p.path[p.path.length - 1], p.h)) { draw.circle(c, e[0], e[1], cs * .1, col, "#fff", 2); }
+  // beat numbers on the path being drawn (and on the two that bumped)
+  if ((drag && drag.p === p) || (bumpMark && sim && !sim.ok && (pals[sim.i] === p || pals[sim.j] === p))) {
+    pts.forEach(([x, y], i) => { if (!i) return; const t = p.wait + i; draw.circle(c, x + cs * .2, y - cs * .2, cs * .12, "rgba(255,255,255,.92)", col, 2); draw.text(c, String(t), x + cs * .2, y - cs * .2 + 1, { size: Math.max(9, cs * .14), color: INK, weight: 800 }); });
+  }
+}
+function drawPal(c, p) {
+  if (p.home && phase !== "plan") return;
+  const bob = phase === "walk" ? Math.abs(Math.sin(wt / TK * Math.PI)) * cs * .08 : Math.sin(clock * 2 + p.i) * cs * .015, sz = cs * .56;
+  const [hx, hy] = cxy(p.h), look = phase === "walk" ? p.look : [clamp((hx - p.x) / (cs * 3), -1, 1), clamp((hy - p.y) / (cs * 3), -1, 1)];
+  const mood = p.dizzy > 0 ? "dizzy" : p.joy > 0 ? "joy" : drag && drag.p === p ? "think" : phase === "clear" ? "joy" : "happy";
+  const a = Pals.draw(c, p.id, p.x, p.y - cs * .06 - bob - ease.pulse(clamp(1 - p.hop, 0, 1)) * cs * .1 * (p.hop > 0 ? 1 : 0), sz, { t: clock + p.i, mood, look, arms: phase === "clear" ? "cheer" : "hold", squash: p.hop > .7 ? .12 : 0, flip: look[0] < 0 });
+  // the lantern in hand
+  if (a && a.handR && phase !== "clear") { const [lx, ly] = a.handR; c.strokeStyle = INK; c.lineWidth = 1.5; c.beginPath(); c.moveTo(lx, ly); c.lineTo(lx, ly + cs * .06); c.stroke(); draw.glow(c, lx, ly + cs * .12, cs * .22, "#ffc857", .35); c.fillStyle = "#ffd98a"; draw.rr(c, lx - cs * .045, ly + cs * .06, cs * .09, cs * .11, cs * .025); c.fill(); c.fillStyle = INK; c.fillRect(lx - cs * .05, ly + cs * .055, cs * .1, cs * .02); }
+  if (p.wait && phase === "plan") { const bx = p.x - cs * .3, by = p.y - cs * .34; draw.circle(c, bx, by, cs * .15, "#fff4dc", INK, 2); c.fillStyle = INK; c.fillRect(bx - cs * .085, by - cs * .05, cs * .025, cs * .1); c.fillRect(bx - cs * .045, by - cs * .05, cs * .025, cs * .1); draw.text(c, String(p.wait), bx + cs * .045, by + 1, { size: Math.max(9, cs * .15), color: INK, weight: 800 }); }
+}
+function button(c, b, label, on, col) {
+  const sh = b.shake ? Math.sin(b.shake * 40) * 5 * b.shake : 0, pulse = on ? 1 + Math.sin(clock * 5) * .03 : 1;
+  c.save(); c.translate(b.x + b.w / 2 + sh, b.y + b.h / 2); c.scale(pulse, pulse);
+  c.fillStyle = "rgba(10,8,30,.35)"; draw.rr(c, -b.w / 2, -b.h / 2 + 4, b.w, b.h, b.h / 2); c.fill();
+  c.fillStyle = on ? col : "rgba(255,255,255,.14)"; draw.rr(c, -b.w / 2, -b.h / 2, b.w, b.h, b.h / 2); c.fill();
+  draw.text(c, label, 0, 1, { size: Math.min(20, b.h * .4), color: on ? INK : "rgba(255,244,220,.75)", weight: 800 }); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx; draw.bg(c, "#2a2463", "#141236", "#1d1a4a");
+  for (let i = 0; i < 40; i++) { c.globalAlpha = .3 + .5 * Math.abs(Math.sin(t * .7 + i * 1.7)); c.fillStyle = "#fff"; c.fillRect((i * 97.31 % 1) * W, (i * 61.7 % 1) * H * .5, 1.6, 1.6); } c.globalAlpha = 1;
+  draw.circle(c, W * .86, Lab.play.y + 26, 16, "#fff4cf"); draw.circle(c, W * .86 + 6, Lab.play.y + 22, 14, "#2a2463");
+  if (!pals) return;
+  const b = boardSprite(); c.drawImage(b, gx - 8, gy - 8, b.w, b.h);
+  // lamp glows flicker over the board
+  for (let r = 0; r < R; r++) for (let cc = 0; cc < C; cc++) if (grid[r][cc] === 3) { const [x, y] = cxy([r, cc]); draw.glow(c, x, y - cs * .25, cs * (.75 + .05 * Math.sin(t * 9 + r)), "#ffc857", .28); }
+  if (bumpMark) { const [x, y] = cxy(bumpMark), k = .5 + .5 * Math.sin(t * 8); c.strokeStyle = `rgba(255,93,115,${.6 + .4 * k})`; c.lineWidth = 3; c.beginPath(); c.arc(x, y, cs * .42, 0, TAU); c.stroke(); }
+  for (const f of flies) if (!f.got) { const [x, y] = cxy([f.r, f.c]), yy = y + Math.sin(t * 2 + f.ph) * cs * .08; draw.glow(c, x, yy, cs * .3, "#e8ff8a", .5); draw.circle(c, x, yy, cs * .05, "#f4ffc2"); }
+  for (const p of pals) drawHouse(c, p);
+  pals.forEach(p => drawPath(c, p, pals.length));
+  for (const p of pals) if (!p.home) draw.shadow(c, p.x, p.y + cs * .24, cs * .2, cs * .05, .3);
+  for (const p of pals.slice().sort((a, b) => a.y - b.y)) drawPal(c, p);
+  if (demo) return;
+  // header: Olli on the signpost with a speech bubble, night and lanterns
+  const ox = hdr.x + 40 * S, oy = hdr.y + 56 * S;
+  c.fillStyle = "#6b4a32"; c.fillRect(ox - 3 * S, oy + 14 * S, 6 * S, hdr.h - 56 * S);
+  Pals.draw(c, "olli", ox, oy, 50 * S, { t: clock, mood: olliT > 0 ? olliMood : phase === "walk" ? "focus" : "happy", look: drag ? [clamp((Lab.input.x - ox) / 200, -1, 1), clamp((Lab.input.y - oy) / 200, -1, 1)] : [.6, .4], arms: olliMood === "joy" && olliT > 0 ? "cheer" : "down", shadow: false });
+  if (say) {
+    const bx = hdr.x + 82 * S, bw = hdr.w - 82 * S - 10, bh = 58 * S, by = hdr.y + 6 * S, lines = say.split("\n"), pop = ease.outBack(clamp(sayT / .25, 0, 1));
+    let fsz = clamp(14 * S, 10, 16); c.font = Lab.font(fsz, 700); const wid = Math.max(...lines.map(l => c.measureText(l).width)); if (wid > bw - 18) fsz *= (bw - 18) / wid;
+    c.save(); c.translate(bx + bw / 2, by + bh / 2); c.scale(pop, pop); Pals.bubble(c, 0, 0, bw, bh, { tailX: ox + 18 * S - bx - bw / 2, tailY: oy - by - bh / 2 - 8 * S });
+    lines.forEach((l, i) => draw.text(c, l, 0, (i - (lines.length - 1) / 2) * fsz * 1.25, { size: fsz, color: INK, weight: 700 })); c.restore();
+  }
+  const sy2 = hdr.y + hdr.h - 22 * S;
+  draw.text(c, "Night " + lvl + "/" + NIGHTS, hdr.x + 82 * S, sy2, { size: 15 * S, color: "#fff4dc", align: "left", weight: 800 });
+  for (let i = 0; i < 3; i++) { const lx = hdr.x + hdr.w - 22 * S - i * 26 * S, on = i < lanterns; if (on) draw.glow(c, lx, sy2, 16 * S, "#ffc857", .4); c.fillStyle = on ? "#ffd98a" : "rgba(255,255,255,.18)"; draw.rr(c, lx - 7 * S, sy2 - 9 * S, 14 * S, 18 * S, 4 * S); c.fill(); c.fillStyle = on ? INK : "rgba(255,255,255,.25)"; c.fillRect(lx - 8 * S, sy2 - 11 * S, 16 * S, 3 * S); c.fillRect(lx - 8 * S, sy2 + 8 * S, 16 * S, 3 * S); }
+  const ready = phase === "plan" && pals.every(p => same(p.path[p.path.length - 1], p.h));
+  button(c, clearBtn, "Clear", phase === "plan" && pals.some(p => p.path.length > 1 || p.wait), "#c9bfe6");
+  button(c, walkBtn, phase === "walk" ? "Walking…" : "Walk!", ready, "#ffc857");
+}
+Lab.boot();
+})();
 </script></body></html>

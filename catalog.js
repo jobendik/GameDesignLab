@@ -6,10 +6,11 @@ window.GDL_CATALOG = {
    "id": "games/arcanum-pinball",
    "path": "games/arcanum-pinball.html",
    "collection": "arcade",
-   "title": "ARCANUM — Pinball Wizard",
-   "desc": "Old-school physics pinball in a mystical neon arcade.",
+   "title": "Arcanum: The Spellbound Table",
+   "desc": "A real arcane pinball table: cradle, post-pass and nudge to cast four spells, complete the summoning ritual for three-ball multiball and challenge the Archmage.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Physics"
    ],
    "controls": [
     "touch",
@@ -2518,6 +2519,25 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--bedtime-stacks.jpg"
   },
   {
+   "id": "PhoneGameLab2/bun-voyage",
+   "path": "PhoneGameLab2/games/bun-voyage/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Bun Voyage",
+   "desc": "Lob fresh bakes into passing balloons.",
+   "genre": [
+    "Skill"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--bun-voyage.jpg"
+  },
+  {
    "id": "PhoneGameLab2/cakewalk",
    "path": "PhoneGameLab2/games/cakewalk/index.html",
    "collection": "PhoneGameLab2",
@@ -2537,23 +2557,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--cakewalk.jpg"
   },
   {
-   "id": "PhoneGameLab2/cats-and-cans",
-   "path": "PhoneGameLab2/games/cats-and-cans/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Cats & Cans",
-   "desc": "Classic shell game — track the cup hiding the cat.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 16,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--cats-and-cans.jpg"
-  },
-  {
    "id": "PhoneGameLab2/clatter-castle",
    "path": "PhoneGameLab2/games/clatter-castle/index.html",
    "collection": "PhoneGameLab2",
@@ -2567,41 +2570,10 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
-  },
-  {
-   "id": "PhoneGameLab2/connect",
-   "path": "PhoneGameLab2/games/connect/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Connect",
-   "desc": "Draw paths to link same-colored dots without crossing.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 19,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--connect.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/cupid-tom",
-   "path": "PhoneGameLab2/games/cupid-tom/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Cupid Tom",
-   "desc": "Shoot arrows at flying hearts cupid-style.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 20,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--cupid-tom.jpg"
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--clatter-castle.jpg"
   },
   {
    "id": "PhoneGameLab2/destroy-aliens",
@@ -3088,6 +3060,25 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--jungle-shot.jpg"
   },
   {
+   "id": "PhoneGameLab2/lantern-lane",
+   "path": "PhoneGameLab2/games/lantern-lane/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Lantern Lane",
+   "desc": "Walk every pal home at once. No bumps!",
+   "genre": [
+    "Puzzle"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--lantern-lane.jpg"
+  },
+  {
    "id": "PhoneGameLab2/lilypad-lunch",
    "path": "PhoneGameLab2/games/lilypad-lunch/index.html",
    "collection": "PhoneGameLab2",
@@ -3227,6 +3218,24 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--pack-ice.jpg"
   },
   {
+   "id": "PhoneGameLab2/peekaboo-park",
+   "path": "PhoneGameLab2/games/peekaboo-park/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Peekaboo Park",
+   "desc": "Ready or not! Spot the tells. Find every pal!",
+   "genre": [
+    "Skill"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--peekaboo-park.jpg"
+  },
+  {
    "id": "PhoneGameLab2/pier-pressure",
    "path": "PhoneGameLab2/games/pier-pressure/index.html",
    "collection": "PhoneGameLab2",
@@ -3276,7 +3285,10 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--pine-kick.jpg"
   },
   {
    "id": "PhoneGameLab2/planet-hop",
@@ -3742,7 +3754,8 @@ window.GDL_CATALOG = {
    ],
    "v2": true,
    "score": 7,
-   "status": "transformed"
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--sweet-circuit.jpg"
   },
   {
    "id": "PhoneGameLab2/tap-tap",

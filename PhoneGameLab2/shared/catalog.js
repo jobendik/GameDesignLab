@@ -4,27 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 16,
-    "slug": "cats-and-cans",
-    "t": "Cats & Cans",
-    "d": "Classic shell game — track the cup hiding the cat.",
-    "thumb": "../thumbs/PhoneGameLab2--cats-and-cans.jpg"
-   },
-   {
-    "n": 19,
-    "slug": "connect",
-    "t": "Connect",
-    "d": "Draw paths to link same-colored dots without crossing.",
-    "thumb": "../thumbs/PhoneGameLab2--connect.jpg"
-   },
-   {
-    "n": 20,
-    "slug": "cupid-tom",
-    "t": "Cupid Tom",
-    "d": "Shoot arrows at flying hearts cupid-style.",
-    "thumb": "../thumbs/PhoneGameLab2--cupid-tom.jpg"
-   },
-   {
     "n": 21,
     "slug": "destroy-aliens",
     "t": "Destroy Aliens",
@@ -466,6 +445,14 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--fish-fizz.jpg"
    },
    {
+    "slug": "lantern-lane",
+    "t": "Lantern Lane",
+    "d": "Walk every pal home at once. No bumps!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--lantern-lane.jpg"
+   },
+   {
     "slug": "pack-ice",
     "t": "Pack Ice",
     "d": "Slide ice blocks in from any side. Fill a line to crack it.",
@@ -486,7 +473,61 @@ window.LAB_GAMES = [
     "t": "Sweet Circuit",
     "d": "Wire up the sweets. Loop them to zap what's inside!",
     "v2": true,
-    "score": 7
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--sweet-circuit.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Skill",
+  "items": [
+   {
+    "slug": "bun-voyage",
+    "t": "Bun Voyage",
+    "d": "Lob fresh bakes into passing balloons.",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--bun-voyage.jpg"
+   },
+   {
+    "slug": "flicknic",
+    "t": "Flicknic",
+    "d": "Flick the bugs off the blanket. Save Bun's cake.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--flicknic.jpg"
+   },
+   {
+    "slug": "jampoline",
+    "t": "Jampoline",
+    "d": "Draw springy leaves. Bounce berries to Bun.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--jampoline.jpg"
+   },
+   {
+    "slug": "peekaboo-park",
+    "t": "Peekaboo Park",
+    "d": "Ready or not! Spot the tells. Find every pal!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--peekaboo-park.jpg"
+   },
+   {
+    "slug": "pine-kick",
+    "t": "Pine Kick",
+    "d": "Hold to coil, let go to kick. How high can Pip climb?",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--pine-kick.jpg"
+   },
+   {
+    "slug": "ramp-scamp",
+    "t": "Ramp Scamp",
+    "d": "Tilt the ramp. Pip is not slowing down.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--ramp-scamp.jpg"
    }
   ]
  },
@@ -550,42 +591,9 @@ window.LAB_GAMES = [
     "slug": "clatter-castle",
     "t": "Clatter Castle",
     "d": "Build what the pals ask for. Mind the wobble!",
-    "v2": true
-   }
-  ]
- },
- {
-  "cat": "Skill",
-  "items": [
-   {
-    "slug": "flicknic",
-    "t": "Flicknic",
-    "d": "Flick the bugs off the blanket. Save Bun's cake.",
     "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--flicknic.jpg"
-   },
-   {
-    "slug": "jampoline",
-    "t": "Jampoline",
-    "d": "Draw springy leaves. Bounce berries to Bun.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--jampoline.jpg"
-   },
-   {
-    "slug": "pine-kick",
-    "t": "Pine Kick",
-    "d": "Hold to coil, let go to kick. How high can Pip climb?",
-    "v2": true
-   },
-   {
-    "slug": "ramp-scamp",
-    "t": "Ramp Scamp",
-    "d": "Tilt the ramp. Pip is not slowing down.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--ramp-scamp.jpg"
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--clatter-castle.jpg"
    }
   ]
  },
