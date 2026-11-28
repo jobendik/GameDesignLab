@@ -1,32 +1,426 @@
-<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Pine Kick</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
 </head><body><script>
-Lab.init({title:"Climber Tom", instructions:"Tap to jump to the other wall. Avoid spikes.", restart:start});
-let hero,side,spikes,t,score,scroll;
-function start(){
-  hero={y:Lab.H-120,vy:0,jump:false};side="L";scroll=0;
-  spikes=[];for(let i=0;i<10;i++)spikes.push({y:-i*180-200,side:Math.random()<0.5?"L":"R"});
-  score=0;Lab.setScore(0);
-  Lab.input.onTap=[()=>{if(!hero.jump){hero.jump=true;hero.vx=side==="L"?500:-500;}}];
-  Lab.loop((dt)=>{
-    scroll+=60*dt;score=Math.floor(scroll/30);Lab.setScore(score);
-    for(const s of spikes){s.y+=60*dt;if(s.y>Lab.H+40){s.y-=2000;s.side=Math.random()<0.5?"L":"R";}}
-    if(hero.jump){const x=side==="L"?80:Lab.W-80;
-      hero.tx=(hero.tx||x)+hero.vx*dt;
-      const target=side==="L"?Lab.W-80:80;
-      if((side==="L"&&hero.tx>=target)||(side==="R"&&hero.tx<=target)){side=side==="L"?"R":"L";hero.jump=false;hero.tx=null;}
+(function(){ "use strict";
+/* PINE KICK — Momo bet Pip he couldn't reach the top of the twin pines. Pip wall-kicks up the gap between two trunks.
+ * Core idea kept: climb by jumping between two walls, dodge the spikes.
+ * Made a game:  the kick is ANALOG — hold to coil, release to kick. The hold time sets the launch speed, so it decides
+ *               where on the far trunk Pip lands (a tap hops a little, a full coil soars ~11 m; a full coil somersaults).
+ *               Brambles are the spikes: land in one, or slide down into one, and it's over. Bark grip fades the longer
+ *               Pip hangs on (he slides), so every kick is "how much, and how soon?". The view climbs on its own.
+ * Twists by height: branches (land on top = a rest; hit the underside = bonk back), moss (slippery) and sap (sticky),
+ *               falling pinecones (telegraphed — kick away), wind gusts that stretch or shorten the arc, night top.
+ * Risk/reward:  acorns float mid-gap on bold arcs (chain them kick after kick); landing a hair from a bramble is a
+ *               CLOSE CALL bonus — Pip loves a dare. Score = metres climbed + bonuses. Best height flagged on the trunk. */
+let demo = false;
+Lab.init({
+  title: "Pine Kick", tagline: "Hold to coil, let go to kick. How high can Pip climb?", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Hold to coil Pip's kick, let go to leap", "Longer hold = higher landing on the far trunk", "Dodge brambles. Keep up with the view!"],
+  theme: { bg: "#79bde6", bg2: "#fff1d0", fg: "#3b2a2a", muted: "#6b4b3a", accent: "#ff8a3d", accent2: "#5fb36b", light: true },
+  orient: "any", music: { style: "funk", key: "A", vol: .4 }, restart: start,
+  attract(dt, t) { if (!demo || !pip) { demo = true; reset(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, mix = Lab.color.mix, shade = Lab.color.shade, INK = Pals.ink;
+const GAP = 125, TW = 120, PR = 18, PS = 46, G = 1900, BVX = 460, VMIN = 560, VMAX = 1060, CHT = .8, M = 25, ZH = 2500;
+const ZONES = [
+  { n: "The Roots", sky: ["#8fd0f5", "#fff3d6"], far: "#86c08f", hill: "#b9dfb0" },
+  { n: "Low Boughs", sky: ["#7cc4f0", "#e6f6ff"], far: "#6aa77e", hill: "#a7d3b3" },
+  { n: "Mossy Middle", sky: ["#86c9e8", "#f6f0c4"], far: "#5d9a78", hill: "#9cc9a4" },
+  { n: "Pinecone Ledge", sky: ["#f3a77a", "#ffe6bd"], far: "#b07d6a", hill: "#e5b99a" },
+  { n: "Windy Crown", sky: ["#b48ad6", "#ffc9a8"], far: "#7d5f93", hill: "#c9a4c8" },
+  { n: "Starry Top", sky: ["#1f2860", "#5d4f9e"], far: "#2f3168", hill: "#45468a" },
+];
+// density per zone: gap between features, chance of thorn/moss/sap, max thorn length, branch spacing, cone & wind
+const DENS = [
+  { g0: 170, g1: 300, th: .55, mo: 0, sa: 0, tl: 70, br: 0 },
+  { g0: 140, g1: 260, th: .6, mo: 0, sa: 0, tl: 85, br: [300, 520] },
+  { g0: 120, g1: 230, th: .5, mo: .25, sa: .15, tl: 95, br: [320, 560] },
+  { g0: 110, g1: 210, th: .55, mo: .2, sa: .12, tl: 100, br: [340, 600], cone: [3.2, 5] },
+  { g0: 105, g1: 200, th: .55, mo: .2, sa: .12, tl: 105, br: [360, 620], cone: [3.6, 5.5], wind: 1 },
+  { g0: 100, g1: 190, th: .6, mo: .2, sa: .1, tl: 110, br: [320, 560], cone: [2.6, 4.2], wind: 1 },
+];
+let knocks, W, H, S, cx, anchorY, pip, cam, creep, started, feats, branches, acorns, cones, leaves, nh, bh, ah, score, maxH, zone, chain, nAcorns, dares, kicks, held, heldKey, relBuf,
+  wind, windT, windTo, coneT, endT, endWhy, clock, warnT, bestH, nightSet, sndCharge, sndSlide, sndWind, momoSay, flags;
+
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function layout() {
+  W = Lab.W; H = Lab.H; const P = Lab.play;
+  S = clamp(Math.min(W / 390, P.h / 560), .5, 1.6); cx = W / 2; anchorY = P.y + P.h * (P.w > P.h ? .56 : .6);
+  Lab.sprite.clear("pk");
+}
+Lab.onResize(() => { if (pip) layout(); });
+const sx = x => cx + x * S, sy = h => anchorY - (h - cam) * S;
+const viewBottom = () => cam - (H - anchorY) / S, viewTop = () => cam + (anchorY - Lab.play.y) / S;
+const zoneAt = h => Math.max(0, Math.floor(h / ZH)), dens = h => DENS[Math.min(DENS.length - 1, zoneAt(h))];
+
+/* ---------- world generation (ahead of the camera) ---------- */
+function gen(upto) {
+  for (const s of [-1, 1]) while (nh[s] < upto) {
+    const d = dens(nh[s]); nh[s] += rand(d.g0, d.g1); const r = Math.random();
+    const type = r < d.th ? "thorn" : r < d.th + d.mo ? "moss" : r < d.th + d.mo + d.sa ? "sap" : null; if (!type) continue;
+    const len = type === "thorn" ? rand(40, d.tl) : rand(80, 150); feats.push({ s, type, h0: nh[s], h1: nh[s] + len, seed: rand(0, 99) }); nh[s] += len;
+  }
+  while (bh < Math.min(upto, nh[-1], nh[1])) { const d = dens(bh); if (!d.br) { bh += 300; continue; } bh += rand(d.br[0], d.br[1]); const s = Math.random() < .5 ? -1 : 1; if (!thornNear(s, bh, 34)) branches.push({ s, h: bh, len: rand(46, 74), seed: rand(0, 99) }); }
+  while (ah < upto) { ah += rand(90, 170); const z = zoneAt(ah); acorns.push({ x: rand(-70, 70), h: ah, gold: z >= 1 && Math.random() < .06, got: false, bob: rand(0, 6) }); }
+}
+function thornNear(s, h, pad) { for (const f of feats) if (f.s === s && f.type === "thorn" && h + pad > f.h0 && h - pad < f.h1) return f; return null; }
+const thornAt = (s, h) => thornNear(s, h, PR * .8);
+function surfAt(s, h) { for (const f of feats) if (f.s === s && f.type !== "thorn" && h > f.h0 && h < f.h1) return f.type; return "bark"; }
+
+/* ---------- reset / start ---------- */
+function reset() {
+  layout();
+  feats = []; branches = []; acorns = []; cones = []; leaves = []; flags = [];
+  nh = { "-1": 320, "1": 420 }; bh = 600; ah = 120; score = 0; bonusPts = 0; maxH = 0; zone = 0; chain = 0; nAcorns = 0; dares = 0; kicks = 0; knocks = 0;
+  held = null; heldKey = null; relBuf = 0; wind = 0; windTo = 0; windT = 6; coneT = 4; endT = 0; endWhy = ""; clock = 0; warnT = 0; started = false; creep = 0; nightSet = false; momoSay = 4;
+  pip = { side: -1, x: -(GAP - 20), h: PR, vy: 0, dir: 1, st: "perch", clingT: 0, charging: false, chargeT: 0, sq: 0, stun: 0, knock: 0, airT: 0, kp: 0, spin: false, bonk: false, got: 0, joy: 0, wow: 0, hurtT: 0, tilt: 0, perchB: null };
+  cam = (H - anchorY) / S - 40;
+  gen(cam + 1800);
+}
+function start() {
+  demo = false; reset(); bestH = Lab.store.get("bestH", 0) || 0;
+  Lab.setScore(0); Lab.setTheme({ fg: "#3b2a2a", muted: "#6b4b3a", light: true });
+  sndCharge = Lab.audio.loop({ type: "triangle", f: 220, vol: 0 }); sndSlide = Lab.audio.loop({ noise: true, bp: 1400, vol: 0 }); sndWind = Lab.audio.loop({ noise: true, bp: 520, vol: 0 });
+  Lab.input.onDown = [() => press("ptr")];
+  Lab.input.onUp = [() => release("ptr")];
+  Lab.input.onKey = [k => { if (k === " " || k === "ArrowUp" || k === "w" || k === "W") { heldKey = k; press("key"); } }];
+  Lab.hint("Hold… then let go to kick!", { sticky: true });
+  Lab.expose({
+    get score() { return score; }, get metres() { return Math.floor(maxH / M); }, get zone() { return zone; }, get acorns() { return nAcorns; }, get dares() { return dares; }, get kicks() { return kicks; },
+    get pip() { return { st: pip.st, side: pip.side, x: pip.x, h: pip.h, charging: pip.charging, chargeT: pip.chargeT, stun: pip.stun, kp: pip.kp }; },
+    get cam() { return cam; }, get creep() { return creep; }, get viewBottom() { return viewBottom(); }, get wind() { return wind; }, get chain() { return chain; },
+    feats: () => feats.map(f => ({ s: f.s, type: f.type, h0: f.h0, h1: f.h1 })), branches: () => branches.map(b => ({ s: b.s, h: b.h, len: b.len })), acornList: () => acorns.filter(a => !a.got).map(a => ({ x: a.x, h: a.h })),
+    kick: p => kick(p), predict: p => predict(p), path(p) { const pts = []; predict(p, pts); const out = []; for (let i = 0; i < pts.length; i += 2) out.push([pts[i], pts[i + 1]]); return out; }, get endWhy() { return endWhy; }, get knocks() { return knocks; }, safeP: () => solve(false), CHT, GAP, PR,
+    clearAhead() { const lo = pip.h - 40; feats = feats.filter(f => f.h1 < lo); branches = branches.filter(b => b.h < lo); acorns = acorns.filter(a => a.h < lo); cones = []; },
+    addThorn(s, h0, h1) { feats.push({ s, type: "thorn", h0, h1, seed: 1 }); }, addAcorn(x, h) { acorns.push({ x, h, gold: false, got: false, bob: 0 }); },
+    addBranch(s, h, len) { branches.push({ s, h, len: len || 60, seed: 1 }); }, addSurf(s, type, h0, h1) { feats.push({ s, type, h0, h1, seed: 1 }); },
+    dropCone(s) { cones.push({ s, h: viewTop() + 60, warn: .01, vy: 0, rot: 0, hit: false }); }, setWind(w) { wind = windTo = w; windT = 99; },
+    holdCreep() { creep = 0; started = false; }, lift(h) { maxH = Math.max(maxH, h); },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- input ---------- */
+const canKick = () => (pip.st === "cling" || pip.st === "perch") && pip.stun <= 0 && !endT;
+function press(src) { if (demo || endT) return; held = src; if (canKick() && !pip.charging) beginCharge(); }
+function release(src) { if (held !== src) return; held = null; if (pip.charging) kick(chargeP()); else if (pip.st === "air") relBuf = .14; }
+function beginCharge() { pip.charging = true; pip.chargeT = 0; }
+const chargeP = () => clamp(pip.chargeT / CHT, 0, 1);
+
+/* ---------- flight ---------- */
+function stepAir(o, dt) {
+  const ph = o.h; o.vy -= G * dt; const vx = o.dir * BVX * (o.bonk ? .5 : 1) + wind; o.x += vx * dt; o.h += o.vy * dt;
+  for (const b of branches) {
+    if (Math.abs(b.h - o.h) > 70) continue;
+    const xi = b.s * (GAP - b.len), lo = Math.min(xi, b.s * GAP) - PR * .5, hi = Math.max(xi, b.s * GAP) + PR * .5;
+    if (o.x < lo || o.x > hi) continue;
+    if (o.vy < 0 && ph - PR >= b.h + 5 - .5 && o.h - PR < b.h + 5) return { kind: "perch", b };
+    if (o.vy > 0 && !o.bonk && b.s === o.dir && ph + PR * .8 <= b.h - 5 + .5 && o.h + PR * .8 > b.h - 5) return { kind: "bonk", b };
+  }
+  const lim = GAP - 20;
+  if (o.x >= lim && vx > 0) return { kind: "land", side: 1 };
+  if (o.x <= -lim && vx < 0) return { kind: "land", side: -1 };
+  return null;
+}
+function launch(p) { return { x: pip.x, h: pip.h, vy: lerp(VMIN, VMAX, p), dir: -pip.side, bonk: false }; }
+function predict(p, pts) {
+  const o = launch(p); let t = 0;
+  for (let i = 0; i < 400; i++) {
+    const e = stepAir(o, 1 / 120); t += 1 / 120; if (pts && i % 4 === 0) pts.push(o.x, o.h);
+    if (e) {
+      if (e.kind === "bonk") { o.bonk = true; o.dir = -o.dir; o.vy = -120; continue; }
+      if (e.kind === "perch") return { kind: "perch", h: e.b.h + 5 + PR, side: e.b.s, t, bonked: o.bonk };
+      return { kind: thornAt(e.side, o.h) ? "thorn" : "land", h: o.h, side: e.side, t, bonked: o.bonk };
     }
-    // collide spikes
-    for(const s of spikes){if(Math.abs(s.y-hero.y)<25 && s.side===side && !hero.jump){Lab.gameover({title:"Ouch!",message:"Height: "+score});return;}}
-    draw();
+    if (o.h < viewBottom() - 100) break;
+  }
+  return { kind: "fall", h: o.h, t };
+}
+function solve(noisy) { // the autopilot (attract scene) and test helper: best safe power from here
+  let best = null, bs = -1e9;
+  for (let p = 0; p <= 1.001; p += .04) {
+    const r = predict(p); let v = r.kind === "thorn" || r.kind === "fall" ? -1e6 : r.h - pip.h + (r.kind === "perch" ? 60 : 0) - (r.bonked ? 400 : 0);
+    if (r.kind === "land" && thornNear(r.side, r.h, PR + 24)) v -= 120; if (noisy) v += rand(0, 60);
+    if (v > bs) { bs = v; best = p; }
+  }
+  return bs < -1e5 ? null : best;
+}
+function kick(p) {
+  if (!canKick()) return false;
+  const s = pip.side; Object.assign(pip, launch(p), { st: "air", charging: false, chargeT: 0, airT: 0, kp: p, spin: p >= .92, sq: -.32, got: 0, perchB: null });
+  kicks++; if (!started && !demo) { started = true; Lab.hint(""); } started = true;
+  snd("jump", { pitch: .8 + p * .7 }); if (p >= .92) snd("whoosh", { pitch: 1.3 }); if (!demo) Lab.buzz(8);
+  fx.burst(sx(s * (GAP - 4)), sy(pip.h + 6), { n: 5 + Math.round(p * 6), colors: ["#a8744a", "#6e4428", "#e8c79a"], speed: 140 + p * 160, angle: s > 0 ? Math.PI : 0, spread: 1.1, gravity: 600, life: .45, size: 3 * S, shape: "square" });
+  return true;
+}
+function land(side) {
+  pip.x = side * (GAP - 20); pip.side = side;
+  if (thornAt(side, pip.h)) return hurt("thorn");
+  const impact = clamp(Math.abs(pip.vy) / 900 + .35, .2, .6);
+  pip.st = "cling"; pip.clingT = 0; pip.sq = .34 * impact; pip.vy = 0; afterLanding();
+  snd("land", { pitch: 1.2 - impact * .5, vol: .7 }); snd("knock", { pitch: 1.6, vol: .3 });
+  fx.burst(sx(side * (GAP - 2)), sy(pip.h), { n: 6, colors: ["#a8744a", "#e8c79a"], speed: 120, angle: side > 0 ? Math.PI : 0, spread: 1.3, gravity: 500, life: .4, size: 3 * S, shape: "square" });
+  // close call: Pip's body edge within a whisker of a bramble
+  const near = thornNear(side, pip.h, PR * .8 + 15);
+  if (near) { dares++; addBonus(15); pip.joy = 1; if (!demo) { fx.text(sx(-side * 30), sy(pip.h + 30), "CLOSE CALL +15", { color: "#ff5d73", size: 16 * S + 4 }); Lab.sfx("swish", { pitch: 1.4 }); Lab.hitstop(.04); } }
+}
+function perch(b) {
+  pip.st = "perch"; pip.side = b.s; pip.h = b.h + 5 + PR; pip.vy = 0; pip.sq = .3; pip.perchB = b; afterLanding();
+  snd("land", { pitch: .9 }); snd("knock", { pitch: 1.1, vol: .4 });
+  fx.burst(sx(pip.x), sy(b.h + 6), { n: 8, colors: ["#5fb36b", "#3f8a4e", "#a8744a"], speed: 110, angle: -Math.PI / 2, spread: 2.2, gravity: 400, life: .5, size: 3 * S });
+}
+function afterLanding() {
+  if (pip.got === 0) chain = 0;
+  if (relBuf > 0 && !demo) { relBuf = 0; kick(0); }
+}
+function hurt(why) {
+  if (pip.st === "hurt") return;
+  pip.st = "hurt"; pip.vy = 320; pip.dir = -pip.side; pip.hurtT = 0; pip.charging = false; endT = .01; endWhy = why;
+  snd("hurt"); snd("crunch", { pitch: 1.3 }); if (!demo) { Lab.shake(9, .35); Lab.hitstop(.09); Lab.buzz(60); Lab.music.intensity(0); }
+  fx.burst(sx(pip.x), sy(pip.h), { n: 18, colors: ["#3f6b3a", "#ff5d73", "#ffd0d8", "#7fb36b"], speed: 260, life: .6, size: 4 * S, shape: "star", gravity: 300 });
+}
+
+/* ---------- update ---------- */
+function tick(dt) {
+  clock += dt;
+  if (!pip) return;
+  const z = zoneAt(pip.h), d = DENS[Math.min(DENS.length - 1, z)];
+  // input polling: key release, lost pointer, buffered hold across a landing
+  if (held === "key" && heldKey && !Lab.input.keys[heldKey]) release("key");
+  if (held === "ptr" && !Lab.input.down) release("ptr");
+  if (held && canKick() && !pip.charging) beginCharge();
+  relBuf = Math.max(0, relBuf - dt);
+  pip.sq = Lab.damp(pip.sq, 0, 10, dt); pip.joy -= dt; pip.stun -= dt; pip.knock = Math.max(0, pip.knock - dt * 900);
+  if (demo) demoBrain(dt);
+  if (pip.st === "cling" || pip.st === "perch") {
+    if (pip.charging) pip.chargeT += dt;
+    if (pip.st === "cling") {
+      pip.clingT += dt; const surf = surfAt(pip.side, pip.h);
+      let slide = surf === "sap" ? 0 : surf === "moss" ? (pip.clingT > .08 ? 210 : 40) : 16 + 120 * clamp((pip.clingT - .3) / 2.2, 0, 1);
+      slide += pip.knock; const ph = pip.h; pip.h -= slide * dt;
+      if (!demo) sndSlide.set({ vol: Math.min(.12, slide / 1500), f: 900 + slide * 4 });
+      for (const b of branches) if (b.s === pip.side && ph >= b.h + 5 + PR && pip.h < b.h + 5 + PR) { pip.x = b.s * (GAP - 26); perch(b); break; }
+      if (pip.st === "cling" && pip.h < PR) { pip.h = PR; pip.st = "perch"; pip.sq = .2; }
+      if (pip.st === "cling" && thornAt(pip.side, pip.h)) hurt("slide");
+    } else { if (pip.perchB) pip.x = Lab.damp(pip.x, pip.side * (GAP - 30), 10, dt); if (!demo) sndSlide.set({ vol: 0 }); }
+    pip.tilt = Lab.damp(pip.tilt, 0, 12, dt);
+  } else if (pip.st === "air") {
+    pip.airT += dt; if (!demo) sndSlide.set({ vol: 0 });
+    const n = Math.ceil(dt / (1 / 120)), h = dt / n;
+    for (let i = 0; i < n && pip.st === "air"; i++) {
+      const e = stepAir(pip, h);
+      for (const a of acorns) if (!a.got && Math.abs(a.h - pip.h) < 40 && Math.hypot(a.x - pip.x, a.h - pip.h) < PR + 16) grab(a);
+      if (!e) continue;
+      if (e.kind === "bonk") { pip.bonk = true; pip.dir = -pip.dir; pip.vy = -120; pip.spin = false; pip.stun = .45; snd("thud", { pitch: 1.2 }); snd("boing", { pitch: .8, vol: .5 }); if (!demo) Lab.shake(4, .2); fx.burst(sx(pip.x), sy(pip.h + PR), { n: 8, colors: ["#fff", "#ffe27a"], speed: 160, life: .35, size: 3 * S, shape: "star" }); }
+      else if (e.kind === "perch") perch(e.b); else land(e.side);
+    }
+    if (pip.st === "air") { const k = pip.spin ? ease.inOutQuad(clamp(pip.airT / .46, 0, 1)) * TAU * pip.dir : pip.dir * clamp(pip.vy / 900, -.4, .4) * .6; pip.tilt = k; }
+  } else if (pip.st === "hurt") {
+    pip.hurtT += dt; pip.vy -= G * .8 * dt; pip.x += pip.dir * 90 * dt; pip.h += pip.vy * dt; pip.tilt += dt * 9 * pip.dir;
+  }
+  if (pip.st !== "hurt" && pip.st !== "fall") maxH = Math.max(maxH, pip.h);
+  // camera: follows Pip upward, never down, and creeps on its own once the climb has begun
+  creep = started ? Math.min(108, 28 + maxH / M * .1) : 0;
+  if (pip.st !== "hurt" && pip.st !== "fall") cam = Math.max(cam + creep * dt, Lab.damp(cam, pip.h + 30, 4, dt));
+  const vb = viewBottom();
+  if ((pip.st === "cling" || pip.st === "perch" || pip.st === "air") && pip.h + PR < vb && !(pip.st === "air" && pip.vy > 0)) { pip.st = "fall"; endT = .01; endWhy = "fall"; snd("slide", { pitch: .5 }); if (!demo) { Lab.music.intensity(0); Lab.buzz(40); } }
+  // score: metres + bonuses
+  const m = Math.floor(maxH / M); if (!demo && m + bonus() !== score) { score = m + bonus(); Lab.setScore(score); }
+  const nz = zoneAt(maxH);
+  if (nz > zone) { zone = nz; addBonus(25 * zone); pip.joy = 1.6; if (!demo) { Lab.banner(ZONES[Math.min(zone, 5)].n + (zone > 5 ? " " + (zone - 4) : ""), { color: "#ffd23f", ms: 1500, y: .28 }); Lab.sfx("levelup"); fx.text(W / 2, anchorY - 120 * S, (zone * 100) + " m  +" + 25 * zone, { color: "#fff", size: 20 * S + 4 }); } }
+  // hazards over time
+  if (d.cone && started && !endT) { coneT -= dt; if (coneT <= 0) { coneT = rand(d.cone[0], d.cone[1]); cones.push({ s: Math.random() < .65 ? pip.side : -pip.side, h: viewTop() + 60, warn: 1, vy: 0, rot: 0, hit: false }); } }
+  for (const c of cones) {
+    if (c.warn > 0) { c.warn -= dt; c.h = viewTop() + 60; if (c.warn <= 0) snd("whoosh", { pitch: .6, vol: .4 }); continue; }
+    c.vy = Math.min(1100, c.vy + 1500 * dt); c.h -= c.vy * dt; c.rot += dt * 8;
+    if (!c.hit && pip.st !== "hurt" && Math.abs(c.s * (GAP - 16) - pip.x) < 30 && Math.abs(c.h - pip.h) < 32) {
+      c.hit = true; knocks++; c.vy = -260; pip.knock = 420; pip.stun = .5; pip.charging = false; pip.wow = .8; snd("knock", { pitch: .8 }); snd("hurt", { pitch: 1.4, vol: .5 }); if (!demo) { Lab.shake(6, .25); Lab.buzz(25); }
+      fx.burst(sx(pip.x), sy(pip.h + 20), { n: 10, colors: ["#8a5a36", "#ffe27a", "#fff"], speed: 200, life: .4, size: 3 * S, shape: "star" });
+    }
+  }
+  cones = cones.filter(c => c.h > vb - 100);
+  if (d.wind && started) { windT -= dt; if (windT <= 0) { if (windTo) { windTo = 0; windT = rand(3, 5); } else { windTo = (Math.random() < .5 ? -1 : 1) * rand(70, 115); windT = rand(3, 4.5); if (!demo) Lab.toast(windTo > 0 ? "Gust → " : "← Gust", 1000, { y: .2 }); } } }
+  else windTo = 0;
+  wind = Lab.damp(wind, windTo, 1.6, dt);
+  if (!demo) sndWind.set({ vol: Math.min(.1, Math.abs(wind) / 1000), f: 400 + Math.abs(wind) * 3 });
+  if (Math.abs(wind) > 20 && leaves.length < 22 && Math.random() < Math.abs(wind) / 400) leaves.push({ x: wind > 0 ? -20 : W + 20, y: rand(Lab.play.y, H), r: rand(0, TAU), v: rand(.7, 1.3) });
+  for (const l of leaves) { l.x += wind * 3.2 * l.v * S * dt; l.y += Math.sin(clock * 3 + l.r) * 30 * dt + 20 * dt; l.r += dt * 4; }
+  leaves = leaves.filter(l => l.x > -40 && l.x < W + 40);
+  // generation + cleanup
+  gen(cam + 1800);
+  if (feats.length > 60) feats = feats.filter(f => f.h1 > vb - 200);
+  if (acorns.length > 40) acorns = acorns.filter(a => a.h > vb - 200 && !a.got);
+  if (branches.length > 20) branches = branches.filter(b => b.h > vb - 200);
+  // audio
+  if (!demo) {
+    sndCharge.set({ vol: pip.charging ? .05 + .04 * chargeP() : 0, f: 180 + 520 * chargeP() });
+    const dk = danger(); Lab.music.intensity(endT ? 0 : clamp(.3 + zone * .1 + dk * .4, 0, 1));
+    if (dk > .5 && !endT) { warnT -= dt; if (warnT <= 0) { Lab.sfx("warn", { pitch: 1 + dk * .3, vol: .5 }); warnT = .55; } }
+  }
+  momoSay -= dt;
+  // end of run
+  if (endT) { endT += dt; if (endT > (endWhy === "fall" ? .6 : 1.1)) finish(); }
+}
+let bonusPts = 0; const bonus = () => bonusPts; function addBonus(n) { bonusPts += n; if (!demo) { score = Math.floor(maxH / M) + bonusPts; Lab.setScore(score); Lab.bumpScore(); } }
+function grab(a) {
+  a.got = true; pip.got++; chain = pip.got > 1 ? chain + 1 : Math.min(chain + 1, 9); nAcorns++;
+  const pts = a.gold ? 50 : 5 * Math.min(chain, 5); addBonus(pts);
+  if (!demo) { Lab.audio.combo(Math.min(chain, 8), { vol: .2 }); Lab.sfx(a.gold ? "gem" : "coin", { pitch: 1 + Math.min(chain, 6) * .05 }); fx.text(sx(a.x), sy(a.h + 20), "+" + pts + (chain > 1 ? " ×" + Math.min(chain, 5) : ""), { color: a.gold ? "#ffd23f" : "#fff", size: 15 * S + 4 }); }
+  fx.burst(sx(a.x), sy(a.h), { n: a.gold ? 16 : 8, colors: a.gold ? ["#ffd23f", "#fff"] : ["#c98a4b", "#ffe2a8"], speed: 150, life: .4, size: 3 * S, shape: a.gold ? "star" : "circle" });
+  if (chain >= 3) pip.joy = .8;
+}
+const danger = () => endT ? 0 : clamp(1 - (pip.h - viewBottom()) / (200), 0, 1);
+function finish() {
+  const m = Math.floor(maxH / M);
+  if (demo) { reset(); return; }
+  if (maxH > bestH) Lab.store.set("bestH", maxH);
+  score = m + bonusPts; Lab.setScore(score); fx.clear && fx.clear();
+  const msg = endWhy === "fall" ? "The view climbed past Pip at " + m + " m." : "Pip kicked into a bramble at " + m + " m.";
+  Lab.gameover({ title: endWhy === "fall" ? "Oops! Pip slipped" : "Ouch! Prickles", message: msg, score, stats: [["Height", m + " m"], ["Acorns", nAcorns], ["Close calls", dares]] });
+}
+function demoBrain(dt) {
+  if (!canKick()) { pip.wait = 0; return; }
+  if (!pip.charging && (pip.wait = (pip.wait || 0) + dt) > .3) { pip.demoP = solve(true); if (pip.demoP == null) pip.demoP = .5; beginCharge(); }
+  if (pip.charging && pip.chargeT >= pip.demoP * CHT) { pip.wait = 0; kick(pip.demoP); }
+}
+
+/* ---------- art ---------- */
+function barkTile() {
+  const w = Math.ceil(TW * S), h = Math.ceil(300 * S);
+  return Lab.sprite("pkbark" + w + "x" + h, w, h, g => {
+    g.fillStyle = "#3a2214"; g.fillRect(0, 0, w, h);
+    const r = Lab.rng(11); let x = -4 * S;
+    while (x < w) { // columns of long, flaky plates separated by deep fissures
+      const cw = (13 + r() * 13) * S, k = clamp(x / w, 0, 1); let y = -r() * 60 * S;
+      while (y < h) {
+        const ph = (34 + r() * 44) * S, base = mix("#6f4429", "#b97c50", k * .8 + r() * .2);
+        for (const yy of [y, y + h, y - h]) {
+          g.fillStyle = base; draw.rr(g, x + 1.6 * S, yy + 1.6 * S, cw - 3.2 * S, ph - 3.2 * S, 5 * S); g.fill();
+          g.fillStyle = "rgba(255,225,180,.18)"; g.fillRect(x + 3 * S, yy + 3 * S, cw - 6 * S, 2.2 * S);
+          g.fillStyle = "rgba(40,20,10,.22)"; g.fillRect(x + cw * .45, yy + ph * .3, 1.5 * S, ph * .4);
+        }
+        y += ph;
+      }
+      x += cw;
+    }
+    const sh = g.createLinearGradient(0, 0, w, 0); sh.addColorStop(0, "rgba(30,15,8,.55)"); sh.addColorStop(.35, "rgba(30,15,8,0)"); sh.addColorStop(.92, "rgba(255,230,190,0)"); sh.addColorStop(1, "rgba(255,230,190,.18)");
+    g.fillStyle = sh; g.fillRect(0, 0, w, h);
   });
 }
-function draw(){const c=Lab.ctx;c.fillStyle="#221638";c.fillRect(0,0,Lab.W,Lab.H);
-  c.fillStyle="#3a2a4a";c.fillRect(0,0,40,Lab.H);c.fillRect(Lab.W-40,0,40,Lab.H);
-  for(const s of spikes){c.fillStyle="#f66";const x=s.side==="L"?40:Lab.W-40;
-    c.beginPath();c.moveTo(x,s.y);c.lineTo(x+(s.side==="L"?20:-20),s.y-10);c.lineTo(x+(s.side==="L"?20:-20),s.y+10);c.closePath();c.fill();}
-  const x=hero.jump?hero.tx:(side==="L"?80:Lab.W-80);
-  c.fillStyle="#fc5";c.beginPath();c.arc(x,hero.y,18,0,Lab.TAU);c.fill();
+function farSprite(zi) {
+  const w = W + 80, h = Math.ceil(300 * S), Z = ZONES[Math.min(zi, 5)];
+  return Lab.sprite("pkfar" + zi + ":" + w + "x" + h, w, h, g => {
+    const r = Lab.rng(5 + zi);
+    g.fillStyle = Z.hill; g.beginPath(); g.moveTo(0, h); for (let x = 0; x <= w; x += 20) g.lineTo(x, h * .35 + Math.sin(x * .006 + zi) * 30 * S + Math.sin(x * .017) * 12 * S); g.lineTo(w, h); g.fill();
+    g.fillStyle = Z.far; for (let x = -10; x < w + 20; x += (14 + r() * 16) * S) { const th = (60 + r() * 90) * S, base = h * .62 + r() * 30 * S; g.beginPath(); g.moveTo(x - th * .22, base); g.lineTo(x, base - th); g.lineTo(x + th * .22, base); g.fill(); }
+    g.fillRect(0, h * .62 + 20 * S, w, h);
+  });
 }
-start();
+function cloudSprite() { return Lab.sprite("pkcloud" + Math.round(S * 100), 150 * S, 60 * S, (g, w, h) => { g.fillStyle = "rgba(255,255,255,.85)"; for (const [x, y, r] of [[.25, .62, .22], [.45, .45, .3], [.68, .56, .24], [.82, .7, .16]]) { g.beginPath(); g.arc(x * w, y * h, r * w * .55, 0, TAU); g.fill(); } g.fillRect(.2 * w, .62 * h, .65 * w, .3 * h); }); }
+function acornSprite(gold) {
+  const sz = Math.ceil(30 * S);
+  return Lab.sprite("pkac" + (gold ? "g" : "n") + sz, sz, sz, (g, w) => {
+    const c = w / 2, s = w / 30;
+    if (gold) { draw.glow(g, c, c, 15 * s, "#ffd23f", .6); g.fillStyle = "#e9a91a"; for (let i = 0; i < 4; i++) { g.beginPath(); g.ellipse(c, c - 6 * s + i * 4 * s, (5 + i * 1.2) * s, 3.2 * s, 0, 0, TAU); g.fill(); } g.fillStyle = "#ffe27a"; for (let i = 0; i < 4; i++) { g.beginPath(); g.ellipse(c, c - 7 * s + i * 4 * s, (3 + i) * s, 1.6 * s, 0, 0, TAU); g.fill(); } return; }
+    g.fillStyle = "#c98a4b"; g.beginPath(); g.ellipse(c, c + 2 * s, 7 * s, 8.5 * s, 0, 0, TAU); g.fill(); g.fillStyle = "#e6b47a"; g.beginPath(); g.ellipse(c - 2 * s, c + 1 * s, 2.5 * s, 4 * s, 0, 0, TAU); g.fill();
+    g.fillStyle = "#6e4428"; g.beginPath(); g.ellipse(c, c - 4 * s, 8.5 * s, 4.5 * s, 0, Math.PI, TAU); g.fill(); g.fillRect(c - 8.5 * s, c - 4.5 * s, 17 * s, 2 * s); g.fillRect(c - 1 * s, c - 11 * s, 2 * s, 4 * s);
+  });
+}
+function drawFeat(c, f) {
+  const fx0 = sx(f.s * GAP), y0 = sy(f.h1), y1 = sy(f.h0), inw = -f.s, r = Lab.rng(Math.round(f.seed * 100));
+  if (y1 < -20 || y0 > H + 20) return;
+  if (f.type === "moss") { for (let y = y0; y < y1; y += 9 * S) { const w = (8 + r() * 8) * S; c.fillStyle = r() < .5 ? "#79c25f" : "#5ea94e"; c.beginPath(); c.ellipse(fx0 + inw * w * .3, y, w * .7, 7 * S, 0, 0, TAU); c.fill(); } c.fillStyle = "rgba(220,255,200,.6)"; for (let y = y0 + 6; y < y1; y += 17 * S) { c.beginPath(); c.arc(fx0 + inw * 6 * S, y, 1.8 * S, 0, TAU); c.fill(); } return; }
+  if (f.type === "sap") { for (let y = y0 + 6 * S; y < y1 - 4 * S; y += 22 * S) { const rr = (5 + r() * 4) * S; c.fillStyle = "#f2a531"; c.beginPath(); c.ellipse(fx0 + inw * rr * .4, y, rr, rr * 1.4, 0, 0, TAU); c.fill(); c.fillStyle = "rgba(255,240,190,.85)"; c.beginPath(); c.arc(fx0 + inw * rr * .1, y - rr * .5, rr * .3, 0, TAU); c.fill(); } c.fillStyle = "rgba(242,165,49,.35)"; c.fillRect(Math.min(fx0, fx0 + inw * 4 * S), y0, 4 * S, y1 - y0); return; }
+  // bramble: a soft warning band on the bark, a coiled vine, spikes pointing into the gap
+  c.fillStyle = "rgba(255,93,115,.32)"; draw.rr(c, f.s < 0 ? fx0 - 30 * S : fx0, y0 - 6 * S, 30 * S, y1 - y0 + 12 * S, 8 * S); c.fill();
+  c.strokeStyle = "#2f5a32"; c.lineWidth = 6.5 * S; c.lineCap = "round"; c.beginPath();
+  for (let y = y0, i = 0; y <= y1 + .1; y += 9 * S, i++) { const x = fx0 + inw * (i % 2 ? 11 : 3) * S; if (i === 0) c.moveTo(x, y); else c.lineTo(x, y); } c.stroke();
+  c.fillStyle = "#d7264c"; for (let y = y0 + 3 * S, i = 0; y < y1; y += 9 * S, i++) { const bx = fx0 + inw * (i % 2 ? 11 : 3) * S; c.beginPath(); c.moveTo(bx, y - 4 * S); c.lineTo(bx + inw * (14 + (i % 3) * 3) * S, y - (i % 2 ? 5 : -3) * S); c.lineTo(bx, y + 4 * S); c.fill(); }
+  c.fillStyle = "#7a1f3a"; for (let y = y0 + 14 * S, i = 0; y < y1 - 6 * S; y += 27 * S, i++) { c.beginPath(); c.arc(fx0 + inw * (8 + i % 2 * 4) * S, y, 3.5 * S, 0, TAU); c.fill(); }
+  c.fillStyle = "#4f8a46"; for (let y = y0 + 8 * S, i = 0; y < y1; y += 24 * S, i++) { c.beginPath(); c.ellipse(fx0 + inw * 6 * S, y, 6 * S, 3 * S, inw * .6, 0, TAU); c.fill(); }
+}
+function drawBranch(c, b) {
+  const y = sy(b.h), x0 = sx(b.s * GAP), x1 = sx(b.s * (GAP - b.len)); if (y < -40 || y > H + 40) return;
+  c.fillStyle = "#6e4428"; c.beginPath(); c.moveTo(x0, y - 7 * S); c.lineTo(x1, y - 4 * S); c.lineTo(x1, y + 4 * S); c.lineTo(x0, y + 9 * S); c.fill();
+  c.fillStyle = "#9b6a43"; c.fillRect(Math.min(x0, x1), y - 6.5 * S, Math.abs(x1 - x0), 3 * S);
+  c.fillStyle = "#3f8a4e"; for (let i = 0; i < 7; i++) { const a = -Math.PI / 2 + (i - 3) * .42; c.save(); c.translate(x1, y); c.rotate(a + (b.s > 0 ? 0 : 0)); c.beginPath(); c.ellipse(0, -9 * S, 2.6 * S, 10 * S, 0, 0, TAU); c.fill(); c.restore(); }
+  c.fillStyle = "#5fb36b"; c.beginPath(); c.arc(x1, y, 5 * S, 0, TAU); c.fill();
+}
+function skyCols(h) {
+  const zf = h / ZH, i = Math.min(ZONES.length - 1, Math.floor(zf)), j = Math.min(ZONES.length - 1, i + 1), k = i === j ? 0 : clamp((zf - i - .7) / .3, 0, 1);
+  return [mix(ZONES[i].sky[0], ZONES[j].sky[0], k), mix(ZONES[i].sky[1], ZONES[j].sky[1], k), clamp(zf - 4.7, 0, 1) / .3];
+}
+function render(t) {
+  const c = Lab.ctx, [top, bot, nightK] = skyCols(cam);
+  const gr = c.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, top); gr.addColorStop(1, bot); c.fillStyle = gr; c.fillRect(-40, -40, W + 80, H + 80);
+  if (nightK > 0) { c.fillStyle = "#fff"; for (let i = 0; i < 50; i++) { c.globalAlpha = Math.min(1, nightK) * (.4 + .6 * Math.abs(Math.sin(t * (1 + i % 3) + i))); c.fillRect((i * 97.3 % 1) * W + (i * 37) % W, (i * 53) % H, 2, 2); } c.globalAlpha = 1; }
+  // distant forest sinks away as Pip climbs; clouds drift past at half speed
+  const fz = Math.min(zoneAt(cam), 5), fs = farSprite(fz), fy = H * .48 + cam * .25 * S; if (fy < H) c.drawImage(fs, -40, fy, fs.w, fs.h);
+  const bgc = mix(bot, ZONES[fz].far, .3), bgOff = cam * .45 * S;
+  for (let i = 0; i < 5; i++) { const x = ((i * .29 + .07) % 1) * W, w = (16 + (i * 7) % 12) * S; c.fillStyle = bgc; c.globalAlpha = .55; c.fillRect(x - w / 2, 0, w, H);
+    for (let y = ((bgOff + i * 137) % (260 * S)) - 260 * S; y < H; y += 260 * S) { const d = i % 2 ? 1 : -1; c.beginPath(); c.moveTo(x, y); c.lineTo(x + d * 46 * S, y + 22 * S); c.lineTo(x + d * 46 * S, y + 28 * S); c.lineTo(x, y + 14 * S); c.fill(); } c.globalAlpha = 1; }
+  const cs = cloudSprite(); for (let k = Math.max(0, Math.floor((cam * .55 - 900) / 430)); k < Math.floor((cam * .55 + 900) / 430) + 1; k++) { const ch = 500 + k * 430, y = anchorY - (ch - cam * .55) * S, x = ((k * 0.618 + clock * .004) % 1) * (W + 160) - 120; if (y > -80 && y < H + 20) c.drawImage(cs, x, y, cs.w, cs.h); }
+  // trunks
+  const bt = barkTile(), off = ((sy(0) % bt.h) + bt.h) % bt.h, fl = sx(-GAP), fr = sx(GAP);
+  for (let y = off - bt.h; y < H + 40; y += bt.h) { c.drawImage(bt, fl - bt.w, y, bt.w, bt.h); c.save(); c.translate(fr + bt.w, 0); c.scale(-1, 1); c.drawImage(bt, 0, y, bt.w, bt.h); c.restore(); }
+  if (fl - bt.w > 0) { c.fillStyle = "rgba(60,35,20,.25)"; c.fillRect(fl - bt.w - 3, 0, 3, H); c.fillRect(fr + bt.w, 0, 3, H); }
+  c.fillStyle = "rgba(40,22,12,.22)"; c.fillRect(fl - 3 * S, 0, 3 * S, H); c.fillRect(fr, 0, 3 * S, H);
+  // height notches every 25 m, best-height ribbon
+  for (let m = Math.max(1, Math.ceil(viewBottom() / M / 25)) * 25; m * M < viewTop() + 60; m += 25) { const y = sy(m * M); c.fillStyle = "rgba(255,240,215,.55)"; c.fillRect(fl - 22 * S, y - 1.5 * S, 22 * S, 3 * S); draw.text(c, m + " m", fl - 26 * S, y, { size: 11 * S + 2, color: "rgba(255,240,215,.85)", align: "right", weight: 800 }); }
+  if (!demo && bestH > 200) { const y = sy(bestH); if (y > -20 && y < H + 20) { c.fillStyle = "#ff5d73"; c.beginPath(); c.moveTo(fr, y - 8 * S); c.lineTo(fr + 30 * S, y - 3 * S); c.lineTo(fr, y + 2 * S); c.fill(); c.fillRect(fr, y - 9 * S, 2.5 * S, 22 * S); draw.text(c, "BEST", fr + 14 * S, y + 12 * S, { size: 9 * S + 2, color: "#fff", weight: 800 }); } }
+  // ground and the dare-giver
+  const gy = sy(0);
+  if (gy < H + 60) {
+    c.fillStyle = "#7fbf5f"; c.fillRect(-40, gy, W + 80, H - gy + 40); c.fillStyle = "#93d26f"; for (let x = -10; x < W + 10; x += 14) { c.beginPath(); c.moveTo(x, gy + 2); c.lineTo(x + 5, gy - 9 * S); c.lineTo(x + 10, gy + 2); c.fill(); }
+    for (const [mx, col] of [[-GAP * .45, "#ff5d73"], [GAP * .62, "#ffb35c"]]) { const x = sx(mx); c.fillStyle = "#fff4e0"; c.fillRect(x - 3 * S, gy - 10 * S, 6 * S, 10 * S); c.fillStyle = col; c.beginPath(); c.ellipse(x, gy - 10 * S, 11 * S, 7 * S, 0, Math.PI, TAU); c.fill(); }
+    { const mx = sx(GAP * .15), cheer = pip.joy > 0 || momoSay > 0; Pals.draw(c, "momo", mx, gy - 20 * S, 40 * S, { t: clock, mood: endT ? "wow" : cheer ? "joy" : "happy", look: [clamp((sx(pip.x) - mx) / 120, -1, 1), -1], arms: cheer ? "cheer" : "down" });
+      if (!started && !demo) { Pals.bubble(c, mx + 4 * S, gy - 82 * S, 170 * S, 34 * S, { tailX: mx, tailY: gy - 44 * S }); draw.text(c, "Bet you can't reach the top!", mx + 4 * S, gy - 82 * S, { size: 11 * S + 1, color: INK, weight: 700 }); } }
+  }
+  for (const f of feats) drawFeat(c, f);
+  for (const b of branches) drawBranch(c, b);
+  for (const a of acorns) if (!a.got) { const y = sy(a.h) + Math.sin(clock * 3 + a.bob) * 3 * S; if (y < -30 || y > H + 30) continue; const s = acornSprite(a.gold); c.drawImage(s, sx(a.x) - s.w / 2, y - s.h / 2, s.w, s.h); }
+  // pinecones: a warning at the top edge, then the drop
+  for (const k of cones) {
+    const x = sx(k.s * (GAP - 16));
+    if (k.warn > 0) { const y = Lab.play.y + 40 * S, p = .6 + .4 * Math.sin(clock * 20); draw.circle(c, x, y, 14 * S, `rgba(255,93,115,${p})`, "#fff", 2); draw.text(c, "!", x, y + 1, { size: 18 * S, color: "#fff", weight: 900 }); continue; }
+    const y = sy(k.h); c.save(); c.translate(x, y); c.rotate(k.rot); c.fillStyle = "#7a4a2a"; for (let i = 0; i < 4; i++) { c.beginPath(); c.ellipse(0, (-8 + i * 5) * S, (5 + i * 1.6) * S, 3.2 * S, 0, 0, TAU); c.fill(); } c.fillStyle = "#b07a4a"; for (let i = 0; i < 4; i++) { c.beginPath(); c.ellipse(0, (-9 + i * 5) * S, (3 + i) * S, 1.4 * S, 0, 0, TAU); c.fill(); } c.restore();
+  }
+  // aim preview: the first part of the arc (all of it while learning)
+  if (pip.charging && !demo) {
+    const pts = [], p = chargeP(), r = predict(p, pts), frac = clamp(1 - maxH / M / 160, .3, 1), n = Math.floor(pts.length / 2 * frac);
+    for (let i = 1; i < n; i++) { const a = (1 - i / n) * .8 + .2; c.fillStyle = `rgba(255,255,255,${a})`; c.beginPath(); c.arc(sx(pts[i * 2]), sy(pts[i * 2 + 1]), (3.2 - i / n) * S, 0, TAU); c.fill(); }
+    if (frac >= 1 && r.kind !== "fall") { const x = sx(r.side * (GAP - 6)), y = sy(r.h); c.strokeStyle = r.kind === "thorn" ? "#ff5d73" : "#fff"; c.lineWidth = 3; c.beginPath(); c.arc(x, y, 12 * S, 0, TAU); c.stroke(); }
+  }
+  drawPip(c);
+  for (const l of leaves) { c.save(); c.translate(l.x, l.y); c.rotate(l.r); c.fillStyle = "#e07b39"; c.beginPath(); c.ellipse(0, 0, 6 * S, 2.6 * S, 0, 0, TAU); c.fill(); c.restore(); }
+  // bottom danger glow + HUD line
+  const dk = danger(); if (dk > 0) { const g2 = c.createLinearGradient(0, H - 160 * S, 0, H); g2.addColorStop(0, "rgba(255,93,115,0)"); g2.addColorStop(1, `rgba(255,93,115,${.55 * dk * (.75 + .25 * Math.sin(clock * 14))})`); c.fillStyle = g2; c.fillRect(0, H - 160 * S, W, 160 * S); }
+  if (!demo) {
+    const P = Lab.play, ty = P.y + 14, fs2 = clamp(13 * S, 11, 16), light = nightK > .5;
+    c.fillStyle = light ? "rgba(20,20,50,.45)" : "rgba(255,248,235,.78)"; draw.rr(c, P.x + 6, ty - fs2 * .9, Math.max(96, fs2 * 8.6), fs2 * 2.9 + 4, 10); c.fill();
+    draw.text(c, Math.floor(maxH / M) + " m", P.x + 14, ty, { size: fs2 + 4, color: light ? "#fff" : "#3b2a2a", align: "left", weight: 800 });
+    draw.text(c, ZONES[Math.min(zone, 5)].n, P.x + 14, ty + fs2 + 6, { size: fs2 - 1, color: light ? "rgba(255,255,255,.8)" : "rgba(59,42,42,.75)", align: "left", weight: 700 });
+    if (chain > 1) draw.text(c, "acorn chain ×" + Math.min(chain, 5), P.x + P.w - 14, ty, { size: fs2, color: "#b5651d", align: "right", weight: 800, stroke: "rgba(255,255,255,.7)" });
+    if (Math.abs(wind) > 15) { const x = W / 2, y = P.y + 70 * S, k = wind / 115; c.strokeStyle = "rgba(255,255,255,.9)"; c.lineWidth = 4; c.lineCap = "round"; c.beginPath(); c.moveTo(x - 30 * k * S, y); c.lineTo(x + 30 * k * S, y); c.lineTo(x + 20 * k * S, y - 8); c.moveTo(x + 30 * k * S, y); c.lineTo(x + 20 * k * S, y + 8); c.stroke(); draw.text(c, "WIND", x, y + 16, { size: 10, color: "#fff", weight: 800 }); }
+    if (nightK > .5 && !nightSet) { nightSet = true; Lab.setTheme({ fg: "#f4f1ff", muted: "#c9c3ee", light: false }); }
+  }
+}
+function drawPip(c) {
+  const st = pip.st, s = pip.side, x = sx(pip.x), y = sy(pip.h) + (st === "perch" ? 0 : 0);
+  let mood = "happy", arms = "up", look = [-s, -.5], hot = 0, sq = pip.sq, tilt = pip.tilt;
+  if (st === "cling") { tilt += s * .16; if (surfAt(s, pip.h) === "moss" || pip.knock > 50) mood = "scared"; else if (danger() > .4) mood = "scared"; }
+  if (st === "perch") { arms = pip.joy > 0 ? "cheer" : "down"; }
+  if (pip.charging) { const p = chargeP(); sq += .3 * p; mood = "focus"; hot = clamp((p - .7) / .3, 0, 1); look = [-s, -.9]; }
+  if (st === "air") { mood = pip.kp > .8 ? "wow" : "joy"; arms = "up"; look = [pip.dir, -.4]; sq += -clamp(pip.vy / 4000, -.12, .2); }
+  if (pip.stun > 0) mood = "dizzy";
+  if (pip.joy > 0 && st !== "air" && !pip.charging) mood = "joy";
+  if (st === "hurt" || st === "fall") { mood = st === "hurt" ? "scared" : "wow"; arms = "up"; }
+  Pals.draw(c, "pip", x, y, PS * S, { t: clock, mood, look, arms, squash: clamp(sq, -.35, .38), tilt, flip: s > 0, hot, shadow: false });
+  if (pip.charging) { const p = chargeP(); c.strokeStyle = "rgba(255,255,255,.35)"; c.lineWidth = 5 * S; c.beginPath(); c.arc(x, y, 34 * S, 0, TAU); c.stroke(); c.strokeStyle = p >= .92 ? "#ffd23f" : "#ff8a3d"; c.beginPath(); c.arc(x, y, 34 * S, -Math.PI / 2, -Math.PI / 2 + TAU * p); c.stroke(); }
+}
+function frame(dt, t) { tick(dt); render(t); }
+Lab.boot();
+})();
 </script></body></html>

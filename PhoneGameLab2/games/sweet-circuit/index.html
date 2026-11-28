@@ -1,33 +1,399 @@
-<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script>
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Sweet Circuit</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
 </head><body><script>
-Lab.init({title:"Candy Connect", instructions:"Drag through 3+ matching candies (horizontal/vertical/diagonal neighbours).", restart:start});
-const N=7;let grid,path,score,moves;
-function start(){grid=Array.from({length:N},()=>Array.from({length:N},()=>Lab.randInt(0,4)));path=[];score=0;moves=15;Lab.setScore(0);
-  Lab.input.onDown=[(x,y)=>{const p=hit(x,y);if(p)path=[p];}];
-  Lab.input.onMove=[(x,y)=>{if(!Lab.input.down||!path.length)return;const p=hit(x,y);if(!p)return;
-    const last=path[path.length-1];if(p.r===last.r&&p.c===last.c)return;
-    if(path.length>=2 && path[path.length-2].r===p.r && path[path.length-2].c===p.c){path.pop();return;}
-    if(Math.abs(p.r-last.r)<=1 && Math.abs(p.c-last.c)<=1 && grid[p.r][p.c]===grid[last.r][last.c]) path.push(p);
-  }];
-  Lab.input.onUp=[()=>{if(path.length>=3){
-    for(const p of path)grid[p.r][p.c]=-1;
-    score+=path.length*10;Lab.setScore(score);
-    for(let c=0;c<N;c++){let w=N-1;for(let r=N-1;r>=0;r--)if(grid[r][c]>=0)grid[w--][c]=grid[r][c];while(w>=0)grid[w--][c]=Lab.randInt(0,4);}
-    Lab.beep(800,.06);moves--;if(moves<=0)Lab.gameover({title:"Done",message:"Score: "+score});
-  }path=[];}];
-  Lab.loop(()=>draw());
+(function(){ "use strict";
+/* SWEET CIRCUIT — Bolt the robot runs on sweets. Drag a wire through 3+ matching sweets (8 directions) and they zap
+ * into his order. Core idea kept: draw a line through matching candies.
+ * What makes the line a decision:
+ *  - ORDERS with a move budget: each circuit Bolt needs N of two or three kinds; the battery holds the moves.
+ *  - LOOPS: drag the wire back onto its first sweet around other cells and the circuit closes — everything INSIDE
+ *    is zapped too, whatever its colour (the smallest loop is a diamond: four sweets round one). A loop costs no move.
+ *  - LONG WIRES: a wire of 6+ sweets also refunds its move, and every extra sweet raises the per-sweet value.
+ *  - JAWBREAKERS (from circuit 3): grey blockers that never connect. A wire running past one cracks it (two cracks),
+ *    a loop around one shatters it at once; the order asks you to break them all.
+ * Unlike Live Wires (non-crossing routing that must cover the board), this is a falling-board score chase:
+ * gravity refills from the top, so every pull reshapes the next one.
+ * Identity: strawberry-pink circuit board with gold traces on a peach candy-shop wall; Bolt sits on the board edge,
+ *           reads the order from his speech bubble, watches your wire, sparks into loops, droops when the battery dies. */
+let demo = false;
+Lab.init({
+  title: "Sweet Circuit", tagline: "Wire up the sweets. Loop them to zap what's inside!", category: "Puzzle", kicker: "Pocket Pals",
+  howto: ["Drag through 3+ matching sweets", "Close a loop to zap everything inside", "Fill Bolt's order before the battery dies"],
+  theme: { bg: "#ffd8c6", bg2: "#fff1e2", fg: "#3a2f4d", muted: "#7a6a80", accent: "#ff5d8f", accent2: "#3ec5ff", light: true },
+  orient: "any", music: { style: "funk", key: "A", bpm: 100, vol: .3 }, restart: start, attract,
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, shade = Lab.color.shade, INK = Pals.ink;
+const COLS = 7, ROWS = 7, GOB = 9, FREE = 7, D4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const SW = [{ n: "cherry", c: "#ff5d73" }, { n: "lemon", c: "#ffb81f" }, { n: "mint", c: "#2cc493" }, { n: "berry", c: "#4a86ee" }, { n: "grape", c: "#a368f2" }];
+let S = 1, U = 1, wide = false, cell = 40, bx = 0, by = 0, LY = null;
+let grid, path, closed, encl, finger, lastPt, level, moves, movesMax, targets, score, phase, busy, loops, longest, wires, pops, arcs, timers,
+  nid, ncol, idleT, hintCells, bolt, demoT, demoQ, fast, teach;
+
+let vs = 7; const vr = () => (vs = vs * 16807 % 2147483647) / 2147483647; // visual-only noise, keeps the seeded RNG for gameplay
+const snd = (n, o) => { if (!demo) Lab.sfx(n, o); };
+const later = (t, fn) => timers.push({ t, fn });
+const cx = c => bx + (c + .5) * cell, cy = r => by + (r + .5) * cell;
+const inB = (r, c) => r >= 0 && r < ROWS && c >= 0 && c < COLS;
+const same = (a, b) => a && b && a.r === b.r && a.c === b.c;
+const adj = (a, b) => Math.abs(a.r - b.r) <= 1 && Math.abs(a.c - b.c) <= 1 && !same(a, b);
+const kindAt = p => grid[p.r][p.c] ? grid[p.r][p.c].k : -1;
+function mk(k) { return { k, id: nid++, fy: 0, vy: 0, sq: 0, hp: k === GOB ? 2 : 0 }; }
+
+function layout() {
+  const P = Lab.play; wide = P.w > P.h * 1.15;
+  if (!wide) {
+    S = Math.min(P.w / 390, P.h / 720); cell = Math.min((P.w - 24 * S) / COLS, (P.h - 250 * S) / ROWS);
+    const bw = cell * COLS, ph = 196 * S, content = ph + bw + 58 * S, top = P.y + Math.max(0, (P.h - content) * .5);
+    bx = P.x + (P.w - bw) / 2; by = top + ph;
+    const bs = 104 * S, bubX = bx + 112 * S;
+    LY = { bolt: { x: bx + 54 * S, y: by - bs / 2 - 2 * S, s: bs }, bub: { x: (bubX + bx + bw) / 2, y: top + 62 * S, w: bx + bw - bubX, h: 100 * S },
+      bat: { x: bx + 8 * S, y: by + bw + 18 * S, w: bw - 26 * S, h: 30 * S } };
+  } else {
+    S = Math.min(P.w / 800, P.h / 380); cell = Math.min((P.h - 20 * S) / ROWS, P.w * .55 / COLS);
+    const bw = cell * COLS, lw = P.w - bw - 36 * S; bx = P.x + lw + 22 * S; by = P.y + (P.h - bw) / 2;
+    const bubW = Math.min(lw - 16 * S, 340 * S), bubH = 96 * S, mid = P.x + 8 * S + lw / 2, batY = by + bw - 32 * S, bs = Math.min(130 * S, (batY - by - bubH - 30 * S) * .72);
+    LY = { bolt: { x: mid - bubW * .22, y: (by + bubH + 10 * S + batY) / 2 + bs * .12, s: bs }, bub: { x: mid, y: by + bubH / 2 + 4 * S, w: bubW, h: bubH },
+      bat: { x: mid - bubW / 2 + 8 * S, y: batY, w: bubW - 24 * S, h: 30 * S } };
+  }
+  U = Math.max(S, .8); Lab.sprite.clear("sc");
 }
-function hit(x,y){const s=size(),o=off();const c=Math.floor((x-o.x)/s),r=Math.floor((y-o.y)/s);
-  if(r<0||r>=N||c<0||c>=N)return null;return {r,c,x:o.x+c*s+s/2,y:o.y+r*s+s/2};}
-function size(){return Math.min(Lab.W/N,(Lab.H-260)/N);}
-function off(){const s=size();return {x:(Lab.W-s*N)/2,y:180};}
-function draw(){const c=Lab.ctx;c.fillStyle="#1a0a2a";c.fillRect(0,0,Lab.W,Lab.H);
-  c.fillStyle="#fff";c.font="14px sans-serif";c.textAlign="left";c.fillText("Moves: "+moves,12,Lab.H-12);
-  const s=size(),o=off();const pal=["#f55","#5cf","#fc5","#5f8","#c5f"];
-  for(let r=0;r<N;r++)for(let col=0;col<N;col++){const v=grid[r][col];if(v<0)continue;
-    c.fillStyle=pal[v];c.beginPath();c.arc(o.x+col*s+s/2,o.y+r*s+s/2,s*0.35,0,Lab.TAU);c.fill();}
-  c.strokeStyle="#fff";c.lineWidth=4;c.beginPath();for(let i=0;i<path.length;i++){const p=path[i];if(i===0)c.moveTo(p.x,p.y);else c.lineTo(p.x,p.y);}c.stroke();c.lineWidth=1;
+Lab.onResize(() => { if (grid) layout(); });
+
+function cfg(L) {
+  const n = L <= 1 ? 4 : 5, gobs = L >= 3 ? Math.min(2 + Math.floor((L - 3) * .7), 7) : 0, kinds = L === 4 || (L >= 7 && L % 3 === 1) ? 3 : 2;
+  const amt = Math.round((L <= 1 ? 10 : 9 + L * 2.5) * (kinds === 3 ? .72 : 1));
+  return { n, gobs, kinds, amt, mv: Math.max(10, 14 - Math.floor(L / 2)) + (gobs ? 2 : 0) };
 }
-start();
+function newLevel(L) {
+  level = L; const C = cfg(L); ncol = C.n; moves = movesMax = C.mv;
+  grid = []; for (let r = 0; r < ROWS; r++) { grid.push([]); for (let c = 0; c < COLS; c++) grid[r].push(mk(Lab.randInt(0, ncol - 1))); }
+  for (let i = 0; i < C.gobs; i++) { let r, c; do { r = Lab.randInt(1, ROWS - 1); c = Lab.randInt(0, COLS - 1); } while (grid[r][c].k === GOB); grid[r][c] = mk(GOB); }
+  targets = Lab.shuffle([...Array(ncol).keys()]).slice(0, C.kinds).map(k => ({ k, need: C.amt, got: 0, shown: 0, bump: 0 }));
+  if (L === 1 || L === 3) { // plant a diamond so the loop can be discovered on the first board
+    const r = Lab.randInt(1, ROWS - 2), c = Lab.randInt(1, COLS - 2), k = targets[0].k;
+    for (const [dr, dc] of D4) grid[r + dr][c + dc] = mk(k);
+    if (L === 3) grid[r][c] = mk(GOB); else if (grid[r][c].k === k) grid[r][c] = mk((k + 1) % ncol);
+  }
+  const g = grid.flat().filter(x => x.k === GOB).length; if (g) targets.push({ k: GOB, need: g, got: 0, shown: 0, bump: 0 });
+  ensureMoves();
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { grid[r][c].fy = r - ROWS - 1 - c * .25 - Lab.rand(0, .3); }
+  for (const p of pops) p.ti = -1;
+  busy = "fall"; path = []; closed = false; encl = null; idleT = 0; hintCells = null; bolt.talkT = 1.1;
+  if (!demo) { Lab.banner("Circuit " + L, { color: "#ff5d8f", ms: 1000, y: .42 }); snd("powerup", { pitch: 1.2, vol: .5 }); }
+}
+function comps() {
+  const seen = new Set(), out = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const g = grid[r][c]; if (!g || g.k === GOB || seen.has(r * COLS + c)) continue;
+    const q = [{ r, c }], comp = []; seen.add(r * COLS + c);
+    while (q.length) { const p = q.pop(); comp.push(p); for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) { const R = p.r + dr, C = p.c + dc; if (inB(R, C) && !seen.has(R * COLS + C) && grid[R][C] && grid[R][C].k === g.k) { seen.add(R * COLS + C); q.push({ r: R, c: C }); } } }
+    out.push(comp);
+  }
+  return out;
+}
+const hasMove = () => comps().some(c => c.length >= 3);
+function ensureMoves() {
+  for (let i = 0; i < 30 && !hasMove(); i++) { const cs = grid.flat().filter(g => g.k !== GOB).map(g => g.k); Lab.shuffle(cs); let j = 0; for (const row of grid) for (const g of row) if (g.k !== GOB) g.k = cs[j++]; }
+  if (!hasMove()) { const k = grid[ROWS - 1][0].k === GOB ? 0 : grid[ROWS - 1][0].k; for (let c = 0; c < 3; c++) grid[ROWS - 1][c] = mk(k); }
+}
+function shuffleBoard() {
+  ensureMoves(); for (const row of grid) for (const g of row) g.sq = .3;
+  snd("whoosh", { pitch: .8 }); bolt.wowT = .8; if (!demo) Lab.toast("No wires left — Bolt shakes the board!", 1400, { y: .3 }); Lab.shake(5, .3);
+}
+
+/* ---------- wire drawing (input) ---------- */
+function hit(x, y, rad) {
+  const c = Math.floor((x - bx) / cell), r = Math.floor((y - by) / cell);
+  if (!inB(r, c) || Lab.dist(x, y, cx(c), cy(r)) > rad * cell) return null; return { r, c };
+}
+function begin(x, y) {
+  idleT = 0; hintCells = null; if (phase !== "play" || busy) return false;
+  const q = hit(x, y, .5); if (!q || !grid[q.r][q.c] || grid[q.r][q.c].k === GOB) return false;
+  path = [q]; closed = false; encl = null; lastPt = [x, y]; finger = [x, y]; if (!demo) Lab.audio.combo(0, { vol: .16 }); Lab.buzz(5); return true;
+}
+function trace(x, y) {
+  const [x0, y0] = lastPt, d = Lab.dist(x0, y0, x, y), n = Math.max(1, Math.ceil(d / (cell * .2)));
+  for (let i = 1; i <= n; i++) { const q = hit(lerp(x0, x, i / n), lerp(y0, y, i / n), .43); if (q) step(q); }
+  lastPt = [x, y]; finger = [x, y];
+}
+function step(q) {
+  const n = path.length, last = path[n - 1];
+  if (closed) { if (same(q, last)) { closed = false; encl = null; } return; }
+  if (same(q, last)) return;
+  if (n >= 2 && same(q, path[n - 2])) { path.pop(); if (!demo) Lab.audio.combo(Math.max(0, n - 3), { vol: .1 }); return; }
+  if (!adj(q, last) || kindAt(q) !== kindAt(path[0])) return;
+  if (same(q, path[0])) {
+    if (n >= 4) { const e = enclosed(); if (e.length) { closed = true; encl = e; snd("zap", { pitch: 1.3, vol: .6 }); snd("chime", { pitch: 1 + e.length * .05, vol: .5 }); bolt.wowT = .6; Lab.buzz(15); } }
+    return;
+  }
+  if (path.some(p => same(p, q))) return;
+  path.push(q); if (!demo) Lab.audio.combo(path.length - 1, { vol: .18 }); Lab.buzz(4);
+  if (path.length === FREE && !demo) Lab.sfx("coin", { pitch: 1.4, vol: .35 });
+}
+function inside(px, py, poly) {
+  let o = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) o = !o; }
+  return o;
+}
+function enclosed() {
+  const poly = path.map(p => [p.c, p.r]), out = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (grid[r][c] && !path.some(p => p.r === r && p.c === c) && inside(c, r, poly)) out.push({ r, c });
+  return out;
+}
+function release() {
+  const n = path.length;
+  if (closed) clearWire(true); else if (n >= 3) clearWire(false);
+  else if (n === 2) { snd("tick", { pitch: .6 }); if (!demo) fx.text(cx(path[1].c), cy(path[1].r) - cell * .4, "3 or more!", { color: "#7a6a80", size: 13 * U, life: .6 }); }
+  path = []; closed = false; encl = null;
+}
+
+/* ---------- clearing ---------- */
+function removeCell(r, c, delay) {
+  const g = grid[r][c]; if (!g) return; grid[r][c] = null;
+  const ti = targets.findIndex(T => T.k === g.k && T.got < T.need); if (ti >= 0) targets[ti].got++;
+  pops.push({ x: cx(c), y: cy(r), k: g.k, t: -delay, ti, started: false, seq: pops.length });
+}
+function crack(r, c, delay) {
+  const g = grid[r][c]; if (!g || g.k !== GOB) return;
+  if (--g.hp <= 0) { removeCell(r, c, delay); later(delay, () => { snd("glass", { pitch: 1.1 }); fx.burst(cx(c), cy(r), { n: 14, colors: ["#b9bfd3", "#7d849c", "#fff"], speed: 220, life: .5, size: 3.5 * S, gravity: 600, shape: "shard" }); }); }
+  else { g.sq = .3; later(delay, () => { snd("crunch", { pitch: 1.3, vol: .7 }); fx.burst(cx(c), cy(r), { n: 6, colors: ["#b9bfd3", "#fff"], speed: 120, life: .35, size: 2.5 * S, gravity: 400 }); }); }
+}
+function clearWire(loop) {
+  const n = path.length, per = 10 + 5 * (n - 3), st = Math.min(.05, .5 / n), cells = path.slice(), ins = loop ? encl.slice() : [];
+  let gain = n * per; moves--; wires++; longest = Math.max(longest, n);
+  const free = loop || n >= FREE; if (free) moves++;
+  cells.forEach((p, i) => removeCell(p.r, p.c, i * st));
+  let d = n * st;
+  if (loop) {
+    loops++;
+    ins.forEach((p, i) => { const g = grid[p.r][p.c]; gain += g.k === GOB ? 60 : 30; removeCell(p.r, p.c, d + i * .03); arcs.push({ x: cx(p.c), y: cy(p.r), t: -(d + i * .03), life: .4 }); });
+    d += ins.length * .03;
+    later(n * st, () => { snd("zap", { pitch: .9 }); snd("powerup", { pitch: 1.1 + ins.length * .04, vol: .6 }); Lab.flash("#fff6c0", .18, .35); Lab.shake(5, .2); Lab.hitstop(.06); });
+    bolt.wowT = 1.3; bolt.sq = -.2;
+  } else {
+    const hitG = new Set(); for (const p of cells) for (const [dr, dc] of D4) { const R = p.r + dr, C = p.c + dc; if (inB(R, C) && grid[R][C] && grid[R][C].k === GOB) hitG.add(R * COLS + C); }
+    [...hitG].forEach((id, i) => crack(id / COLS | 0, id % COLS, d + i * .04)); d += hitG.size * .04;
+    if (n >= 5) { bolt.joyT = .9; bolt.sq = -.15; }
+  }
+  score += gain; if (!demo) { Lab.setScore(score); if (n >= 6 || loop) Lab.bumpScore(); }
+  const L = cells[cells.length - 1];
+  if (!demo) {
+    fx.text(cx(L.c), cy(L.r) - cell * .3, (loop ? "Closed circuit! " : "") + "+" + gain, { color: loop ? "#ff5d8f" : "#3a2f4d", size: (loop ? 20 : n >= 6 ? 18 : 15) * U, life: 1 });
+    if (free) later(d, () => { fx.text(LY.bat.x + LY.bat.w / 2, LY.bat.y - 6 * S, "+1 move", { color: "#2a9d74", size: 15 * U, life: .9 }); snd("coin", { pitch: 1.2, vol: .5 }); });
+    if (level === 1 && wires === 1 && !loops) later(1.2, () => { if (!loops && phase === "play") Lab.hint("Loop around a sweet to zap it — loops are free!"); });
+  }
+  busy = "pop"; if (fast) { collapse(); settleAll(); return; } later(d + .12, collapse);
+}
+function collapse() {
+  for (let c = 0; c < COLS; c++) {
+    let w = ROWS - 1; for (let r = ROWS - 1; r >= 0; r--) if (grid[r][c]) { if (w !== r) { grid[w][c] = grid[r][c]; grid[r][c] = null; } w--; }
+    const m = w + 1; for (let r = w; r >= 0; r--) { const g = mk(Lab.randInt(0, ncol - 1)); g.fy = r - m - .4; grid[r][c] = g; }
+  }
+  busy = "fall";
+}
+function settleAll() { for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { grid[r][c].fy = r; grid[r][c].vy = 0; } busy = false; afterSettle(); }
+function afterSettle() {
+  if (phase !== "play") return;
+  if (targets.every(T => T.got >= T.need)) return levelUp();
+  if (moves <= 0) return outOfJuice();
+  if (!hasMove()) shuffleBoard();
+  if (level === 1 && !loops && !demo) hintCells = findDiamond();
+}
+function findDiamond() {
+  for (let r = 1; r < ROWS - 1; r++) for (let c = 1; c < COLS - 1; c++) { const k = grid[r - 1][c].k; if (k !== GOB && D4.every(([dr, dc]) => grid[r + dr][c + dc].k === k)) return D4.map(([dr, dc]) => ({ r: r + dr, c: c + dc })); }
+  return null;
+}
+function levelUp() {
+  phase = "clear"; const bonus = moves * 25; score += bonus; bolt.joyT = 2.2; bolt.talkT = 1;
+  if (!demo) { Lab.setScore(score); Lab.bumpScore(); snd("levelup"); Lab.fx.confetti(); Lab.banner("Powered up!", { color: "#2a9d74", ms: 1200, y: .4 }); if (bonus) Lab.toast(moves + " moves left  +" + bonus, 1300, { y: .3 }); }
+  later(1.7, () => { if (phase === "clear") { phase = "play"; newLevel(level + 1); } });
+}
+function outOfJuice() {
+  phase = "end"; bolt.sadT = 99; snd("warn", { pitch: .7 }); if (!demo) Lab.audio.tone({ f: 420, f2: 90, dur: .9, type: "sawtooth", vol: .12, lp: 900 });
+  later(1.4, () => {
+    if (demo) { resetRun(); return; }
+    const rem = targets.reduce((a, T) => a + Math.max(0, T.need - T.got), 0);
+    Lab.gameover({ title: "Out of juice!", message: "Bolt still needed " + rem + " more.", score, stats: [["Circuits powered", level - 1], ["Longest wire", longest], ["Loops closed", loops]] });
+  });
+}
+
+/* ---------- bot (attract demo, idle hint, tests) ---------- */
+function bestChain() {
+  let best = null, bestV = 0; const want = new Set(targets.filter(T => T.got < T.need).map(T => T.k));
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const g = grid[r][c]; if (!g || g.k === GOB) continue;
+    const k = g.k, vis = new Set([r * COLS + c]), cur = [{ r, c }]; let budget = 1500;
+    (function dfs() {
+      if (--budget < 0) return;
+      if (cur.length >= 3) { let v = cur.length * (want.has(k) ? 3 : 1) + (cur.length >= FREE ? 8 : 0); for (const p of cur) for (const [dr, dc] of D4) { const R = p.r + dr, C = p.c + dc; if (inB(R, C) && grid[R][C] && grid[R][C].k === GOB) v += 2; } if (v > bestV) { bestV = v; best = cur.slice(); } }
+      const p = cur[cur.length - 1];
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) { const R = p.r + dr, C = p.c + dc; if (!inB(R, C) || vis.has(R * COLS + C) || !grid[R][C] || grid[R][C].k !== k) continue; vis.add(R * COLS + C); cur.push({ r: R, c: C }); dfs(); cur.pop(); vis.delete(R * COLS + C); }
+    })();
+  }
+  return best;
+}
+function demoTick(dt) {
+  if (phase !== "play" || busy) return;
+  demoT -= dt; if (demoT > 0) return;
+  if (!demoQ) { demoQ = bestChain(); if (!demoQ) return; const p = demoQ.shift(); begin(cx(p.c), cy(p.r)); demoT = .14; return; }
+  if (demoQ.length) { const p = demoQ.shift(); trace(cx(p.c), cy(p.r)); demoT = .12; return; }
+  demoQ = null; release(); demoT = 1;
+}
+
+/* ---------- run lifecycle ---------- */
+function resetRun() {
+  nid = 0; score = 0; loops = 0; longest = 0; wires = 0; pops = []; arcs = []; timers = []; path = []; closed = false; encl = null; phase = "play"; busy = false;
+  idleT = 0; hintCells = null; finger = null; lastPt = [0, 0]; fast = false; demoT = 1; demoQ = null;
+  bolt = { sq: 0, joyT: 0, wowT: 0, sadT: 0, talkT: 0 }; layout(); newLevel(1);
+}
+function start() {
+  demo = false; resetRun(); Lab.setScore(0); Lab.hint("Drag through 3 or more matching sweets");
+  Lab.input.onDown = [(x, y) => begin(x, y)];
+  Lab.input.onMove = [(x, y) => { if (path.length && Lab.input.down) trace(x, y); }];
+  Lab.input.onUp = [() => { if (path.length) release(); }];
+  Lab.expose({
+    get score() { return score; }, get moves() { return moves; }, get level() { return level; }, get loops() { return loops; }, get phase() { return phase; }, get busy() { return !!busy; },
+    get targets() { return targets.map(T => ({ k: T.k, need: T.need, got: T.got })); }, get board() { return grid.map(row => row.map(g => g ? g.k : -1)); },
+    get hp() { return grid.map(row => row.map(g => g ? g.hp : 0)); }, get wire() { return path.length; }, get closed() { return closed; },
+    at(r, c) { return [cx(c), cy(r)]; }, findChain() { const p = bestChain(); return p && p.map(q => [cx(q.c), cy(q.r)]); },
+    setBoard(rows) { rows.forEach((s, r) => [...s].forEach((ch, c) => { const g = mk(ch === "x" ? GOB : ch.charCodeAt(0) - 97); g.fy = r; grid[r][c] = g; })); },
+    setTargets(list, mv) { targets = list.map(([k, need]) => ({ k: k === "x" ? GOB : k, need, got: 0, shown: 0, bump: 0 })); if (mv != null) moves = movesMax = mv; },
+    sim(maxMoves) { fast = true; let m = 0; while (m < maxMoves && phase !== "end") { if (phase === "clear") { timers = []; phase = "play"; newLevel(level + 1); settleAll(); continue; } const p = bestChain(); if (!p) { shuffleBoard(); continue; } path = p; release(); m++; } fast = false; return { level, score, moves, m }; },
+  });
+  Lab.loop(frame);
+}
+function update(dt) {
+  for (const tm of timers.slice()) { tm.t -= dt; if (tm.t <= 0) { const i = timers.indexOf(tm); if (i >= 0) timers.splice(i, 1); tm.fn(); } }
+  let moving = false, landed = 0;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const g = grid[r][c]; if (!g) continue;
+    if (g.fy < r) { g.vy += 48 * dt; g.fy += g.vy * dt; moving = true; if (g.fy >= r) { g.fy = r; if (g.vy > 4) { g.sq = Math.min(.26, g.vy * .022); landed++; } g.vy = 0; } }
+    g.sq = Lab.damp(g.sq, 0, 9, dt);
+  }
+  if (landed && !demo) Lab.sfx("tick", { pitch: 1.6 + Lab.rand(0, .4), vol: .25 });
+  if (busy === "fall" && !moving) { busy = false; afterSettle(); }
+  for (const p of pops) {
+    const was = p.t; p.t += dt;
+    if (was < 0 && p.t >= 0) { p.started = true; if (!demo) Lab.audio.combo(Math.min(p.seq, 14), { vol: .13 }); if (p.ti < 0 && p.k !== GOB) fx.burst(p.x, p.y, { n: 7, colors: [SW[p.k].c, "#fff"], speed: 130, life: .35, size: 3 * S, gravity: 300 }); else fx.ring(p.x, p.y, { r0: 4, r1: cell * .5, color: "#fff", width: 3, life: .25 }); }
+    if (p.ti >= 0 && p.t >= .5 && !p.arrived) { p.arrived = true; const T = targets[p.ti]; if (T) { T.shown++; T.bump = 1; } if (!demo) Lab.sfx("tick", { pitch: 1 + (T ? T.shown / T.need : 0), vol: .4 }); }
+  }
+  pops = pops.filter(p => p.t < (p.ti >= 0 ? .5 : .25));
+  for (const a of arcs) a.t += dt; arcs = arcs.filter(a => a.t < a.life);
+  for (const T of targets) T.bump = Lab.damp(T.bump, 0, 8, dt);
+  bolt.sq = Lab.damp(bolt.sq, 0, 7, dt); bolt.joyT -= dt; bolt.wowT -= dt; bolt.talkT -= dt;
+  if (phase === "play" && !busy && !path.length) { idleT += dt; if (idleT > 7 && !hintCells && !demo) hintCells = bestChain() || []; } else if (path.length) idleT = 0;
+  if (demo) demoTick(dt); else Lab.music.intensity(clamp(.2 + (1 - moves / movesMax) * .7, 0, 1));
+}
+function frame(dt, t) { update(dt); render(t); }
+function attract(dt, t) { if (!grid || !demo) { demo = true; resetRun(); } update(dt); render(t); }
+
+/* ---------- drawing ---------- */
+function candyPath(g, k, r) {
+  if (k === 0) draw.heart(g, 0, r * .08, r * .82);
+  else if (k === 1) draw.star(g, 0, r * .06, r * 1.04, null, 5, .56);
+  else if (k === 2) { g.beginPath(); g.moveTo(0, -r * .95); g.bezierCurveTo(r * .55, -r * .35, r * .88, r * .05, r * .82, r * .35); g.arc(0, r * .3, r * .82, .06, Math.PI - .06); g.bezierCurveTo(-r * .88, r * .05, -r * .55, -r * .35, 0, -r * .95); g.closePath(); }
+  else if (k === 3) draw.rr(g, -r * .8, -r * .8, r * 1.6, r * 1.6, r * .38);
+  else if (k === 4) { g.beginPath(); g.moveTo(0, -r * .95); g.quadraticCurveTo(r * .1, -r * .9, r * .95, r * .62); g.quadraticCurveTo(r * .95, r * .8, r * .7, r * .8); g.lineTo(-r * .7, r * .8); g.quadraticCurveTo(-r * .95, r * .8, -r * .95, r * .62); g.quadraticCurveTo(-r * .1, -r * .9, 0, -r * .95); g.closePath(); }
+  else { g.beginPath(); g.arc(0, 0, r * .86, 0, TAU); }
+}
+function candySprite(k, sz) {
+  sz = Math.max(8, Math.round(sz));
+  return Lab.sprite("scC" + k + ":" + sz, sz * 1.3, sz * 1.3, g => {
+    g.translate(sz * .65, sz * .65); const r = sz / 2; g.lineJoin = "round";
+    if (k === GOB) {
+      draw.circle(g, 0, r * .06, r * .9, "rgba(43,35,64,.18)"); draw.circle(g, 0, 0, r * .86, "#a8aec4", "#6f7690", r * .1);
+      g.strokeStyle = "#e6e9f4"; g.lineWidth = r * .13; g.lineCap = "round"; g.beginPath(); for (let a = 0; a < 9; a += .25) { const rr = r * .07 * a; g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } g.stroke();
+      draw.circle(g, -r * .32, -r * .36, r * .16, "rgba(255,255,255,.7)"); return;
+    }
+    const col = SW[k].c;
+    g.save(); g.translate(0, r * .08); candyPath(g, k, r); g.fillStyle = "rgba(43,35,64,.18)"; g.fill(); g.restore();
+    candyPath(g, k, r); g.fillStyle = col; g.fill(); g.strokeStyle = shade(col, -.35); g.lineWidth = r * .11; g.stroke();
+    g.save(); candyPath(g, k, r); g.clip(); g.fillStyle = shade(col, -.14); g.beginPath(); g.arc(r * .4, r * .7, r * 1.1, 0, TAU); g.fill();
+    g.fillStyle = "rgba(255,255,255,.5)"; g.beginPath(); g.ellipse(-r * .28, -r * .3, r * .3, r * .18, -.6, 0, TAU); g.fill(); g.restore();
+    draw.circle(g, -r * .34, -r * .4, r * .09, "rgba(255,255,255,.9)");
+  });
+}
+function bgSprite() {
+  return Lab.sprite("scbg", Lab.W + 80, Lab.H + 80, g => {
+    g.translate(40, 40); const W = Lab.W, H = Lab.H, bw = cell * COLS, pad = 10 * S;
+    draw.vgrad(g, -40, -40, W + 80, H + 80, ["#ffd2bf", "#ffe9d8", "#fff3e6"]);
+    g.fillStyle = "rgba(255,255,255,.35)"; const st = 34 * S; for (let x = -H; x < W + 40; x += st * 2) { g.beginPath(); g.moveTo(x, -40); g.lineTo(x + st, -40); g.lineTo(x + st + H + 80, H + 40); g.lineTo(x + H + 80, H + 40); g.closePath(); g.fill(); }
+    const rnd = Lab.rng(3); for (let i = 0; i < 40; i++) draw.circle(g, rnd() * W, rnd() * H, (2 + rnd() * 3) * S, Lab.color.alpha(SW[i % 5].c, .18));
+    draw.shadow(g, bx + bw / 2, by + bw + pad * 1.2, bw * .55, 12 * S, .2);
+    draw.rect(g, bx - pad, by - pad, bw + pad * 2, bw + pad * 2, 18 * S, "#ff94ad", "#d9607f", 3 * S);
+    draw.rect(g, bx - pad * .45, by - pad * .45, bw + pad * .9, bw + pad * .9, 13 * S, "#ffb0c2");
+    g.strokeStyle = "#f0c25a"; g.lineCap = "round"; g.lineWidth = Math.max(2, cell * .07);
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { if (c < COLS - 1) { g.beginPath(); g.moveTo(cx(c), cy(r)); g.lineTo(cx(c + 1), cy(r)); g.stroke(); } if (r < ROWS - 1) { g.beginPath(); g.moveTo(cx(c), cy(r)); g.lineTo(cx(c), cy(r + 1)); g.stroke(); } }
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { draw.circle(g, cx(c), cy(r), cell * .42, "#fff1e8", "#f0c25a", Math.max(1.5, cell * .05)); }
+    for (const [x, y] of [[bx - pad * .1, by - pad * .1], [bx + bw + pad * .1, by - pad * .1], [bx - pad * .1, by + bw + pad * .1], [bx + bw + pad * .1, by + bw + pad * .1]]) { draw.circle(g, x, y, 4 * S, "#f0c25a", "#b8892c", 1.2); }
+  });
+}
+function chipPos(i) { const B = LY.bub, n = targets.length, w = B.w - 24 * S; return [B.x - w / 2 + w * (i + .5) / n, B.y + 12 * S]; }
+function render(t) {
+  const c = Lab.ctx, bg = bgSprite(); c.drawImage(bg, -40, -40, bg.w, bg.h);
+  const sz = cell * .8, pk = path.length ? kindAt(path[0]) : -1, inP = new Set(path.map(p => p.r * COLS + p.c)), inE = new Set((encl || []).map(p => p.r * COLS + p.c)), hs = new Set((hintCells || []).map(p => p.r * COLS + p.c));
+  // enclosed area glow
+  if (closed) { c.save(); c.globalAlpha = .28 + .12 * Math.sin(t * 14); c.fillStyle = "#fff36b"; c.beginPath(); path.forEach((p, i) => c[i ? "lineTo" : "moveTo"](cx(p.c), cy(p.r))); c.closePath(); c.fill(); c.restore(); }
+  c.save(); c.beginPath(); c.rect(bx - 4, by - 2, cell * COLS + 8, cell * ROWS + 6); c.clip();
+  for (let r = 0; r < ROWS; r++) for (let col = 0; col < COLS; col++) {
+    const g = grid[r][col]; if (!g) continue; const id = r * COLS + col, X = cx(col), Y = by + (g.fy + .5) * cell;
+    let sc = 1, a = 1; if (inP.has(id)) sc = 1.13 + .03 * Math.sin(t * 12 + id); else if (inE.has(id)) sc = 1 + .1 * Math.abs(Math.sin(t * 16 + id)); else if (pk >= 0) a = g.k === pk ? 1 : .5;
+    if (hs.has(id)) sc = 1 + .1 * Math.max(0, Math.sin(t * 7));
+    const sp = candySprite(g.k, sz); c.save(); c.globalAlpha = a; c.translate(X, Y + sz * .45); c.scale(sc * (1 + g.sq * .6), sc * (1 - g.sq)); c.drawImage(sp, -sp.w / 2, -sp.h / 2 - sz * .45, sp.w, sp.h); c.restore();
+    if (g.k === GOB && g.hp === 1) { c.strokeStyle = "#4b5068"; c.lineWidth = 2 * S; c.beginPath(); c.moveTo(X - sz * .3, Y - sz * .25); c.lineTo(X - sz * .05, Y - sz * .02); c.lineTo(X - sz * .14, Y + sz * .18); c.moveTo(X - sz * .05, Y - sz * .02); c.lineTo(X + sz * .28, Y - sz * .1); c.stroke(); }
+    if (hs.has(id)) { c.strokeStyle = `rgba(255,255,255,${.5 + .4 * Math.sin(t * 7)})`; c.lineWidth = 3 * S; c.beginPath(); c.arc(X, Y, cell * .46, 0, TAU); c.stroke(); }
+  }
+  for (const p of pops) if (p.t < 0) { const sp = candySprite(p.k, sz); c.drawImage(sp, p.x - sp.w * .57, p.y - sp.h * .57, sp.w * 1.14, sp.h * 1.14); }
+  c.restore();
+  // the wire
+  if (path.length) {
+    const col = SW[pk] ? SW[pk].c : "#fff", pts = path.map(p => [cx(p.c), cy(p.r)]); if (closed) pts.push(pts[0]);
+    c.save(); c.lineCap = "round"; c.lineJoin = "round";
+    const stroke = (w, s) => { c.strokeStyle = s; c.lineWidth = w; c.beginPath(); pts.forEach((p, i) => c[i ? "lineTo" : "moveTo"](p[0], p[1])); if (!closed && finger) { const l = pts[pts.length - 1]; c.quadraticCurveTo((l[0] + finger[0]) / 2, (l[1] + finger[1]) / 2 + cell * .25, finger[0], finger[1]); } c.stroke(); };
+    stroke(cell * .22, shade(col, -.4)); stroke(cell * .14, col); stroke(cell * .05, "rgba(255,255,255,.75)");
+    c.setLineDash([1, cell * .32]); c.lineDashOffset = -t * cell * 3.5; stroke(cell * .11, closed ? "#fff36b" : "#fffbe8"); c.setLineDash([]);
+    if (closed) for (let i = 0; i < pts.length - 1; i++) if (vr() < .5) zig(c, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], "#fff36b", 2 * S);
+    c.restore();
+    const L = path[path.length - 1]; if (path.length >= 3 || closed) draw.text(c, closed ? "LOOP · free!" : "×" + path.length + (path.length >= FREE ? " · free!" : ""), cx(L.c), cy(L.r) - cell * .62, { size: 15 * U, color: closed ? "#d9467a" : "#3a2f4d", weight: 700, stroke: "rgba(255,255,255,.9)", strokeW: 4 });
+  }
+  // flying sweets + pops
+  for (const p of pops) {
+    if (p.t < 0) continue;
+    if (p.ti >= 0) { const u = clamp(p.t / .5, 0, 1), k = ease.inOutCubic(u), [tx, ty] = chipPos(p.ti), sp = candySprite(p.k, sz); const sc = lerp(1.1, .5, k), X = lerp(p.x, tx, k), Y = lerp(p.y, ty, k) - Math.sin(u * Math.PI) * 50 * S; c.drawImage(sp, X - sp.w * sc / 2, Y - sp.h * sc / 2, sp.w * sc, sp.h * sc); }
+    else { const u = p.t / .25, sp = candySprite(p.k, sz), sc = 1.15 + u * .5; c.globalAlpha = 1 - u; c.drawImage(sp, p.x - sp.w * sc / 2, p.y - sp.h * sc / 2, sp.w * sc, sp.h * sc); c.globalAlpha = 1; }
+  }
+  // Bolt
+  const B = LY.bolt, an0 = lookAt(), mood = phase === "end" ? (bolt.sadT > 98.2 ? "sad" : "sleepy") : bolt.wowT > 0 || closed ? "wow" : bolt.joyT > 0 || path.length >= 5 ? "joy" : path.length ? "happy" : moves <= 3 ? "scared" : "happy";
+  const hop = phase === "clear" ? Math.abs(Math.sin(t * 9)) * 10 * S : 0;
+  const an = Pals.draw(c, "bolt", B.x, B.y - hop, B.s, { t, mood, look: an0, squash: bolt.sq + (hop ? -.06 : 0), arms: phase === "clear" || bolt.joyT > 0 ? "cheer" : closed ? "up" : path.length ? "hold" : "wave", talk: bolt.talkT > 0 ? Math.abs(Math.sin(t * 16)) * .7 : 0, hot: phase === "play" && moves <= 3 ? .6 : 0, alpha: phase === "end" ? .85 : 1 });
+  for (const a of arcs) if (a.t >= 0) zig(c, an.head[0], an.head[1] - B.s * .1, a.x, a.y, "#fff36b", 3 * S);
+  if (phase === "end") draw.text(c, "z", an.head[0] + B.s * .4, an.head[1] - B.s * .1 - (t * 20 % 20) * S, { size: 16 * U, color: "#7a6a80", weight: 700 });
+  // order bubble
+  const Bb = LY.bub; Pals.bubble(c, Bb.x, Bb.y, Bb.w, Bb.h, { tailX: B.x + B.s * .3, tailY: B.y - B.s * .25, lineWidth: 2.5 * S });
+  draw.text(c, "CIRCUIT " + level + " · Bolt needs", Bb.x, Bb.y - Bb.h * .3, { size: 12 * U, color: "#7a6a80", weight: 700, maxWidth: Bb.w - 20 * S });
+  targets.forEach((T, i) => {
+    const [x, y] = chipPos(i), left = Math.max(0, T.need - T.shown), sc = 1 + T.bump * .25, isz = 30 * S * sc, sp = candySprite(T.k, isz);
+    c.drawImage(sp, x - 13 * S - sp.w / 2, y - sp.h / 2, sp.w, sp.h);
+    if (left) draw.text(c, String(left), x + 12 * S, y + 1, { size: 18 * U * sc, color: "#3a2f4d", weight: 700, align: "left" });
+    else { draw.circle(c, x + 18 * S, y, 10 * S, "#2cc493"); c.strokeStyle = "#fff"; c.lineWidth = 3 * S; c.lineCap = "round"; c.beginPath(); c.moveTo(x + 13 * S, y); c.lineTo(x + 17 * S, y + 4 * S); c.lineTo(x + 23 * S, y - 4 * S); c.stroke(); }
+  });
+  // battery = moves
+  const A = LY.bat, low = moves <= 3, f = clamp(moves / movesMax, 0, 1), fc = low ? "#ff5d73" : f < .5 ? "#ffb81f" : "#2cc493";
+  draw.rect(c, A.x, A.y, A.w, A.h, A.h * .32, "#fffaf3", INK, 2.5 * S); draw.rect(c, A.x + A.w + 1, A.y + A.h * .28, 6 * S, A.h * .44, 2 * S, INK);
+  const iw = A.w - 8 * S; if (f > 0) { c.globalAlpha = low ? .65 + .35 * Math.sin(t * 10) : 1; draw.rect(c, A.x + 4 * S, A.y + 4 * S, iw * f, A.h - 8 * S, A.h * .2, fc); c.globalAlpha = 1; }
+  if (movesMax <= 30) { c.fillStyle = "rgba(255,255,255,.55)"; for (let i = 1; i < movesMax; i++) c.fillRect(A.x + 4 * S + iw * i / movesMax - .5, A.y + 6 * S, 1.2, A.h - 12 * S); }
+  draw.text(c, moves + (moves === 1 ? " move" : " moves"), A.x + A.w / 2, A.y + A.h / 2 + 1, { size: 15 * U, color: INK, weight: 700, stroke: "rgba(255,255,255,.85)", strokeW: 4 });
+}
+function lookAt() {
+  const B = LY.bolt; let tx = bx + cell * COLS / 2, ty = by + cell * 2;
+  if (path.length) { const L = path[path.length - 1]; tx = cx(L.c); ty = cy(L.r); } else if (pops.length) { tx = LY.bub.x; ty = LY.bub.y; }
+  return [clamp((tx - B.x) / (140 * S), -1, 1), clamp((ty - B.y) / (140 * S), -1, 1)];
+}
+function zig(c, x0, y0, x1, y1, col, w) {
+  const n = 6, nx = -(y1 - y0), ny = x1 - x0, l = Math.hypot(nx, ny) || 1; c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(x0, y0);
+  for (let i = 1; i < n; i++) { const k = i / n, o = (vr() - .5) * cell * .35; c.lineTo(lerp(x0, x1, k) + nx / l * o, lerp(y0, y1, k) + ny / l * o); } c.lineTo(x1, y1); c.stroke();
+}
+Lab.boot();
+})();
 </script></body></html>
