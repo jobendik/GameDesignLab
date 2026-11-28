@@ -803,10 +803,12 @@ window.GDL_CATALOG = {
    "id": "games/slithergar",
    "path": "games/slithergar.html",
    "collection": "arcade",
-   "title": "SlitherGar.io",
-   "desc": "Slither + agar hybrid.",
+   "title": "Slurpentine",
+   "desc": "A ramen-bowl noodle brawl where length and girth are separate: long noodles are fast, fat noodles bite thin ones in half, and the chopsticks come for whoever is fattest.",
    "genre": [
-    ".io"
+    ".io",
+    "Action",
+    "Arcade"
    ],
    "controls": [
     "touch",
@@ -2524,24 +2526,10 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
-  },
-  {
-   "id": "PhoneGameLab2/candy-connect",
-   "path": "PhoneGameLab2/games/candy-connect/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Candy Connect",
-   "desc": "Draw a line through matching candies to clear them.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 14,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--candy-connect.jpg"
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--cakewalk.jpg"
   },
   {
    "id": "PhoneGameLab2/castle-craft",
@@ -2576,23 +2564,6 @@ window.GDL_CATALOG = {
    "n": 16,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--cats-and-cans.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/climber-tom",
-   "path": "PhoneGameLab2/games/climber-tom/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Climber Tom",
-   "desc": "Climb a wall by jumping between sides; dodge spikes.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 18,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--climber-tom.jpg"
   },
   {
    "id": "PhoneGameLab2/connect",
@@ -3288,6 +3259,21 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--pinata-drop.jpg"
   },
   {
+   "id": "PhoneGameLab2/pine-kick",
+   "path": "PhoneGameLab2/games/pine-kick/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Climber Tom",
+   "desc": "Tap to jump to the other wall. Avoid spikes.",
+   "genre": [
+    "Minigame"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": false
+  },
+  {
    "id": "PhoneGameLab2/planet-hop",
    "path": "PhoneGameLab2/games/planet-hop/index.html",
    "collection": "PhoneGameLab2",
@@ -3362,7 +3348,7 @@ window.GDL_CATALOG = {
    "path": "PhoneGameLab2/games/reef-relief/index.html",
    "collection": "PhoneGameLab2",
    "title": "Reef Relief",
-   "desc": "Swing the claw. Haul the junk. Spare the fish.",
+   "desc": "Haul the junk. Spare the fish.",
    "genre": [
     "Arcade"
    ],
@@ -3371,7 +3357,10 @@ window.GDL_CATALOG = {
     "mouse",
     "keyboard"
    ],
-   "v2": true
+   "v2": true,
+   "score": 8,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--reef-relief.jpg"
   },
   {
    "id": "PhoneGameLab2/rocket-fun",
@@ -3732,6 +3721,21 @@ window.GDL_CATALOG = {
    "n": 72,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--super-balloons.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/sweet-circuit",
+   "path": "PhoneGameLab2/games/sweet-circuit/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Candy Connect",
+   "desc": "Drag through 3+ matching candies (horizontal/vertical/diagonal neighbours).",
+   "genre": [
+    "Minigame"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": false
   },
   {
    "id": "PhoneGameLab2/tap-tap",

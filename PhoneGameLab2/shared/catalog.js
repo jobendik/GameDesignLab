@@ -4,13 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 14,
-    "slug": "candy-connect",
-    "t": "Candy Connect",
-    "d": "Draw a line through matching candies to clear them.",
-    "thumb": "../thumbs/PhoneGameLab2--candy-connect.jpg"
-   },
-   {
     "n": 15,
     "slug": "castle-craft",
     "t": "Castle Craft",
@@ -23,13 +16,6 @@ window.LAB_GAMES = [
     "t": "Cats & Cans",
     "d": "Classic shell game — track the cup hiding the cat.",
     "thumb": "../thumbs/PhoneGameLab2--cats-and-cans.jpg"
-   },
-   {
-    "n": 18,
-    "slug": "climber-tom",
-    "t": "Climber Tom",
-    "d": "Climb a wall by jumping between sides; dodge spikes.",
-    "thumb": "../thumbs/PhoneGameLab2--climber-tom.jpg"
    },
    {
     "n": 19,
@@ -464,6 +450,16 @@ window.LAB_GAMES = [
     "t": "Wire Ball",
     "d": "Drag a ring along a wire without touching it.",
     "thumb": "../thumbs/PhoneGameLab2--wire-ball.jpg"
+   },
+   {
+    "slug": "sweet-circuit",
+    "t": "Candy Connect",
+    "d": "Drag through 3+ matching candies (horizontal/vertical/diagonal neighbours)."
+   },
+   {
+    "slug": "pine-kick",
+    "t": "Climber Tom",
+    "d": "Tap to jump to the other wall. Avoid spikes."
    }
   ]
  },
@@ -511,7 +507,9 @@ window.LAB_GAMES = [
     "slug": "cakewalk",
     "t": "Cakewalk",
     "d": "Catch the cake on Momo's head. Walk gently!",
-    "v2": true
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--cakewalk.jpg"
    },
    {
     "slug": "gulp-and-float",
@@ -540,8 +538,10 @@ window.LAB_GAMES = [
    {
     "slug": "reef-relief",
     "t": "Reef Relief",
-    "d": "Swing the claw. Haul the junk. Spare the fish.",
-    "v2": true
+    "d": "Haul the junk. Spare the fish.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--reef-relief.jpg"
    },
    {
     "slug": "sunny-soak",
