@@ -1,0 +1,327 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Huddle Up</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* HUDDLE UP — the big picnic. Every pal on the field has a twin sitting on the same kind of blanket somewhere else.
+ * Tap a pal, then its twin: if the two can run to each other along a path with at most TWO BENDS through open grass
+ * (the path may loop round the outside of the field), they run, hug and join Nori's huddle.
+ * Core idea kept: connect matching happy faces. Unlike Sweet Circuit / Live Wires / Lantern Lane (drag a line through
+ * or between cells) this is a pair-reachability puzzle: you clear the way so twins can see each other.
+ * Depth, unlocking level by level:
+ *  - BLANKETS: the same pal on a gingham, striped or dotty blanket is a different twin (6 → 18 kinds).
+ *  - SLIDES (picnic 3+): after each hug the field shifts (down, left, up or right), re-opening and closing routes.
+ *  - SNOOZERS (picnic 4+): dozing pals can't be picked until a hug right next to them wakes them up (+bonus).
+ *  - Combo: hugs within 3 s of each other multiply; every hug buys back 2 s on Nori's stopwatch.
+ *  - Stuck fields reshuffle themselves; a hint (tap Nori's HINT button or H) costs 6 seconds.
+ * Identity: sunny mown meadow, cloth blankets with real patterns (pattern + pal, never colour alone), bunting paths. */
+let demo = false;
+Lab.init({
+  title: "Huddle Up", tagline: "Tap two twins. If they can reach each other, they hug!", category: "Puzzle", kicker: "Pocket Pals",
+  howto: ["Tap a pal, then its twin on the same blanket", "Their path can bend at most twice", "Hug fast for combos — the clock is ticking"],
+  theme: { bg: "#bfe8a0", bg2: "#fff3d6", fg: "#2f4a2a", muted: "#5e7a52", accent: "#ff6b6b", accent2: "#3e8ed0", light: true },
+  orient: "any", music: { style: "bounce", key: "F", bpm: 108, vol: .4 }, restart: start,
+  attract(dt, t) { if (!grid) { demo = true; setup(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink;
+const PALS = ["pip", "bun", "momo", "nori", "olli", "bolt"];
+const BLANK = [{ n: "gingham", a: "#ff6b6b", b: "#fff4ec" }, { n: "stripes", a: "#4a9be0", b: "#eef7ff" }, { n: "dots", a: "#ffc43d", b: "#fffbe8" }];
+const LEVELS = [
+  { c: 6, r: 7, k: 6, t: 80 }, { c: 6, r: 8, k: 9, t: 90 }, { c: 7, r: 8, k: 12, t: 100, g: "down" },
+  { c: 8, r: 8, k: 12, t: 100, z: 6 }, { c: 8, r: 9, k: 15, t: 110, g: "left", z: 8 },
+];
+const GRAV = ["down", "left", "up", "right"];
+const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+let huddle = [], W, H, S, land, P, panel, ts, bx0, by0, R, C, grid, level, cfg, time, tmax, score, combo, comboT, bestCombo, hugs, sel, hugsFx, hintPair, hintT,
+  nori, cursor, kbd, stuck, cleared, alive, shufT, idSeq, wakeN, lowTick;
+
+/* ---------- layout ---------- */
+function dims() { // logical board dims for this orientation
+  return land ? { R: cfg.c, C: cfg.r } : { R: cfg.r, C: cfg.c };
+}
+function layout() {
+  W = Lab.W; H = Lab.H; P = Lab.play; const wasLand = land; land = W > H * 1.1;
+  S = land ? clamp(Math.min(W / 844, H / 390), .7, 1.6) : clamp(Math.min(W / 390, H / 800), .7, 1.6);
+  panel = land ? { x: P.x + 10 * S, y: P.y + 10 * S, w: Math.min(190 * S, W * .26), h: P.h - 20 * S } : { x: P.x + 12 * S, y: P.y + 10 * S, w: P.w - 24 * S, h: 74 * S };
+  if (grid && wasLand !== undefined && wasLand !== land) transpose();
+  if (!R) return;
+  const ax = land ? panel.x + panel.w + 8 * S : P.x + 6 * S, ay = land ? P.y + 6 * S : panel.y + panel.h + 8 * S;
+  const aw = (land ? P.x + P.w - 8 * S : P.x + P.w - 6 * S) - ax, ah = H - Lab.safe.bottom - 10 * S - ay;
+  ts = Math.floor(Math.min(aw / (C + 1.1), ah / (R + 1.1), 76 * S));
+  bx0 = ax + (aw - ts * C) / 2; by0 = ay + (ah - ts * R) / 2;
+  Lab.sprite.clear("hu-");
+}
+Lab.onResize(layout);
+function transpose() {
+  const g = []; for (let c = 0; c < C; c++) { g.push([]); for (let r = 0; r < R; r++) g[c].push(grid[r][c]); }
+  grid = g; const t = R; R = C; C = t; sel = null; hintPair = null; cursor = { r: 0, c: 0 };
+}
+const cx = c => c < 0 ? bx0 - ts * .38 : c >= C ? bx0 + C * ts + ts * .38 : bx0 + (c + .5) * ts;
+const cy = r => r < 0 ? by0 - ts * .38 : r >= R ? by0 + R * ts + ts * .38 : by0 + (r + .5) * ts;
+
+/* ---------- board ---------- */
+function setup() {
+  R = 0; C = 0; level = 1; score = 0; combo = 0; comboT = 0; bestCombo = 0; hugs = 0; huddle = []; hugsFx = []; sel = null; hintPair = null; hintT = 0; wakeN = 0;
+  nori = { sq: 0, joy: 0, wow: 0, look: 0 }; cursor = { r: 0, c: 0 }; kbd = false; alive = true; shufT = 0; idSeq = 0; lowTick = 0;
+  newLevel();
+}
+function levelCfg(n) {
+  if (n <= LEVELS.length) return LEVELS[n - 1];
+  return { c: 8, r: 10, k: 18, t: Math.max(85, 120 - (n - 6) * 6), g: GRAV[(n - 6) % 4], z: Math.min(14, 8 + (n - 6) * 2) };
+}
+function newLevel() {
+  cfg = levelCfg(level); grid = null; layout(); const d = dims(); R = d.R; C = d.C; layout();
+  const n = R * C, kinds = [];
+  for (let i = 0; i < n / 2; i++) { const k = i % cfg.k; kinds.push(k, k); }
+  Lab.shuffle(kinds);
+  grid = []; for (let r = 0; r < R; r++) { grid.push([]); for (let c = 0; c < C; c++) grid[r].push(mkTile(kinds[r * C + c], r, c)); }
+  if (cfg.z) { const all = tiles(); Lab.shuffle(all); for (let i = 0; i < cfg.z && i < all.length; i++) all[i].sleep = true; }
+  time = tmax = cfg.t; sel = null; hintPair = null; cleared = false; stuck = 0;
+  ensureMoves(true);
+}
+function mkTile(k, r, c) { return { k, pal: PALS[k % 6], bl: Math.floor(k / 6), sleep: false, id: idSeq++, ox: 0, oy: 0, pop: 0, born: (r + c) * .035, hop: 0, shake: 0 }; }
+function tiles() { const out = []; for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) if (grid[r][c]) out.push(Object.assign(grid[r][c], { r, c })); return out; }
+const empty = (r, c) => r < 0 || r >= R || c < 0 || c >= C || !grid[r][c];
+function findPath(a, b) {
+  const key = (r, c) => (r + 1) * (C + 2) + (c + 1), par = new Map(); par.set(key(a.r, a.c), null);
+  let frontier = [[a.r, a.c]];
+  for (let t = 0; t < 3; t++) {
+    const next = [];
+    for (const [r, c] of frontier) for (const [dr, dc] of DIRS) {
+      let rr = r + dr, cc = c + dc;
+      while (rr >= -1 && rr <= R && cc >= -1 && cc <= C) {
+        const k = key(rr, cc);
+        if (rr === b.r && cc === b.c) { par.set(k, [r, c]); const pts = [[b.r, b.c]]; let p = [r, c]; while (p) { pts.push(p); p = par.get(key(p[0], p[1])); } return pts.reverse(); }
+        if (!empty(rr, cc)) break;
+        if (!par.has(k)) { par.set(k, [r, c]); next.push([rr, cc]); }
+        rr += dr; cc += dc;
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+function findPair() {
+  const byK = {}; for (const t of tiles()) if (!t.sleep) (byK[t.k] = byK[t.k] || []).push(t);
+  for (const k in byK) { const l = byK[k]; for (let i = 0; i < l.length; i++) for (let j = i + 1; j < l.length; j++) { const p = findPath(l[i], l[j]); if (p) return [l[i], l[j], p]; } }
+  return null;
+}
+function ensureMoves(quiet) {
+  if (!tiles().length || findPair()) return;
+  let tries = 0;
+  do {
+    tries++;
+    const ts0 = tiles(); if (tries > 12) for (const t of ts0) t.sleep = false;
+    const pos = ts0.map(t => [t.r, t.c]); Lab.shuffle(pos);
+    for (const t of ts0) grid[t.r][t.c] = null;
+    ts0.forEach((t, i) => { const [r, c] = pos[i]; t.ox += cx(t.c) - cx(c); t.oy += cy(t.r) - cy(r); grid[r][c] = t; t.r = r; t.c = c; });
+  } while (!findPair() && tries < 60);
+  if (!quiet && !demo) { Lab.toast("Nobody can reach — swap blankets!", 1500, { y: .5 }); Lab.sfx("whoosh"); Lab.sfx("whistle", { vol: .5 }); nori.wow = 1.2; }
+  shufT = .6; stuck++;
+}
+
+/* ---------- play ---------- */
+function start() {
+  demo = false; setup(); Lab.setScore(0);
+  Lab.input.onDown = [(x, y) => { if (!alive) return; kbd = false; if (hitHint(x, y)) { hint(); return; } const h = pick(x, y); if (h) tap(h.r, h.c); }];
+  Lab.input.onKey = [k => {
+    if (!alive) return; kbd = true;
+    if (k === "ArrowLeft") cursor.c = Math.max(0, cursor.c - 1); else if (k === "ArrowRight") cursor.c = Math.min(C - 1, cursor.c + 1);
+    else if (k === "ArrowUp") cursor.r = Math.max(0, cursor.r - 1); else if (k === "ArrowDown") cursor.r = Math.min(R - 1, cursor.r + 1);
+    else if (k === " " || k === "Enter") tap(cursor.r, cursor.c); else if (k === "h" || k === "H") hint();
+  }];
+  Lab.expose({
+    get score() { return score; }, get level() { return level; }, get time() { return time; }, get combo() { return combo; }, get hugs() { return hugs; },
+    get dims() { return { R, C }; }, get selected() { return sel ? { r: sel.r, c: sel.c } : null; }, get left() { return tiles().length; }, get stuck() { return stuck; },
+    tiles: () => tiles().map(t => ({ r: t.r, c: t.c, k: t.k, sleep: t.sleep })), cell: (r, c) => ({ x: cx(c), y: cy(r) }),
+    pair() { const p = findPair(); return p ? [{ r: p[0].r, c: p[0].c }, { r: p[1].r, c: p[1].c }] : null; }, path: (a, b) => findPath(a, b),
+    tap, hint, setTime(v) { time = v; }, setLevel(n) { level = n; newLevel(); }, get grav() { return cfg.g || null; },
+  });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+function pick(x, y) {
+  const c = Math.floor((x - bx0) / ts), r = Math.floor((y - by0) / ts);
+  if (r < 0 || r >= R || c < 0 || c >= C || !grid[r][c]) return null; return { r, c };
+}
+function tap(r, c) {
+  if (!alive || cleared) return false;
+  const t = grid[r] && grid[r][c]; if (!t) return false; t.r = r; t.c = c; cursor = { r, c };
+  if (t.sleep) { t.shake = 1; snd("tap", { pitch: .6 }); if (!demo) fx.text(cx(c), cy(r) - ts * .5, "zzz…", { color: "#5b6bb0", size: 13 * S }); return false; }
+  if (!sel) { sel = t; t.hop = 1; snd("pop", { pitch: 1 + (t.k % 6) * .08 }); return true; }
+  if (sel === t) { sel = null; snd("tap", { pitch: .8 }); return false; }
+  if (sel.k !== t.k) { sel = t; t.hop = 1; snd("pop", { pitch: 1 + (t.k % 6) * .08 }); return false; }
+  const path = findPath(sel, t);
+  if (!path) { t.shake = 1; sel.shake = 1; snd("error", { vol: .5 }); if (!demo) fx.text(cx(c), cy(r) - ts * .5, "Can't reach!", { color: "#d0453b", size: 14 * S }); sel = t; return false; }
+  hug(sel, t, path); sel = null; return true;
+}
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function hug(a, b, path) {
+  const pts = path.map(([r, c]) => [cx(c), cy(r)]);
+  grid[a.r][a.c] = null; grid[b.r][b.c] = null; if (hintPair && (hintPair.includes(a) || hintPair.includes(b))) hintPair = null;
+  combo = comboT > 0 ? combo + 1 : 1; comboT = 3; bestCombo = Math.max(bestCombo, combo); hugs++;
+  const m = 1 + .5 * Math.min(combo - 1, 8), pts0 = Math.round(10 * level * m);
+  score += pts0; time = Math.min(tmax, time + 2);
+  hugsFx.push({ a, b, pts, t: 0, len: pathLen(pts), gain: pts0 });
+  // wake neighbours
+  let woke = 0;
+  for (const s of [a, b]) for (const [dr, dc] of DIRS) { const n = !empty(s.r + dr, s.c + dc) && grid[s.r + dr][s.c + dc]; if (n && n.sleep) { n.sleep = false; n.hop = 1; woke++; if (!demo) fx.text(cx(s.c + dc), cy(s.r + dr) - ts * .4, "Awake! +" + 15 * level, { color: "#3e8ed0", size: 13 * S }); } }
+  if (woke) { score += 15 * level * woke; wakeN += woke; snd("boing", { pitch: 1.2 }); }
+  if (!demo) { Lab.setScore(score); if (combo > 2) Lab.bumpScore(); }
+  snd("chime", { pitch: .9 + Math.min(combo, 8) * .06, vol: .6 }); if (!demo && combo > 1) Lab.audio.combo(Math.min(12, combo), { vol: .16 });
+  nori.joy = combo > 2 ? 1.2 : .6;
+  if (cfg.g) slide(cfg.g);
+  if (!tiles().length) { cleared = true; Lab.after(1.1, levelDone); }
+  else ensureMoves(false);
+}
+function pathLen(p) { let l = 0; for (let i = 1; i < p.length; i++) l += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]); return l; }
+function at(p, d) { for (let i = 1; i < p.length; i++) { const l = Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]); if (d <= l || i === p.length - 1) { const u = l ? clamp(d / l, 0, 1) : 0; return [lerp(p[i - 1][0], p[i][0], u), lerp(p[i - 1][1], p[i][1], u)]; } d -= l; } return p[0]; }
+function slide(dir) {
+  const vert = dir === "down" || dir === "up", outer = vert ? C : R, inner = vert ? R : C, toEnd = dir === "down" || dir === "right";
+  for (let o = 0; o < outer; o++) {
+    const line = []; for (let i = 0; i < inner; i++) { const r = vert ? i : o, c = vert ? o : i; if (grid[r][c]) line.push(grid[r][c]); grid[r][c] = null; }
+    line.forEach((t, j) => {
+      const i = toEnd ? inner - line.length + j : j, r = vert ? i : o, c = vert ? o : i;
+      t.ox += cx(t.c) - cx(c); t.oy += cy(t.r) - cy(r); t.r = r; t.c = c; grid[r][c] = t;
+    });
+  }
+  if (sel && !grid[sel.r][sel.c]) sel = null;
+}
+function hint() {
+  if (!alive || cleared || hintT > 0) return;
+  const p = findPair(); if (!p) return; hintPair = [p[0], p[1]]; hintT = 3; time = Math.max(1, time - 6);
+  snd("whistle", { vol: .5, pitch: 1.2 }); nori.wow = .8; if (!demo) fx.text(panel.x + panel.w * (land ? .5 : .85), panel.y + panel.h + (land ? -60 : 14) * S, "−6 s", { color: "#d0453b", size: 16 * S });
+}
+function levelDone() {
+  if (!alive) return;
+  const bonus = 50 * level + Math.round(time) * 5;
+  score += bonus; if (!demo) { Lab.setScore(score); Lab.bumpScore(); Lab.banner("Picnic " + level + " cleared! +" + bonus, { color: "#ff6b6b", ms: 1500, y: .4 }); Lab.sfx("levelup"); Lab.fx.confetti && level % 2 === 0 && Lab.fx.confetti(); }
+  level++; newLevel(); nori.joy = 2;
+  if (!demo) { const c2 = levelCfg(level), msg = level === 2 ? "New blanket: stripes!" : level === 3 ? "The field slides after every hug!" : level === 4 ? "Snoozers! Hug next to them to wake them" : level === 5 ? "Dotty blankets join in" : "Picnic " + level + " · slides " + c2.g; Lab.after(.4, () => Lab.toast(msg, 2200, { y: .55 })); }
+}
+function lose() {
+  alive = false; Lab.music.intensity(0);
+  Lab.gameover({ title: "Oops! Picnic's packed up", message: "Nori's stopwatch ran out. More hugs next time!", score, stats: [["Picnics cleared", level - 1], ["Hugs", hugs], ["Best combo", "×" + bestCombo]] });
+}
+
+/* ---------- tick ---------- */
+function tick(dt) {
+  if (!grid) return;
+  if (comboT > 0) { comboT -= dt; if (comboT <= 0) combo = 0; }
+  hintT = Math.max(0, hintT - dt); if (hintT <= 0) hintPair = null; shufT = Math.max(0, shufT - dt);
+  if (alive && !cleared && !demo) {
+    time -= dt;
+    if (time < 10) { lowTick -= dt; if (lowTick <= 0) { lowTick = 1; Lab.sfx("tick", { pitch: 1.4, vol: .5 }); } }
+    Lab.music.intensity(clamp(.35 + (1 - time / tmax) * .6, 0, 1));
+    if (time <= 0) { time = 0; lose(); }
+  }
+  for (const t of tiles()) { t.ox = Lab.damp(t.ox, 0, 11, dt); t.oy = Lab.damp(t.oy, 0, 11, dt); t.hop = Math.max(0, t.hop - dt * 2.5); t.shake = Math.max(0, t.shake - dt * 3); t.born = Math.max(-1, t.born - dt); t.pop = Math.min(1, t.pop + (t.born <= 0 ? dt * 4 : 0)); }
+  for (const h of hugsFx) { h.t += dt; if (h.t > .75 && !h.burst) { h.burst = 1; const m = at(h.pts, h.len / 2); if (!demo) { fx.burst(m[0], m[1], { n: 10, colors: ["#ff8fb8", "#ff6b6b", "#fff"], speed: 140, life: .6, size: 4 * S, shape: "circle", gravity: -40 }); fx.text(clamp(m[0], 46 * S, W - 46 * S), m[1] - ts * .6, "+" + h.gain + (combo > 1 ? " ×" + (1 + .5 * Math.min(combo - 1, 8)) : ""), { color: "#ff6b6b", size: 15 * S }); } } }
+  for (const h of hugsFx) if (h.t >= 1.25) { huddle.push(h.a.pal, h.b.pal); if (huddle.length > 24) huddle.splice(0, 2); }
+  hugsFx = hugsFx.filter(h => h.t < 1.25);
+  nori.joy = Math.max(0, nori.joy - dt); nori.wow = Math.max(0, nori.wow - dt);
+  if (demo) { demoT = (demoT || 0) + dt; if (demoT > 1.1) { demoT = 0; const p = findPair(); if (p) { tap(p[0].r, p[0].c); tap(p[1].r, p[1].c); } else setup(); if (level > 2) setup(); } }
+}
+let demoT = 0;
+
+/* ---------- drawing ---------- */
+function field() {
+  return Lab.sprite("hu-bg", W + 80, H + 80, g => {
+    g.translate(40, 40);
+    draw.vgrad(g, -40, -40, W + 80, H + 80, ["#d4f2b5", "#b5e391", "#9fd47e"]);
+    g.fillStyle = "rgba(255,255,255,.12)"; for (let i = -2; i < (W + 80) / (48 * S) + 2; i += 2) g.fillRect(-40 + i * 48 * S, -40, 48 * S, H + 80);
+    for (let i = 0; i < 70; i++) { const x = ((i * 97) % 1000) / 1000 * (W + 80) - 40, y = ((i * 61) % 1000) / 1000 * (H + 80) - 40; const col = i % 7 === 0 ? "#fff" : i % 7 === 1 ? "#ffd23f" : null; if (col) { draw.circle(g, x, y, 2.6 * S, col); draw.circle(g, x, y, 1 * S, "#ff9f43"); } else { g.strokeStyle = "rgba(60,120,40,.35)"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, y); g.lineTo(x - 2 * S, y - 6 * S); g.moveTo(x + 3 * S, y); g.lineTo(x + 4 * S, y - 7 * S); g.stroke(); } }
+    // field edge: a hedge frame around the board
+    draw.rect(g, bx0 - ts * .62, by0 - ts * .62, ts * (C + 1.24), ts * (R + 1.24), ts * .4, "rgba(80,140,60,.25)");
+    draw.rect(g, bx0 - ts * .5, by0 - ts * .5, ts * (C + 1), ts * (R + 1), ts * .32, "rgba(240,255,220,.35)", "rgba(80,140,60,.35)", 2);
+  });
+}
+function blanket(bl) {
+  const s = ts * .9;
+  return Lab.sprite("hu-bl" + bl + "-" + ts, s, s, g => {
+    const B = BLANK[bl]; draw.rect(g, 1, 2, s - 2, s - 2, s * .18, "rgba(40,70,30,.25)"); draw.rect(g, 0, 0, s - 2, s - 3, s * .18, B.b);
+    g.save(); draw.rr(g, 0, 0, s - 2, s - 3, s * .18); g.clip(); g.fillStyle = Lab.color.alpha(B.a, .55);
+    if (bl === 0) { const q = s / 5; for (let i = 0; i < 5; i++) { g.fillRect(i * q, 0, q / 2, s); g.fillRect(0, i * q, s, q / 2); } }
+    else if (bl === 1) { const q = s / 6; for (let i = -6; i < 12; i++) { g.beginPath(); g.moveTo(i * q, 0); g.lineTo(i * q + q * .5, 0); g.lineTo(i * q + q * .5 - s, s); g.lineTo(i * q - s, s); g.fill(); } }
+    else { for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) draw.circle(g, (i + .5 + (j % 2) * .5) * s / 4, (j + .5) * s / 4, s * .06, B.a); }
+    g.restore(); draw.rect(g, 0, 0, s - 2, s - 3, s * .18, null, Lab.color.shade(B.a, -.15), 2);
+  });
+}
+function palSprite(pal, sleep) {
+  const s = ts * 1.1;
+  return Lab.sprite("hu-p" + pal + (sleep ? "z" : "") + "-" + ts, s, s, g => { Pals.draw(g, pal, s / 2, s * .56, ts * .54, { mood: sleep ? "sleepy" : "happy", shadow: false, arms: "down" }); });
+}
+function drawTile(c, t, now) {
+  if (t.pop <= 0) return;
+  const shake = Math.sin(t.shake * 30) * t.shake * 4 * S, x = cx(t.c) + t.ox + shake, y = cy(t.r) + t.oy, p = ease.outBack(t.pop), s = ts * .9 * p;
+  const isSel = sel === t, isHint = hintPair && hintPair.includes(t) && Math.sin(now * 10) > -.3;
+  if (isSel || isHint) draw.glow(c, x, y, ts * .85, isSel ? "#fff27a" : "#7ad0ff", .8);
+  c.drawImage(blanket(t.bl), x - s / 2, y - s / 2 + (isSel ? -2 * S : 0), s, s);
+  const hop = Math.sin(t.hop * Math.PI) * ts * .16;
+  if (isSel || t.hop > 0) {
+    Pals.draw(c, t.pal, x, y + ts * .06 - hop - (isSel ? ts * .05 : 0), ts * .5 * p, { t: now, mood: isSel ? "wow" : "joy", arms: isSel ? "wave" : "cheer", shadow: false, squash: isSel ? Math.sin(now * 8) * .05 : 0 });
+  } else {
+    const ps = palSprite(t.pal, t.sleep), w = ts * 1.1 * p; c.drawImage(ps, x - w / 2, y + ts * .06 - w * .56, w, w);
+    if (t.sleep) { c.fillStyle = "rgba(70,80,160,.72)"; draw.rr(c, x - s * .44, y + s * .04, s * .88, s * .42, s * .14); c.fill(); c.fillStyle = "rgba(255,255,255,.35)"; for (let i = 0; i < 3; i++) draw.circle(c, x - s * .26 + i * s * .26, y + s * .26, s * .045, "rgba(255,255,255,.45)");
+      const zz = (now * .7 + t.id * .37) % 1; c.globalAlpha = 1 - zz; draw.text(c, "Zz", x + ts * .26 + zz * ts * .12, y - ts * .28 - zz * ts * .25, { size: ts * .26, color: "#3a4a9a", weight: 800, stroke: "#fff", strokeW: 3 }); c.globalAlpha = 1; }
+  }
+  if (isSel) draw.rect(c, x - s / 2, y - s / 2 - 2 * S, s, s, s * .18, null, "#ff6b6b", 3);
+}
+function drawHug(c, h, now) {
+  const u = clamp(h.t / .3, 0, 1), L = h.len;
+  // bunting rope along the path
+  c.save(); c.globalAlpha = h.t > .9 ? clamp(1 - (h.t - .9) / .35, 0, 1) : 1;
+  c.strokeStyle = "#8a5a2f"; c.lineWidth = 2.5 * S; c.lineJoin = "round"; c.beginPath();
+  const n = 40; for (let i = 0; i <= n; i++) { const d = L * (.5 - u / 2 + u * i / n), q = at(h.pts, d); i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]); } c.stroke();
+  const cols = [Pals.cast[h.a.pal].body, "#fff4ec", BLANK[h.a.bl].a];
+  for (let d = L * (.5 - u / 2), i = 0; d < L * (.5 + u / 2); d += 16 * S, i++) { const q = at(h.pts, d); c.fillStyle = cols[i % 3]; c.beginPath(); c.moveTo(q[0] - 5 * S, q[1]); c.lineTo(q[0] + 5 * S, q[1]); c.lineTo(q[0], q[1] + 9 * S); c.fill(); }
+  c.restore();
+  // the twins run to the middle, hug, then float off to the huddle
+  const run = ease.inOutQuad(clamp((h.t - .1) / .5, 0, 1)), mid = L / 2, up = clamp((h.t - .85) / .4, 0, 1);
+  const tgt = huddleXY();
+  for (const [tt, d] of [[h.a, run * (mid - ts * .22)], [h.b, L - run * (mid - ts * .22)]]) {
+    let [x, y] = at(h.pts, d); const flip = tt === h.b;
+    if (up > 0) { x = lerp(x, tgt[0], ease.inQuad(up)); y = lerp(y, tgt[1], ease.inQuad(up)) - Math.sin(up * Math.PI) * 40 * S; }
+    const hop = run < 1 ? Math.abs(Math.sin(h.t * 22)) * ts * .12 : 0;
+    Pals.draw(c, tt.pal, x, y - hop, ts * .5 * (1 - up * .5), { t: now, mood: run >= 1 ? "joy" : "happy", arms: run >= 1 ? "up" : "down", flip, shadow: false, tilt: run >= 1 && up === 0 ? (flip ? -.2 : .2) : 0, alpha: 1 - up * .6 });
+  }
+  if (run >= 1 && up < .5) { const m = at(h.pts, mid); draw.heart(c, m[0], m[1] - ts * .55 - (h.t - .6) * 30 * S, 8 * S, "#ff6b8a"); }
+}
+function noriXY() { return land ? [panel.x + panel.w * .5, panel.y + 70 * S] : [panel.x + 40 * S, panel.y + 34 * S]; }
+function huddleXY() { return land ? [panel.x + panel.w * .5, hintBtn().y - 30 * S] : [panel.x + 40 * S, panel.y + 34 * S]; }
+function hintBtn() { return land ? { x: panel.x + 12 * S, y: panel.y + panel.h - 50 * S, w: panel.w - 24 * S, h: 40 * S } : { x: panel.x + panel.w - 74 * S, y: panel.y + 14 * S, w: 66 * S, h: 46 * S }; }
+function hitHint(x, y) { const b = hintBtn(); return x >= b.x - 6 && x <= b.x + b.w + 6 && y >= b.y - 6 && y <= b.y + b.h + 6; }
+function render(now) {
+  if (!grid) return; const c = Lab.ctx;
+  c.drawImage(field(), -40, -40, W + 80, H + 80);
+  // panel
+  draw.rect(c, panel.x, panel.y, panel.w, panel.h, 18 * S, "rgba(255,251,240,.88)", "rgba(80,140,60,.35)", 2);
+  const low = time < 10 && alive, nm = nori.wow > 0 ? "wow" : nori.joy > 0 ? "joy" : low ? "scared" : sel ? "think" : "happy";
+  const [nx, ny] = noriXY(), ns = (land ? 62 : 44) * S;
+  const na = Pals.draw(c, "nori", nx, ny + (land ? 0 : 2 * S), ns, { t: now, mood: nm, arms: nori.joy > 0 ? "cheer" : "hold", hot: low ? .7 : 0, squash: -nori.joy * .05, shadow: false, look: sel ? [clamp((cx(sel.c) - nx) / W * 2, -1, 1), .5] : [.3, .2] });
+  const [hx, hy] = na.handR; draw.circle(c, hx, hy, 7 * S, "#fff", INK, 2); c.strokeStyle = "#ff6b6b"; c.lineWidth = 2; c.beginPath(); c.moveTo(hx, hy); const ang = -Math.PI / 2 + (1 - time / tmax) * TAU; c.lineTo(hx + Math.cos(ang) * 5 * S, hy + Math.sin(ang) * 5 * S); c.stroke();
+  // level + timer
+  const tx = land ? panel.x + 14 * S : panel.x + 84 * S, tw = land ? panel.w - 28 * S : panel.w - 84 * S - 86 * S, ty = land ? panel.y + 130 * S : panel.y + 46 * S;
+  draw.text(c, "Picnic " + level, tx, ty - 20 * S, { size: 16 * S, color: "#2f4a2a", align: "left", weight: 800 });
+  if (combo > 1) draw.text(c, "combo ×" + (1 + .5 * Math.min(combo - 1, 8)), tx + tw, ty - 20 * S, { size: 13 * S, color: "#ff6b6b", align: "right", weight: 800 });
+  draw.rect(c, tx, ty - 6 * S, tw, 12 * S, 6 * S, "rgba(47,74,42,.15)");
+  const tf = clamp(time / tmax, 0, 1); draw.rect(c, tx, ty - 6 * S, tw * tf, 12 * S, 6 * S, low ? (Math.sin(now * 12) > 0 ? "#ff6b6b" : "#ff9f43") : tf < .35 ? "#ffb347" : "#5fc46a");
+  draw.text(c, Math.ceil(time) + "s", tx + tw, ty + 18 * S, { size: 12 * S, color: "#5e7a52", align: "right", weight: 700 });
+  if (land) { draw.text(c, "Hugs " + hugs, tx, ty + 18 * S, { size: 12 * S, color: "#5e7a52", align: "left", weight: 700 }); draw.text(c, "Left " + tiles().length, tx, ty + 40 * S, { size: 12 * S, color: "#5e7a52", align: "left", weight: 700 }); }
+  if (land) { // the huddle: everyone who has hugged so far, piled up in the panel
+    const top = ty + 58 * S, bot = hintBtn().y - 10 * S, cols = 4, cw = (panel.w - 24 * S) / cols, rows = Math.max(0, Math.floor((bot - top) / (cw * .8))), n = Math.min(huddle.length, cols * rows), start = huddle.length - n;
+    for (let i = 0; i < n; i++) { const r = Math.floor(i / cols), k = i % cols, sp = palSprite(huddle[start + i], false), w = cw * 1.1; c.drawImage(sp, panel.x + 12 * S + k * cw + cw / 2 - w / 2, bot - (r + 1) * cw * .8 - w * .2, w, w); }
+  }
+  // hint button
+  const b = hintBtn(), on = hintT <= 0 && alive && !cleared;
+  draw.rect(c, b.x, b.y, b.w, b.h, 12 * S, on ? "#3e8ed0" : "#a9c3d8", Lab.color.shade("#3e8ed0", -.3), 2);
+  draw.text(c, "Hint", b.x + b.w / 2, b.y + b.h * .38, { size: 14 * S, color: "#fff", weight: 800 }); draw.text(c, "−6 s", b.x + b.w / 2, b.y + b.h * .74, { size: 10 * S, color: "#dbeeff", weight: 700 });
+  // tiles
+  const ts0 = tiles(); for (const t of ts0) if (t !== sel) drawTile(c, t, now); if (sel && grid[sel.r][sel.c] === sel) drawTile(c, sel, now);
+  if (kbd && alive) draw.rect(c, bx0 + cursor.c * ts + 2, by0 + cursor.r * ts + 2, ts - 4, ts - 4, ts * .2, null, "#3e8ed0", 3);
+  for (const h of hugsFx) drawHug(c, h, now);
+  if (cfg.g && !land) draw.text(c, "slides " + ({ down: "↓", up: "↑", left: "←", right: "→" })[cfg.g], bx0 + C * ts, by0 - ts * .5 - 2 * S, { size: 11 * S, color: "#3d6b33", align: "right", weight: 800 });
+}
+Lab.boot();
+})();
+</script></body></html>

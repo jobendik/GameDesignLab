@@ -1,0 +1,349 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Bumpy Bus</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* BUMPY BUS — Pip drives the little camp bus down a hilly country road, and the passengers ride on the ROOF RACK.
+ * Side view, one thumb: HOLD to drive, LET GO to brake. Stop at each bus stop to pick up a pal (stop on the sign for a
+ * Perfect Stop), then stop at the campsite to drop everyone off before the sun goes down.
+ * Core idea kept: drive down the road and deal with what's on it. The verb is new (siblings Sundown Sprint and Paper
+ * Rapids steer/dodge from above): here you only control SPEED, and speed is a trade-off —
+ *  - bumps and crests launch the bus at speed; a hard landing bounces the riders into the air;
+ *  - braking while a rider is in the air leaves them flying forward off the roof (lost!) — ease off, don't stamp;
+ *  - too slow and the daylight runs out; every campsite buys more daylight;
+ *  - creeks with broken bridges need speed off the ramp (fall short = splash, back up and lose 4 s).
+ * Stages add potholes, tall bumps, crests and creeks; the sky goes from morning to starry night.
+ * Physics: fixed 1/120 s step; the bus follows the ground until the ground drops away faster than gravity, then it
+ * flies; riders are seated on the rack and only fly when a landing impact throws them, then land back by themselves. */
+let demo = false;
+Lab.init({
+  title: "Bumpy Bus", tagline: "Pick up your pals. Don't bounce them off the roof!", category: "Arcade", kicker: "Pocket Pals",
+  howto: ["Hold to drive, let go to brake", "Stop at the signs to pick pals up", "Never brake while someone's in the air!"],
+  theme: { bg: "#bfe6ff", bg2: "#fff2d0", fg: "#2d3a55", muted: "#5d6b88", accent: "#ff8a3d", accent2: "#3aa0d8", light: true },
+  orient: "any", music: { style: "bounce", key: "D", bpm: 118, vol: .36 }, restart: start,
+  attract(dt, t) { if (!pts) { demo = true; setup(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink;
+const STEP = 8, G = 1100, ACC = 300, BRAKE = 620, VMAX = 430, HB = 1 / 120, ROOF = 56, SEATS = [-36, -12, 12, 36];
+const WEIGHT = { bun: 1.15, momo: 1, nori: .9, olli: 1.05, bolt: .8, pip: 1 };
+const RIDERS = ["momo", "nori", "olli", "bolt"];
+let stopSeq = 0;
+const SKIES = [["#bfe6ff", "#fff2d0"], ["#9ed8ff", "#e9f8ff"], ["#ffc48a", "#ffe6b0"], ["#e58fb0", "#ffc89a"], ["#2c3266", "#6b5a9a"]];
+let W, H, S, Z, land, P, pts, px0, genX, baseY, queue, decor, stops, stations, bus, riders, lost, stage, day, score, camX, camY, acc, gas, braking,
+  delivered, lostN, perfect, airT, bestAir, eng, squeal, toastT, splashT, stageX0, planned;
+
+/* ---------- layout ---------- */
+function layout() {
+  W = Lab.W; H = Lab.H; P = Lab.play; land = W > H * 1.1;
+  S = land ? clamp(Math.min(W / 844, H / 390), .7, 1.6) : clamp(Math.min(W / 390, H / 800), .7, 1.6);
+  Z = land ? clamp(H / 420, .7, 1.6) : clamp(W / 430, .7, 1.4);
+  Lab.sprite.clear("bb-");
+}
+Lab.onResize(layout);
+const vw = () => W / Z;
+const sx = x => (x - camX) * Z, sy = y => (y - camY) * Z;
+
+/* ---------- terrain ---------- */
+function rnd(a, b) { return a + Math.random() * (b - a); }
+function plan(n) {
+  const L = [{ t: "flat", len: 240 }], stopsN = n === 1 ? 2 : 3;
+  const feat = () => {
+    const pool = ["hill", "flat", "bump", "hill", "bump"]; if (n >= 2) pool.push("pot", "slope", "bump2"); if (n >= 3) pool.push("crest", "crest", "bumps"); if (n >= 4) pool.push("creek", "creek");
+    const t = Lab.choose(pool);
+    if (t === "hill") return { t: "hill", len: rnd(300, 520), a: rnd(30, 60 + n * 6) };
+    if (t === "flat") return { t: "flat", len: rnd(90, 220) };
+    if (t === "bump") return { t: "hill", len: rnd(60, 80), a: rnd(16, 24) };
+    if (t === "bump2") return { t: "hill", len: rnd(66, 84), a: rnd(26, 34) };
+    if (t === "bumps") return { t: "bumps", len: 200, a: rnd(16, 22) };
+    if (t === "pot") return { t: "hill", len: 44, a: -14 };
+    if (t === "slope") return { t: "slope", len: rnd(260, 380), a: Lab.choose([-1, 1]) * rnd(40, 80) };
+    if (t === "crest") return { t: "hill", len: rnd(320, 420), a: rnd(80, 120) };
+    return { t: "creek", len: 340, gap: rnd(110, 160 + n * 8) };
+  };
+  for (let s = 0; s < stopsN; s++) { for (let i = 0; i < 3 + Math.min(4, n); i++) L.push(feat()); L.push({ t: "flat", len: 140 }, { t: "stop", len: 180 }, { t: "flat", len: 80 }); }
+  for (let i = 0; i < 3; i++) L.push(feat());
+  L.push({ t: "flat", len: 160 }, { t: "station", len: 320, n }, { t: "flat", len: 160 });
+  return L;
+}
+function extend(toX) {
+  while (genX < toX) {
+    if (!queue.length) { planned++; queue = plan(planned); }
+    const p = queue.shift(), x0 = genX, b0 = baseY, n = Math.ceil(p.len / STEP);
+    if (p.t === "stop") { const id = RIDERS[stopSeq++ % RIDERS.length]; stops.push({ x: x0 + p.len / 2, pal: id, st: "wait", stage: planned, react: 0 }); decor.push({ k: "warn", x: x0 + p.len / 2 - 420 }); }
+    if (p.t === "station") stations.push({ x: x0 + p.len / 2, stage: p.n, done: false });
+    for (let i = 1; i <= n; i++) {
+      const u = i / n, x = x0 + i * STEP; let y = b0;
+      if (p.t === "hill") y = b0 - p.a * (1 - Math.cos(u * TAU)) / 2;
+      else if (p.t === "bumps") y = b0 - p.a * (1 - Math.cos(u * TAU * 3)) / 2;
+      else if (p.t === "slope") { y = b0 - p.a * (u * u * (3 - 2 * u)); baseY = y; }
+      else if (p.t === "creek") {
+        const ramp = 90, gx = (x - x0);
+        if (gx < ramp) y = b0 - 30 * Math.sin(gx / ramp * Math.PI / 2);
+        else if (gx < ramp + p.gap) { y = null; }
+        else y = b0;
+        if (gx >= ramp && gx < ramp + STEP) decor.push({ k: "creek", x: x0 + ramp, w: p.gap, y: b0 });
+      }
+      pts.push(y);
+    }
+    genX = x0 + n * STEP;
+    if (p.t !== "slope") baseY = b0;
+    if (p.t === "flat" || p.t === "hill") for (let d = x0 + rnd(20, 90); d < genX - 20; d += rnd(90, 240)) decor.push({ k: Lab.choose(["tree", "tree", "bush", "flowers", "fence"]), x: d, s: rnd(.8, 1.25) });
+  }
+  // trim far behind
+  const cut = Math.floor((camX - 600 - px0) / STEP); if (cut > 200) { pts.splice(0, cut); px0 += cut * STEP; }
+  decor = decor.filter(d => d.x > camX - 400); stops = stops.filter(s => s.x > camX - 400 || s.st === "wait");
+}
+function ground(x) {
+  const f = (x - px0) / STEP, i = Math.floor(f);
+  if (i < 0 || i + 1 >= pts.length) return 1e5;
+  const a = pts[i], b = pts[i + 1]; if (a == null || b == null) return 1e5;
+  return a + (b - a) * (f - i);
+}
+
+/* ---------- setup ---------- */
+function setup() {
+  layout(); stopSeq = 0; pts = []; px0 = 0; genX = 0; baseY = 0; queue = []; decor = []; stops = []; stations = []; planned = 0;
+  pts.push(0); camX = 0; extend(2400); while (!stations.length) extend(genX + 400);
+  bus = { x: 160, y: 0, vx: 0, vy: 0, air: false, ang: 0, sq: 0, wheel: 0, airT: 0, splash: 0, horn: 0 };
+  bus.y = ground(bus.x); camY = bus.y - H * (land ? .64 : .58) / Z; camX = bus.x - vw() * .28;
+  riders = [mkRider("bun", SEATS[1])]; lost = []; stage = 1; day = 55; score = 0; acc = 0; gas = false; braking = 0;
+  delivered = 0; lostN = 0; perfect = 0; airT = 0; bestAir = 0; toastT = 0; splashT = 0; stageX0 = 0; campers = []; lostAtStage = 0; forceGas = null; stopSeq = 0;
+}
+function mkRider(id, off) { return { id, off, st: "seat", x: 0, y: 0, vx: 0, vy: 0, sq: 0, mood: 0, hop: 0, ph: Math.random() * 6 }; }
+function start() {
+  demo = false; setup(); Lab.setScore(0);
+  eng = Lab.audio.loop({ type: "sawtooth", f: 60, lp: 500, vol: 0 }); squeal = Lab.audio.loop({ noise: true, bp: 2600, q: 6, vol: 0 });
+  Lab.input.onKey = [() => { }];
+  Lab.expose({
+    get score() { return score; }, get stage() { return stage; }, get day() { return day; }, get delivered() { return delivered; }, get lostN() { return lostN; },
+    get bus() { return { x: bus.x, vx: bus.vx, vy: bus.vy, air: bus.air }; }, riders: () => riders.map(r => ({ id: r.id, st: r.st, off: r.off })),
+    stops: () => stops.map(s => ({ x: s.x, st: s.st, pal: s.pal })), stations: () => stations.map(s => ({ x: s.x, done: s.done })),
+    gas(on) { forceGas = on; }, place(x, v) { extend(x + 2400); bus.x = x; bus.vx = v || 0; bus.vy = 0; bus.air = false; bus.y = ground(x); for (const r of riders) if (r.st !== "seat") r.st = "seat"; camX = bus.x - vw() * .28; },
+    launch(i, vy) { const r = riders[i]; const p = seatXY(r); r.st = "air"; r.x = p.x; r.y = p.y; r.vx = bus.vx; r.vy = vy; },
+    setDay(v) { day = v; }, ground, get gasOn() { return gasOn(); },
+  });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+let forceGas = null;
+function gasOn() { if (forceGas != null) return forceGas; if (demo) return !(nextStop() && nextStop().x - bus.x < 30 + bus.vx * bus.vx / (2 * BRAKE) && nextStop().x - bus.x > -40); const k = Lab.input.keys; return Lab.input.down || !!(k[" "] || k.ArrowRight || k.ArrowUp || k.d || k.w); }
+function nextStop() { const s = stops.find(s => s.st === "wait" && s.x > bus.x - 50); const st = stations.find(s => !s.done); return s && (!st || s.x < st.x) ? s : st; }
+
+/* ---------- physics ---------- */
+function seatXY(r) { const c = Math.cos(bus.ang), s = Math.sin(bus.ang), lx = r.off, ly = -70; return { x: bus.x + lx * c - ly * s, y: bus.y + lx * s + ly * c }; }
+function roofAt(x) { const c = Math.cos(bus.ang), s = Math.sin(bus.ang), lx = (x - bus.x) / c; return { lx, y: bus.y + lx * s - 70 * c }; }
+function step(h) {
+  const g = gasOn(); gas = g;
+  if (!bus.air) {
+    const slope = (ground(bus.x + 20) - ground(bus.x - 20)) / 40;
+    if (g) bus.vx = Math.min(VMAX, bus.vx + ACC * h); else bus.vx = Math.max(0, bus.vx - BRAKE * h);
+    bus.vx = clamp(bus.vx + G * slope * .28 * h * (g || bus.vx > 0 ? 1 : 0), 0, VMAX + 60);
+    braking = !g && bus.vx > 40 ? 1 : 0;
+  } else braking = 0;
+  const nx = bus.x + bus.vx * h;
+  if (!bus.air) {
+    const gb = ground(nx - 40), gf = ground(nx + 40), gy = (gb + gf) / 2;
+    const curv = (ground(nx + 24) - 2 * ground(nx) + ground(nx - 24)) / (24 * 24); // ground bending away (+) needs downward accel curv·v²
+    if (gb > 5e4 || gf > 5e4 || curv * bus.vx * bus.vx > G) { bus.air = true; bus.airT = 0; bus.vy = (ground(nx + 8) - ground(nx - 8)) / 16 * bus.vx; if (gf > 5e4) bus.vy = Math.min(bus.vy, (ground(nx) - ground(nx - 16)) / 16 * bus.vx); }
+    else { bus.vy = (gy - bus.y) / h; bus.y = gy; bus.ang = Math.atan2(gf - gb, 80); }
+  }
+  bus.x = nx;
+  if (bus.air) {
+    bus.vy += G * h; bus.y += bus.vy * h; bus.airT += h;
+    const gb = ground(bus.x - 40), gf = ground(bus.x + 40), gy = Math.min(gb, gf) < 5e4 ? (Math.max(gb, gf) > 5e4 ? Math.min(gb, gf) : (gb + gf) / 2) : 1e5;
+    bus.ang = Lab.damp(bus.ang, gy < 5e4 ? Math.atan2(gf - gb, 80) : .12, 3, h);
+    if (bus.y >= gy) {
+      const gvy = (ground(bus.x + bus.vx * h) - ground(bus.x)) / h, imp = bus.vy - gvy;
+      bus.y = gy; bus.air = false; bus.vy = gvy; touchdown(imp, bus.airT);
+    }
+    if (bus.y > baseAt(bus.x) + 170) splash();
+  }
+  // riders
+  for (const r of riders) {
+    if (r.st === "seat") continue;
+    r.vy += G * h; r.x += r.vx * h; r.y += r.vy * h;
+    if (r.st === "air" && r.vy > 0) {
+      const ro = roofAt(r.x);
+      if (Math.abs(ro.lx) <= ROOF + 8 && r.y >= ro.y - 2 && r.y < ro.y + 26) { r.st = "seat"; r.off = clamp(ro.lx, -48, 48); r.sq = .3; r.hop = 0; snd("land", { pitch: 1.4 }); }
+      else if (r.y > ro.y + 26) { r.st = "fall"; fellOff(r); }
+    }
+    if (r.st === "fall" && r.y >= ground(r.x) - 14) { r.st = "gone"; lost.push({ id: r.id, x: r.x, y: ground(r.x) }); }
+  }
+  riders = riders.filter(r => r.st !== "gone");
+}
+function baseAt(x) { let y = ground(x); for (let d = 40; y > 5e4 && d < 400; d += 40) y = Math.min(ground(x - d), ground(x + d)); return y > 5e4 ? bus.y : y; }
+function touchdown(imp, air) {
+  bus.sq = clamp(imp / 1400, .05, .25); snd("thud", { pitch: 1.2 - clamp(imp / 1200, 0, .5), vol: clamp(imp / 500, .2, 1) });
+  if (!demo) { fx.burst(sx(bus.x), sy(bus.y), { n: 8, color: "#d8c3a0", speed: 120, life: .4, size: 4 * Z, gravity: 200, angle: -Math.PI / 2, spread: 2.4 }); if (imp > 380) Lab.shake(clamp(imp / 120, 2, 7), .2); }
+  if (air > .45) { const b = Math.round(air * 40) * (riders.length ? 1 : 0); if (b && !demo) { score += b; Lab.setScore(score); fx.text(sx(bus.x), sy(bus.y) - 130 * Z, "Big air! +" + b, { color: "#ff8a3d", size: 16 * S }); } bestAir = Math.max(bestAir, air); }
+  if (imp > 260) for (const r of riders) if (r.st === "seat") { const p = seatXY(r); r.st = "air"; r.x = p.x; r.y = p.y; r.vx = bus.vx; r.vy = bus.vy - (imp - 200) * .85 * (WEIGHT[r.id] || 1) * rnd(.85, 1.1); r.mood = 1; snd("boing", { pitch: 1.3 + Math.random() * .3, vol: .5 }); }
+}
+function fellOff(r) {
+  lostN++; snd("whoosh"); snd("error", { vol: .5 });
+  if (!demo) { Lab.toast("Oops! " + Pals.cast[r.id].name + " bounced off!", 1500, { y: .3 }); Lab.buzz(40); }
+}
+function splash() {
+  if (!demo) { Lab.flash("#7ac8ff", .3, .6); Lab.sfx("splash"); Lab.toast("Splash! Back up the bank… −4 s", 1500, { y: .3 }); }
+  day = Math.max(0, day - 4); const back = bus.x - 260; bus.x = back; bus.vx = 0; bus.vy = 0; bus.air = false; bus.y = ground(back); bus.ang = 0; splashT = 1;
+  for (const r of riders) { r.st = "seat"; r.vy = 0; r.wet = 1; }
+}
+
+/* ---------- tick ---------- */
+function tick(dt) {
+  if (!pts) return;
+  acc = Math.min(acc + dt, .05); while (acc >= HB) { step(HB); acc -= HB; }
+  extend(bus.x + vw() * 2 + 600); while (!stations.some(s => !s.done)) extend(genX + 400);
+  camX = Lab.damp(camX, bus.x - vw() * (land ? .3 : .26), 8, dt);
+  const gy = bus.air ? Math.min(bus.y, baseAt(bus.x)) : bus.y; camY = Lab.damp(camY, gy - H * (land ? .64 : .58) / Z, 3.5, dt);
+  bus.sq = Lab.damp(bus.sq, 0, 8, dt); bus.wheel += bus.vx * dt / 13; splashT = Math.max(0, splashT - dt);
+  for (const r of riders) { r.sq = Lab.damp(r.sq, 0, 9, dt); r.mood = Math.max(0, r.mood - dt * .7); r.hop = Math.max(0, r.hop - dt * 2); if (r.wet) r.wet = Math.max(0, r.wet - dt * .3); }
+  // stops & station
+  if (!bus.air && bus.vx < 12) {
+    for (const s of stops) if (s.st === "wait" && Math.abs(bus.x - s.x) <= 46) pickUp(s);
+    for (const s of stations) if (!s.done && Math.abs(bus.x - s.x) <= 80 && riders.every(r => r.st === "seat")) arrive(s);
+  }
+  for (const s of stops) { s.react = Math.max(0, s.react - dt); if (s.st === "wait" && bus.x - s.x > 60) { s.st = "missed"; s.react = 2; if (!demo) { Lab.toast("Missed the stop! " + Pals.cast[s.pal].name + " waves goodbye", 1500, { y: .3 }); Lab.sfx("error", { vol: .4 }); } } }
+  if (!demo) {
+    day -= dt; if (day <= 0) { day = 0; return over(); }
+    eng.set({ vol: .05 + bus.vx / VMAX * .05, f: 55 + bus.vx * .22 + (gas ? 12 : 0), cutoff: 400 + bus.vx * 2 }); squeal.set({ vol: braking && riders.length ? .025 * bus.vx / VMAX : 0 });
+    Lab.music.intensity(clamp(.3 + stage * .1 + (day < 12 ? .3 : 0), 0, 1));
+  }
+  if (demo && bus.x > 9000) setup();
+}
+function pickUp(s) {
+  s.st = "picked"; const free = SEATS.filter(o => !riders.some(r => Math.abs(r.off - o) < 8));
+  const r = mkRider(s.pal, free.length ? free[0] : 0); r.hop = 1; riders.push(r);
+  const d = Math.abs(bus.x - s.x), perf = d < 14, pts0 = 50 + (perf ? 50 : 0);
+  if (perf) perfect++;
+  if (!demo) { score += pts0; Lab.setScore(score); Lab.bumpScore(); fx.text(sx(s.x), sy(ground(s.x)) - 150 * Z, (perf ? "Perfect stop! +" : "Hop on! +") + pts0, { color: perf ? "#ff8a3d" : "#2d3a55", size: 17 * S }); Lab.sfx("chime", { pitch: perf ? 1.3 : 1 }); }
+}
+function arrive(s) {
+  s.done = true; const n = riders.length, bonus = n * 100 * s.stage + (lostN === lostAtStage ? 50 * n : 0);
+  delivered += n; score += bonus; stageX0 = s.x; day = Math.min(99, day + 28); stage = s.stage + 1; lostAtStage = lostN;
+  if (!demo) { Lab.setScore(score); Lab.bumpScore(); Lab.sfx("levelup"); Lab.banner("Campsite " + s.stage + "!  +" + bonus, { color: "#ff8a3d", ms: 1500, y: .3 }); Lab.after(1.1, () => Lab.toast(stage === 2 ? "Watch out: potholes and big bumps" : stage === 3 ? "Hills with crests — fly smooth!" : stage === 4 ? "Creeks! Take the ramp fast" : "Stage " + stage + " — +28 s daylight", 1800, { y: .38 })); for (let i = 0; i < 24; i++) fx.burst(sx(s.x) + rnd(-60, 60), sy(ground(s.x)) - 60 * Z, { n: 1, colors: ["#ff8a3d", "#ffd23f", "#5fd39a", "#3ec5ff"], speed: 260, life: .9, size: 5, gravity: 400 }); }
+  campers.push(...riders.map((r, i) => ({ id: r.id, x: s.x - 40 + i * 30, y: ground(s.x) }))); riders = [];
+}
+let lostAtStage = 0, campers = [];
+function over() {
+  eng.set({ vol: 0 }); squeal.set({ vol: 0 });
+  Lab.gameover({ title: "Oops! The sun went down", message: "Pip parks the bus under the stars.", score, stats: [["Pals delivered", delivered], ["Bounced off", lostN], ["Perfect stops", perfect]] });
+}
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+
+/* ---------- drawing ---------- */
+function skyCols() { const k = Math.min(SKIES.length - 1, stage - 1), dk = clamp(1 - day / 14, 0, 1) * .55; return SKIES[k].map(c => Lab.color.mix(c, "#2c3266", dk)); }
+function hillsSprite(layer) {
+  const w = Math.ceil(W + 2), h = Math.ceil(H * .5);
+  return Lab.sprite("bb-h" + layer, w, h, g => {
+    g.fillStyle = layer ? "rgba(120,180,110,.85)" : "rgba(160,200,170,.7)"; g.beginPath(); g.moveTo(0, h);
+    for (let x = 0; x <= w; x += 8) { const u = x / w * TAU; g.lineTo(x, h * (layer ? .55 : .35) - Math.sin(u * 2 + layer) * h * .12 - Math.sin(u * 5 + layer * 2) * h * .05); }
+    g.lineTo(w, h); g.fill();
+  });
+}
+function drawTree(c, x, y, s, k) {
+  if (k === "tree") { draw.rect(c, x - 4 * s, y - 40 * s, 8 * s, 40 * s, 3 * s, "#8a5a3a"); draw.circle(c, x, y - 52 * s, 22 * s, "#5fb85a"); draw.circle(c, x - 12 * s, y - 42 * s, 15 * s, "#4fa84f"); draw.circle(c, x + 12 * s, y - 44 * s, 14 * s, "#6cc868"); }
+  else if (k === "bush") { draw.circle(c, x - 8 * s, y - 8 * s, 11 * s, "#4fa84f"); draw.circle(c, x + 6 * s, y - 10 * s, 13 * s, "#5fb85a"); }
+  else if (k === "flowers") { for (let i = 0; i < 4; i++) { draw.line(c, x + i * 7 * s, y, x + i * 7 * s, y - 10 * s, "#3d8a3d", 1.5); draw.circle(c, x + i * 7 * s, y - 11 * s, 3 * s, ["#ff8fb8", "#ffd23f", "#fff", "#b9a3ff"][i]); } }
+  else if (k === "fence") { for (let i = 0; i < 3; i++) draw.rect(c, x + i * 16 * s, y - 20 * s, 4 * s, 20 * s, 1, "#c9a07a"); draw.rect(c, x - 2 * s, y - 16 * s, 40 * s, 3 * s, 1, "#c9a07a"); draw.rect(c, x - 2 * s, y - 9 * s, 40 * s, 3 * s, 1, "#c9a07a"); }
+}
+function drawBus(c, t) {
+  const X = sx(bus.x), Y = sy(bus.y), z = Z;
+  c.save(); c.translate(X, Y); c.rotate(bus.ang); c.scale(1 + bus.sq * .5, 1 - bus.sq);
+  draw.shadow(c, 0, 2 * z, 66 * z, 6 * z, .2);
+  // body
+  draw.rect(c, -64 * z, -66 * z, 128 * z, 50 * z, 14 * z, "#ffd9a0", INK, 2.5);
+  draw.rect(c, -64 * z, -36 * z, 128 * z, 18 * z, 6 * z, "#3aa0d8"); c.strokeStyle = INK; c.lineWidth = 2.5; draw.rr(c, -64 * z, -66 * z, 128 * z, 50 * z, 14 * z); c.stroke();
+  for (let i = 0; i < 3; i++) draw.rect(c, (-52 + i * 30) * z, -60 * z, 24 * z, 18 * z, 5 * z, "#cfeeff", INK, 1.5);
+  // cab window with Pip
+  draw.rect(c, 38 * z, -60 * z, 22 * z, 22 * z, 6 * z, "#cfeeff", INK, 1.5);
+  c.save(); draw.rr(c, 38 * z, -60 * z, 22 * z, 22 * z, 6 * z); c.clip();
+  Pals.draw(c, "pip", 50 * z, -44 * z, 22 * z, { t, mood: bus.air ? "joy" : braking ? "wow" : gas ? "focus" : "happy", look: [.8, 0], shadow: false });
+  c.restore();
+  draw.circle(c, 62 * z, -26 * z, 4 * z, "#fff3a0", INK, 1.2);
+  // roof rack
+  c.strokeStyle = "#5a4a6a"; c.lineWidth = 3 * z; c.beginPath(); c.moveTo(-58 * z, -68 * z); c.lineTo(58 * z, -68 * z); c.stroke();
+  for (const px of [-56, -20, 20, 56]) { c.beginPath(); c.moveTo(px * z, -66 * z); c.lineTo(px * z, -74 * z); c.stroke(); }
+  // wheels
+  for (const wx of [-40, 40]) { draw.circle(c, wx * z, -13 * z, 13 * z, "#3a3550", INK, 2); draw.circle(c, wx * z, -13 * z, 5.5 * z, "#c9c2d8"); c.strokeStyle = "#c9c2d8"; c.lineWidth = 2; c.beginPath(); for (let k = 0; k < 3; k++) { const a = bus.wheel + k * TAU / 3; c.moveTo(wx * z, -13 * z); c.lineTo(wx * z + Math.cos(a) * 10 * z, -13 * z + Math.sin(a) * 10 * z); } c.stroke(); }
+  c.restore();
+}
+function drawRider(c, r, t) {
+  const p = r.st === "seat" ? seatXY(r) : { x: r.x, y: r.y }, sz = 30 * Z, hop = Math.sin(r.hop * Math.PI) * 14 * Z;
+  const mood = r.st === "fall" ? "dizzy" : r.st === "air" ? "scared" : r.mood > 0 ? "wow" : bus.air ? "joy" : braking ? "think" : "happy";
+  Pals.draw(c, r.id, sx(p.x), sy(p.y) - sz * .5 - hop, sz, { t: t + r.ph, mood, arms: r.st !== "seat" ? "up" : bus.air ? "cheer" : "hold", tilt: r.st === "seat" ? bus.ang : (r.st === "fall" ? t * 8 : Math.sin(t * 9) * .2), squash: r.sq, shadow: false, wet: r.wet || 0 });
+}
+function render(t) {
+  if (!pts) return; const c = Lab.ctx, [s0, s1] = skyCols();
+  draw.vgrad(c, -40, -40, W + 80, H + 80, [s0, s1]);
+  if (stage >= 5 || day < 10) for (let i = 0; i < 40; i++) { const a = clamp(stage >= 5 ? 1 : 1 - day / 10, 0, 1) * (.4 + .4 * Math.sin(t * 2 + i)); draw.circle(c, (i * 97 % W), (i * 53 % (H * .5)), 1.4, `rgba(255,255,255,${a})`); }
+  draw.circle(c, W * .8, H * .16 + (1 - clamp(day / 60, 0, 1)) * H * .3, 26 * S, stage >= 5 ? "#fff6d0" : "#fff3a0");
+  for (const layer of [0, 1]) { const hs = hillsSprite(layer), par = layer ? .35 : .15, off = ((camX * Z * par) % hs.w + hs.w) % hs.w, y = H * (layer ? .42 : .34) - (camY * Z * par * .3); for (let x = -off; x < W; x += hs.w) c.drawImage(hs, x, y, hs.w, hs.h); }
+  // terrain
+  const x0 = camX - 40, x1 = camX + vw() + 40;
+  const i0 = Math.max(0, Math.floor((x0 - px0) / STEP)), i1 = Math.min(pts.length - 1, Math.ceil((x1 - px0) / STEP));
+  for (const d of decor) { if (d.k !== "creek" || d.x + d.w < x0 || d.x > x1) continue; const wy = sy(d.y + 60); c.fillStyle = "#5fb0e8"; c.fillRect(sx(d.x), wy, d.w * Z, H - wy + 40); c.fillStyle = "rgba(255,255,255,.5)"; for (let k = 0; k < 4; k++) c.fillRect(sx(d.x) + ((t * 30 + k * 40) % (d.w)) * Z, wy + 4 * Z, 14 * Z, 2 * Z); draw.rect(c, sx(d.x + d.w) - 6 * Z, sy(d.y) - 4 * Z, 8 * Z, 70 * Z, 2, "#8a5a3a"); }
+  c.fillStyle = "#86c66a"; c.strokeStyle = "#5c5670"; c.lineWidth = 9 * Z; c.lineJoin = "round";
+  let open = false; const path = [];
+  for (let i = i0; i <= i1 + 1; i++) {
+    const y = i <= i1 ? pts[i] : null, x = px0 + i * STEP;
+    if (y != null) { path.push([sx(x), sy(y)]); open = true; }
+    else if (open) {
+      c.beginPath(); c.moveTo(path[0][0], H + 40); for (const q of path) c.lineTo(q[0], q[1]); c.lineTo(path[path.length - 1][0], H + 40); c.closePath(); c.fill();
+      c.fillStyle = "#c9a074"; c.beginPath(); c.moveTo(path[0][0], H + 40); for (const q of path) c.lineTo(q[0], q[1] + 18 * Z); c.lineTo(path[path.length - 1][0], H + 40); c.fill(); c.fillStyle = "#86c66a";
+      c.fillStyle = "#b88a5e"; c.beginPath(); c.moveTo(path[0][0], H + 40); for (const q of path) c.lineTo(q[0], q[1] + 90 * Z); c.lineTo(path[path.length - 1][0], H + 40); c.fill();
+      c.fillStyle = "#a47650"; c.beginPath(); c.moveTo(path[0][0], H + 40); for (const q of path) c.lineTo(q[0], q[1] + 200 * Z); c.lineTo(path[path.length - 1][0], H + 40); c.fill();
+      for (let k = 0; k < path.length; k += 5) { const wx = Math.round((path[k][0] / Z + camX) / 40), hsh = (wx * 2654435761 >>> 0) % 997; if (hsh % 3) continue; c.fillStyle = hsh % 2 ? "rgba(90,60,40,.25)" : "rgba(255,240,220,.22)"; c.beginPath(); c.ellipse(path[k][0], path[k][1] + (40 + hsh % 220) * Z, (5 + hsh % 7) * Z, (3 + hsh % 4) * Z, 0, 0, TAU); c.fill(); }
+      c.fillStyle = "#86c66a";
+      c.beginPath(); path.forEach((q, k) => k ? c.lineTo(q[0], q[1] + 3 * Z) : c.moveTo(q[0], q[1] + 3 * Z)); c.stroke();
+      c.strokeStyle = "rgba(255,255,255,.7)"; c.lineWidth = 1.5; c.setLineDash([10 * Z, 12 * Z]); c.beginPath(); path.forEach((q, k) => k ? c.lineTo(q[0], q[1] + 3 * Z) : c.moveTo(q[0], q[1] + 3 * Z)); c.stroke(); c.setLineDash([]); c.strokeStyle = "#5c5670"; c.lineWidth = 9 * Z;
+      path.length = 0; open = false;
+    }
+  }
+  // decor (behind the bus)
+  for (const d of decor) {
+    if (d.x < x0 - 60 || d.x > x1 + 60 || d.k === "creek") continue; const gy = ground(d.x); if (gy > 5e4) continue;
+    if (d.k === "warn") { const X = sx(d.x), Y = sy(gy); draw.rect(c, X - 2 * Z, Y - 44 * Z, 4 * Z, 44 * Z, 1, "#7a7290"); c.save(); c.translate(X, Y - 52 * Z); c.rotate(Math.PI / 4); draw.rect(c, -11 * Z, -11 * Z, 22 * Z, 22 * Z, 3 * Z, "#ffd23f", INK, 1.5); c.restore(); draw.text(c, "STOP", X, Y - 52 * Z, { size: 7 * Z, color: INK, weight: 800 }); draw.text(c, "AHEAD", X, Y - 70 * Z, { size: 8 * Z, color: "#2d3a55", weight: 800 }); }
+    else drawTree(c, sx(d.x), sy(gy) + 2 * Z, Z * d.s, d.k);
+  }
+  for (const s of stations) { if (s.x < x0 - 200 || s.x > x1 + 200) continue; const X = sx(s.x), Y = sy(ground(s.x)); c.fillStyle = "rgba(255,138,61,.15)"; c.fillRect(X - 80 * Z, Y - 6 * Z, 160 * Z, 8 * Z);
+    c.fillStyle = "#ff8a3d"; c.beginPath(); c.moveTo(X - 120 * Z, Y); c.lineTo(X - 90 * Z, Y - 50 * Z); c.lineTo(X - 60 * Z, Y); c.fill(); c.fillStyle = "#3aa0d8"; c.beginPath(); c.moveTo(X + 70 * Z, Y); c.lineTo(X + 100 * Z, Y - 46 * Z); c.lineTo(X + 130 * Z, Y); c.fill();
+    draw.rect(c, X - 2 * Z, Y - 90 * Z, 4 * Z, 90 * Z, 1, "#7a7290"); c.fillStyle = "#ff5d73"; c.beginPath(); c.moveTo(X + 2 * Z, Y - 90 * Z); c.lineTo(X + 34 * Z + Math.sin(t * 5) * 3 * Z, Y - 80 * Z); c.lineTo(X + 2 * Z, Y - 70 * Z); c.fill();
+    draw.text(c, "CAMP", X, Y - 100 * Z, { size: 13 * Z, color: "#2d3a55", weight: 800 });
+    if (!s.done) { draw.text(c, "▼ stop here", X, Y - 120 * Z, { size: 10 * Z, color: "#ff8a3d", weight: 800 }); } }
+  for (const k of campers) { if (k.x < x0 - 40 || k.x > x1 + 40) continue; Pals.draw(c, k.id, sx(k.x), sy(k.y) - 15 * Z, 28 * Z, { t, mood: "joy", arms: "wave" }); }
+  for (const s of stops) {
+    if (s.x < x0 - 60 || s.x > x1 + 60) continue; const X = sx(s.x), Y = sy(ground(s.x));
+    c.fillStyle = s.st === "wait" ? "rgba(58,160,216,.18)" : "rgba(0,0,0,.05)"; c.fillRect(X - 46 * Z, Y - 5 * Z, 92 * Z, 7 * Z); draw.rect(c, X - 1.5 * Z, Y - 6 * Z, 3 * Z, 6 * Z, 0, "#3aa0d8");
+    draw.rect(c, X + 30 * Z, Y - 58 * Z, 4 * Z, 58 * Z, 1, "#7a7290"); draw.circle(c, X + 32 * Z, Y - 62 * Z, 12 * Z, "#3aa0d8", INK, 1.5); draw.text(c, "BUS", X + 32 * Z, Y - 62 * Z, { size: 7 * Z, color: "#fff", weight: 800 });
+    if (s.st !== "picked") { const near = Math.abs(bus.x - s.x) < 300; Pals.draw(c, s.pal, X + 52 * Z, Y - 15 * Z, 30 * Z, { t, mood: s.st === "missed" ? "sad" : near ? "joy" : "happy", arms: s.st === "missed" ? "down" : "wave", look: [clamp((bus.x - s.x) / 300, -1, 1), 0] }); }
+  }
+  for (const l of lost) { if (l.x < x0 - 40 || l.x > x1 + 40) continue; Pals.draw(c, l.id, sx(l.x), sy(l.y) - 15 * Z, 28 * Z, { t, mood: "dizzy", arms: "down" }); }
+  drawBus(c, t);
+  for (const r of riders) drawRider(c, r, t);
+  if (splashT > 0) { c.globalAlpha = splashT; draw.text(c, "Splash!", W / 2, H * .4, { size: 34 * S, color: "#3aa0d8", stroke: "#fff", weight: 800 }); c.globalAlpha = 1; }
+  if (!land) { // the pedal: a big affordance in the empty earth below the road (the whole screen still works)
+    const pw = Math.min(P.w - 60 * S, 260 * S), ph = 64 * S, px = W / 2 - pw / 2, py = H - Lab.safe.bottom - ph - 26 * S, dn = gas ? 4 * S : 0;
+    draw.rect(c, px, py + 6 * S, pw, ph, 22 * S, "rgba(60,40,30,.35)");
+    draw.rect(c, px, py + dn, pw, ph, 22 * S, gas ? "#ffb070" : "#fff4e4", "#7a4a2a", 3);
+    for (let i = 0; i < 4; i++) draw.rect(c, px + 24 * S, py + dn + 14 * S + i * 10 * S, pw - 48 * S, 4 * S, 2 * S, gas ? "rgba(122,74,42,.35)" : "rgba(122,74,42,.18)");
+    draw.text(c, gas ? "GO!" : "HOLD TO DRIVE", W / 2, py + dn + ph / 2, { size: 18 * S, color: "#7a4a2a", weight: 800, stroke: gas ? "#ffb070" : "#fff4e4", strokeW: 6 * S });
+    draw.text(c, "let go to brake", W / 2, py - 14 * S, { size: 12 * S, color: "rgba(255,244,228,.85)", weight: 700 });
+  }
+  // HUD: daylight bar + route strip
+  const hx = P.x + 12 * S, hy = P.y + 10 * S, hw = Math.min(P.w - 24 * S, 460 * S);
+  draw.rect(c, hx, hy, hw, 44 * S, 14 * S, "rgba(255,255,255,.75)");
+  const df = clamp(day / 60, 0, 1); draw.circle(c, hx + 16 * S, hy + 14 * S, 7 * S, day < 12 ? "#ff8a3d" : "#ffd23f", "#e0a91a", 1.5);
+  draw.rect(c, hx + 30 * S, hy + 9 * S, hw * .45, 10 * S, 5 * S, "rgba(45,58,85,.12)"); draw.rect(c, hx + 30 * S, hy + 9 * S, hw * .45 * df, 10 * S, 5 * S, day < 12 ? (Math.sin(t * 10) > 0 ? "#ff5d73" : "#ff8a3d") : "#ffc43d");
+  draw.text(c, Math.ceil(day) + "s", hx + 36 * S + hw * .45, hy + 14 * S, { size: 11 * S, color: "#2d3a55", align: "left", weight: 800 });
+  draw.text(c, "Stage " + stage + " · " + riders.length + "/4 aboard", hx + hw - 10 * S, hy + 14 * S, { size: 11 * S, color: "#2d3a55", align: "right", weight: 800 });
+  const st = stations.find(s => !s.done), rx = hx + 12 * S, rw = hw - 24 * S, ry = hy + 32 * S;
+  if (st) {
+    const a = stageX0 || 0, span = Math.max(1, st.x - a), u = x => rx + clamp((x - a) / span, 0, 1) * rw;
+    draw.rect(c, rx, ry - 2 * S, rw, 4 * S, 2 * S, "rgba(45,58,85,.18)");
+    for (const s of stops) if (s.x > a && s.x < st.x) draw.circle(c, u(s.x), ry, 5 * S, s.st === "picked" ? "#5fd39a" : s.st === "missed" ? "#c9c2d8" : Pals.cast[s.pal].body, INK, 1);
+    draw.circle(c, u(st.x), ry, 6 * S, "#ff8a3d", INK, 1); draw.rect(c, u(bus.x) - 7 * S, ry - 5 * S, 14 * S, 10 * S, 3 * S, "#3aa0d8", INK, 1);
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

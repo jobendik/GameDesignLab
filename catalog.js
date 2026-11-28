@@ -57,15 +57,20 @@ window.GDL_CATALOG = {
    "id": "games/bounce-dungeon",
    "path": "games/bounce-dungeon.html",
    "collection": "arcade",
-   "title": "Bounce Dungeon — Improved Prototype",
-   "desc": "Improved bounce dungeon with tighter controls.",
+   "title": "Bounce Dungeon",
+   "desc": "A one-tap dungeon crawl where your bouncing ball is the weapon: bank off walls to charge each hit, crush foes from above, draft relics that combo, and topple a boss on every floor.",
    "genre": [
+    "Roguelite",
+    "Action",
     "Arcade"
    ],
    "controls": [
     "touch",
-    "mouse"
+    "mouse",
+    "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--bounce-dungeon.jpg"
   },
   {
@@ -525,10 +530,11 @@ window.GDL_CATALOG = {
    "id": "games/neon-pin-climb",
    "path": "games/neon-pin-climb.html",
    "collection": "arcade",
-   "title": "Neon Pin Climb — learning prototype",
-   "desc": "Neon pin-climb learning prototype.",
+   "title": "Neon Pin Climb",
+   "desc": "A vertical pinball time-attack: flip the ball up the side lanes from floor to floor of an endless neon tower before the clock runs out — miss, and you fall back a floor.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Physics"
    ],
    "controls": [
     "touch",
@@ -541,16 +547,20 @@ window.GDL_CATALOG = {
    "id": "games/neon-pinball-rush",
    "path": "games/neon-pinball-rush.html",
    "collection": "arcade",
-   "title": "Neon Pinball Rush - Mobile Prototype",
-   "desc": "Neon-styled mobile pinball rush prototype.",
+   "title": "Neon Pinball Rush",
+   "desc": "A one-thumb pinball roguelite: shatter every crystal in a short neon room, dive into the portal, draft an upgrade, and break the Warden at the end of each act.",
    "genre": [
-    "Arcade"
+    "Arcade",
+    "Roguelite",
+    "Physics"
    ],
    "controls": [
     "touch",
     "mouse",
     "keyboard"
    ],
+   "score": 7,
+   "status": "transformed",
    "thumb": "thumbs/games--neon-pinball-rush.jpg"
   },
   {
@@ -855,9 +865,11 @@ window.GDL_CATALOG = {
    "id": "games/spire",
    "path": "games/spire.html",
    "collection": "arcade",
-   "title": "SPIRE — one-tap bounce roguelite",
-   "desc": "One-tap bounce roguelite — climb the spire.",
+   "title": "Ticktock Tower",
+   "desc": "Leap wall to wall up a haunted clock tower on the beat: one tap, a rising dark below, gear-tooth bricks that bite in rhythm, and forks where the lane you ride decides your road to the twelfth chime.",
    "genre": [
+    "Rhythm",
+    "Roguelite",
     "Arcade"
    ],
    "controls": [
@@ -2531,6 +2543,22 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--bedtime-stacks.jpg"
   },
   {
+   "id": "PhoneGameLab2/bumpy-bus",
+   "path": "PhoneGameLab2/games/bumpy-bus/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Bumpy Bus",
+   "desc": "Pick up your pals. Don't bounce them off the roof!",
+   "genre": [
+    "Arcade"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true
+  },
+  {
    "id": "PhoneGameLab2/bun-voyage",
    "path": "PhoneGameLab2/games/bun-voyage/index.html",
    "collection": "PhoneGameLab2",
@@ -2701,91 +2729,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--flutterbun.jpg"
   },
   {
-   "id": "PhoneGameLab2/football",
-   "path": "PhoneGameLab2/games/football/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Football",
-   "desc": "Swipe to shoot the ball past the goalkeeper.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 29,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--football.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/fruit-boom",
-   "path": "PhoneGameLab2/games/fruit-boom/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Fruit Boom",
-   "desc": "Swipe to slice flying fruit, fruit-ninja style.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 30,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--fruit-boom.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/go-up",
-   "path": "PhoneGameLab2/games/go-up/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Go Up",
-   "desc": "Hop from a moving platform to the next to climb.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 31,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--go-up.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/goal",
-   "path": "PhoneGameLab2/games/goal/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Goal!",
-   "desc": "Precision shot — hit the target inside the goal.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 32,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--goal.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/guitar-ace",
-   "path": "PhoneGameLab2/games/guitar-ace/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Guitar Ace",
-   "desc": "Tap the falling notes in time with the rhythm.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 33,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--guitar-ace.jpg"
-  },
-  {
    "id": "PhoneGameLab2/gulp-and-float",
    "path": "PhoneGameLab2/games/gulp-and-float/index.html",
    "collection": "PhoneGameLab2",
@@ -2805,57 +2748,6 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--gulp-and-float.jpg"
   },
   {
-   "id": "PhoneGameLab2/happy-connect",
-   "path": "PhoneGameLab2/games/happy-connect/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Happy Connect",
-   "desc": "Draw lines to match identical happy faces.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 34,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--happy-connect.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/happy-face",
-   "path": "PhoneGameLab2/games/happy-face/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Happy Face",
-   "desc": "Find the odd face out before time runs out.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 35,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--happy-face.jpg"
-  },
-  {
-   "id": "PhoneGameLab2/hit-the-road",
-   "path": "PhoneGameLab2/games/hit-the-road/index.html",
-   "collection": "PhoneGameLab2",
-   "title": "Hit The Road",
-   "desc": "Switch lanes to dodge traffic and grab coins.",
-   "genre": [
-    "Minigame"
-   ],
-   "controls": [
-    "touch",
-    "mouse"
-   ],
-   "n": 36,
-   "v2": false,
-   "thumb": "thumbs/PhoneGameLab2--hit-the-road.jpg"
-  },
-  {
    "id": "PhoneGameLab2/hole-chase",
    "path": "PhoneGameLab2/games/hole-chase/index.html",
    "collection": "PhoneGameLab2",
@@ -2871,6 +2763,43 @@ window.GDL_CATALOG = {
    "n": 37,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--hole-chase.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/hover-hop",
+   "path": "PhoneGameLab2/games/hover-hop/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Hover Hop",
+   "desc": "Tap to hop Bolt up the sliding pads. Land dead centre!",
+   "genre": [
+    "Arcade"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--hover-hop.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/huddle-up",
+   "path": "PhoneGameLab2/games/huddle-up/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Huddle Up",
+   "desc": "Tap two twins. If they can reach each other, they hug!",
+   "genre": [
+    "Puzzle"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/hungry-fish",
@@ -3279,6 +3208,42 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--planet-hop.jpg"
   },
   {
+   "id": "PhoneGameLab2/plop-shot",
+   "path": "PhoneGameLab2/games/plop-shot/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Plop Shot",
+   "desc": "Sports day beanbags. Press, hold, release — plop!",
+   "genre": [
+    "Sports"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--plop-shot.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/pop-and-pour",
+   "path": "PhoneGameLab2/games/pop-and-pour/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Pop & Pour",
+   "desc": "Pop the fruit, layer the juice, serve the queue!",
+   "genre": [
+    "Arcade"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--pop-and-pour.jpg"
+  },
+  {
    "id": "PhoneGameLab2/race-car",
    "path": "PhoneGameLab2/games/race-car/index.html",
    "collection": "PhoneGameLab2",
@@ -3402,6 +3367,23 @@ window.GDL_CATALOG = {
    "n": 55,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--rolling-ball.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/say-cheese",
+   "path": "PhoneGameLab2/games/say-cheese/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Say Cheese",
+   "desc": "One pal is spoiling the group photo. Find them before the flash!",
+   "genre": [
+    "Skill"
+   ],
+   "controls": [
+    "touch",
+    "mouse"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
   },
   {
    "id": "PhoneGameLab2/sky-high",
@@ -3678,6 +3660,24 @@ window.GDL_CATALOG = {
    "thumb": "thumbs/PhoneGameLab2--stew-patch.jpg"
   },
   {
+   "id": "PhoneGameLab2/strum-corner",
+   "path": "PhoneGameLab2/games/strum-corner/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Strum Corner",
+   "desc": "Strum down, strum up, let it ring. Draw a crowd!",
+   "genre": [
+    "Music"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed"
+  },
+  {
    "id": "PhoneGameLab2/sub-adventure",
    "path": "PhoneGameLab2/games/sub-adventure/index.html",
    "collection": "PhoneGameLab2",
@@ -3869,6 +3869,25 @@ window.GDL_CATALOG = {
    "n": 77,
    "v2": false,
    "thumb": "thumbs/PhoneGameLab2--unicorns.jpg"
+  },
+  {
+   "id": "PhoneGameLab2/volley-garden",
+   "path": "PhoneGameLab2/games/volley-garden/index.html",
+   "collection": "PhoneGameLab2",
+   "title": "Volley Garden",
+   "desc": "Momo crosses, Pip volleys. Can you beat Nori?",
+   "genre": [
+    "Sports"
+   ],
+   "controls": [
+    "touch",
+    "mouse",
+    "keyboard"
+   ],
+   "v2": true,
+   "score": 7,
+   "status": "transformed",
+   "thumb": "thumbs/PhoneGameLab2--volley-garden.jpg"
   },
   {
    "id": "PhoneGameLab2/water-rush",

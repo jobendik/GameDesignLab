@@ -1,0 +1,257 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Plop Shot</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* PLOP SHOT — Pocket Pals sports day, the beanbag event. Olli (bookish, precise) tosses beanbags at the painted target
+ * wall; Nori (competitive) judges with a flag. Bags that go through a hole drop into the net with a satisfying PLOP.
+ * Core idea kept: a precision shot timed against a moving aim, at targets inside a goal frame.
+ * Not a football game (that's Volley Garden): one press does both axes —
+ *   the sight sweeps across the wall; PRESS to fix the column; while you hold, the sight climbs (and falls back) up it;
+ *   RELEASE to throw at that height. Clean through the middle = SWISH (+50%); clipping the rim may rattle in (LUCKY).
+ *   Three holes in a row heats Olli up: bigger multiplier.
+ * Each event is 5 bags with a par to beat; miss par and you're out. Events: Warm-up → Quick sight → Windy (windsock
+ *   drift to aim against) → Sliding panel (lead the moving bullseye) → Spinning wheel → Nori's Final, then endless mixes. */
+let demo = false;
+Lab.init({
+  title: "Plop Shot", tagline: "Sports day beanbags. Press, hold, release — plop!", category: "Sports", kicker: "Pocket Pals",
+  howto: ["Press to fix the sight's column", "Hold — it climbs. Release to throw", "Beat each event's par"],
+  theme: { bg: "#bfe8ff", bg2: "#fff6dd", fg: "#3a2a1e", muted: "#6b5a4a", accent: "#ffb52e", accent2: "#2f3d73", light: true },
+  orient: "any", music: { style: "march", key: "G", bpm: 104, vol: .3 }, restart: start,
+  attract(dt, t) { if (!demo || !holes) { demo = true; reset(); } demoAI(dt); update(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, shade = Lab.color.shade, INK = Pals.ink;
+const EVENTS = [
+  { n: "Warm-up", par: 40, sx: 1.7, sy: 1.15 }, { n: "Quick sight", par: 55, sx: 1.25, sy: .95 }, { n: "Windy!", par: 55, sx: 1.4, sy: 1.0, wind: true },
+  { n: "Sliding panel", par: 60, sx: 1.3, sy: .95, slide: true }, { n: "Spinning wheel", par: 60, sx: 1.3, sy: .95, wheel: true }, { n: "Nori's Final", par: 75, sx: 1.05, sy: .8, wind: true, slide: true },
+];
+const BAGS = 5, HCOL = { 10: "#5fd39a", 25: "#3ec5ff", 50: "#ffb52e" };
+let S, W, H, wall, groundY, olli, nori;
+let crowd = [{ who: "bun", dx: -.75, cheer: 0 }, { who: "momo", dx: -.25, cheer: 0 }, { who: "pip", dx: .25, cheer: 0 }, { who: "bolt", dx: .75, cheer: 0 }];
+let holes, ev, evIdx, bags, roundScore, score, streak, bestStreak, swishes, plops, aim, flying, pile, wind, over, between, msgs, wheelA;
+
+function layout() {
+  W = Lab.W; H = Lab.H; const P = Lab.play, wide = P.w > P.h * 1.1;
+  S = Math.min(W / 390, P.h / (wide ? 480 : 680));
+  const ww = Math.min(W - 40 * S, wide ? 470 * S : 350 * S), wh = Math.min(P.h * (wide ? .48 : .44), ww * (wide ? .72 : .9));
+  wall = { x: W / 2 - ww / 2, y: P.y + 46 + (wide ? 14 : 44) * S, w: ww, h: wh };
+  groundY = wall.y + wall.h + 6 * S;
+  olli = { x: wide ? Math.max(70 * S, wall.x - 50 * S) : W * .24, y: P.y + P.h * (wide ? .8 : .84), sz: (wide ? 84 : 100) * S };
+  nori = { x: wide ? Math.min(W - 60 * S, wall.x + wall.w + 50 * S) : W * .8, y: P.y + P.h * (wide ? .78 : .82), sz: (wide ? 60 : 70) * S };
+}
+Lab.onResize(() => { if (holes) { layout(); placeHoles(); pile.length = 0; } });
+
+function placeHoles() {
+  const e = ev, s = S, mk = (fx0, fy, r, pts, mv) => ({ fx: fx0, fy, r: r * s, pts, mv: mv || null, x: 0, y: 0 });
+  holes = [];
+  if (e.wheel) { holes.push(mk(.5, .5, 30, 10)); for (let i = 0; i < 3; i++) holes.push(mk(.5, .5, i === 0 ? 17 : 23, i === 0 ? 50 : 25, { wheel: i * TAU / 3, rad: .3 })); }
+  else {
+    const ly = e.slide ? .46 : .62;
+    holes.push(mk(.2, ly, 34, 10), mk(.8, ly, 34, 10), mk(.5, e.slide ? .24 : .4, evIdx === 0 ? 26 : 23, 25));
+    holes.push(mk(.5, e.slide ? .84 : .78, 17, 50, e.slide ? { slide: .36, period: evIdx > 5 ? 2.4 : 3.2 } : null));
+    if (evIdx >= 1 && !e.slide) { holes[3].fy = .17; holes[3].fx = Lab.chance(.5) ? .3 : .7; }
+  }
+  moveHoles(0);
+}
+function moveHoles(t) {
+  for (const h of holes) {
+    let fx0 = h.fx, fy = h.fy;
+    if (h.mv && h.mv.slide) fx0 = .5 + Math.sin(t * TAU / h.mv.period) * h.mv.slide;
+    if (h.mv && h.mv.wheel != null) { const a = h.mv.wheel + wheelA; fx0 = .5 + Math.cos(a) * h.mv.rad * wall.h / wall.w * 1.25; fy = .5 + Math.sin(a) * h.mv.rad * 1.25; }
+    h.x = wall.x + fx0 * wall.w; h.y = wall.y + fy * wall.h;
+  }
+}
+function setEvent(i) {
+  evIdx = i; const base = EVENTS[Math.min(i, EVENTS.length - 1)];
+  ev = i < EVENTS.length ? Object.assign({}, base) : { n: "Encore " + (i - EVENTS.length + 1), par: 75 + (i - EVENTS.length + 1) * 8, sx: Math.max(.8, 1.05 - (i - 5) * .05), sy: Math.max(.6, .8 - (i - 5) * .04), wind: true, slide: Lab.chance(.5), wheel: Lab.chance(.4) };
+  if (ev.wheel) ev.slide = false;
+  bags = BAGS; roundScore = 0; wheelA = 0; placeHoles(); newWind();
+  aim = { st: "sweep", x: wall.x + wall.w * .5, y: wall.y + wall.h, u: rand(0, 1), v: 0, dir: 1 };
+}
+function newWind() { wind = ev.wind ? (Lab.chance(.5) ? -1 : 1) * Lab.randInt(1, 3) : 0; }
+function reset() {
+  layout();
+  score = 0; streak = 0; bestStreak = 0; swishes = 0; plops = 0; flying = null; pile = []; over = false; between = 0; msgs = []; wheelA = 0;
+  olli.mood = "think"; olli.moodT = 0; olli.throwT = 0; nori.mood = "happy"; nori.moodT = 0; nori.flag = 0;
+  setEvent(0);
+}
+let clock = 0;
+function start() {
+  demo = false; reset(); clock = 0; Lab.setScore(0);
+  Lab.input.onDown = [() => press()]; Lab.input.onUp = [() => release()];
+  Lab.on("key", k => { if (k === " " || k === "Space" || k === "Enter") { if (!kdown) { kdown = true; press(); } } });
+  kdown = false;
+  Lab.music.onBeat = (b, down) => { if (down) nori.bob = 1; };
+  Lab.expose({
+    get score() { return score; }, get holes() { return holes; }, get aim() { return aim; }, get bags() { return bags; }, get round() { return evIdx; }, get roundScore() { return roundScore; },
+    get par() { return ev.par; }, get streak() { return streak; }, get flying() { return flying; }, get over() { return over; }, get last() { return msgs.last; }, get wind() { return wind; }, get between() { return between; },
+    calmWind() { wind = 0; }, setEvent(i) { setEvent(i); }, setPar(v) { ev.par = v; },
+  });
+  Lab.loop(frame);
+}
+let kdown = false;
+addEventListener("keyup", e => { if (e.key === " " || e.key === "Enter") { if (kdown) { kdown = false; if (!demo) release(); } } });
+
+/* ---------- aiming + throwing ---------- */
+function press() { if (over || flying || between > 0 || bags <= 0 || aim.st !== "sweep" || Lab.paused) return; aim.st = "climb"; aim.v = 0; aim.vdir = 1; aim.y = wall.y + wall.h - 6 * S; olli.mood = "focus"; if (!demo) Lab.sfx("tick", { pitch: 1.4 }); }
+function release() { if (aim.st !== "climb") return; throwAt(aim.x, aim.y); }
+function throwAt(x, y) {
+  aim.st = "thrown"; bags--; olli.throwT = 1; olli.mood = "wow";
+  const drift = wind * 11 * S, hx = olli.x + olli.sz * .45, hy = olli.y - olli.sz * .35;
+  flying = { x0: hx, y0: hy, tx: x + drift, ty: y, aimX: x, u: 0, dur: .62, spin: rand(-8, 8) };
+  if (!demo) { Lab.sfx("whoosh", { pitch: 1.2, vol: .7 }); Lab.buzz(8); }
+}
+function arrive() {
+  const f = flying, bagR = 9 * S; flying = null; moveHoles(clock);
+  const onWall = f.tx > wall.x && f.tx < wall.x + wall.w && f.ty > wall.y && f.ty < wall.y + wall.h;
+  let best = null, bd = 1e9; for (const h of holes) { const d = Math.hypot(f.tx - h.x, f.ty - h.y); if (d - h.r < bd) { bd = d - h.r; best = h; } }
+  const d = best ? Math.hypot(f.tx - best.x, f.ty - best.y) : 1e9;
+  if (best && onWall && d <= best.r - bagR * .2) score1(best, d < best.r * .45 ? "swish" : "in", f);
+  else if (best && onWall && d <= best.r + bagR * .45) score1(best, "lucky", f);
+  else missBag(f, onWall);
+  Lab.after(.75, nextBag);
+}
+function score1(h, kind, f) {
+  const mult = 1 + Math.min(3, Math.floor(streak / 3)) * .5;
+  let pts = h.pts * (kind === "swish" ? 1.5 : kind === "lucky" ? .6 : 1); pts = Math.round(pts * mult);
+  streak++; bestStreak = Math.max(bestStreak, streak); plops++; if (kind === "swish") swishes++;
+  roundScore += pts; score += pts; Lab.setScore(score); msgs.last = kind;
+  for (const sp of crowd) sp.cheer = h.pts >= 25 || kind === "swish" ? 1 : Lab.chance(.5) ? .6 : 0;
+  olli.mood = "joy"; olli.moodT = 1; nori.mood = h.pts >= 50 ? "wow" : "joy"; nori.moodT = 1; nori.flag = 1;
+  if (!demo) {
+    Lab.sfx("drop", { pitch: .7 + h.pts / 80 }); Lab.sfx(kind === "swish" ? "chime" : "pop", { pitch: 1 + streak * .05, vol: .7 }); Lab.audio.combo(Math.min(streak, 10), { vol: .16 });
+    fx.ring(h.x, h.y, { r0: h.r * .4, r1: h.r * 2.2, color: HCOL[h.pts], width: 5 }); fx.burst(h.x, h.y, { n: 10 + h.pts / 5, colors: [HCOL[h.pts], "#fff"], speed: 180, life: .5, shape: "star", size: 4 });
+    fx.text(h.x, h.y - h.r - 16 * S, (kind === "swish" ? "SWISH! " : kind === "lucky" ? "Lucky! " : "PLOP! ") + "+" + pts, { color: kind === "lucky" ? "#3a2a1e" : HCOL[h.pts] === "#ffb52e" ? "#e07a00" : shade(HCOL[h.pts], -.35), size: 18 * Math.max(.85, S) });
+    if (h.pts >= 50) { Lab.shake(4, .2); Lab.hitstop(.05); Lab.bumpScore(); } Lab.buzz(h.pts >= 50 ? 30 : 12);
+    if (streak === 3) Lab.toast("Olli is on fire! ×1.5", 1000, { y: .62 }); else if (streak === 6) Lab.toast("Red hot! ×2", 1000, { y: .62 });
+  }
+}
+function missBag(f, onWall) {
+  streak = 0; msgs.last = onWall ? "wood" : "out"; olli.mood = "sad"; olli.moodT = 1; nori.mood = "think"; nori.moodT = .8;
+  const y = onWall ? f.ty : Math.min(f.ty, groundY); pile.push({ x: clamp(f.tx, 8, W - 8), y, vy: 0, rest: groundY + rand(-3, 3) * S, rot: rand(-.5, .5), col: Lab.choose(["#ff5d73", "#3ec5ff", "#ffd23f"]) });
+  if (pile.length > 12) pile.shift();
+  if (!demo) { Lab.sfx(onWall ? "thud" : "drop", { pitch: .8 }); fx.puff ? fx.puff(f.tx, y, { color: "rgba(200,160,110,.6)" }) : 0; }
+}
+function nextBag() {
+  if (over) return;
+  if (bags > 0) { aim = { st: "sweep", x: aim.x, y: wall.y + wall.h, u: aim.u, v: 0, dir: aim.dir }; if (ev.wind) newWind(); olli.mood = "think"; return; }
+  // event over
+  if (roundScore >= ev.par) {
+    if (!demo) { Lab.banner("Par beaten! " + roundScore + "/" + ev.par, { color: "#2f3d73", ms: 1300, y: .5 }); Lab.sfx("levelup"); Lab.fx.confetti && evIdx % 2 === 1 && Lab.fx.confetti(); }
+    nori.mood = "joy"; nori.moodT = 1.5; between = 1.6;
+    Lab.after(1.6, () => { if (over) return; pile.length = 0; setEvent(evIdx + 1); if (!demo) { Lab.banner(ev.n, { color: "#ffb52e", ms: 1300, y: .5 }); Lab.sfx("whistle", { vol: .5 }); } });
+  } else if (demo) { setEvent(0); }
+  else {
+    over = true; olli.mood = "sad"; olli.moodT = 9;
+    Lab.gameover({ title: "Oops! Short of par", message: ev.n + ": " + roundScore + " / " + ev.par, score, stats: [["Events cleared", evIdx], ["Plops", plops], ["Swishes", swishes]] });
+  }
+}
+
+/* ---------- update ---------- */
+function frame(dt, t) { update(dt); render(t); }
+function update(dt) {
+  clock += dt; between = Math.max(0, between - dt);
+  if (ev.wheel) wheelA += dt * (evIdx > 5 ? 1.3 : .9);
+  moveHoles(clock);
+  if (aim.st === "sweep") { aim.u += dt / ev.sx * aim.dir; if (aim.u > 1) { aim.u = 1; aim.dir = -1; } if (aim.u < 0) { aim.u = 0; aim.dir = 1; } aim.x = wall.x + 10 * S + (wall.w - 20 * S) * ease.inOutSine(aim.u); aim.y = wall.y + wall.h; }
+  else if (aim.st === "climb") { aim.v += dt / ev.sy * aim.vdir; if (aim.v > 1) { aim.v = 1; aim.vdir = -1; } if (aim.v < 0) { aim.v = 0; aim.vdir = 1; } aim.y = wall.y + wall.h - 6 * S - (wall.h - 12 * S) * aim.v + (aim.v > 0 ? 0 : 0); }
+  if (flying) { flying.u += dt / flying.dur; flying.spin *= 1; if (flying.u >= 1) arrive(); }
+  for (const b of pile) { if (b.y < b.rest) { b.vy += 1400 * S * dt; b.y = Math.min(b.rest, b.y + b.vy * dt); } }
+  for (const p of [olli, nori]) { p.moodT -= dt; if (p.moodT <= 0 && p.mood !== "think" && p.mood !== "focus") p.mood = p === olli ? (aim.st === "climb" ? "focus" : "think") : "happy"; }
+  for (const sp of crowd) sp.cheer = Math.max(0, sp.cheer - dt);
+  olli.throwT = Math.max(0, olli.throwT - dt * 2.5); nori.flag = Math.max(0, nori.flag - dt * .9); nori.bob = Math.max(0, (nori.bob || 0) - dt * 4);
+  if (!demo) Lab.music.intensity(.3 + Math.min(evIdx, 6) * .1 + (bags <= 2 && roundScore < ev.par ? .2 : 0));
+}
+function demoAI(dt) {
+  if (flying || between > 0) return; const target = holes[2];
+  if (aim.st === "sweep" && Math.abs(aim.x - target.x) < 6 * S && Lab.chance(.6)) press();
+  else if (aim.st === "climb" && Math.abs(aim.y - target.y) < 6 * S) release();
+}
+
+/* ---------- drawing ---------- */
+function bgSprite() {
+  return Lab.sprite("ps:bg" + W + "x" + H, W + 80, H + 80, g => {
+    g.translate(40, 40);
+    const gy = Pals.backdrop(g, W, H, 0, { scene: "meadow", ground: (groundY - 30 * S) / H });
+    // running-track lanes in the foreground
+    const ty = groundY + 26 * S; g.fillStyle = "#e98b5d"; g.fillRect(-40, ty, W + 80, H - ty + 40);
+    g.strokeStyle = "rgba(255,255,255,.75)"; g.lineWidth = 2.5 * S; for (let i = 1; i < 4; i++) { const y = ty + (H - ty) * i / 4; g.beginPath(); g.moveTo(-40, y); g.lineTo(W + 40, y); g.stroke(); }
+    g.fillStyle = "#7cc56a"; g.fillRect(-40, groundY - 4 * S, W + 80, 30 * S);
+    // throwing line
+    g.fillStyle = "#fff"; g.fillRect(-40, olli.y + olli.sz * .52, W + 80, 4 * S);
+    // bunting
+    const by = Lab.play.y + 40 * S; g.strokeStyle = "rgba(80,60,40,.5)"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-10, by - 10 * S); g.quadraticCurveTo(W / 2, by + 26 * S, W + 10, by - 10 * S); g.stroke();
+    const cols = ["#ff5d73", "#ffd23f", "#3ec5ff", "#5fd39a", "#b9a3ff"];
+    for (let i = 0, n = Math.ceil(W / (28 * S)); i <= n; i++) { const u = i / n, x = lerp(-10, W + 10, u), y = (1 - u) * (1 - u) * (by - 10 * S) + 2 * (1 - u) * u * (by + 26 * S) + u * u * (by - 10 * S); g.fillStyle = cols[i % 5]; g.beginPath(); g.moveTo(x - 9 * S, y); g.lineTo(x + 9 * S, y); g.lineTo(x, y + 16 * S); g.closePath(); g.fill(); }
+  });
+}
+function wallSprite() {
+  return Lab.sprite("ps:wall" + Math.round(wall.w) + "x" + Math.round(wall.h), wall.w + 30 * S, wall.h + 40 * S, g => {
+    const x = 15 * S, y = 10 * S, w = wall.w, h = wall.h;
+    g.fillStyle = "#8a5a2f"; g.fillRect(x + w * .12, y + h, 10 * S, 26 * S); g.fillRect(x + w * .88 - 10 * S, y + h, 10 * S, 26 * S);
+    g.fillStyle = "rgba(0,0,0,.15)"; draw.rr(g, x + 5 * S, y + 7 * S, w, h, 14 * S); g.fill();
+    g.fillStyle = "#f6e3c2"; draw.rr(g, x, y, w, h, 14 * S); g.fill();
+    g.strokeStyle = "#c99a62"; g.lineWidth = 5 * S; g.stroke();
+    g.strokeStyle = "rgba(201,154,98,.35)"; g.lineWidth = 1.5; for (let i = 1; i < 5; i++) { g.beginPath(); g.moveTo(x + 6, y + h * i / 5); g.lineTo(x + w - 6, y + h * i / 5); g.stroke(); }
+    // painted sun + stripes
+    g.save(); draw.rr(g, x, y, w, h, 14 * S); g.clip(); g.fillStyle = "rgba(255,181,46,.18)"; for (let i = 0; i < 12; i += 2) { g.beginPath(); g.moveTo(x + w / 2, y + h / 2); g.arc(x + w / 2, y + h / 2, w, i * TAU / 12, (i + 1) * TAU / 12); g.closePath(); g.fill(); } g.restore();
+    g.fillStyle = "#3a2a1e"; g.font = Lab.font(11 * Math.max(.8, S), 700); g.textAlign = "center"; g.globalAlpha = .45; g.fillText("POCKET PALS SPORTS DAY", x + w / 2, y + h - 8 * S); g.globalAlpha = 1;
+  });
+}
+function drawHole(c, h, t) {
+  const col = HCOL[h.pts];
+  draw.circle(c, h.x, h.y, h.r + 7 * S, col); draw.circle(c, h.x, h.y, h.r + 7 * S, null, shade(col, -.3), 2);
+  c.fillStyle = "#2b2340"; c.beginPath(); c.arc(h.x, h.y, h.r, 0, TAU); c.fill();
+  c.strokeStyle = "rgba(255,255,255,.12)"; c.lineWidth = 1; c.beginPath(); for (let i = -2; i <= 2; i++) { c.moveTo(h.x + i * h.r * .4, h.y - h.r); c.lineTo(h.x + i * h.r * .4, h.y + h.r); } c.stroke();
+  draw.text(c, String(h.pts), h.x, h.y + h.r + 7 * S + 1, { size: 10 * Math.max(.85, S), color: "#fff", weight: 700, stroke: shade(col, -.4) });
+}
+function drawBag(c, x, y, r, rot, col) {
+  c.save(); c.translate(x, y); c.rotate(rot); c.fillStyle = col; draw.rr(c, -r, -r * .8, r * 2, r * 1.6, r * .5); c.fill();
+  c.strokeStyle = shade(col, -.3); c.lineWidth = Math.max(1, r * .15); c.stroke(); c.setLineDash([2, 2]); c.beginPath(); draw.rr(c, -r * .7, -r * .5, r * 1.4, r * 1.0, r * .3); c.stroke(); c.setLineDash([]); c.restore();
+}
+function render(t) {
+  const c = Lab.ctx; c.drawImage(bgSprite(), -40, -40, W + 80, H + 80);
+  const ws = wallSprite(); c.drawImage(ws, wall.x - 15 * S, wall.y - 10 * S, ws.w, ws.h);
+  if (ev.wheel) { draw.circle(c, wall.x + wall.w / 2, wall.y + wall.h / 2, wall.h * .48, "rgba(255,143,184,.25)", "rgba(201,154,98,.6)", 2); }
+  if (ev.slide) { const hy = holes[3].y; c.fillStyle = "rgba(201,154,98,.35)"; c.fillRect(wall.x + 8 * S, hy - 3 * S, wall.w - 16 * S, 6 * S); }
+  for (const h of holes) drawHole(c, h, t);
+  for (const b of pile) drawBag(c, b.x, b.y, 9 * S, b.rot, b.col);
+  // wind sock
+  if (ev.wind) { const sx = wall.x + wall.w - 8 * S, sy = wall.y - 26 * S, k = wind / 3; c.strokeStyle = "#8a5a2f"; c.lineWidth = 3 * S; c.beginPath(); c.moveTo(sx, sy + 24 * S); c.lineTo(sx, sy - 6 * S); c.stroke();
+    for (let i = 0; i < 4; i++) { const w2 = (6 - i) * S, x = sx + Math.sign(wind || 1) * (i * 8 + 4) * S * (.4 + Math.abs(k) * .6), y = sy - 4 * S + i * (1 - Math.abs(k)) * 5 * S + Math.sin(t * 8 + i) * 1.5; c.fillStyle = i % 2 ? "#fff" : "#ff5d73"; c.beginPath(); c.arc(x, y, w2, 0, TAU); c.fill(); }
+    draw.text(c, wind ? (wind < 0 ? "← " : "") + "wind " + Math.abs(wind) + (wind > 0 ? " →" : "") : "calm", sx - 52 * S, sy - 2 * S, { size: 12 * Math.max(.85, S), color: "#3a2a1e", weight: 700 }); }
+  // sight
+  if ((aim.st === "sweep" || aim.st === "climb") && !over && between <= 0) {
+    const ax = aim.x, ay = aim.st === "climb" ? aim.y : wall.y + wall.h * .5, climbing = aim.st === "climb";
+    c.strokeStyle = climbing ? "rgba(255,93,115,.85)" : "rgba(43,35,64,.35)"; c.lineWidth = climbing ? 3 : 2; c.setLineDash(climbing ? [] : [6, 6]); c.beginPath(); c.moveTo(ax, wall.y + 4 * S); c.lineTo(ax, wall.y + wall.h - 4 * S); c.stroke(); c.setLineDash([]);
+    if (climbing) { const r = 13 * S; c.strokeStyle = "#ff5d73"; c.lineWidth = 3; c.beginPath(); c.arc(ax, ay, r, 0, TAU); c.moveTo(ax - r * 1.6, ay); c.lineTo(ax - r * .5, ay); c.moveTo(ax + r * .5, ay); c.lineTo(ax + r * 1.6, ay); c.stroke(); if (wind) { c.strokeStyle = "rgba(255,93,115,.45)"; c.setLineDash([3, 4]); c.beginPath(); c.arc(ax + wind * 11 * S, ay, 9 * S, 0, TAU); c.stroke(); c.setLineDash([]); } }
+    else { draw.text(c, "▼", ax, wall.y - 8 * S, { size: 16 * Math.max(.85, S), color: "#ff5d73" }); }
+  }
+  // spectators on the bench across the track: they cheer every plop
+  const wideV = W > H * 1.3;
+  for (const sp of crowd) { const cy = wideV ? groundY - 8 * S : groundY + 58 * S, x = wideV ? (sp.dx < 0 ? wall.x - (sp.dx < -.5 ? 95 : 40) * S : wall.x + wall.w + (sp.dx > .5 ? 95 : 40) * S) : W / 2 + sp.dx * Math.min(W * .42, 190 * S), j = sp.cheer > 0 ? Math.abs(Math.sin(sp.cheer * 12)) * 6 * S : 0;
+    Pals.draw(c, sp.who, x, cy - j, (wideV ? 44 : 38) * S, { t: t + sp.dx, mood: sp.cheer > 0 ? "joy" : streak >= 3 ? "wow" : "happy", arms: sp.cheer > 0 ? "cheer" : "down", look: [clamp((aim.x - x) / 200, -1, 1), -.6], clipY: wideV ? undefined : 14 * S, shadow: wideV }); }
+  if (!wideV) { c.fillStyle = "#c98f5a"; draw.rr(c, W / 2 - Math.min(W * .47, 215 * S), groundY + 58 * S + 12 * S, Math.min(W * .94, 430 * S), 9 * S, 4 * S); c.fill(); }
+  // pals
+  const ot = olli.throwT, oanc = Pals.draw(c, "olli", olli.x, olli.y - Math.sin(ot * Math.PI) * 8 * S, olli.sz, { t, mood: olli.mood, arms: ot > 0 ? "up" : "hold", look: [clamp((aim.x - olli.x) / 200, -1, 1), -.7], squash: aim.st === "climb" ? .08 : -ot * .1, hot: Math.min(1, streak / 6) });
+  if (bags > 0 && !flying && ot <= 0) drawBag(c, oanc.handR[0], oanc.handR[1] - 4 * S, 10 * S, .2, "#ff5d73");
+  const nb = Math.sin((nori.bob || 0) * Math.PI) * 3 * S, nanc = Pals.draw(c, "nori", nori.x, nori.y - nb, nori.sz, { t, mood: nori.mood, arms: nori.flag > 0 ? "up" : "hold", look: [-.6, -.5] });
+  { const hx = nanc.handR[0], hy = nanc.handR[1]; c.strokeStyle = "#8a5a2f"; c.lineWidth = 2.5 * S; c.beginPath(); c.moveTo(hx, hy); c.lineTo(hx, hy - 34 * S); c.stroke(); const wv = Math.sin(t * (nori.flag > 0 ? 18 : 3)) * 4 * S; c.fillStyle = nori.flag > 0 ? "#ffd23f" : "#ff5d73"; c.beginPath(); c.moveTo(hx, hy - 34 * S); c.quadraticCurveTo(hx + 12 * S, hy - 30 * S + wv, hx + 24 * S, hy - 28 * S); c.lineTo(hx, hy - 20 * S); c.fill(); }
+  // bag in flight (shrinks as it travels away)
+  if (flying) { const f = flying, u = f.u, x = lerp(f.x0, f.tx, u), y = lerp(f.y0, f.ty, u) - Math.sin(u * Math.PI) * 90 * S, sc = lerp(1.15, .85, u);
+    draw.shadow(c, x, lerp(olli.y + olli.sz * .5, groundY, u), 9 * S * sc, 3 * S, .15); drawBag(c, x, y, 10 * S * sc, f.spin * u, "#ff5d73"); }
+  // HUD: event, bags, par progress
+  if (!demo) {
+    const y0 = Lab.play.y + 8, pw = Math.min(W - 24, 330);
+    const x0 = W / 2 - pw / 2; draw.rect(c, x0, y0, pw, 30, 12, "rgba(255,255,255,.88)", "rgba(43,35,64,.15)", 1.5);
+    draw.text(c, ev.n, x0 + 10, y0 + 16, { size: 13, color: "#3a2a1e", weight: 700, align: "left" });
+    for (let i = 0; i < BAGS; i++) drawBag(c, x0 + pw - 14 - i * 19, y0 + 15, 6.5, 0, i < bags ? "#ff5d73" : "rgba(43,35,64,.18)");
+    const bx = x0 + pw * .42, bw = pw * .3, k = clamp(roundScore / ev.par, 0, 1);
+    draw.rect(c, bx, y0 + 10, bw, 10, 5, "rgba(43,35,64,.12)"); draw.rect(c, bx, y0 + 10, Math.max(10, bw * k), 10, 5, k >= 1 ? "#5fd39a" : "#ffb52e");
+    draw.text(c, roundScore + "/" + ev.par, bx + bw / 2, y0 + 16, { size: 9.5, color: "#3a2a1e", weight: 700 });
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

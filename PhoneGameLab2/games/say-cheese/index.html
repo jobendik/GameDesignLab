@@ -1,0 +1,246 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Say Cheese</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* SAY CHEESE — Photo Day at the Pocket Pals club. Bun is behind the camera; group after group climbs the risers and
+ * everyone is meant to strike the SAME pose. Someone always spoils it. Spot the odd one out and tap them before the
+ * countdown ends: they fix their face, and the moment the whole group is right, Bun snaps the photo (faster = more).
+ * Core idea kept from the prototype: find the odd face before the time runs out.
+ * What makes it a game:
+ *  - The odd one changes KIND as the day goes on: a frown, closed eyes, wrong arms, a missing (or extra) party hat,
+ *    eyes looking away, a CHATTERBOX (mouth moving), a tilted head, and the OFF-BEAT BOUNCER — everyone bobs to the
+ *    music except one, so you have to watch the rhythm, not just the faces.
+ *  - Groups grow from 6 to 20, mixed-species groups from photo 8, two spoilers per photo from photo 10.
+ *  - Countdown shrinks from 7 s to 3.2 s. A wrong tap startles that pal ("Hey!") and burns 0.8 s.
+ *  - Streak: clean photos (no wrong taps) raise the multiplier up to ×3. Points = (50 + time left) × streak.
+ *  - A photo with a spoiler still in it is BLURRY and costs one of three film rolls; Bun circles who it was.
+ * Identity: school-gym photo day — wooden risers, a pastel backdrop on a roller, tripod camera, polaroids pinned
+ * to the album strip. Funk music, shutter clicks, countdown beeps that rise in pitch.                              */
+let demo = false;
+Lab.init({
+  title: "Say Cheese", tagline: "One pal is spoiling the group photo. Find them before the flash!", category: "Skill", kicker: "Pocket Pals",
+  howto: ["Everyone should strike the same pose", "Tap the pal who's doing it wrong", "Fix the group before the flash"],
+  theme: { bg: "#ffe9ef", bg2: "#e6f0ff", fg: "#3d2f4f", muted: "#7c6a8c", accent: "#ff5d8f", accent2: "#5b8cff", light: true },
+  orient: "any", music: { style: "funk", key: "G", bpm: 100, vol: .38 }, restart: start,
+  attract(dt, t) { if (!crowd) { demo = true; setup(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink;
+const SPECIES = ["momo", "pip", "nori", "olli", "bolt", "momo", "nori", "pip"];
+const GRID = [[2, 3], [2, 3], [2, 4], [3, 3], [3, 4], [3, 4], [3, 5], [4, 4], [4, 4], [4, 5], [4, 5]];
+const TYPES = [
+  { id: "frown", from: 1, say: "Big smiles!" }, { id: "sleepy", from: 2, say: "Eyes open!" }, { id: "arms", from: 3, say: "Same pose, everyone!" },
+  { id: "hat", from: 4, say: "Hats on… or off!" }, { id: "look", from: 5, say: "Look at the camera!" }, { id: "beat", from: 6, say: "Bounce on the beat!" },
+  { id: "talk", from: 7, say: "No chatting!" }, { id: "tilt", from: 9, say: "Heads straight!" },
+];
+const BPM = 100;
+let forced = null, W, H, S, land, P, area, cam, crowd, photo, rolls, score, streak, bestStreak, taken, fastest, phase, pt, tLeft, tMax, base, lastType, album,
+  bun, flashA, beat, sayTxt, sayT, wrongN, blurN, dropT, ticks;
+
+/* ---------- layout ---------- */
+function layout() {
+  W = Lab.W; H = Lab.H; P = Lab.play; land = W > H * 1.1;
+  S = land ? clamp(Math.min(W / 844, H / 390), .7, 1.6) : clamp(Math.min(W / 390, H / 800), .7, 1.6);
+  if (land) { area = { x: P.x + 10 * S, y: P.y + 52 * S, w: P.w * .7 - 20 * S, h: P.h - 64 * S }; cam = { x: P.x + P.w * .84, y: P.y + P.h * .62, s: Math.min(92 * S, P.h * .3) }; }
+  else { const camH = Math.min(200 * S, P.h * .27); area = { x: P.x + 10 * S, y: P.y + 56 * S, w: P.w - 20 * S, h: P.h - 56 * S - camH - 10 * S }; cam = { x: P.x + P.w * .62, y: H - Lab.safe.bottom - camH * .42, s: Math.min(84 * S, camH * .46) }; }
+  Lab.sprite.clear("ch-");
+  if (crowd) place();
+}
+Lab.onResize(layout);
+function place() {
+  const R = crowd.rows, C = crowd.cols, cw = area.w / C, rh = area.h / R;
+  crowd.size = Math.min(cw * .64, rh * .6, 96 * S);
+  for (const p of crowd.pals) {
+    const back = R - 1 - p.row, k = 1 - back * .05, stag = C > 3 ? (p.row % 2 ? .2 : -.2) * cw : 0;
+    p.x = clamp(area.x + cw * (p.col + .5) + stag, area.x + crowd.size * .5, area.x + area.w - crowd.size * .5); p.y = area.y + rh * (p.row + .62); p.s = crowd.size * k;
+  }
+}
+
+/* ---------- setup ---------- */
+function setup() {
+  photo = 0; rolls = 3; score = 0; streak = 0; bestStreak = 0; taken = 0; fastest = 99; album = []; lastType = null; wrongN = 0; blurN = 0;
+  bun = { joy: 0, wow: 0, sad: 0, talk: 0 }; flashA = 0; beat = 0; sayTxt = ""; sayT = 9; ticks = 0; crowd = null; layout();
+  nextGroup();
+}
+function unlocked() { return TYPES.filter(t => t.from <= photo); }
+function nextGroup() {
+  photo++; const g = GRID[Math.min(photo - 1, GRID.length - 1)];
+  const rows = land ? Math.min(g[0], 3) : Math.max(g[0], g[1]), cols = land ? Math.ceil(g[0] * g[1] / rows) : Math.min(g[0], g[1]);
+  const mixed = photo >= 8, sp = SPECIES[(photo - 1) % SPECIES.length];
+  base = { mood: Lab.chance(.5) ? "happy" : "joy", arms: Lab.choose(["cheer", "wave", "up", "down", "hold"]), hat: photo >= 4 && Lab.chance(.5) };
+  const pals = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) pals.push({ row: r, col: c, id: mixed ? Lab.choose(["pip", "bun", "momo", "nori", "olli", "bolt"]) : sp, odd: null, fixed: 0, react: 0, hop: 0, sq: 0, ph: Lab.rand(0, TAU), x: 0, y: 0, s: 0, drop: Lab.rand(0, .35) + r * .08, show: 0 });
+  crowd = { rows, cols, pals, size: 0 }; place();
+  // spoilers
+  const n = photo >= 10 && Lab.chance(.6) ? 2 : 1, pool = unlocked().filter(t => t.id !== lastType), picks = Lab.shuffle(pals.slice());
+  for (let i = 0; i < n; i++) { const tp = forced ? TYPES.find(t => t.id === forced) : Lab.choose(pool.length ? pool : unlocked()); forced = null; lastType = tp.id; const p = picks[i]; p.odd = tp.id; p.oddArms = tp.id === "arms" ? (base.arms === "down" || base.arms === "hold" ? "up" : "down") : null; p.lookX = Lab.chance(.5) ? -1 : 1; p.tiltD = Lab.chance(.5) ? -1 : 1; }
+  tMax = Math.max(3.2, 7.2 - (photo - 1) * .3) + (n > 1 ? 1.2 : 0); tLeft = tMax;
+  phase = "in"; pt = 0; dropT = 0; ticks = 0;
+  const tp0 = TYPES.find(t => t.id === lastType);
+  sayTxt = n > 1 ? "Two pals are off!" : photo <= 4 ? tp0.say : Lab.choose(["Everybody, same pose!", "Ready…", "Hold it…", "Nice and still!"]); sayT = 0; bun.talk = .8;
+  if (photo === 1) sayTxt = "Who's not smiling?";
+}
+function start() {
+  demo = false; setup(); Lab.setScore(0); Lab.music.intensity(.3);
+  Lab.input.onDown = [(x, y) => { const p = hit(x, y); if (p) tapPal(p); }];
+  Lab.expose({
+    get score() { return score; }, get photo() { return photo; }, get rolls() { return rolls; }, get phase() { return phase; }, get timeLeft() { return tLeft; }, get streak() { return streak; },
+    get taken() { return taken; }, pals: () => crowd.pals.map((p, i) => ({ i, x: p.x, y: p.y, s: p.s, odd: p.odd, fixed: !!p.fixed })), tap: i => tapPal(crowd.pals[i]),
+    setTime(v) { tLeft = v; }, force(t) { forced = t; }, get beatPhase() { return beat % 1; }, bobOf: i => bob(crowd.pals[i]),
+  });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+function hit(x, y) {
+  if (!crowd) return null; let best = null, bd = 1e9;
+  for (const p of crowd.pals) { const d = Math.hypot((x - p.x) / (p.s * .75), (y - (p.y - p.s * .15)) / (p.s * .85)); if (d < 1.2 && d < bd) { bd = d; best = p; } }
+  return best;
+}
+function snd(n, o) { if (!demo) Lab.sfx(n, o); }
+function tapPal(p) {
+  if (phase !== "pose" || !p) return false;
+  if (p.odd && !p.fixed) {
+    p.fixed = 1; p.hop = 1; p.sq = -.2; snd("pop", { pitch: 1.3 }); snd("chime", { pitch: 1.2, vol: .5 });
+    if (!demo) { fx.burst(p.x, p.y - p.s * .4, { n: 12, colors: ["#ffd23f", "#ff8fb8", "#fff"], speed: 180, life: .5, size: 3.5 * S, shape: "star" }); fx.text(p.x, p.y - p.s * 1.1, "Better!", { color: "#ff5d8f", size: 15 * S }); }
+    if (crowd.pals.every(q => !q.odd || q.fixed)) snap(true);
+    return true;
+  }
+  if (p.fixed || p.react > 0) return false;
+  p.react = 1; p.hop = .6; streak = 0; wrongN++; tLeft = Math.max(.05, tLeft - .8); bun.wow = .7;
+  snd("boing", { pitch: .7 }); if (!demo) { Lab.buzz(25); Lab.shake(3, .15); fx.text(p.x, p.y - p.s * 1.05, "Hey! −0.8s", { color: "#7c6a8c", size: 13 * S }); }
+  return false;
+}
+function snap(clean) {
+  phase = "snap"; pt = 0; flashA = 1;
+  if (!demo) { Lab.audio.noise({ dur: .08, vol: .25, hp: 2500 }); Lab.audio.tone({ f: 1800, f2: 900, type: "square", dur: .04, vol: .08 }); Lab.flash("#ffffff", .25, .7); }
+  const used = tMax - tLeft;
+  if (clean) {
+    taken++; fastest = Math.min(fastest, used); if (wrongN === 0) streak++; else streak = 0;
+    bestStreak = Math.max(bestStreak, streak); const mult = Math.min(3, 1 + Math.max(0, streak - 1) * .25);
+    const pts = Math.round((50 + tLeft * 25) * mult); score += pts;
+    if (!demo) { Lab.setScore(score); Lab.bumpScore(); fx.text(area.x + area.w / 2, area.y + area.h * .45, "+" + pts + (mult > 1 ? "  ×" + mult : ""), { color: "#ff5d8f", size: 26 * S }); Lab.audio.combo(Math.min(10, streak + 2), { vol: .15 }); }
+    bun.joy = 1.2; sayTxt = tLeft > tMax * .6 ? "Lightning fast!" : Lab.choose(["Perfect!", "Lovely!", "Say cheese!"]); sayT = 0;
+    for (const p of crowd.pals) p.hop = Math.max(p.hop, .7 + Lab.rand(0, .3));
+  } else {
+    rolls--; blurN++; streak = 0; bun.sad = 1.4; sayTxt = rolls > 0 ? "Oh no… blurry!" : "Out of film!"; sayT = 0;
+    if (!demo) { Lab.sfx("error"); Lab.buzz(60); Lab.shake(6, .3); }
+  }
+  // the polaroid: a little snapshot of the risers
+  if (!demo) {
+    const cv = document.createElement("canvas"), sw = 120, sh = Math.round(120 * area.h / area.w); cv.width = sw; cv.height = sh;
+    try { const src = Lab.ctx.canvas, d = Lab.dpr; cv.getContext("2d").drawImage(src, area.x * d, area.y * d, area.w * d, area.h * d, 0, 0, sw, sh); } catch (e) { }
+    album.push({ cv, clean, t: 0, rot: Lab.rand(-.15, .15) }); if (album.length > 6) album.shift();
+  }
+  wrongN = 0;
+}
+function lose() {
+  phase = "over"; Lab.music.intensity(0);
+  Lab.gameover({ title: "Oops! Out of film", message: "Three blurry photos — Bun needs a new roll.", score, stats: [["Photos taken", taken], ["Fastest fix", fastest < 99 ? fastest.toFixed(2) + " s" : "–"], ["Best streak", bestStreak]] });
+}
+
+/* ---------- tick ---------- */
+function tick(dt) {
+  if (!crowd) return;
+  pt += dt; beat += dt * BPM / 60; sayT += dt; flashA = Math.max(0, flashA - dt * 3);
+  for (const k in bun) bun[k] = Math.max(0, bun[k] - dt);
+  if (phase === "in") { dropT += dt; if (dropT > .75) { phase = "pose"; pt = 0; snd("whistle", { vol: .35, pitch: 1.3 }); } }
+  else if (phase === "pose") {
+    tLeft -= dt;
+    const sec = Math.ceil(tLeft); if (tLeft < 3 && sec !== ticks) { ticks = sec; snd("tick", { pitch: 1.6 - sec * .15, vol: .6 }); }
+    if (tLeft <= 0) { tLeft = 0; snap(false); }
+    if (demo && pt > 1.4) { const o = crowd.pals.find(p => p.odd && !p.fixed); if (o) tapPal(o); }
+  } else if (phase === "snap") {
+    if (pt > (album.length && !album[album.length - 1].clean ? 1.6 : 1.05)) {
+      if (rolls <= 0 && !demo) { lose(); return; }
+      if (demo && photo > 9) setup(); else nextGroup();
+      if (!demo) Lab.music.intensity(clamp(.3 + photo * .05, 0, 1));
+    }
+  }
+  for (const p of crowd.pals) { p.hop = Math.max(0, p.hop - dt * 2.2); p.react = Math.max(0, p.react - dt * 1.2); p.sq = Lab.damp(p.sq, 0, 9, dt); p.show = phase === "in" ? clamp((dropT - p.drop) / .35, 0, 1) : 1; }
+  for (const a of album) a.t = Math.min(1, a.t + dt * 1.6);
+}
+function bob(p) { const off = p.odd === "beat" && !p.fixed ? .5 : 0, ph = (beat + off) % 1; return Math.pow(1 - ph, 3); }
+
+/* ---------- drawing ---------- */
+function backdrop() {
+  return Lab.sprite("ch-bg" + crowd.rows, W + 80, H + 80, g => {
+    g.translate(40, 40);
+    draw.vgrad(g, -40, -40, W + 80, H + 80, ["#f7e3ff", "#ffe9ef"]);
+    // gym wall planks
+    g.fillStyle = "rgba(160,120,170,.08)"; for (let x = -40; x < W + 40; x += 26 * S) g.fillRect(x, -40, 2, H + 80);
+    // rolled photo backdrop behind the risers
+    const bx = area.x - 6 * S, bw = area.w + 12 * S, top = area.y - 18 * S, bot = area.y + area.h + 4 * S;
+    draw.rect(g, bx - 8 * S, top - 12 * S, bw + 16 * S, 18 * S, 9 * S, "#8a6aa8");
+    const bg = g.createLinearGradient(0, top, 0, bot); bg.addColorStop(0, "#bcd6ff"); bg.addColorStop(1, "#e2ecff"); g.fillStyle = bg; g.fillRect(bx, top, bw, bot - top);
+    g.fillStyle = "rgba(255,255,255,.35)"; for (let i = 0; i < 12; i++) draw.star(g, bx + ((i * 73) % 100) / 100 * bw, top + ((i * 41) % 100) / 100 * (bot - top) * .5 + 10 * S, 5 * S, "rgba(255,255,255,.5)", 5, .45);
+    // risers
+    const R = crowd.rows, rh = area.h / R;
+    for (let r = 0; r < R; r++) { const y = area.y + rh * (r + .62) + crowd.size * .45, x0 = area.x - (R - r) * 4 * S, w = area.w + (R - r) * 8 * S; draw.rect(g, x0, y - 4 * S, w, 10 * S, 4 * S, "#f0c48e"); draw.rect(g, x0, y + 5 * S, w, 18 * S, 3 * S, r % 2 ? "#c98b52" : "#d69a60", "#a8743f", 2); g.fillStyle = "rgba(255,255,255,.25)"; g.fillRect(x0 + 6 * S, y + 9 * S, w - 12 * S, 2 * S); }
+    // floor
+    const fy = land ? area.y + area.h + 6 * S : area.y + area.h + 8 * S; g.fillStyle = "#e8c9a0"; g.fillRect(-40, fy, W + 80, H + 40 - fy); g.strokeStyle = "rgba(150,100,60,.2)"; g.lineWidth = 2; for (let x = -40; x < W + 40; x += 40 * S) { g.beginPath(); g.moveTo(x, fy); g.lineTo(x + (x - W / 2) * .4, H + 40); g.stroke(); }
+  });
+}
+function hat(c, a, s, col) {
+  const [hx, hy] = a.head, h = s * .46, w = s * .32;
+  c.fillStyle = col; c.beginPath(); c.moveTo(hx - w / 2, hy + h * .18); c.lineTo(hx, hy - h * .8); c.lineTo(hx + w / 2, hy + h * .18); c.closePath(); c.fill(); c.strokeStyle = INK; c.lineWidth = 1.5; c.stroke();
+  c.strokeStyle = "#fff"; c.lineWidth = 2; c.beginPath(); c.moveTo(hx - w * .3, hy - h * .05); c.lineTo(hx + w * .22, hy - h * .2); c.stroke();
+  draw.circle(c, hx, hy - h * .82, s * .06, "#ffd23f", INK, 1);
+}
+function drawPal(c, p, t) {
+  if (p.show <= 0) return;
+  const odd = p.odd && !p.fixed, b = bob(p) * p.s * .07, hop = Math.sin(p.hop * Math.PI) * p.s * .22, fall = (1 - ease.outBack(p.show)) * p.s * 2.2;
+  let mood = base.mood, arms = base.arms, look = [0, 0], tilt = 0, talk = 0, hasHat = base.hat;
+  if (odd) {
+    if (p.odd === "frown") mood = "sad"; else if (p.odd === "sleepy") mood = "sleepy"; else if (p.odd === "arms") arms = p.oddArms;
+    else if (p.odd === "look") look = [p.lookX, .15]; else if (p.odd === "talk") talk = .5 + Math.sin(t * 14) * .5; else if (p.odd === "tilt") tilt = .32 * p.tiltD; else if (p.odd === "hat") hasHat = !base.hat;
+  }
+  if (p.react > 0) mood = "wow"; if (p.fixed && p.hop > 0) { mood = "joy"; }
+  if (phase === "snap" && !odd) mood = "joy";
+  const a = Pals.draw(c, p.id, p.x, p.y - b - hop - fall, p.s, { t: t + p.ph, mood, arms, look, tilt, talk, squash: p.sq + b / p.s * -.6, shadow: false, blink: .001 });
+  if (hasHat) hat(c, a, p.s, ["#ff5d8f", "#5b8cff", "#3ecf8e", "#ffb52e"][(p.row + p.col) % 4]);
+  if (phase === "snap" && odd && pt > .25) { const r = p.s * .85; c.strokeStyle = "#ff3b5c"; c.lineWidth = 4 * S; c.beginPath(); c.arc(p.x, p.y - p.s * .2, r, 0, TAU * ease.outCubic(clamp((pt - .25) / .4, 0, 1))); c.stroke(); }
+}
+function drawCam(c, t) {
+  const { x, y, s } = cam, mood = bun.sad > 0 ? "sad" : bun.joy > 0 ? "joy" : bun.wow > 0 ? "wow" : phase === "pose" && tLeft < 2 ? "focus" : "happy";
+  // tripod + camera
+  const kx = x - s * .95, ky = y - s * .15;
+  c.strokeStyle = "#5a4a6a"; c.lineWidth = 4 * S; for (const d of [-1, 0, 1]) { c.beginPath(); c.moveTo(kx, ky + s * .2); c.lineTo(kx + d * s * .38, y + s * .72); c.stroke(); }
+  draw.rect(c, kx - s * .42, ky - s * .28, s * .84, s * .52, s * .1, "#3d2f4f", INK, 2); draw.rect(c, kx - s * .16, ky - s * .4, s * .3, s * .14, s * .04, "#3d2f4f");
+  const lr = s * .2; draw.circle(c, kx, ky, lr, "#2a2240", "#c9c2d8", 3); draw.circle(c, kx - lr * .3, ky - lr * .3, lr * .25, "rgba(255,255,255,.5)");
+  if (phase === "pose") { const f = clamp(tLeft / tMax, 0, 1); c.strokeStyle = f < .3 ? "#ff3b5c" : "#ffd23f"; c.lineWidth = 5 * S; c.beginPath(); c.arc(kx, ky, lr + 7 * S, -Math.PI / 2, -Math.PI / 2 + TAU * f); c.stroke(); }
+  draw.circle(c, kx + s * .3, ky - s * .2, s * .05, flashA > 0 ? "#fff" : "#ff8fb8");
+  if (flashA > 0) draw.glow(c, kx, ky, s * 3 * flashA + s, "#ffffff", .8 * flashA);
+  // bun
+  Pals.draw(c, "bun", x + s * .1, y, s, { t, mood, arms: bun.joy > 0 ? "cheer" : "hold", talk: bun.talk > 0 ? Math.abs(Math.sin(t * 12)) * .7 : 0, look: [-.8, -.3], squash: bun.joy > 0 ? Math.sin(t * 16) * .04 : 0 });
+  // countdown digits
+  if (phase === "pose" && tLeft < 3.2) { const n = Math.ceil(tLeft), f = 1 - (tLeft % 1); draw.text(c, String(n), kx, ky - s * .95, { size: (30 + f * 8) * S, color: "#ff3b5c", stroke: "#fff", strokeW: 5 * S, weight: 800 }); }
+  // speech bubble
+  if (sayT < 2.2 && sayTxt) {
+    const bw = Math.min(200 * S, (land ? W - cam.x + s * 1.1 : W - 24 * S)), bh = 38 * S, bx = clamp(land ? x - s * .2 : x - bw * .3, 12 * S + bw / 2, W - 12 * S - bw / 2), by = y - s * 1.25 - bh / 2, pop = ease.outBack(clamp(sayT / .2, 0, 1));
+    c.save(); c.translate(bx, by); c.scale(pop, pop); Pals.bubble(c, 0, 0, bw, bh, { tailX: x + s * .1 - bx, tailY: s * .45 }); draw.text(c, sayTxt, 0, 1, { size: 14 * S, color: INK, weight: 800, maxWidth: bw - 16 * S }); c.restore();
+  }
+}
+function render(t) {
+  if (!crowd) return; const c = Lab.ctx;
+  c.drawImage(backdrop(), -40, -40, W + 80, H + 80);
+  const sorted = crowd.pals.slice().sort((a, b) => a.row - b.row); for (const p of sorted) drawPal(c, p, t);
+  drawCam(c, t);
+  // top strip: film rolls, photo number, streak; album polaroids
+  const y = P.y + 22 * S;
+  for (let i = 0; i < 3; i++) { const x = P.x + 22 * S + i * 30 * S, on = i < rolls; draw.rect(c, x - 11 * S, y - 9 * S, 22 * S, 18 * S, 4 * S, on ? "#3d2f4f" : "rgba(61,47,79,.18)"); draw.circle(c, x, y, 6 * S, on ? "#ffd23f" : "rgba(255,255,255,.4)"); draw.circle(c, x, y, 2.2 * S, on ? "#3d2f4f" : "rgba(61,47,79,.2)"); }
+  draw.text(c, "Photo " + photo, P.x + 112 * S, y, { size: 15 * S, color: "#3d2f4f", align: "left", weight: 800 });
+  if (streak > 1) draw.text(c, "streak ×" + Math.min(3, 1 + (streak - 1) * .25), P.x + 112 * S, y + 17 * S, { size: 11 * S, color: "#ff5d8f", align: "left", weight: 800 });
+  const n = album.length;
+  for (let i = 0; i < n; i++) {
+    const a = album[i], pw = 38 * S, ph = pw * 1.1, tx = P.x + P.w - 26 * S - (n - 1 - i) * 24 * S, ty = y + 4 * S, u = ease.outCubic(a.t);
+    const sx = lerp(area.x + area.w / 2, tx, u), sy = lerp(area.y + area.h / 2, ty, u), sc = lerp(3.2, 1, u);
+    c.save(); c.translate(sx, sy); c.rotate(a.rot * u); c.scale(sc, sc);
+    draw.rect(c, -pw / 2, -ph / 2, pw, ph, 2, "#fffdf6", "rgba(61,47,79,.25)", 1); const iw = pw - 6 * S, ih = iw * a.cv.height / a.cv.width;
+    c.drawImage(a.cv, -iw / 2, -ph / 2 + 3 * S, iw, Math.min(ih, ph - 12 * S));
+    if (!a.clean) { c.fillStyle = "rgba(255,255,255,.55)"; c.fillRect(-iw / 2, -ph / 2 + 3 * S, iw, Math.min(ih, ph - 12 * S)); draw.text(c, "✕", 0, -ph * .1, { size: 14 * S, color: "#ff3b5c", weight: 800 }); }
+    c.restore();
+  }
+}
+Lab.boot();
+})();
+</script></body></html>

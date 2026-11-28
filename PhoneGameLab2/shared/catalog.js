@@ -4,62 +4,6 @@ window.LAB_GAMES = [
   "cat": "Minigame",
   "items": [
    {
-    "n": 29,
-    "slug": "football",
-    "t": "Football",
-    "d": "Swipe to shoot the ball past the goalkeeper.",
-    "thumb": "../thumbs/PhoneGameLab2--football.jpg"
-   },
-   {
-    "n": 30,
-    "slug": "fruit-boom",
-    "t": "Fruit Boom",
-    "d": "Swipe to slice flying fruit, fruit-ninja style.",
-    "thumb": "../thumbs/PhoneGameLab2--fruit-boom.jpg"
-   },
-   {
-    "n": 31,
-    "slug": "go-up",
-    "t": "Go Up",
-    "d": "Hop from a moving platform to the next to climb.",
-    "thumb": "../thumbs/PhoneGameLab2--go-up.jpg"
-   },
-   {
-    "n": 32,
-    "slug": "goal",
-    "t": "Goal!",
-    "d": "Precision shot — hit the target inside the goal.",
-    "thumb": "../thumbs/PhoneGameLab2--goal.jpg"
-   },
-   {
-    "n": 33,
-    "slug": "guitar-ace",
-    "t": "Guitar Ace",
-    "d": "Tap the falling notes in time with the rhythm.",
-    "thumb": "../thumbs/PhoneGameLab2--guitar-ace.jpg"
-   },
-   {
-    "n": 34,
-    "slug": "happy-connect",
-    "t": "Happy Connect",
-    "d": "Draw lines to match identical happy faces.",
-    "thumb": "../thumbs/PhoneGameLab2--happy-connect.jpg"
-   },
-   {
-    "n": 35,
-    "slug": "happy-face",
-    "t": "Happy Face",
-    "d": "Find the odd face out before time runs out.",
-    "thumb": "../thumbs/PhoneGameLab2--happy-face.jpg"
-   },
-   {
-    "n": 36,
-    "slug": "hit-the-road",
-    "t": "Hit The Road",
-    "d": "Switch lanes to dodge traffic and grab coins.",
-    "thumb": "../thumbs/PhoneGameLab2--hit-the-road.jpg"
-   },
-   {
     "n": 37,
     "slug": "hole-chase",
     "t": "Hole Chase",
@@ -389,6 +333,13 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--fish-fizz.jpg"
    },
    {
+    "slug": "huddle-up",
+    "t": "Huddle Up",
+    "d": "Tap two twins. If they can reach each other, they hug!",
+    "v2": true,
+    "score": 7
+   },
+   {
     "slug": "lantern-lane",
     "t": "Lantern Lane",
     "d": "Walk every pal home at once. No bumps!",
@@ -419,6 +370,97 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 7,
     "thumb": "../thumbs/PhoneGameLab2--sweet-circuit.jpg"
+   }
+  ]
+ },
+ {
+  "cat": "Arcade",
+  "items": [
+   {
+    "slug": "bumpy-bus",
+    "t": "Bumpy Bus",
+    "d": "Pick up your pals. Don't bounce them off the roof!",
+    "v2": true
+   },
+   {
+    "slug": "cakewalk",
+    "t": "Cakewalk",
+    "d": "Catch the cake on Momo's head. Walk gently!",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--cakewalk.jpg"
+   },
+   {
+    "slug": "gulp-and-float",
+    "t": "Gulp & Float",
+    "d": "Ride a bubble to the stars. Gulp fireflies, dodge the prickles.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--gulp-and-float.jpg"
+   },
+   {
+    "slug": "hover-hop",
+    "t": "Hover Hop",
+    "d": "Tap to hop Bolt up the sliding pads. Land dead centre!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--hover-hop.jpg"
+   },
+   {
+    "slug": "lilypad-lunch",
+    "t": "Lilypad Lunch",
+    "d": "Bounce Momo off the lily pad and gulp the fruit.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--lilypad-lunch.jpg"
+   },
+   {
+    "slug": "pier-pressure",
+    "t": "Pier Pressure",
+    "d": "Bumper cars on a sinking pier. Bonk your pals into the bay.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--pier-pressure.jpg"
+   },
+   {
+    "slug": "pop-and-pour",
+    "t": "Pop & Pour",
+    "d": "Pop the fruit, layer the juice, serve the queue!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--pop-and-pour.jpg"
+   },
+   {
+    "slug": "reef-relief",
+    "t": "Reef Relief",
+    "d": "Haul the junk. Spare the fish.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--reef-relief.jpg"
+   },
+   {
+    "slug": "return-to-sender",
+    "t": "Return to Sender",
+    "d": "No blaster, just a beam. Fling the jellies back where they came from!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--return-to-sender.jpg"
+   },
+   {
+    "slug": "sunny-soak",
+    "t": "Sunny Soak",
+    "d": "Lob water balloons. Cool your pals down.",
+    "v2": true,
+    "score": 8,
+    "thumb": "../thumbs/PhoneGameLab2--sunny-soak.jpg"
+   },
+   {
+    "slug": "top-frog",
+    "t": "Top Frog",
+    "d": "Kick, snap, grow. Today's snack was yesterday's bully.",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--top-frog.jpg"
    }
   ]
  },
@@ -490,81 +532,19 @@ window.LAB_GAMES = [
     "thumb": "../thumbs/PhoneGameLab2--ramp-scamp.jpg"
    },
    {
+    "slug": "say-cheese",
+    "t": "Say Cheese",
+    "d": "One pal is spoiling the group photo. Find them before the flash!",
+    "v2": true,
+    "score": 7
+   },
+   {
     "slug": "topping-toss",
     "t": "Topping Toss",
     "d": "Toss toppings on the spinning donut. Three of a kind and Momo gobbles them!",
     "v2": true,
     "score": 7,
     "thumb": "../thumbs/PhoneGameLab2--topping-toss.jpg"
-   }
-  ]
- },
- {
-  "cat": "Arcade",
-  "items": [
-   {
-    "slug": "cakewalk",
-    "t": "Cakewalk",
-    "d": "Catch the cake on Momo's head. Walk gently!",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--cakewalk.jpg"
-   },
-   {
-    "slug": "gulp-and-float",
-    "t": "Gulp & Float",
-    "d": "Ride a bubble to the stars. Gulp fireflies, dodge the prickles.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--gulp-and-float.jpg"
-   },
-   {
-    "slug": "lilypad-lunch",
-    "t": "Lilypad Lunch",
-    "d": "Bounce Momo off the lily pad and gulp the fruit.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--lilypad-lunch.jpg"
-   },
-   {
-    "slug": "pier-pressure",
-    "t": "Pier Pressure",
-    "d": "Bumper cars on a sinking pier. Bonk your pals into the bay.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--pier-pressure.jpg"
-   },
-   {
-    "slug": "reef-relief",
-    "t": "Reef Relief",
-    "d": "Haul the junk. Spare the fish.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--reef-relief.jpg"
-   },
-   {
-    "slug": "return-to-sender",
-    "t": "Return to Sender",
-    "d": "No blaster, just a beam. Fling the jellies back where they came from!",
-    "v2": true,
-    "score": 7,
-    "thumb": "../thumbs/PhoneGameLab2--return-to-sender.jpg"
-   },
-   {
-    "slug": "sunny-soak",
-    "t": "Sunny Soak",
-    "d": "Lob water balloons. Cool your pals down.",
-    "v2": true,
-    "score": 8,
-    "thumb": "../thumbs/PhoneGameLab2--sunny-soak.jpg"
-   },
-   {
-    "slug": "top-frog",
-    "t": "Top Frog",
-    "d": "Kick, snap, grow. Today's snack was yesterday's bully.",
-    "v2": true,
-    "score": 7,
-    "thumb": "../thumbs/PhoneGameLab2--top-frog.jpg"
    }
   ]
  },
@@ -607,6 +587,13 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 7,
     "thumb": "../thumbs/PhoneGameLab2--echo-jam.jpg"
+   },
+   {
+    "slug": "strum-corner",
+    "t": "Strum Corner",
+    "d": "Strum down, strum up, let it ring. Draw a crowd!",
+    "v2": true,
+    "score": 7
    }
   ]
  },
@@ -620,6 +607,22 @@ window.LAB_GAMES = [
     "v2": true,
     "score": 8,
     "thumb": "../thumbs/PhoneGameLab2--ice-dunk.jpg"
+   },
+   {
+    "slug": "plop-shot",
+    "t": "Plop Shot",
+    "d": "Sports day beanbags. Press, hold, release — plop!",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--plop-shot.jpg"
+   },
+   {
+    "slug": "volley-garden",
+    "t": "Volley Garden",
+    "d": "Momo crosses, Pip volleys. Can you beat Nori?",
+    "v2": true,
+    "score": 7,
+    "thumb": "../thumbs/PhoneGameLab2--volley-garden.jpg"
    }
   ]
  }

@@ -1,0 +1,412 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Strum Corner</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* STRUM CORNER — Bolt busks on a street corner with a little guitar. One strum ribbon slides in from the right; the
+ * pick's point tells you the stroke: SWIPE DOWN for a down-strum, SWIPE UP for an up-strum, TAP for a body SLAP, and a
+ * pick with a tail is a down-strum you HOLD to let the chord ring.
+ * Core idea kept: play the notes in time with the rhythm. The verb is different from the lane games (Coconut Groove,
+ * Punchline) and the memory band (Echo Jam): one track, the direction of your stroke is the skill, and your strums
+ * ARE the chords — the game only sequences bass, cajón and shaker; miss a strum and the chord is missing.
+ * The crowd is the meter: every hit raises the VIBE, misses drain it. Each 12 vibe draws another passer-by to stop and
+ * listen (up to eight); each listener adds ×0.25 to every coin. When the vibe sinks they shrug and wander off — and
+ * when the corner is empty the set is over. Perfect strums make listeners toss coins into the case.
+ * Set: four songs at four times of day (92 → 128 BPM). Song 1 is plain down-strums, song 2 adds up-strums (the
+ * classic D-DU-UDU), song 3 adds slaps and held chords, song 4 adds quick down-up flicks. Charts use fixed seeds,
+ * so the set is the same every run and learnable. Clock: one game clock drives scheduling, drawing and judging;
+ * presses are time-stamped between frames. PERFECT ±60 ms, GOOD ±130 ms, 130–220 ms early is a miss.            */
+let demo = false;
+Lab.init({
+  title: "Strum Corner", tagline: "Strum down, strum up, let it ring. Draw a crowd!", category: "Music", kicker: "Pocket Pals",
+  howto: ["Swipe down or up as each pick reaches the ring", "Tap to slap · hold the long ones", "Good vibes draw a crowd: more coins"],
+  theme: { bg: "#4a3060", bg2: "#ffcf9a", fg: "#fff8ee", muted: "#ffe2c8", accent: "#ff8a3d", accent2: "#3ec5ff" },
+  orient: "any", restart: start,
+  attract(dt, t) { if (!notes) { demo = true; setup(); } tick(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, INK = Pals.ink, shade = Lab.color.shade;
+const PERF = .06, GOOD = .13, EARLY = .22;
+const SONGS = [
+  { name: "Morning Set", bpm: 92, prog: ["C", "G", "Am", "F"], sky: ["#ffe7c4", "#ffd2a8"], wall: "#e9a77c", lit: 0 },
+  { name: "Lunch Rush", bpm: 104, prog: ["G", "D", "Em", "C"], sky: ["#bfe8ff", "#e6f6ff"], wall: "#e39a76", lit: 0 },
+  { name: "Golden Hour", bpm: 116, prog: ["Am", "F", "C", "G"], sky: ["#ffb36b", "#ff8a6b"], wall: "#c9715a", lit: .4 },
+  { name: "Streetlights", bpm: 128, prog: ["D", "A", "Bm", "G"], sky: ["#2d2a5c", "#5a3f7a"], wall: "#5d4470", lit: 1 },
+];
+const PATS = [
+  ["D.D.D.D.", "D...D.D.", "D.D.H---", "H---D.D.", "D.D.D.U.", "D...H---"],
+  ["D.DU.UD.", "D.D.DUDU", "DU.UDU..", "D.DUD.D.", "H---DUDU", "D.DU.UDU"],
+  ["D.S.D.S.", "DUS.DUS.", "D.DUS.DU", "H---S.S.", "D.S.DUDU", "H-..DUS."],
+  ["DUSUDUSU", "D.DUSUDU", "W.S.W.S.", "DUDUS.DU", "H---DUSU", "W.WUS.D."],
+];
+const BARS = 12, SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }, CROWD = ["bun", "momo", "nori", "olli", "pip"];
+const TINTS = ["#9fd8c8", "#f2a7b8", "#c7b2e8", "#f6c768", "#9cc3f0"];
+let W, H, S, land, trk, zoneX, lead, floorY, bx, by, bs, P;
+let songs, notes, events, ni, ei, songT, frameWall, total, cur, vibe, score, streak, bestStreak, cnt, listeners, joinCd, coins, coinsIn, flies,
+  holding, gest, boltS, zone, judge, alive, maxCrowd, hum, fadeBg, sayTxt, sayT;
+
+const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+function chordNotes(name) {
+  const minor = name.endsWith("m"), root = 40 + ((SEMI[name[0]] - 4 + 12) % 12);
+  return (minor ? [0, 7, 12, 15, 19, 24] : [0, 7, 12, 16, 19, 24]).map(i => root + i);
+}
+/* ---------- chart + backing ---------- */
+function build() {
+  songs = []; notes = []; events = []; let t = .6;
+  SONGS.forEach((sg, k) => {
+    const spb = 60 / sg.bpm, R = Lab.rng(101 + k * 17), cin = t, t0 = cin + 4 * spb, bar = 4 * spb;
+    for (let b = 0; b < 4; b++) events.push({ t: cin + b * spb, k: "stick", acc: b === 0, n: 4 - b });
+    for (let i = 0; i < BARS; i++) {
+      let pat;
+      if (i === BARS - 1) pat = "H-------";
+      else if (k === 0 && i < 2) pat = ["D...D...", "D.D.D.D."][i];
+      else { const pool = k > 0 && R() < .3 ? PATS[k - 1] : PATS[k]; pat = pool[Math.floor(R() * pool.length)]; }
+      const chord = sg.prog[i % 4], bt = t0 + i * bar;
+      for (let s = 0; s < 8; s++) {
+        const ch = pat[s], nt = bt + s * spb / 2;
+        if (ch === "D" || ch === "U" || ch === "S") notes.push({ t: nt, type: ch, chord, song: k, st: 0 });
+        else if (ch === "W") { notes.push({ t: nt, type: "D", chord, song: k, st: 0 }); notes.push({ t: nt + spb / 4, type: "U", chord, song: k, st: 0 }); }
+        else if (ch === "H") { let l = 1; while (s + l < 8 && pat[s + l] === "-") l++; notes.push({ t: nt, type: "H", dur: l * spb / 2 - .06, chord, song: k, st: 0 }); }
+      }
+      // backing: kick 1 & 3, cajón 2 & 4, shaker eighths, bass root (+ walk in later songs)
+      const root = chordNotes(chord)[0];
+      for (let q = 0; q < 4; q++) events.push({ t: bt + q * spb, k: q % 2 ? "snare" : "kick" });
+      for (let e = 0; e < 8; e++) events.push({ t: bt + e * spb / 2, k: "shake", acc: e % 2 === 0 });
+      events.push({ t: bt, k: "bass", m: root, d: spb * 1.6 }); events.push({ t: bt + 2 * spb, k: "bass", m: root + (k > 1 ? 7 : 0), d: spb * 1.4 });
+      if (k > 0) events.push({ t: bt + 3.5 * spb, k: "bass", m: root + (i % 2 ? 5 : 12), d: spb * .45 });
+    }
+    const end = t0 + BARS * bar;
+    events.push({ t: end + spb * 2, k: "clap" });
+    songs.push({ cin, t0, end, spb, idx: k }); t = end + 3.4;
+  });
+  total = songs[3].end + 2.6; events.sort((a, b) => a.t - b.t); notes.sort((a, b) => a.t - b.t);
+}
+function play(ev, d) {
+  if (demo) return; const A = Lab.audio;
+  if (ev.k === "kick") A.tone({ f: 130, f2: 46, dur: .2, vol: .32, delay: d, music: true });
+  else if (ev.k === "snare") { A.noise({ dur: .12, vol: .12, bp: 1300, delay: d, music: true }); A.tone({ f: 210, f2: 150, dur: .07, vol: .1, type: "triangle", delay: d, music: true }); }
+  else if (ev.k === "shake") A.noise({ dur: .035, vol: ev.acc ? .035 : .022, hp: 6500, delay: d, music: true });
+  else if (ev.k === "bass") A.tone({ f: hz(ev.m), type: "triangle", dur: ev.d, vol: .2, delay: d, music: true, lp: 600 });
+  else if (ev.k === "stick") { A.tone({ f: ev.acc ? 2100 : 1700, type: "square", dur: .03, vol: .06, delay: d, music: true }); Lab.after(d, () => { sayTxt = ev.n === 1 ? "4!" : String(5 - ev.n); sayT = 0; boltS.tap = 1; }); }
+  else if (ev.k === "clap") applause(d);
+}
+function applause(d) {
+  if (demo) return;
+  Lab.audio.noise({ dur: 1.6, vol: .07 + listeners.length * .012, bp: 2200, q: .6, delay: d, a: .2 });
+  for (let i = 0; i < 8 + listeners.length * 3; i++) Lab.audio.noise({ dur: .04, vol: .05, bp: Lab.rand(1500, 3200), delay: d + Lab.rand(0, 1.3) });
+}
+function strumSound(chord, dir, vol, ring) {
+  if (demo) return; const ns = chordNotes(chord), A = Lab.audio, list = dir === "U" ? ns.slice(2).reverse() : ns;
+  list.forEach((m, i) => A.tone({ f: hz(m), type: "sawtooth", dur: ring ? ring : dir === "U" ? .38 : .62, vol: (dir === "U" ? .04 : .05) * vol, delay: i * (dir === "U" ? .009 : .013), lp: dir === "U" ? 3400 : 2600, lp2: 420 }));
+  A.noise({ dur: .03, vol: .04 * vol, hp: 4000 });
+}
+function slapSound() { if (demo) return; Lab.audio.noise({ dur: .07, vol: .2, bp: 1900, q: .9 }); Lab.audio.tone({ f: 95, f2: 60, dur: .12, vol: .28 }); }
+function clunk() { if (demo) return; Lab.audio.noise({ dur: .09, vol: .1, hp: 2500 }); Lab.audio.tone({ f: 118, f2: 84, type: "square", dur: .14, vol: .08, lp: 700 }); }
+
+/* ---------- layout ---------- */
+function layout() {
+  W = Lab.W; H = Lab.H; P = Lab.play; land = W > H * 1.15;
+  S = land ? clamp(Math.min(W / 844, H / 390), .72, 1.6) : clamp(Math.min(W / 390, H / 800), .72, 1.6);
+  const th = (land ? 62 : 78) * S, ty = H - Lab.safe.bottom - (land ? 40 : 112) * S;
+  trk = { x: P.x + 10 * S, y: ty - th / 2, w: P.w - 20 * S, h: th, cy: ty };
+  zoneX = trk.x + (land ? 56 : 46) * S; lead = land ? 4.6 : 3.4;
+  floorY = trk.y - (land ? 18 : 86) * S;
+  bs = land ? Math.min(112 * S, (floorY - P.y) * .46) : Math.min(140 * S, (floorY - P.y) * .32);
+  bx = W / 2; by = floorY - bs * .62 - bs * .5;
+  Lab.sprite.clear("sc-");
+  if (listeners) for (const l of listeners) { const s = slotXY(l.slot); if (l.state === "stay") { l.x = s.x; } l.y = s.y; }
+}
+Lab.onResize(layout);
+function slotXY(i) {
+  if (!land) { // portrait: a back row beside the crate and a front row on the pavement, leaving the coin case clear
+    const side = i % 2 ? 1 : -1, front = (i >> 1) % 2 === 1, k = i >> 2, sz = bs * (front ? .46 : .38);
+    const x = front ? W / 2 + side * W * (k ? .41 : .2) : bx + side * (bs * .72 + (k ? bs * .5 : 0) + 4 * S);
+    return { x: clamp(x, sz * .6, W - sz * .6), y: (front ? floorY + 64 * S : floorY + 2 * S) - sz * .52, s: sz, far: !front };
+  }
+  const side = i % 2 ? 1 : -1, k = i >> 1, unit = Math.min(bs * .92, (W / 2 - 34 * S) / (land ? 4.2 : 3.3));
+  const far = k % 2 === 1, sz = bs * (far ? .4 : .5);
+  return { x: bx + side * (bs * .78 + unit * (k + .4)), y: floorY + (far ? -2 : 10) * S - sz * .52, s: sz, far };
+}
+/* ---------- state ---------- */
+function setup() {
+  build(); ni = 0; ei = 0; songT = 0; frameWall = performance.now(); cur = -1; vibe = 40; score = 0; streak = 0; bestStreak = 0; maxCrowd = 0;
+  cnt = { p: 0, g: 0, m: 0, w: 0, holds: 0 }; listeners = []; joinCd = 0; coins = []; coinsIn = 0; flies = []; holding = null; gest = new Map();
+  boltS = { strum: 0, dir: 1, sq: 0, tap: 0, flinch: 0, joy: 0 }; zone = { glow: 0, col: "#fff", miss: 0 }; judge = { txt: "", t: 9, col: "#fff" };
+  alive = true; fadeBg = 0; hum = null; sayTxt = ""; sayT = 9; layout();
+  for (let i = 0; i < 3; i++) join(true);
+  if (demo) { songT = songs[1].t0 - .5; ni = notes.findIndex(n => n.t >= songT); ei = events.findIndex(e => e.t >= songT); cur = 1; }
+}
+function start() {
+  demo = false; setup(); Lab.setScore(0);
+  hum = Lab.audio.loop({ type: "sawtooth", f: 220, lp: 1200, vol: 0 });
+  Lab.input.onDown = [(x, y, id) => { if (!alive) return; gest.set(id, { t: clockAt(Lab.input.pressT), x, y, done: false, id }); }];
+  Lab.input.onMove = [(x, y, dx, dy, id) => { const g = gest.get(id); if (!g || g.done) return; const d = y - g.y; if (Math.abs(d) > 13 * S) resolve(g, d > 0 ? "D" : "U", "p"); }];
+  Lab.input.onUp = [(x, y, id) => { const g = gest.get(id); if (g && !g.done) { const d = y - g.y; resolve(g, Math.abs(d) > 13 * S ? (d > 0 ? "D" : "U") : "S", "p"); } gest.delete(id); if (holding && holding.src === "p" && holding.id === id) releaseHold(); }];
+  Lab.input.onKey = [(k, e) => { if (!alive || e.repeat) return; const t = clockAt(e.timeStamp || performance.now()), g = { t, done: false, id: "k" + k, key: k };
+    if (k === "ArrowDown" || k === "s" || k === "S") resolve(g, "D", "k"); else if (k === "ArrowUp" || k === "w" || k === "W") resolve(g, "U", "k"); else if (k === " " || k === "Enter") resolve(g, "S", "k"); }];
+  Lab.expose({
+    get score() { return score; }, get vibe() { return vibe; }, get crowd() { return listeners.filter(l => l.state !== "out").length; }, get streak() { return streak; },
+    get time() { return songT; }, get song() { return cur; }, get counts() { return Object.assign({}, cnt); }, get holding() { return !!holding; }, get total() { return total; },
+    next() { const n = notes.find(n => n.st === 0); return n ? { t: n.t, type: n.type, dur: n.dur || 0 } : null; }, get lastGesture() { return lastG; },
+    hit(type, at) { return judgeAt(type, at == null ? songT : at, null); }, release: releaseHold,
+    setTime(t) { songT = t; while (ei < events.length && events[ei].t < t) ei++; for (const n of notes) if (n.t < t && n.st === 0) n.st = 3; while (ni < notes.length && notes[ni].st) ni++; },
+    setVibe(v) { vibe = v; }, mult,
+  });
+  Lab.loop((dt, t) => { tick(dt); render(t); });
+}
+let lastG = null;
+function latency() { const a = Lab.audio.ctx; return a ? Math.min(.05, (a.outputLatency || a.baseLatency || 0) * .5) : 0; }
+function clockAt(ms) { return songT + clamp((ms - frameWall) / 1000, -.05, .05) - latency(); }
+const mult = () => 1 + listeners.filter(l => l.state !== "out").length * .25;
+function resolve(g, type, src) {
+  g.done = true; lastG = type;
+  boltS.strum = 1; boltS.dir = type === "U" ? -1 : 1; if (type === "S") boltS.tap = 1;
+  const r = judgeAt(type, g.t, g);
+  if (r === "hold") holding = Object.assign(holding, { src, id: g.id, key: g.key });
+}
+/* ---------- judging ---------- */
+function judgeAt(type, tp, g) {
+  if (!alive) return null;
+  let best = null, bd = 1e9;
+  for (let i = ni; i < notes.length && notes[i].t < tp + EARLY; i++) { const n = notes[i]; if (n.st) continue; const d = Math.abs(n.t - tp); if (d < bd && tp - n.t < GOOD) { bd = d; best = n; } }
+  if (!best || best.t - tp > EARLY) { // stray: a muted scratch, no penalty
+    if (type === "S") slapSound(); else strumSound((curSong() ? SONGS[curSong().idx] : SONGS[0]).prog[0], type, .35, .12);
+    return "stray";
+  }
+  const d = tp - best.t, want = best.type === "H" ? "D" : best.type;
+  if (type !== want) { best.st = 3; miss(best, "Wrong way!"); cnt.w++; return "wrong"; }
+  if (Math.abs(d) > GOOD) { best.st = 3; miss(best, "Too early"); return "early"; }
+  const perf = Math.abs(d) <= PERF; best.st = 1;
+  if (perf) cnt.p++; else cnt.g++;
+  streak++; bestStreak = Math.max(bestStreak, streak);
+  vibe = clamp(vibe + (perf ? 4 : 2) + (streak % 16 === 0 ? 8 : 0), 0, 100);
+  const pts = Math.round((perf ? 30 : 15) * mult()); score += pts; Lab.setScore(score); if (streak % 8 === 0) Lab.bumpScore();
+  if (type === "S") slapSound(); else strumSound(best.chord, type, perf ? 1 : .8, best.type === "H" ? .35 : 0);
+  zone.glow = 1; zone.col = type === "U" ? "#3ec5ff" : type === "S" ? "#ffd23f" : "#ff8a3d";
+  judge = { txt: perf ? "Perfect!" : "Good", t: 0, col: perf ? "#fff3a0" : "#ffffff" };
+  if (!demo) {
+    fx.burst(zoneX, trk.cy, { n: perf ? 10 : 6, colors: [zone.col, "#fff8ee"], speed: perf ? 220 : 150, life: .45, size: 3.5 * S, gravity: 120, shape: perf ? "star" : "circle" });
+    if (streak % 16 === 0) { Lab.banner(streak + " in a row!", { color: "#fff3a0", ms: 900, y: .2 }); Lab.audio.combo(Math.min(10, streak / 16 + 3), { vol: .18 }); boltS.joy = 1.4; }
+    if (perf && listeners.length && Lab.chance(.55) && flies.length < 16) toss();
+  }
+  if (best.type === "H") { holding = { n: best, end: best.t + best.dur, src: "?", gave: 0 }; if (hum) hum.set({ f: hz(chordNotes(best.chord)[2]), vol: demo ? 0 : .05 }); return "hold"; }
+  return perf ? "perfect" : "good";
+}
+function miss(n, why) {
+  streak = 0; cnt.m++; const k = n.song;
+  vibe = clamp(vibe - (9 + k), 0, 100); clunk(); boltS.flinch = 1; zone.miss = 1;
+  judge = { txt: why || "Miss", t: 0, col: "#ffb3b3" };
+  if (!demo) Lab.buzz(20);
+  if (vibe <= 0 && !demo) lose();
+}
+function releaseHold() {
+  if (!holding) return; const h = holding; holding = null; if (hum) hum.set({ vol: 0 });
+  const full = songT >= h.end - .12;
+  if (full) { cnt.holds++; const b = Math.round(25 * mult()); score += b; Lab.setScore(score); vibe = clamp(vibe + 3, 0, 100); if (!demo) { fx.text(zoneX + 40 * S, trk.y - 8 * S, "Ring! +" + b, { color: "#fff3a0", size: 15 * S }); fx.ring(zoneX, trk.cy, { r0: 10 * S, r1: 46 * S, color: "#ffcf5a", width: 4 }); } }
+  else if (!demo) fx.text(zoneX + 40 * S, trk.y - 8 * S, "let go early", { color: "#ffe2c8", size: 12 * S });
+}
+function toss() {
+  const l = Lab.choose(listeners.filter(l => l.state === "stay")); if (!l) return;
+  flies.push({ x0: l.x, y0: l.y - l.s * .4, x1: caseX() + Lab.rand(-14, 14) * S, y1: floorY + (land ? 6 : 18) * S, t: 0, d: Lab.rand(.5, .7) }); l.bounce = 1;
+}
+const caseX = () => land ? bx + bs * .95 : bx;
+/* ---------- crowd ---------- */
+function join(instant) {
+  const used = new Set(listeners.filter(l => l.state !== "out").map(l => l.slot)); let slot = 0; while (used.has(slot)) slot++;
+  if (slot >= 8) return;
+  const n = listeners.length + (maxCrowd || 0), idx = listeners.filter(l => l.state !== "out").length;
+  const id = CROWD[(slot * 3 + (cur < 0 ? 0 : cur)) % CROWD.length], s = slotXY(slot);
+  const fromX = s.x < bx ? -40 * S : W + 40 * S;
+  const tint = idx >= 5 ? TINTS[slot % TINTS.length] : null;
+  listeners.push({ id, tint, slot, x: instant ? s.x : fromX, y: s.y, s: s.s, state: instant ? "stay" : "in", bounce: 0, ph: Lab.rand(0, TAU), heart: 0 });
+  if (!instant && !demo) Lab.sfx("pop", { pitch: 1.2 + idx * .06, vol: .5 });
+  maxCrowd = Math.max(maxCrowd, listeners.filter(l => l.state !== "out").length); void n;
+}
+function crowdTick(dt) {
+  const here = listeners.filter(l => l.state !== "out"), want = clamp(Math.floor(vibe / 12), 0, 8);
+  joinCd -= dt;
+  if (joinCd <= 0 && alive) {
+    if (here.length < want) { join(false); joinCd = .45; }
+    else if (here.length > want && here.length > 0) { const l = here.reduce((a, b) => (b.slot > a.slot ? b : a)); l.state = "out"; joinCd = .4; if (!demo) Lab.sfx("whoosh", { pitch: .7, vol: .4 }); }
+  }
+  for (const l of listeners) {
+    const s = slotXY(l.slot); l.y = s.y; l.s = s.s; l.bounce = Math.max(0, l.bounce - dt * 3);
+    if (l.state === "in") { l.x = Lab.approach(l.x, s.x, 260 * S * dt); if (Math.abs(l.x - s.x) < 1) { l.state = "stay"; l.heart = 1; } }
+    else if (l.state === "out") { l.x += (l.x < bx ? -1 : 1) * 170 * S * dt; }
+    l.heart = Math.max(0, l.heart - dt);
+  }
+  listeners = listeners.filter(l => l.state !== "out" || (l.x > -80 * S && l.x < W + 80 * S));
+}
+/* ---------- tick ---------- */
+const curSong = () => songs[Math.max(0, cur)];
+function tick(dt) {
+  if (!notes) return;
+  songT += dt; frameWall = performance.now(); sayT += dt; fadeBg = Math.max(0, fadeBg - dt * .8);
+  while (ei < events.length && events[ei].t < songT + .12) { const ev = events[ei++]; if (ev.t > songT - .05) play(ev, Math.max(0, ev.t - songT)); }
+  const k = songs.findIndex(s => songT >= s.cin - 1 && songT < s.end + 3);
+  if (k >= 0 && k !== cur) { cur = k; fadeBg = 1; if (!demo) { Lab.banner(SONGS[k].name, { color: "#fff3b0", ms: 1500, y: .22 }); Lab.toast("Song " + (k + 1) + " of 4 · " + SONGS[k].bpm + " BPM" + (k === 1 ? " · up-strums!" : k === 2 ? " · slaps & holds!" : k === 3 ? " · quick flicks!" : ""), 1900, { y: .3 }); } }
+  // song bonus when a song ends
+  for (const s of songs) if (!s.paid && songT >= s.end + s.spb) { s.paid = true; const b = 40 * listeners.filter(l => l.state !== "out").length; if (b && !demo) { score += b; Lab.setScore(score); Lab.bumpScore(); fx.text(bx, by - bs * .9, "Applause! +" + b, { color: "#fff3a0", size: 20 * S }); } boltS.joy = 2; for (const l of listeners) l.heart = 1.2; }
+  for (; ni < notes.length && notes[ni].st; ni++);
+  for (let i = ni; i < notes.length && notes[i].t < songT - GOOD; i++) if (notes[i].st === 0) { notes[i].st = 2; if (demo) notes[i].st = 1; else miss(notes[i]); if (!alive) return; }
+  if (demo) for (let i = ni; i < notes.length && notes[i].t <= songT; i++) if (notes[i].st === 0) { const n = notes[i]; judgeAt(n.type === "H" ? "D" : n.type, n.t, null); boltS.strum = 1; boltS.dir = n.type === "U" ? -1 : 1; if (holding) holding.src = "demo"; }
+  // unresolved press held long enough = a down-strum (lets a press-and-hold play a held chord)
+  for (const g of gest.values()) if (!g.done && songT - g.t > .2) resolve(g, "D", "p");
+  if (holding) {
+    const still = holding.src === "demo" ? true : holding.src === "k" ? !!(Lab.input.keys[holding.key]) : Lab.input.down;
+    if (songT >= holding.end || !still) { if (holding.src === "demo") holding.src = "x"; releaseHold(); }
+    else { holding.gave += dt; if (holding.gave > .25) { holding.gave = 0; score += Math.round(3 * mult()); if (!demo) Lab.setScore(score); } zone.glow = Math.max(zone.glow, .6); }
+  }
+  crowdTick(dt);
+  for (const f of flies) { f.t += dt / f.d; if (f.t >= 1 && !f.done) { f.done = true; coinsIn++; if (!demo) Lab.sfx("coin", { pitch: 1 + Math.min(.6, coinsIn * .01), vol: .35 }); } }
+  flies = flies.filter(f => f.t < 1);
+  boltS.strum = Math.max(0, boltS.strum - dt * 6); boltS.tap = Math.max(0, boltS.tap - dt * 5); boltS.flinch = Math.max(0, boltS.flinch - dt * 2.5); boltS.joy = Math.max(0, boltS.joy - dt);
+  zone.glow = Math.max(0, zone.glow - dt * 4); zone.miss = Math.max(0, zone.miss - dt * 3); judge.t += dt;
+  if (demo && songT > songs[1].end) { songT = songs[1].t0 - .5; for (const n of notes) n.st = 0; ni = notes.findIndex(n => n.t >= songT); ei = events.length; }
+  if (!demo && alive && songT >= total) finish();
+}
+function lose() {
+  alive = false; if (hum) hum.set({ vol: 0 }); holding = null;
+  Lab.gameover({ title: "Oops! The corner emptied", message: "Everyone wandered off mid-song. Bolt will tune up and try again.", score, stats: stats() });
+}
+function finish() {
+  alive = false; Lab.fx.confetti();
+  const pct = Math.round(cnt.p / Math.max(1, notes.length) * 100), rank = pct >= 85 ? "Street legend" : pct >= 65 ? "Crowd pleaser" : pct >= 40 ? "Good busk" : "Warming up";
+  Lab.win({ title: "Set complete!", message: rank + " — the hat is full of coins.", score, stats: stats() });
+}
+function stats() { const n = cnt.p + cnt.g + cnt.m; return [["Perfect strums", n ? Math.round(cnt.p / n * 100) + "%" : "–"], ["Best streak", bestStreak], ["Biggest crowd", maxCrowd + " pals"]]; }
+
+/* ---------- drawing ---------- */
+function bg(k) {
+  const sg = SONGS[k];
+  return Lab.sprite("sc-bg" + k, W + 80, H + 80, g => {
+    g.translate(40, 40);
+    draw.vgrad(g, -40, -40, W + 80, floorY + 40, sg.sky);
+    const wallTop = P.y + (land ? 24 : 40) * S, wallL = -40, wallR = W + 40;
+    // building: brick wall
+    g.fillStyle = sg.wall; g.fillRect(wallL, wallTop, wallR - wallL, floorY - wallTop);
+    const bw = 34 * S, bh = 14 * S; g.fillStyle = shade(sg.wall, -.12);
+    for (let r = 0, y = wallTop + 6 * S; y < floorY - 4; r++, y += bh) for (let x = wallL + (r % 2) * bw / 2; x < wallR; x += bw) if ((x * 7 + r * 13) % 5 < 2) g.fillRect(x, y, bw - 3 * S, bh - 3 * S);
+    g.fillStyle = shade(sg.wall, -.25); g.fillRect(wallL, wallTop - 8 * S, wallR - wallL, 10 * S);
+    // windows with awning
+    const winY = wallTop + 22 * S, ww = (land ? 90 : 70) * S, wh = (land ? 70 : 84) * S;
+    for (const wx of land ? [W * .14, W * .86] : [W * .17, W * .83]) {
+      g.fillStyle = sg.lit ? Lab.color.mix("#9cc3f0", "#ffd98a", sg.lit) : "#bfe0f5"; g.fillRect(wx - ww / 2, winY, ww, wh);
+      g.strokeStyle = "#fff4e4"; g.lineWidth = 5 * S; g.strokeRect(wx - ww / 2, winY, ww, wh); g.beginPath(); g.moveTo(wx, winY); g.lineTo(wx, winY + wh); g.moveTo(wx - ww / 2, winY + wh / 2); g.lineTo(wx + ww / 2, winY + wh / 2); g.stroke();
+      for (let i = 0; i < 6; i++) { g.fillStyle = i % 2 ? "#fff4e4" : "#ff6b6b"; g.beginPath(); g.moveTo(wx - ww / 2 - 8 * S + i * (ww + 16 * S) / 6, winY - 4 * S); g.lineTo(wx - ww / 2 - 8 * S + (i + 1) * (ww + 16 * S) / 6, winY - 4 * S); g.lineTo(wx - ww / 2 - 8 * S + (i + 1) * (ww + 16 * S) / 6, winY - 20 * S); g.lineTo(wx - ww / 2 - 8 * S + i * (ww + 16 * S) / 6, winY - 20 * S); g.fill(); }
+    }
+    // poster behind Bolt
+    const px = land ? bx - bs * 1.45 : bx, py = land ? by - bs * .35 : Math.max(wallTop + 30 * S, by - bs * 1.3);
+    g.save(); g.translate(px, py); g.rotate(-.04); draw.rect(g, -42 * S, -28 * S, 84 * S, 56 * S, 4 * S, "#fff4dc"); draw.text(g, "LIVE", 0, -10 * S, { size: 18 * S, color: "#e0567a", weight: 800 }); draw.text(g, "♪ today ♪", 0, 12 * S, { size: 11 * S, color: "#5a4470", weight: 700 }); g.restore();
+    // pavement
+    const pg = g.createLinearGradient(0, floorY, 0, H + 40); pg.addColorStop(0, sg.lit > .5 ? "#6d6390" : "#d9c6b0"); pg.addColorStop(1, sg.lit > .5 ? "#3c3460" : "#b59f8a"); g.fillStyle = pg; g.fillRect(-40, floorY, W + 80, H + 40 - floorY);
+    g.strokeStyle = "rgba(60,40,40,.18)"; g.lineWidth = 2; for (let x = -40; x < W + 40; x += 48 * S) { g.beginPath(); g.moveTo(x, floorY); g.lineTo(x - 30 * S, H + 40); g.stroke(); }
+    g.fillStyle = "rgba(255,255,255,.25)"; g.fillRect(-40, floorY, W + 80, 3 * S);
+    // lamppost
+    const lx = land ? W * .3 : W * .06; g.fillStyle = "#3b3355"; g.fillRect(lx - 3 * S, P.y + 30 * S, 6 * S, floorY - P.y - 30 * S); draw.circle(g, lx, P.y + 30 * S, 10 * S, sg.lit > .5 ? "#ffe9a8" : "#e7e1f0");
+    if (sg.lit > .5) { draw.glow(g, lx, P.y + 30 * S, 80 * S, "#ffd98a", .4); const lg = g.createLinearGradient(0, P.y + 30 * S, 0, floorY + 20 * S); lg.addColorStop(0, "rgba(255,230,160,.25)"); lg.addColorStop(1, "rgba(255,230,160,0)"); g.fillStyle = lg; g.beginPath(); g.moveTo(lx - 8 * S, P.y + 34 * S); g.lineTo(lx + 8 * S, P.y + 34 * S); g.lineTo(lx + 70 * S, floorY + 20 * S); g.lineTo(lx - 70 * S, floorY + 20 * S); g.fill(); }
+    if (sg.lit > .2) { // string lights
+      g.strokeStyle = "rgba(40,30,50,.6)"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-40, wallTop + 6 * S); g.quadraticCurveTo(W / 2, wallTop + 40 * S, W + 40, wallTop + 6 * S); g.stroke();
+      for (let i = 0; i <= 14; i++) { const u = i / 14, x = -40 + u * (W + 80), y = wallTop + 6 * S + 2 * u * (1 - u) * 40 * S; const col = ["#ffd23f", "#ff8fb8", "#5fd39a", "#3ec5ff"][i % 4]; draw.glow(g, x, y + 4 * S, 12 * S, col, .5 * sg.lit); draw.circle(g, x, y + 4 * S, 3.5 * S, col); }
+    }
+  });
+}
+function trackSprite() {
+  return Lab.sprite("sc-trk", trk.w, trk.h, g => {
+    draw.rect(g, 0, 0, trk.w, trk.h, trk.h * .32, "#7a4a2a"); draw.rect(g, 3, 3, trk.w - 6, trk.h - 6, trk.h * .3, "#94603a");
+    for (let i = 0; i < 6; i++) { const y = trk.h * (.18 + i * .128); g.strokeStyle = `rgba(255,236,200,${.18 + i * .05})`; g.lineWidth = .8 + i * .35; g.beginPath(); g.moveTo(8, y); g.lineTo(trk.w - 8, y); g.stroke(); }
+  });
+}
+function pick(c, x, y, r, type, alpha) {
+  c.save(); c.globalAlpha = alpha; c.translate(x, y);
+  if (type === "S") { draw.circle(c, 0, 0, r * .9, "#ffd23f", INK, 2); draw.star(c, 0, 0, r * .55, "#fff8ee", 6, .45); c.restore(); return; }
+  const up = type === "U"; if (up) c.scale(1, -1);
+  const col = up ? "#3ec5ff" : "#ff8a3d";
+  c.beginPath(); c.moveTo(0, r * 1.05); c.bezierCurveTo(-r * .4, r * .6, -r * 1.05, -r * .1, -r * .9, -r * .6); c.quadraticCurveTo(-r * .7, -r * 1.02, 0, -r * .98); c.quadraticCurveTo(r * .7, -r * 1.02, r * .9, -r * .6); c.bezierCurveTo(r * 1.05, -r * .1, r * .4, r * .6, 0, r * 1.05); c.closePath();
+  c.fillStyle = col; c.fill(); c.strokeStyle = INK; c.lineWidth = 2; c.stroke();
+  c.strokeStyle = "#fff8ee"; c.lineWidth = Math.max(2, r * .2); c.beginPath(); c.moveTo(-r * .38, -r * .2); c.lineTo(0, r * .25); c.lineTo(r * .38, -r * .2); c.stroke();
+  c.restore();
+}
+function drawBolt(c, t) {
+  const sg = curSong(), ph = sg ? ((songT - sg.t0) / sg.spb % 1 + 1) % 1 : 0, beat = Math.pow(1 - ph, 3);
+  // crate
+  const cw = bs * 1.05, ch = bs * .62, cx = bx - cw / 2, cy = floorY - ch;
+  draw.shadow(c, bx, floorY + 2 * S, cw * .6, 7 * S, .2); draw.rect(c, cx, cy, cw, ch, 4 * S, "#c98a4b", INK, 2);
+  c.strokeStyle = "rgba(90,50,20,.5)"; c.lineWidth = 2; for (let i = 1; i < 3; i++) { c.beginPath(); c.moveTo(cx + 4, cy + ch * i / 3); c.lineTo(cx + cw - 4, cy + ch * i / 3); c.stroke(); }
+  // guitar case with coins
+  const kx = caseX(), ky = floorY + (land ? 4 : 16) * S, kw = bs * .62, kh = bs * .2;
+  draw.rect(c, kx - kw / 2, ky - kh * .6, kw, kh, kh * .45, "#3a2a4a", INK, 2); draw.rect(c, kx - kw / 2 + 4 * S, ky - kh * .45, kw - 8 * S, kh * .7, kh * .3, "#c4364f");
+  for (let i = 0; i < Math.min(28, coinsIn); i++) { const u = (i * .618) % 1, v = (i * .37) % 1; draw.circle(c, kx - kw * .38 + u * kw * .76, ky - kh * .25 + v * kh * .35 - Math.floor(i / 14) * 2 * S, 3.4 * S, i % 3 ? "#ffd23f" : "#ffe98a", "#b8861a", 1); }
+  // bolt
+  const mood = boltS.flinch > .2 ? "scared" : boltS.joy > 0 ? "joy" : vibe < 22 ? "think" : boltS.strum > .3 ? "focus" : "happy";
+  const bob = beat * bs * .03, sq = boltS.tap * .08 - boltS.strum * .03 + (holding ? .02 : 0);
+  const a = Pals.draw(c, "bolt", bx, by + bob, bs, { t, mood, squash: sq, arms: boltS.joy > 0 && !holding && boltS.strum < .1 ? "cheer" : "hold", look: [-.5, .35], hot: vibe < 22 ? .6 : 0, shadow: false, tilt: Math.sin(t * 2) * .02 });
+  if (boltS.joy > 0 && boltS.strum < .1 && !holding) return;
+  // guitar in front: body at belly, neck to the left hand
+  const gx = bx + bs * .1, gy = by + bob + bs * .2, gr = bs * .26;
+  c.save(); c.translate(gx, gy); c.rotate(-.42);
+  c.fillStyle = "#6b3b1f"; c.fillRect(-gr * 3.2, -gr * .14, gr * 2.4, gr * .28); c.fillStyle = "#3b2a2a"; draw.rect(c, -gr * 3.7, -gr * .22, gr * .6, gr * .44, gr * .1, "#3b2a2a");
+  c.fillStyle = "#e09a4a"; c.beginPath(); c.ellipse(-gr * .35, 0, gr * .72, gr * .62, 0, 0, TAU); c.ellipse(gr * .45, 0, gr * .95, gr * .82, 0, 0, TAU); c.fill(); c.strokeStyle = INK; c.lineWidth = 2; c.stroke();
+  draw.circle(c, -gr * .1, 0, gr * .3, "#3b2a2a"); draw.circle(c, -gr * .1, 0, gr * .38, null, "#fff1dc", 2); c.fillStyle = "#6b3b1f"; c.fillRect(gr * .62, -gr * .35, gr * .14, gr * .7);
+  const vib = (holding || boltS.strum > 0) ? Math.sin(t * 90) * 1.2 : 0; c.strokeStyle = "rgba(255,248,230,.8)"; c.lineWidth = 1; for (let i = -2; i <= 2; i++) { c.beginPath(); c.moveTo(-gr * 3.4, i * gr * .05); c.lineTo(gr * .69, i * gr * .05 + vib * (i % 2 ? 1 : -1)); c.stroke(); }
+  c.restore();
+  // strumming hand + pick
+  const sy = gy - boltS.dir * (boltS.strum - .5) * bs * .28, sx = gx - bs * .02;
+  c.strokeStyle = Pals.cast.bolt.dark; c.lineWidth = bs * .07; c.lineCap = "round"; c.beginPath(); c.moveTo(a.handR[0], a.handR[1]); c.quadraticCurveTo(sx + bs * .2, sy - bs * .05, sx, sy); c.stroke();
+  draw.circle(c, sx, sy, bs * .07, Pals.cast.bolt.body, INK, 1.5); pick(c, sx - bs * .05, sy + bs * .04, bs * .05, "D", 1);
+}
+function drawListener(c, l, t) {
+  const sg = curSong(), ph = sg ? ((songT - sg.t0) / sg.spb % 1 + 1) % 1 : 0, walking = l.state !== "stay";
+  const happy = vibe > 60, mood = l.state === "out" ? "sad" : l.heart > 0 ? "joy" : boltS.flinch > .3 ? "wow" : happy ? "happy" : vibe < 25 ? "sleepy" : "think";
+  const hop = walking ? Math.abs(Math.sin(t * 10 + l.ph)) * l.s * .12 : (happy ? Math.pow(1 - ph, 4) * l.s * .1 : 0) + Math.sin(l.bounce * Math.PI) * l.s * .3;
+  Pals.draw(c, l.id, l.x, l.y - hop, l.s, { t: t + l.ph, mood, tint: l.tint || undefined, look: [clamp((bx - l.x) / (W * .3), -1, 1), -.1], arms: l.bounce > .2 || l.heart > 0 ? "cheer" : walking ? "down" : happy ? "wave" : "down", flip: l.state === "out" && l.x > bx, squash: walking ? Math.sin(t * 20 + l.ph) * .04 : 0, tilt: walking ? Math.sin(t * 10 + l.ph) * .08 : 0 });
+  if (l.heart > 0) { c.globalAlpha = Math.min(1, l.heart * 2); draw.heart(c, l.x, l.y - l.s * 1.1 - (1 - l.heart) * 20 * S, 7 * S, "#ff6b8a"); c.globalAlpha = 1; }
+}
+function render(t) {
+  if (!notes) return; const c = Lab.ctx, k = Math.max(0, cur);
+  if (fadeBg > 0 && k > 0) c.drawImage(bg(k - 1), -40, -40, W + 80, H + 80);
+  c.globalAlpha = 1 - fadeBg * (k > 0 ? 1 : 0); c.drawImage(bg(k), -40, -40, W + 80, H + 80); c.globalAlpha = 1;
+  // crowd (far first) and bolt
+  const ls = listeners.slice().sort((a, b) => a.y - b.y || a.s - b.s), far = ls.filter(l => slotXY(l.slot).far), near = ls.filter(l => !slotXY(l.slot).far);
+  for (const l of far) drawListener(c, l, t);
+  drawBolt(c, t);
+  for (const l of near) drawListener(c, l, t);
+  for (const f of flies) { const u = f.t, x = lerp(f.x0, f.x1, u), y = lerp(f.y0, f.y1, u) - Math.sin(u * Math.PI) * 70 * S; draw.circle(c, x, y, 4 * S, "#ffd23f", "#b8861a", 1.2); }
+  // count-in bubble
+  if (sayT < .45 && sayTxt) { const a = ease.outBack(clamp(sayT / .15, 0, 1)); c.save(); c.translate(bx + bs * .8, by - bs * .85); c.scale(a, a); Pals.bubble(c, 0, 0, 52 * S, 40 * S, { tailX: -18 * S, tailY: 26 * S }); draw.text(c, sayTxt, 0, 1, { size: 20 * S, color: INK, weight: 800 }); c.restore(); }
+  // the strum ribbon
+  c.drawImage(trackSprite(), trk.x, trk.y, trk.w, trk.h);
+  const sg = curSong(), pps = (trk.x + trk.w - 12 * S - zoneX) / (lead * sg.spb);
+  c.save(); draw.rr(c, trk.x + 3, trk.y + 3, trk.w - 6, trk.h - 6, trk.h * .3); c.clip();
+  // beat lines
+  for (const s of songs) { if (songT < s.cin - 3 || songT > s.end + 1) continue; for (let b = 0; b <= BARS * 4; b++) { const x = zoneX + (s.t0 + b * s.spb - songT) * pps; if (x < trk.x || x > trk.x + trk.w) continue; c.fillStyle = b % 4 ? "rgba(255,236,200,.16)" : "rgba(255,236,200,.42)"; c.fillRect(x - (b % 4 ? 1 : 2), trk.y + 4, b % 4 ? 2 : 4, trk.h - 8); } }
+  const r = trk.h * .3;
+  for (let i = Math.max(0, ni - 6); i < notes.length; i++) {
+    const n = notes[i], x = zoneX + (n.t - songT) * pps; if (x > trk.x + trk.w + r * 2) break;
+    if (n.type === "H") { const x2 = zoneX + (n.t + n.dur - songT) * pps, act = holding && holding.n === n; if (n.st !== 2 && n.st !== 3 && (n.st === 0 || act)) { const xa = act ? zoneX : x; draw.rect(c, xa, trk.cy - r * .32, Math.max(0, x2 - xa), r * .64, r * .32, act ? "#ffcf5a" : "rgba(255,170,90,.75)", INK, 1.5); } }
+    if (n.st === 1 || n.st === 3) continue;
+    const a = n.st === 2 ? clamp(1 - (songT - n.t - GOOD) * 4, 0, 1) : 1; if (a <= 0) continue;
+    pick(c, x, trk.cy + (n.st === 2 ? (songT - n.t) * 60 * S : 0), r, n.type === "H" ? "D" : n.type, a);
+  }
+  c.restore();
+  // ring (strum zone)
+  const gl = zone.glow; draw.circle(c, zoneX, trk.cy, r * 1.3, null, "#fff1dc", 3); draw.circle(c, zoneX, trk.cy, r * 1.55, null, "rgba(255,241,220,.35)", 2);
+  if (gl > 0) { draw.glow(c, zoneX, trk.cy, r * 3.4, zone.col, .5 * gl); draw.circle(c, zoneX, trk.cy, r * (1.3 + (1 - gl) * .6), null, zone.col, 3 * gl); }
+  if (zone.miss > 0) draw.circle(c, zoneX, trk.cy, r * 1.3, null, `rgba(255,107,107,${zone.miss})`, 4);
+  if (judge.t < .6) { const u = judge.t / .6; c.globalAlpha = 1 - u * u; draw.text(c, judge.txt, zoneX + 8 * S, trk.y - 14 * S - u * 10 * S, { size: 17 * S, color: judge.col, stroke: "rgba(43,35,64,.75)", align: "left", weight: 800 }); c.globalAlpha = 1; }
+  if (!land) draw.text(c, "swipe ▼ ▲ to strum · tap to slap · hold long picks", W / 2, trk.y + trk.h + 22 * S, { size: 12.5 * S, color: "rgba(255,248,238,.75)", weight: 700, maxWidth: W - 24 * S });
+  // HUD panel: vibe meter, crowd multiplier, song progress
+  const px = P.x + 12 * S, py = P.y + 14 * S, pw = Math.min(land ? 300 * S : P.w - 24 * S, 420 * S), x0 = px;
+  draw.rect(c, x0, py, pw, 40 * S, 14 * S, "rgba(43,30,60,.55)");
+  const mw = pw - 104 * S; draw.rect(c, x0 + 10 * S, py + 9 * S, mw, 10 * S, 5 * S, "rgba(255,255,255,.18)");
+  draw.rect(c, x0 + 10 * S, py + 9 * S, mw * vibe / 100, 10 * S, 5 * S, vibe < 22 ? "#ff7a7a" : vibe > 60 ? "#ffcf5a" : "#ffb07a");
+  for (let i = 1; i < 9; i++) { const x = x0 + 10 * S + mw * i * 12 / 100; c.fillStyle = "rgba(43,30,60,.5)"; c.fillRect(x - 1, py + 9 * S, 2, 10 * S); }
+  draw.text(c, "VIBE", x0 + 10 * S, py + 30 * S, { size: 10.5 * S, color: "#ffe2c8", align: "left", weight: 800 });
+  const pr = sg ? clamp((songT - sg.t0) / (sg.end - sg.t0), 0, 1) : 0;
+  draw.rect(c, x0 + 46 * S, py + 27 * S, mw - 36 * S, 5 * S, 3 * S, "rgba(255,255,255,.14)"); draw.rect(c, x0 + 46 * S, py + 27 * S, (mw - 36 * S) * pr, 5 * S, 3 * S, "#9fe0ff");
+  draw.text(c, "×" + (+mult().toFixed(2)), x0 + pw - 47 * S, py + 15 * S, { size: 18 * S, color: "#fff3a0", weight: 800 });
+  draw.text(c, listeners.filter(l => l.state !== "out").length + " listening", x0 + pw - 47 * S, py + 31 * S, { size: 9.5 * S, color: "#ffe2c8", weight: 700 });
+}
+Lab.boot();
+})();
+</script></body></html>

@@ -1,0 +1,252 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Hover Hop</title>
+<link rel="stylesheet" href="../../shared/style.css"><script src="../../shared/core.js"></script><script src="../../shared/pals.js"></script>
+</head><body><script>
+(function(){ "use strict";
+/* HOVER HOP — Bolt built a stack of hover pads to visit the moon. They will not hold still.
+ * Core idea kept: hop from a moving platform to the next to climb.
+ * vs. Pogo Peak (auto-bounce, steer) and Pine Kick (hold-to-coil wall kicks): here Bolt never steers. One tap = one
+ * straight-up hop with magnet boots released; the ONLY skill is the moment. The pad above slides across; tap so it is
+ * under Bolt when he comes down. Precision is the hook:
+ *   dead-centre = PERFECT (sparks, rising combo multiplier, pitch climbs); near the rim = TEETER (Bolt windmills and
+ *   the pad tips: hop again quickly or slip off). Bolt nuts hang in the gaps — grab one by hopping when your pad is
+ *   under it, but then the landing above must line up too.
+ * Zones: Workshop (gentle slides) → Rooftops (fast + pause-at-the-end pads, short pads) → Cloud Deck (cloud pads sink
+ *   under you, wind gusts drift your hop) → Orbit (floaty gravity, pads that blink in and out on the beat).
+ * Input buffering: a tap just before landing hops right after it.  One fall ends the run.                          */
+let demo = false;
+Lab.init({
+  title: "Hover Hop", tagline: "Tap to hop Bolt up the sliding pads. Land dead centre!", category: "Arcade", kicker: "Pocket Pals",
+  howto: ["Tap to hop straight up", "Time it so the pad above slides under you", "Dead centre = PERFECT combo"],
+  theme: { bg: "#ffd9a8", bg2: "#fff3dd", fg: "#3a2e1f", muted: "#7a6650", accent: "#3ec5ff", accent2: "#ffd23f", light: true },
+  orient: "any", music: { style: "arcade", key: "E", bpm: 112, vol: .3 }, restart: start,
+  attract(dt, t) { if (!demo || !pads) { demo = true; reset(); } demoAI(dt); update(dt); render(t); },
+});
+const { draw, fx, ease } = Lab, TAU = Lab.TAU, clamp = Lab.clamp, lerp = Lab.lerp, rand = Lab.rand, mix = Lab.color.mix, shade = Lab.color.shade, INK = Pals.ink;
+const ZONES = [
+  { at: 0, n: "Workshop", top: "#ffcf9a", bot: "#fff3dd", pad: "#ffb347", far: "#e9b27a" },
+  { at: 15, n: "Rooftops", top: "#8fd0ff", bot: "#e8f7ff", pad: "#ff7a8a", far: "#9db8d6" },
+  { at: 35, n: "Cloud Deck", top: "#ffb3c7", bot: "#ffeedd", pad: "#4fc3b5", far: "#f7c9da" },
+  { at: 60, n: "Orbit", top: "#171a4a", bot: "#4b3a8c", pad: "#9b8cff", far: "#2c2f6e" },
+];
+let S, W, H, gap, L, R, base, G, V0;
+let pads, bolt, camY, score, height, combo, bestCombo, perfects, nuts, nutsGot, zone, wind, windT, beat, buffer, over, frozen, msgs, lastLand, dark;
+
+function layout() {
+  W = Lab.W; H = Lab.H; const P = Lab.play; S = Math.min(W / 390, P.h / (P.w > P.h ? 500 : 640));
+  gap = 128 * S; const band = Math.min(W - 24 * S, 520 * S); L = W / 2 - band / 2; R = W / 2 + band / 2;
+  base = P.y + P.h * .78;
+}
+Lab.onResize(() => { if (pads) { const oldL = L, oldR = R, oldGap = gap; layout(); const f = gap / oldGap; for (const p of pads) { p.cx = L + (p.cx - oldL) / (oldR - oldL) * (R - L); p.amp *= (R - L) / (oldR - oldL); p.w *= f; p.y = -p.i * gap; } bolt.y = bolt.y * f; camY *= f; } });
+const zoneAt = h => { let z = 0; for (let i = 0; i < ZONES.length; i++) if (h >= ZONES[i].at) z = i; return z; };
+const grav = () => (zone === 3 ? 1900 : 2600) * S;
+
+function mkPad(i) {
+  const z = zoneAt(i), d = clamp(i / 80, 0, 1), first = i === 0;
+  let type = "slide";
+  if (z >= 1 && Lab.chance(.4)) type = "ease";
+  if (z >= 2 && Lab.chance(.35)) type = "cloud";
+  if (z >= 3 && Lab.chance(.4)) type = "blink";
+  let w = (first ? 170 : lerp(118, 74, d)) * S; if (z >= 1 && Lab.chance(.25) && !first) w *= .72;
+  const amp = first ? 0 : (R - L) / 2 - w / 2 - 6 * S, speed = lerp(85, 190, d) * S * rand(.85, 1.15) * (w < 80 * S ? 1.15 : 1);
+  const period = Math.max(.9, 4 * amp / Math.max(1, speed));
+  const p = { i, y: -i * gap, cx: (L + R) / 2, amp, period, ph: rand(0, 1), type, w, x: (L + R) / 2, dx: 0, sink: 0, tip: 0, glow: 0, parity: i % 2, solid: true, locked: false, nut: null };
+  if (i > 2 && i % 4 === 2 && Lab.chance(.7)) p.nut = { x: L + rand(.15, .85) * (R - L), got: false, spin: rand(0, TAU) };
+  movePad(p, 0); return p;
+}
+function movePad(p, t) {
+  const u = ((t / p.period + p.ph) % 1 + 1) % 1, prev = p.x;
+  const f = p.type === "ease" ? Math.sin(u * TAU) : (u < .5 ? u * 4 - 1 : 3 - u * 4);
+  p.x = p.cx + p.amp * f; p.dx = p.x - prev;
+}
+function reset() {
+  layout();
+  pads = []; for (let i = 0; i < 9; i++) pads.push(mkPad(i));
+  bolt = { x: pads[0].x, y: 0, vy: 0, st: "stand", pad: 0, sq: 0, tilt: 0, teeter: 0, mood: "happy", moodT: 0, airT: 0, fallT: 0, prevY: 0 };
+  camY = -(base); score = 0; height = 0; combo = 0; bestCombo = 0; perfects = 0; nutsGot = 0; zone = 0; wind = 0; windT = 6; beat = 0; buffer = 0; over = false; frozen = false; msgs = []; lastLand = ""; dark = false;
+}
+function start() {
+  demo = false; reset(); Lab.setScore(0); Lab.setTheme({ light: true, fg: "#3a2e1f", muted: "#7a6650" });
+  Lab.input.onDown = [() => hop()];
+  Lab.input.onKey = [k => { if (k === " " || k === "Space" || k === "ArrowUp" || k === "w" || k === "Enter") hop(); }];
+  Lab.music.onBeat = (b, down) => { beat++; for (const p of pads) if (p.type === "blink" && !p.locked) { p.solid = (beat >> 1) % 2 === p.parity; } };
+  Lab.expose({
+    get score() { return score; }, get height() { return height; }, get bolt() { return bolt; }, get pads() { return pads; }, get combo() { return combo; }, get perfects() { return perfects; },
+    get nuts() { return nutsGot; }, get over() { return over; }, get last() { return lastLand; }, get gap() { return gap; },
+    hop, freeze(v) { frozen = v; }, place(i, x) { const p = pads.find(q => q.i === i); if (p) { p.x = p.cx = x; p.amp = 0; p.dx = 0; } }, padAt(i) { return pads.find(q => q.i === i); },
+    nut(i, x) { const p = pads.find(q => q.i === i); if (p) p.nut = { x, got: false, spin: 0 }; },
+  });
+  Lab.loop(frame);
+}
+
+/* ---------- hopping ---------- */
+function hop() {
+  if (over || Lab.paused) return;
+  if (bolt.st !== "stand") { if (bolt.st === "air" && bolt.vy > 0) buffer = .2; return; }
+  const P = pads.find(p => p.i === bolt.pad);
+  bolt.st = "air"; bolt.vy = -Math.sqrt(2 * grav() * (gap + 42 * S)); bolt.sq = -.22; bolt.teeter = 0; bolt.airT = 0; buffer = 0;
+  if (P) { P.sinking = false; P.glow = .5; }
+  if (!demo) { Lab.sfx("jump", { pitch: 1 + Math.min(combo, 10) * .04, vol: .7 }); Lab.buzz(6); }
+  fx.burst(bolt.x, screenY(bolt.y) + 4, { n: 6, colors: ["#3ec5ff", "#fff"], speed: 120, angle: Math.PI / 2, spread: 1.2, life: .3, size: 3 });
+}
+function land(p) {
+  const off = (bolt.x - p.x) / (p.w / 2), a = Math.abs(off);
+  bolt.st = "stand"; bolt.y = p.y; bolt.vy = 0; bolt.sq = .25; bolt.pad = p.i; p.locked = true; p.solid = true; p.glow = 1;
+  if (p.type === "cloud") p.sinking = true;
+  const fresh = p.i > height;
+  if (!fresh) { lastLand = "back"; if (!demo) Lab.sfx("land", { vol: .6 }); return; }
+  height = p.i; const pf = a < .18, edge = a > .74;
+  combo = pf ? combo + 1 : 0; bestCombo = Math.max(bestCombo, combo); if (pf) perfects++;
+  const mult = 1 + Math.min(4, Math.floor(combo / 2)), pts = 10 * mult + (pf ? 5 * Math.min(combo, 10) : 0);
+  score += pts; Lab.setScore(score); lastLand = pf ? "perfect" : edge ? "edge" : "ok";
+  const sy = screenY(p.y);
+  if (!demo) {
+    if (pf) { Lab.sfx("coin", { pitch: 1 + Math.min(combo, 12) * .06 }); Lab.audio.combo(Math.min(combo, 12), { vol: .2 }); fx.burst(bolt.x, sy, { n: 14 + combo * 2, colors: ["#ffd23f", "#3ec5ff", "#fff"], speed: 200, shape: "star", life: .5, size: 4 }); fx.ring(bolt.x, sy, { r0: 6, r1: p.w * .7, color: "#ffd23f", width: 4 }); if (combo >= 2) Lab.bumpScore(); }
+    else Lab.sfx("land", { pitch: edge ? .8 : 1 });
+    fx.text(bolt.x, sy - 70 * S, pf ? (combo > 1 ? "PERFECT ×" + combo : "PERFECT!") : edge ? "Whoa!" : "+" + pts, { color: pf ? (dark ? "#ffd23f" : "#e8503a") : (dark ? "#fff" : "#3a2e1f"), size: pf ? 22 : 16 });
+    Lab.buzz(pf ? 18 : 8);
+  }
+  if (edge) { bolt.teeter = 1; bolt.teeterDir = Math.sign(off) || 1; bolt.mood = "scared"; bolt.moodT = 1; if (!demo) Lab.sfx("warn", { pitch: 1.3, vol: .5 }); }
+  else { bolt.mood = pf ? "joy" : "happy"; bolt.moodT = .7; }
+  const nz = zoneAt(height); if (nz !== zone) { zone = nz; if (!demo) { Lab.banner(ZONES[zone].n, { color: zone === 3 ? "#9b8cff" : "#ff7a8a", ms: 1400, y: .3 }); Lab.sfx("levelup", { vol: .6 }); } setDark(zone === 3); }
+  if (height % 10 === 0 && !demo) Lab.toast(height + " pads!", 900, { y: .2 });
+  while (pads[pads.length - 1].i < height + 8) pads.push(mkPad(pads[pads.length - 1].i + 1));
+  pads = pads.filter(q => q.i >= height - 3);
+  if (buffer > 0 && !edge) { buffer = 0; Lab.after(.04, hop); }
+}
+function setDark(v) { if (demo || v === dark) return; dark = v; Lab.setTheme(v ? { light: false, fg: "#f2ecff", muted: "#c9b8ff" } : { light: true, fg: "#3a2e1f", muted: "#7a6650" }); }
+function fall(why) {
+  if (bolt.st === "fall") return; bolt.st = "fall"; bolt.mood = "dizzy"; bolt.vy = Math.max(bolt.vy, 0); combo = 0; lastLand = why;
+  if (!demo) { Lab.sfx("whoosh", { pitch: .6 }); Lab.sfx("hurt", { vol: .6 }); }
+}
+function screenY(y) { return y - camY; }
+
+/* ---------- update ---------- */
+let clockT = 0;
+function frame(dt, t) { update(dt); render(t); }
+function update(dt) {
+  clockT += dt; buffer = Math.max(0, buffer - dt);
+  if (!frozen) for (const p of pads) movePad(p, clockT);
+  if (frozen) for (const p of pads) p.dx = 0;
+  for (const p of pads) {
+    p.glow = Math.max(0, p.glow - dt * 2); p.tip = Lab.damp(p.tip, bolt.st === "stand" && bolt.pad === p.i ? bolt.teeter * (bolt.teeterDir || 1) * .18 : 0, 10, dt);
+    if (p.sinking) { p.sink += 26 * S * dt; p.y = -p.i * gap + p.sink; if (p.sink > gap * .8) { p.gone = true; } }
+    if (p.nut) p.nut.spin += dt * 3;
+  }
+  const b = bolt, g = grav();
+  b.sq = Lab.damp(b.sq, 0, 10, dt); b.moodT -= dt; if (b.moodT <= 0 && b.st !== "fall") b.mood = b.st === "air" ? "wow" : "happy";
+  if (b.st === "stand") {
+    const p = pads.find(q => q.i === b.pad);
+    if (!p || p.gone) { fall("sank"); }
+    else {
+      b.x += p.dx; b.y = p.y;
+      if (b.teeter > 0) { b.teeter -= dt * 1.1; b.tilt = Math.sin(clockT * 22) * .25 * b.teeter + (b.teeterDir || 1) * .2; if (b.teeter <= 0) { b.x += (b.teeterDir || 1) * p.w * .3; fall("slipped"); } }
+      else b.tilt = Lab.damp(b.tilt, 0, 10, dt);
+      if (Math.abs(b.x - p.x) > p.w / 2 + 6 * S) fall("slipped");
+    }
+  } else if (b.st === "air") {
+    b.airT += dt; b.prevY = b.y; b.vy += g * dt; b.y += b.vy * dt; b.tilt = Lab.damp(b.tilt, 0, 8, dt);
+    if (wind) b.x = clamp(b.x + wind * dt, L - 30 * S, R + 30 * S);
+    for (const p of pads) if (p.nut && !p.nut.got && Math.abs(b.x - p.nut.x) < 24 * S && Math.abs(b.y - 31 * S - (p.y - gap * .5)) < 34 * S) grabNut(p);
+    if (b.vy > 0) {
+      let best = null;
+      for (const p of pads) { if (p.gone || (p.type === "blink" && !p.solid && !p.locked)) continue; if (b.prevY <= p.y + 1 && b.y >= p.y && Math.abs(b.x - p.x) <= p.w / 2 + 4 * S) { if (!best || p.i > best.i) best = p; } }
+      if (best) land(best);
+      else if (b.y > -height * gap + gap * 1.2) fall("missed");
+    }
+  } else if (b.st === "fall") {
+    b.vy += g * dt; b.y += b.vy * dt; b.tilt += dt * 6;
+    if (screenY(b.y) > H + 80 && !over && !demo) end();
+    if (demo && screenY(b.y) > H + 80) reset();
+  }
+  // camera follows the highest pad reached, keeps Bolt in view
+  const target = -height * gap - base;
+  camY = Lab.damp(camY, b.st === "fall" ? camY : target, 4, dt);
+  // wind gusts in the Cloud Deck and above
+  if (zone >= 2 && !demo) { windT -= dt; if (windT <= 0) { if (wind) { wind = 0; windT = rand(4, 7); } else { wind = (Lab.chance(.5) ? -1 : 1) * rand(40, 70) * S; windT = rand(2.5, 4); Lab.toast(wind < 0 ? "← gust" : "gust →", 900, { y: .45 }); Lab.sfx("whoosh", { pitch: .5, vol: .4 }); } } }
+  if (!demo) Lab.music.intensity(.25 + zone * .18 + Math.min(combo, 6) * .03);
+}
+function grabNut(p) {
+  p.nut.got = true; nutsGot++; const pts = 25; score += pts; Lab.setScore(score);
+  if (!demo) { Lab.sfx("pickup", { pitch: 1.3 }); fx.burst(p.nut.x, screenY(p.y - gap * .5), { n: 12, colors: ["#c9d3e0", "#ffd23f"], speed: 180, life: .4, shape: "spark" }); fx.text(p.nut.x, screenY(p.y - gap * .5) - 20, "+25 nut", { color: dark ? "#fff" : "#3a2e1f", size: 15 }); }
+}
+function end() {
+  over = true; Lab.shake(6, .3);
+  Lab.gameover({ title: "Oops! Bolt bonked down", score, stats: [["Height", height + " pads"], ["Perfects", perfects], ["Best combo", bestCombo]] });
+}
+function demoAI() {
+  if (bolt.st !== "stand" || bolt.teeter > 0 && bolt.teeter < .6) { if (bolt.st === "stand" && bolt.teeter > 0) hop(); return; }
+  const n = pads.find(p => p.i === bolt.pad + 1); if (!n) return;
+  const tAir = .52, u = (((clockT + tAir) / n.period + n.ph) % 1 + 1) % 1, f = n.type === "ease" ? Math.sin(u * TAU) : (u < .5 ? u * 4 - 1 : 3 - u * 4);
+  if (Math.abs(n.cx + n.amp * f - bolt.x) < n.w * .15) hop();
+}
+
+/* ---------- drawing ---------- */
+function skyCols() { const h = -camY / gap - 4; let z = 0; for (let i = 0; i < ZONES.length; i++) if (h >= ZONES[i].at - 3) z = i; const z0 = ZONES[Math.max(0, z - 1)], z1 = ZONES[z], k2 = clamp((h - (z1.at - 3)) / 6, 0, 1); return z === 0 ? [z1.top, z1.bot, z1.far] : [mix(z0.top, z1.top, k2), mix(z0.bot, z1.bot, k2), mix(z0.far, z1.far, k2)]; }
+function render(t) {
+  const c = Lab.ctx, [top, bot, far] = skyCols(), hh = -camY / gap;
+  const gr = c.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, top); gr.addColorStop(1, bot); c.fillStyle = gr; c.fillRect(-40, -40, W + 80, H + 80);
+  if (hh > 50) { c.fillStyle = "#fff"; for (let i = 0; i < 50; i++) { const x = (i * 97.3) % W, y = ((i * 57.1 - camY * .1) % (H + 20) + H + 20) % (H + 20) - 10; c.globalAlpha = clamp((hh - 50) / 12, 0, 1) * (.4 + .5 * Math.abs(Math.sin(t + i))); c.fillRect(x, y, 2, 2); } c.globalAlpha = 1; if (hh > 58) { const my = H * .25 - (camY + 62 * gap + base) * .05; draw.glow(c, W * .78, my, 80 * S, "#fffbe0", .3); draw.circle(c, W * .78, my, 34 * S, "#fffbe0"); draw.circle(c, W * .78 - 10 * S, my - 8 * S, 6 * S, "#e9e2c0"); draw.circle(c, W * .78 + 12 * S, my + 10 * S, 8 * S, "#e9e2c0"); } }
+  // parallax decor: pegboard + tools → rooftops → clouds → planets
+  const par = camY * .35, seg = 110 * S;
+  if (hh < 20) { c.fillStyle = "rgba(150,90,40,.12)"; const sp = 26 * S, oy = ((-par) % sp + sp) % sp; for (let y = oy - sp; y < H; y += sp) for (let x = sp / 2; x < W; x += sp) c.fillRect(x, y, 3 * S, 3 * S); }
+  for (let k = -1; k < H / seg + 2; k++) {
+    const wy = Math.floor(par / seg) + k, y = wy * seg - par, rnd = Lab.rng(Math.abs(wy) * 31 + 7), zh = hh + (base - y) / gap * .6;
+    const x = rnd() < .5 ? lerp(0, L + 30 * S, rnd()) : lerp(R - 30 * S, W, rnd()), r = (18 + rnd() * 22) * S, kind = zh < 16 ? 0 : zh < 36 ? 1 : zh < 59 ? 2 : 3, spin = (rnd() - .5) * t;
+    c.save(); c.globalAlpha = kind === 3 ? .55 : .5; c.fillStyle = far; c.strokeStyle = far; c.translate(x, y);
+    if (kind === 0) { const v = rnd(); if (v < .45) { c.rotate(spin); c.beginPath(); for (let i = 0; i < 16; i++) { const a = i * TAU / 16, rr = i % 2 ? r : r * .8; c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } c.closePath(); c.fill(); c.globalCompositeOperation = "destination-out"; c.beginPath(); c.arc(0, 0, r * .3, 0, TAU); c.fill(); }
+      else if (v < .75) { c.rotate(.6); c.lineWidth = r * .32; c.lineCap = "round"; c.beginPath(); c.moveTo(0, -r); c.lineTo(0, r); c.stroke(); c.beginPath(); c.arc(0, -r, r * .4, 0, TAU); c.fill(); }
+      else { c.fillRect(-r * 1.4, 0, r * 2.8, 6 * S); for (let i = 0; i < 3; i++) draw.rr(c, -r * 1.2 + i * r * .9, -r * .7, r * .6, r * .7, 4 * S), c.fill(); } }
+    else if (kind === 1) { const bw = r * 2, bh = r * 2.6; c.fillRect(-bw / 2, -bh / 2, bw, bh); c.beginPath(); c.moveTo(-bw / 2 - 4, -bh / 2); c.lineTo(0, -bh / 2 - r * .8); c.lineTo(bw / 2 + 4, -bh / 2); c.fill(); c.fillStyle = "#fff3b0"; c.globalAlpha = .7; for (let i = 0; i < 4; i++) c.fillRect(-bw / 2 + 6 + (i % 2) * bw * .5, -bh / 2 + 8 + Math.floor(i / 2) * bh * .4, bw * .25, bh * .18); }
+    else if (kind === 2) { c.fillStyle = "#ffffff"; c.globalAlpha = .7; c.beginPath(); c.ellipse(0, 0, r * 1.8, r * .55, 0, 0, TAU); c.ellipse(-r * .6, -r * .35, r * .8, r * .6, 0, 0, TAU); c.ellipse(r * .5, -r * .45, r, r * .7, 0, 0, TAU); c.fill(); }
+    else { const col = ["#ff9ecb", "#7ee0c8", "#ffd23f"][Math.floor(rnd() * 3)]; c.fillStyle = col; c.globalAlpha = .6; c.beginPath(); c.arc(0, 0, r * .7, 0, TAU); c.fill(); c.strokeStyle = "#fffbe0"; c.lineWidth = 2; c.beginPath(); c.ellipse(0, 0, r * 1.2, r * .3, -.3, 0, TAU); c.stroke(); }
+    c.restore();
+  }
+  // ground (workshop floor) at the start
+  const gy = screenY(0) + 34 * S; if (gy < H + 40) { c.fillStyle = "#c98f5a"; c.fillRect(-40, gy, W + 80, H - gy + 40); c.fillStyle = "#e0a76d"; c.fillRect(-40, gy, W + 80, 8 * S); }
+  // wind streaks
+  if (wind) { c.strokeStyle = dark ? "rgba(255,255,255,.35)" : "rgba(255,255,255,.7)"; c.lineWidth = 2; for (let i = 0; i < 9; i++) { const y = ((i * 83.7) % H), x = ((t * wind * 4 + i * 137) % (W + 120) + W + 120) % (W + 120) - 60; c.beginPath(); c.moveTo(x, y); c.lineTo(x - Math.sign(wind) * 40 * S, y); c.stroke(); } }
+  // pads + nuts
+  for (const p of pads) drawPad(c, p, t);
+  for (const p of pads) if (p.nut && !p.nut.got) { const y = screenY(p.y - gap * .5) + Math.sin(t * 3 + p.i) * 4; drawNut(c, p.nut.x, y, 11 * S, p.nut.spin); }
+  // Bolt
+  const b = bolt, by = screenY(b.y), sz = 62 * S;
+  const anc = Pals.draw(c, "bolt", b.x, by - sz / 2 - 3 * S, sz, { t, mood: b.mood, squash: b.sq, tilt: b.tilt, arms: b.teeter > 0 ? "up" : b.st === "air" ? (b.vy < 0 ? "up" : "cheer") : b.mood === "joy" ? "cheer" : "down", look: [0, b.st === "air" ? -.6 : .3], shadow: b.st === "stand" });
+  if (b.st === "air" && b.vy < 0) { for (const d of [-1, 1]) { const fl = 6 * S + Math.random() * 6 * S; c.fillStyle = "#3ec5ff"; c.globalAlpha = .8; c.beginPath(); c.ellipse(b.x + d * 9 * S, by + 4 * S + fl * .5, 4 * S, fl, 0, 0, TAU); c.fill(); c.globalAlpha = 1; } }
+  // HUD: height pill + combo
+  if (!demo) {
+    const y0 = Lab.play.y + 12, col = dark ? "rgba(23,26,74,.65)" : "rgba(255,255,255,.82)", tx = dark ? "#f2ecff" : "#3a2e1f";
+    draw.rect(c, 10, y0, 96, 32, 12, col, "rgba(43,35,64,.15)", 1.5); draw.text(c, height + " ▲", 58, y0 + 17, { size: 17, color: tx, weight: 700 });
+    if (combo > 0) { draw.rect(c, W - 110, y0, 100, 32, 12, col, "rgba(43,35,64,.15)", 1.5); draw.text(c, "×" + (1 + Math.min(4, Math.floor(combo / 2))) + "  combo " + combo, W - 60, y0 + 17, { size: 13, color: "#ff7a8a", weight: 700 }); }
+  }
+}
+function drawPad(c, p, t) {
+  const y = screenY(p.y); if (y < -40 || y > H + 60 || p.gone) return;
+  const z = ZONES[zoneAt(p.i)], ghost = p.type === "blink" && !p.solid && !p.locked, h = 14 * S, w = p.w;
+  c.save(); c.translate(p.x, y); c.rotate(p.tip);
+  if (ghost) { c.globalAlpha = .35; c.setLineDash([5, 5]); draw.rect(c, -w / 2, 0, w, h, h / 2, null, z.pad, 2); c.setLineDash([]); c.restore(); return; }
+  if (p.type === "cloud") {
+    c.fillStyle = "rgba(255,255,255,.95)"; for (let i = -2; i <= 2; i++) { c.beginPath(); c.arc(i * w / 5.5, h * .5 - (2 - Math.abs(i)) * 3 * S, w / 6 + (2 - Math.abs(i)) * 3 * S, 0, TAU); c.fill(); }
+    c.fillStyle = "rgba(255,180,200,.35)"; c.fillRect(-w / 2, h * .6, w, 4 * S);
+    if (p.sinking) { const k2 = p.sink / (gap * .8); draw.rect(c, -w * .3, h + 8 * S, w * .6, 4 * S, 2, "rgba(43,35,64,.2)"); draw.rect(c, -w * .3, h + 8 * S, w * .6 * (1 - k2), 4 * S, 2, k2 > .6 ? "#ff5d73" : "#5fd39a"); }
+  } else {
+    // jets
+    for (const d of [-1, 1]) { const fl = 8 * S + Math.sin(t * 30 + p.i + d) * 3 * S; c.fillStyle = "rgba(62,197,255,.55)"; c.beginPath(); c.ellipse(d * w * .3, h + fl * .6, 5 * S, fl, 0, 0, TAU); c.fill(); }
+    draw.rect(c, -w / 2, 0, w, h, h / 2, z.pad, shade(z.pad, -.3), 2);
+    c.fillStyle = "rgba(255,255,255,.35)"; draw.rr(c, -w / 2 + 6, 2, w - 12, h * .35, h * .2); c.fill();
+    if (p.type === "ease") { c.fillStyle = shade(z.pad, -.35); for (const d of [-1, 1]) { c.beginPath(); c.arc(d * (w / 2 - 8 * S), h / 2, 3 * S, 0, TAU); c.fill(); } }
+    if (p.type === "blink") { c.strokeStyle = "#fffbe0"; c.lineWidth = 2; draw.rr(c, -w / 2 - 3, -3, w + 6, h + 6, h / 2 + 3); c.stroke(); }
+  }
+  // centre mark = the perfect zone
+  c.fillStyle = p.glow > 0 ? `rgba(255,210,63,${.5 + p.glow * .5})` : "rgba(43,35,64,.28)"; draw.rr(c, -w * .18, h * .3, w * .36, h * .4, h * .2); c.fill();
+  c.restore();
+}
+function drawNut(c, x, y, r, spin) {
+  c.save(); c.translate(x, y); c.scale(Math.cos(spin) * .5 + .7, 1); c.fillStyle = "#c9d3e0"; c.strokeStyle = "#7a8599"; c.lineWidth = 2;
+  c.beginPath(); for (let i = 0; i < 6; i++) { const a = i * TAU / 6; c[i ? "lineTo" : "moveTo"](Math.cos(a) * r, Math.sin(a) * r); } c.closePath(); c.fill(); c.stroke();
+  c.fillStyle = "rgba(43,35,64,.5)"; c.beginPath(); c.arc(0, 0, r * .42, 0, TAU); c.fill(); c.restore();
+}
+Lab.boot();
+})();
+</script></body></html>
