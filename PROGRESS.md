@@ -2,29 +2,31 @@
 
 Live state of the project. Update at the end of every batch. (Counts: `node tools/build-docs.js` → `GAME_INVENTORY.md`.)
 
-## State — 2026-11-27 (afternoon)
+## State — 2026-11-28 (morning)
 | Area | State |
 |---|---|
 | Foundation / tooling / engine v2 / mascots | ✅ done (see `CHANGELOG.md`) |
 | Arcade launcher (`index.html`, `play.html`, lab launchers) | ✅ done and verified (9 tests in `tests/arcade/`) |
-| Phone Game Lab (70) | ✅ **all 70 transformed and verified** (smoke 70/70, a gameplay test and review each) |
-| Pocket Pals (80) | 1 verified (bedtime-stacks). In progress: sunny-soak (was balloon-splash), basketball, berry-bounce. Not started: 76 |
-| Standalone games (65) | 12 verified (see `GAME_INVENTORY.md`). In progress: neon-core-ballstorm, star-petal-ballstorm, orbit-drift-sling, orbit-drift-3d. Not started: 49 |
+| Phone Game Lab (70) | ✅ all 70 transformed and verified |
+| Pocket Pals (80) | 14 verified: bedtime-stacks, sunny-soak, ice-dunk, jampoline, stew-patch, lilypad-lunch, ramp-scamp, fish-fizz, gulp-and-float, pack-ice, pier-pressure, flicknic, cakewalk, reef-relief. In progress: sweet-circuit (renamed candy-connect, still prototype), castle-craft, cats-and-cans, pine-kick (renamed climber-tom, still prototype), connect, cupid-tom. Not started: 60 |
+| Standalone games (65) | 21 verified (see `GAME_INVENTORY.md`). In progress: slithergar (rewritten, no test/review), cosmic-devourer, neon-galaxy. Not started: 41 |
 
-**Operational constraint:** the account's 5-hour usage limit is hit every ~40–60 minutes of 4-agent work (ten times so
-far); each time every running agent dies mid-task (work on disk is kept; the lead commits it as "WIP checkpoint").
-Run **at most 4 agents at a time**, tell each to finish one game completely before starting the next, give each a
-precise "what is on disk / what remains" resume message (SendMessage to the same agent id while this session lives;
-otherwise start a fresh agent with the brief + the on-disk state), and verify + commit each batch as it lands.
-Verification rule learned the hard way: run each new test at least 3 times before calling it verified (two racy
-tests and one real input bug only showed up on repeat runs), and never chain a commit after `| tail` of a test run.
+**Operational constraints**
+- The account's 5-hour usage limit is hit every ~40–60 minutes of 4-agent work (thirteen times so far); every running
+  agent dies mid-task (work on disk is kept; the lead commits it as "WIP checkpoint").
+- On 2026-11-27 the weekly limit for the original model was reached (resets 2026-12-02); work continues on another
+  model. Agents started on the old model cannot be resumed until then — start fresh agents with the brief plus a
+  precise "what is on disk / what remains" note instead.
+- Run at most 4 agents at a time; each finishes one game completely before starting the next. Verify each new test
+  3 times in a row before calling it verified; never chain a commit after `| tail` of a test run.
 
 ## Batches in flight
 | Batch | Games | Status |
 |---|---|---|
-| PP1 | bedtime-stacks ✅, sunny-soak, basketball, berry-bounce | sunny-soak written, no test/review; other two are prototypes |
-| S5 | neon-core-ballstorm, star-petal-ballstorm | just started |
-| S6 | orbit-drift-sling, orbit-drift-3d | just started |
+| PP4 | cakewalk ✅, sweet-circuit, castle-craft, cats-and-cans | fresh agent |
+| PP5 | reef-relief ✅, pine-kick, connect, cupid-tom | fresh agent |
+| S9 | kosmisk-slange ✅, slithergar | fresh agent finishing slithergar |
+| S10 | cosmic-devourer, neon-galaxy | fresh agent |
 
 ### Planned batches (not started)
 **Pocket Pals** (briefs: phone-game-brief + `pocket-pals-addendum.md`), 80 games alphabetical, 4 per batch (20 batches):
@@ -32,7 +34,6 @@ tests and one real input bug only showed up on repeat runs), and never chain a c
 
 **Standalone** (brief: `docs/briefs/standalone-game-brief.md`), related games paired so they get differentiated:
 S7 brink-edge-rush + brink-reactor ·
-S8 neon-burst + chroma-frenzy · S9 kosmisk-slange + slithergar · S10 cosmic-devourer + neon-galaxy ·
 S11 arcanum-pinball + pinball-wizard-3d · S12 neon-pinball-rush + neon-pin-climb · S13 bounce-dungeon + spire ·
 S14 chomp-chain-rush + maze-munch-rush · S15 pitch-26 + pocket-football · S16 the-grid-war + the-global-dig ·
 S17 swarm-logic + neon-survivor-overdrive · S20 painted-wilds (solo) · S21 lysarkivet (solo) · S22 neon-ash (solo) ·
