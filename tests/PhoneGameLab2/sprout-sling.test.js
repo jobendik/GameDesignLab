@@ -23,7 +23,7 @@ module.exports = {
     await wait(100); expect((await state()).score === g.score, 'HUD shows the score');
     // what you grow is terrain: a seed dropped onto the new plant bounces off it (trick flag) instead of reaching the soil
     const pl = (await game(g => g.plantsXY()))[0];
-    await game((g, p) => g.dropSeed(p[0] + 3, p[1] - 320), pl);
+    await game((g, a) => { const t = g.mounds()[a.i].type; g.setQueue([(t + 1) % 3, (t + 1) % 3]); g.dropSeed(a.p[0] + 3, a.p[1] - 320); }, { p: pl, i: 1 - i0 });
     let bounced = false; for (let i = 0; i < 30 && !bounced && await game(g => g.flying); i++) { const si = await game(g => g.seedInfo); if (si && si.trick) bounced = true; await wait(50); }
     expect(bounced, 'the grown ' + ['palm', 'bloom', 'fruit tree'][pl[2]] + ' is solid and springy: the seed bounces off it');
     await settle();
